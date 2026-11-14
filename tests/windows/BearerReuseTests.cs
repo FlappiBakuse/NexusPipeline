@@ -82,12 +82,12 @@ public sealed class BearerReuseTests
         await fixture.Service.ApplyAsync(operation, key, 0, SecretDisposition.Set, material, default);
         using var verifier = new ControlBearerVerifier(fixture.Instance, fixture.Database, fixture.Lease, fixture.Index, fixture.Service);
         var proof = Assert.IsType<VerifiedControlBearer>(verifier.Verify(token));
-        using (var connection = DatabaseConnections.Open(fixture.Database.DatabasePath))
+        using (var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var command = connection.CreateCommand())
         {
             command.CommandText = fault == "payload"
-                ? "UPDATE secret_payloads SET digest=$value WHERE preparation_operation_id=$operation;"
-                : "UPDATE secret_preparations SET replay_proof=$value WHERE operation_id=$operation;";
+                ? "UPDATE system.secret_payloads SET digest=$value WHERE preparation_operation_id=$operation;"
+                : "UPDATE system.secret_preparations SET replay_proof=$value WHERE operation_id=$operation;";
             command.Parameters.AddWithValue("$value", new string('0', 64));
             command.Parameters.AddWithValue("$operation", operation.ToString("D"));
             Assert.Equal(1, command.ExecuteNonQuery());

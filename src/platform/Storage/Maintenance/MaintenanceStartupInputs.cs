@@ -76,7 +76,7 @@ internal sealed class MaintenanceStartupInputs : IDisposable
         if (fresh.Shape != installed.Snapshot.Shape || !fresh.Entries.SequenceEqual(installed.Snapshot.Entries) ||
             !PhysicalTreeIdentity.Capture(Plan.TargetPath, fresh).SequenceEqual(_installedObjects)) throw Invalid();
         PhysicalTreeIdentity.RequireSingleLinks(Plan.TargetPath, fresh);
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System))
         using (var transaction = connection.BeginTransaction(deferred: true))
         {
             UpdateFeedRows.RequireAccepted(connection, transaction, Source.Feed);
@@ -94,7 +94,7 @@ internal sealed class MaintenanceStartupInputs : IDisposable
 
     private static MaintenanceOperationRow ReadOperation(StateDatabase database, MaintenanceStartupBinding binding)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         var row = MaintenanceOperationRows.ReadAll(connection, transaction).SingleOrDefault(item => item.Identity.OperationId == binding.OperationId) ?? throw Invalid();
         if (row.State != HostUpdateState.Starting &&

@@ -92,7 +92,7 @@ internal sealed class SecretDocumentService(RuntimeInstance instance, StateDatab
 
     private BoundSecretDocument? Find(Guid operation)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         var reference = SecretDocumentRows.Find(connection, null, operation);
         return reference is null ? null : new SecretDocumentFormat(instance, contracts).Read(reference);
     }

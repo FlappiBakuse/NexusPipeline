@@ -94,10 +94,10 @@ public sealed class SettingsStartupTests
         fixture.Effects.BeforeMutation = RejectMutation;
         if (fault == "sql")
         {
-            using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = fixture.Database.DatabasePath, Pooling = false }.ToString());
+            using var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open(new SqliteConnectionStringBuilder { DataSource = fixture.Database.DatabasePath, Pooling = false }.ToString());
             connection.Open();
             using var command = connection.CreateCommand();
-            command.CommandText = "CREATE TRIGGER fixture_reject_settings BEFORE INSERT ON settings_snapshots WHEN NEW.revision>0 BEGIN SELECT RAISE(ABORT,'fixture_write_failure'); END;";
+            command.CommandText = "CREATE TRIGGER system.fixture_reject_settings BEFORE INSERT ON settings_snapshots WHEN NEW.revision>0 BEGIN SELECT RAISE(ABORT,'fixture_write_failure'); END;";
             command.ExecuteNonQuery();
         }
         var change = new HostSettingsChange(0, initial.Values with { AutoStart = true });

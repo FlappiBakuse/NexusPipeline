@@ -103,10 +103,10 @@ public sealed class EditorControlTests
         var pid = await fixture.BeginAsync(request: request);
         using var process = Process.GetProcessById(pid); Assert.False(process.HasExited);
         Assert.NotNull(fixture.Controller.ReadAcceptedSource(fixture.SessionId, "fixture", digest));
-        using var sql = new SqliteConnection(new SqliteConnectionStringBuilder
+        using var sql = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open(new SqliteConnectionStringBuilder
             { DataSource = PhysicalPathPolicy.NativePath(fixture.Base.Database.DatabasePath), Pooling = false }.ToString());
         sql.Open(); using var command = sql.CreateCommand();
-        command.CommandText = "UPDATE configuration_edit_sessions SET source_request_digest=$digest WHERE session_id=$session;";
+        command.CommandText = "UPDATE configuration.configuration_edit_sessions SET source_request_digest=$digest WHERE session_id=$session;";
         command.Parameters.AddWithValue("$session", fixture.SessionId.ToString("D"));
         command.Parameters.AddWithValue("$digest", new string('b', 64)); command.ExecuteNonQuery();
         try

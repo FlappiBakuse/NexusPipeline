@@ -20,7 +20,7 @@ internal sealed class InstalledImagePort(StateDatabase database, ResourceLeaseMa
     {
         Require(); ExtensionDataNames.Require(documentName); cancellationToken.ThrowIfCancellationRequested();
         using var use = consumption.Begin();
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System);
         _ = ExtensionDocumentRows.Read(connection, null, extensionId, documentName);
         var result = ExtensionImageRows.List(connection, null, extensionId, documentName);
         use.RequireCurrent(); cancellationToken.ThrowIfCancellationRequested();
@@ -31,7 +31,7 @@ internal sealed class InstalledImagePort(StateDatabase database, ResourceLeaseMa
     {
         Require(); ExtensionImageBytes.RequireId(imageId); cancellationToken.ThrowIfCancellationRequested();
         using var use = consumption.Begin();
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System);
         var result = ExtensionImageRows.Read(connection, null, extensionId, imageId);
         use.RequireCurrent(); cancellationToken.ThrowIfCancellationRequested(); return ValueTask.FromResult(result);
     }

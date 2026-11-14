@@ -74,25 +74,20 @@ class QueueGroupTests(unittest.TestCase):
         unavailable, dependent = str(uuid.uuid4()), str(uuid.uuid4())
         first_binding, dependent_binding = str(uuid.uuid4()), str(uuid.uuid4())
         unavailable_script = copy.deepcopy(seed["scripts"][0]["value"])
-        unavailable_script.update(id=unavailable, name="unavailable-group", kind="specialized", extensionId="fixture-extension", updateConfigurationAtFinish=True)
+        unavailable_script.update(id=unavailable, name="unavailable-group")
         dependent_script = copy.deepcopy(seed["scripts"][0]["value"])
         dependent_script.update(id=dependent, name="dependent-group")
         self.save(address, self.control.change(4,
             scripts=[dict(expectedRevision=0, value=value) for value in (unavailable_script, dependent_script)],
             bindings=[dict(expectedRevision=0, value=dict(id=identity, userId=user, scriptId=group, enabled=True,
-                priority=0, notifyEnabled=False, notificationTaskIds=[])) for identity, group in
+                priority=0, runDays=0 if group == unavailable else -1, notifyEnabled=False, notificationTaskIds=[])) for identity, group in
                 ((first_binding, unavailable), (dependent_binding, dependent))],
             queues=[dict(expectedRevision=2, value=self.queue(first, [unavailable, dependent, script], 0,
                 [dict(scriptId=dependent, requiredScriptIds=[unavailable])]))]))
-        settings = self.get(address, "/control/v1/settings")["saved"]
-        values = settings["values"] | dict(extensions=[dict(extensionId="fixture-extension", enabled=False)])
-        status, result = self.control.post(address, "/control/v1/settings", dict(format="nexus.control.host-settings", version=1,
-            operationId=str(uuid.uuid4()), expectedRevision=settings["revision"], values=values))
-        self.assertEqual(200, status, result)
         request, preview = self.preview(address, first, 5)
         self.assertTrue(preview["hasRunnable"]); self.assertFalse(preview["hasBlockedItems"])
         items = {item["scriptId"]: item for item in preview["items"]}
-        self.assertEqual("execution_extension_disabled", items[unavailable]["reasonCode"])
+        self.assertEqual("execution_run_days_exhausted", items[unavailable]["reasonCode"])
         self.assertEqual("execution_queue_dependency_not_successful", items[dependent]["reasonCode"])
         self.assertEqual("runnable", items[script]["disposition"])
         status, accepted = self.control.post(address, "/control/v1/execution/start/" + str(uuid.uuid4()), request)

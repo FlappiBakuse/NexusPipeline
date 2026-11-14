@@ -16,7 +16,7 @@ internal static class ConfigurationRunInventory
         try
         {
             using var parents = JournalReadScope.HoldParents(instance, contracts);
-            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
             using var transaction = connection.BeginTransaction(deferred: true);
             using var command = connection.CreateCommand(); command.Transaction = transaction;
             foreach (var item in ReadSessions(connection, transaction))
@@ -31,14 +31,14 @@ internal static class ConfigurationRunInventory
                     binding.Resources.ToDictionary(value => value.State.Source.Address, value => value.State), new(new(instance, contracts)));
                 foreach (var resource in session.Resources) VerifyResource(connection, transaction, session, resource, item.Subject,
                     binding.Resources.Single(value => value.State.Source.Address == resource.Address).State, new(new(instance, contracts)));
-                command.CommandText = "SELECT EXISTS(SELECT 1 FROM operations WHERE operation_id=$owner AND subject_id=$subject);";
+                command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operations WHERE operation_id=$owner AND subject_id=$subject);";
                 command.Parameters.Clear(); command.Parameters.AddWithValue("$owner", session.OwnerOperationId.ToString("D")); command.Parameters.AddWithValue("$subject", item.Subject);
                 if ((long)command.ExecuteScalar()! != 1)
                     throw new IOException("configuration_run_parent_subject_unbound");
             }
             command.Parameters.Clear();
-            command.CommandText = "SELECT EXISTS(SELECT 1 FROM configuration_run_sync_items i LEFT JOIN configuration_run_syncs s ON s.operation_id=i.operation_id " +
-                "LEFT JOIN configuration_run_sessions g ON g.completion_operation_id=i.operation_id WHERE s.operation_id IS NULL AND g.session_id IS NULL);";
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM configuration.configuration_run_sync_items i LEFT JOIN configuration.configuration_run_syncs s ON s.operation_id=i.operation_id " +
+                "LEFT JOIN configuration.configuration_run_sessions g ON g.completion_operation_id=i.operation_id WHERE s.operation_id IS NULL AND g.session_id IS NULL);";
             if ((long)command.ExecuteScalar()! != 0) throw new IOException("configuration_run_sync_result_orphaned");
         }
         catch (Exception error) when (error is ConfigurationException or ArgumentException or InvalidOperationException or FormatException)
@@ -52,8 +52,8 @@ internal static class ConfigurationRunInventory
         while (true)
         {
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT s.session_id,o.subject_id,o.operation_kind,o.status FROM configuration_run_sessions s " +
-                "LEFT JOIN operations o ON o.operation_id=s.session_id WHERE s.session_id>$after ORDER BY s.session_id LIMIT 128;";
+            command.CommandText = "SELECT s.session_id,o.subject_id,o.operation_kind,o.status FROM configuration.configuration_run_sessions s " +
+                "LEFT JOIN main.operations o ON o.operation_id=s.session_id WHERE s.session_id>$after ORDER BY s.session_id LIMIT 128;";
             command.Parameters.AddWithValue("$after", after);
             var page = new List<(Guid Id, string Subject, string Kind, string Status)>();
             using (var row = command.ExecuteReader())
@@ -127,14 +127,14 @@ internal static class ConfigurationRunInventory
 
     private static ImmutableArray<ConfigurationRunStatus> ReadCompletionGroups(StateDatabase database, RegisteredJournal parent)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT subject_id FROM operations WHERE operation_id=$owner AND status='accepted';";
+        command.CommandText = "SELECT subject_id FROM main.operations WHERE operation_id=$owner AND status='accepted';";
         command.Parameters.AddWithValue("$owner", parent.OperationId.ToString("D"));
         var subject = command.ExecuteScalar() as string ?? throw new IOException("attempt_configuration_parent_operation_unbound");
-        command.CommandText = "SELECT s.session_id,o.subject_id,o.operation_kind,o.status FROM configuration_run_sessions s " +
-            "JOIN operations o ON o.operation_id=s.session_id WHERE s.parent_journal_id=$parent OR s.owner_operation_id=$owner LIMIT 4097;";
+        command.CommandText = "SELECT s.session_id,o.subject_id,o.operation_kind,o.status FROM configuration.configuration_run_sessions s " +
+            "JOIN main.operations o ON o.operation_id=s.session_id WHERE s.parent_journal_id=$parent OR s.owner_operation_id=$owner LIMIT 4097;";
         command.Parameters.AddWithValue("$parent", parent.JournalId.ToString("D"));
         var ids = new List<Guid>();
         using (var rows = command.ExecuteReader())
@@ -150,14 +150,14 @@ internal static class ConfigurationRunInventory
             var group = ConfigurationRunRows.Read(connection, transaction, id, subject)!;
             if (group.OwnerOperationId != parent.OperationId || group.ParentJournalId != parent.JournalId)
                 throw new IOException("attempt_configuration_group_unbound");
-            command.CommandText = "SELECT status FROM operations WHERE operation_id=$group;";
+            command.CommandText = "SELECT status FROM main.operations WHERE operation_id=$group;";
             command.Parameters.AddWithValue("$group", id.ToString("D"));
             if (command.ExecuteScalar() as string != (group.Phase == ConfigurationRunPhase.Prepared ? "accepted" : "completed"))
                 throw new IOException("attempt_configuration_group_operation_unbound");
             command.Parameters.RemoveAt("$group");
             foreach (var resource in group.Resources)
             {
-                command.CommandText = "SELECT EXISTS(SELECT 1 FROM operations WHERE operation_id=$child AND subject_id=$subject " +
+                command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operations WHERE operation_id=$child AND subject_id=$subject " +
                     "AND operation_kind='configuration.run.resource' AND request_digest=$digest AND status=$status);";
                 command.Parameters.AddWithValue("$child", resource.OperationId.ToString("D"));
                 command.Parameters.AddWithValue("$subject", subject);
@@ -180,13 +180,13 @@ internal static class ConfigurationRunInventory
         {
             var plan = child.Reference;
             command.Parameters.Clear(); command.Parameters.AddWithValue("$path", plan.RelativePath); command.Parameters.AddWithValue("$digest", plan.Sha256);
-            command.CommandText = "SELECT count(*) FROM operation_journals WHERE plan_path=$path AND plan_digest=$digest;";
+            command.CommandText = "SELECT count(*) FROM main.operation_journals WHERE plan_path=$path AND plan_digest=$digest;";
             var count = (long)command.ExecuteScalar()!;
             if (child.MayBeUnregistered && count == 0) continue;
             if (count != 1) throw new IOException("attempt_configuration_membership_unbound");
             expected++;
-            command.CommandText = "SELECT EXISTS(SELECT 1 FROM configuration_run_resources r JOIN configuration_run_sessions s ON s.session_id=r.session_id " +
-                "JOIN operation_journals j ON j.journal_id=r.journal_id AND j.operation_id=r.operation_id " +
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM configuration.configuration_run_resources r JOIN configuration.configuration_run_sessions s ON s.session_id=r.session_id " +
+                "JOIN main.operation_journals j ON j.journal_id=r.journal_id AND j.operation_id=r.operation_id " +
                 "WHERE s.owner_operation_id=$owner AND s.parent_journal_id=$parent AND s.step_id=$step " +
                 "AND ($complete=0 OR (s.phase IN (2,3) AND s.writer_gate=1 AND s.closed_elapsed_milliseconds IS NOT NULL AND s.completion_operation_id IS NOT NULL)) " +
                 "AND r.plan_path=$path AND r.plan_digest=$digest AND j.phase='committed' AND j.operation_kind='configExchange');";
@@ -199,7 +199,7 @@ internal static class ConfigurationRunInventory
         command.Parameters.Clear(); command.Parameters.AddWithValue("$owner", parent.OperationId.ToString("D"));
         command.Parameters.AddWithValue("$parent", parent.JournalId.ToString("D"));
         command.Parameters.AddWithValue("$selectedStep", (object?)stepId ?? DBNull.Value);
-        command.CommandText = "SELECT count(*) FROM configuration_run_resources r JOIN configuration_run_sessions s ON s.session_id=r.session_id " +
+        command.CommandText = "SELECT count(*) FROM configuration.configuration_run_resources r JOIN configuration.configuration_run_sessions s ON s.session_id=r.session_id " +
             "WHERE (s.owner_operation_id=$owner OR s.parent_journal_id=$parent) AND ($selectedStep IS NULL OR s.step_id=$selectedStep);";
         if ((long)command.ExecuteScalar()! != expected) throw new IOException("attempt_configuration_membership_unbound");
         return restored;
@@ -211,7 +211,7 @@ internal static class ConfigurationRunInventory
         if (session.IsWriterAdmissionClosed != session.ClosedElapsedMilliseconds.HasValue)
             throw new IOException("configuration_run_elapsed_unbound");
         using var command = ConfigurationRunRows.Command(connection, transaction, session.SessionId);
-        command.CommandText = "SELECT r.journal_id,b.writer_id,b.job_name,b.session_id FROM configuration_run_resources r LEFT JOIN journal_writer_jobs b " +
+        command.CommandText = "SELECT r.journal_id,b.writer_id,b.job_name,b.session_id FROM configuration.configuration_run_resources r LEFT JOIN main.journal_writer_jobs b " +
             "ON b.journal_id=r.journal_id WHERE r.session_id=$session ORDER BY r.journal_id LIMIT 98;";
         var jobs = new List<(Guid Journal, Guid Writer, string Job, int Session)>();
         using (var rows = command.ExecuteReader())
@@ -223,12 +223,12 @@ internal static class ConfigurationRunInventory
                 throw new IOException("configuration_run_job_unbound");
             if (!session.IsWriterAdmissionClosed) return;
             if (session.ClosedElapsedMilliseconds != 0) throw new IOException("configuration_run_elapsed_unbound");
-            command.CommandText = "SELECT EXISTS(SELECT 1 FROM configuration_run_resources r JOIN journal_writer_job_roots b ON b.journal_id=r.journal_id WHERE r.session_id=$session);";
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM configuration.configuration_run_resources r JOIN main.journal_writer_job_roots b ON b.journal_id=r.journal_id WHERE r.session_id=$session);";
             if ((long)command.ExecuteScalar()! != 0) throw new IOException("configuration_run_job_unbound");
             foreach (var resource in session.Resources)
             {
                 var physical = new JournalStore(instance, contracts).Read(resource.JournalId);
-                command.CommandText = "SELECT EXISTS(SELECT 1 FROM operation_journals WHERE journal_id=$journal AND phase='committed' AND revision=$revision);";
+                command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operation_journals WHERE journal_id=$journal AND phase='committed' AND revision=$revision);";
                 command.Parameters.Clear(); command.Parameters.AddWithValue("$journal", resource.JournalId.ToString("D"));
                 command.Parameters.AddWithValue("$revision", physical.Revision);
                 if (physical.Phase != JournalPhase.Committed || (long)command.ExecuteScalar()! != 1 ||
@@ -271,7 +271,7 @@ internal static class ConfigurationRunInventory
     {
         var source = state.Source;
         using var command = ConfigurationRunRows.Command(connection, transaction, session.SessionId);
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM operations WHERE operation_id=$child AND subject_id=$subject " +
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operations WHERE operation_id=$child AND subject_id=$subject " +
             "AND operation_kind='configuration.run.resource' AND request_digest=$digest AND status=$status);";
         command.Parameters.AddWithValue("$child", resource.OperationId.ToString("D")); command.Parameters.AddWithValue("$subject", subject);
         command.Parameters.AddWithValue("$digest", resource.PlanDigest);
@@ -291,7 +291,7 @@ internal static class ConfigurationRunInventory
             throw new IOException("configuration_run_resource_cursor_unbound");
         if (!session.CompletionOperationId.HasValue && ConfigurationRevisionRows.Current(connection, transaction, resource.Address, snapshots)?.Revision.Revision != resource.CurrentRevision)
             throw new IOException("configuration_run_current_pointer_conflict");
-        command.CommandText = "SELECT phase FROM operation_journals WHERE journal_id=$journal;";
+        command.CommandText = "SELECT phase FROM main.operation_journals WHERE journal_id=$journal;";
         command.Parameters.AddWithValue("$journal", resource.JournalId.ToString("D"));
         if (session.CompletionOperationId.HasValue && command.ExecuteScalar() as string != "committed") throw new IOException("configuration_run_completion_not_restored");
     }

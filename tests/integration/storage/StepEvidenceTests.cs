@@ -6,6 +6,7 @@ using NexusPipeline.Core.Execution;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Journals;
+using Sqlite = NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
 
 namespace NexusPipeline.StorageTests;
@@ -56,10 +57,10 @@ public sealed class StepEvidenceTests
         var raw = RawOutputCodec.Read(blobs, binding, evidence.RawOutput!);
         var path = Path.Combine(source.Instance.RuntimeRoot, raw.Parts[0].Content.RelativePath);
         Assert.Throws<IOException>(() => File.WriteAllBytes(path, [1]));
-        using (var connection = NexusPipeline.Platform.Storage.Sqlite.DatabaseConnections.Open(source.Database.DatabasePath))
+        using (var connection = NexusPipeline.Platform.Storage.Sqlite.DatabaseConnections.Open(source.Database.DatabasePath, domains: Sqlite.DatabaseDomain.Runtime | Sqlite.DatabaseDomain.Automation | Sqlite.DatabaseDomain.Configuration | Sqlite.DatabaseDomain.Records | Sqlite.DatabaseDomain.Extensions | Sqlite.DatabaseDomain.System | Sqlite.DatabaseDomain.Content))
         using (var command = connection.CreateCommand())
         {
-            command.CommandText = "UPDATE journal_writer_job_roots SET image_sha256=$digest WHERE journal_id=$journal;";
+            command.CommandText = "UPDATE main.journal_writer_job_roots SET image_sha256=$digest WHERE journal_id=$journal;";
             command.Parameters.AddWithValue("$journal", fixture.JournalId.ToString("D"));
             command.Parameters.AddWithValue("$digest", new string('0', 64)); command.ExecuteNonQuery();
             Assert.Throws<IOException>(() => AttemptWriterState.Read(source.Instance, source.Database, new(), fixture.JournalId));

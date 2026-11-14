@@ -21,7 +21,7 @@ internal static class BindingConfigurationSource
     internal static AutomationCatalog Read(StateDatabase database, SqliteConnection connection, SqliteTransaction transaction, AutomationCatalog catalog)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT binding_id FROM configuration_current WHERE resource_id=$resource;";
+        command.CommandText = "SELECT binding_id FROM configuration.configuration_current WHERE resource_id=$resource;";
         command.Parameters.AddWithValue("$resource", ResourceId);
         var ids = new HashSet<Guid>();
         using (var rows = command.ExecuteReader()) while (rows.Read()) ids.Add(Guid.Parse(rows.GetString(0)));

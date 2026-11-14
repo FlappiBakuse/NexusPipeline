@@ -107,13 +107,13 @@ public sealed class NotificationWebhookTests
         fixture.Delivery.MaterializePending();
         await using var sender = Create(fixture, sink.Address);
         var reference = Assert.Single(sender.ReadQueuedForSource(fixture.Snapshot.Reference));
-        fixture.Sql("CREATE TRIGGER fail_notify_result BEFORE INSERT ON notification_delivery_transitions WHEN NEW.ordinal=2 BEGIN SELECT RAISE(ABORT,'fixture'); END;");
+        fixture.Sql("CREATE TRIGGER notifications.fail_notify_result BEFORE INSERT ON notification_delivery_transitions WHEN NEW.ordinal=2 BEGIN SELECT RAISE(ABORT,'fixture'); END;");
         try
         {
             Assert.Equal(NotificationDeliveryState.Sending, await Send(fixture, sender, reference));
             Assert.Equal("notification_result_publication_pending", sender.FailureCode); Assert.Single(sink.Requests);
         }
-        finally { fixture.Sql("DROP TRIGGER fail_notify_result;"); }
+        finally { fixture.Sql("DROP TRIGGER notifications.fail_notify_result;"); }
         Assert.Equal(1, sender.ReconcilePendingResults()); Assert.Equal(0, sender.ReconcilePendingResults());
         Assert.Single(sink.Requests); Assert.True(fixture.Delivery.IsSettledForRun(fixture.Receipt.Facts.RunId));
     }

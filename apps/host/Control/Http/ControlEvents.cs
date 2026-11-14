@@ -30,6 +30,8 @@ internal sealed class ControlEvents(ControlAuthentication authority, ControlEven
             try
             {
                 await context.Response.StartAsync(deadline.Token);
+                await context.Response.WriteAsync(": connected\n\n", deadline.Token);
+                await context.Response.Body.FlushAsync(deadline.Token);
                 do
                 {
                     request.Require(ControlCapability.StatusRead);

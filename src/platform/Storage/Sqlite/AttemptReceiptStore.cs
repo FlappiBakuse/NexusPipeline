@@ -39,7 +39,7 @@ public sealed class AttemptReceiptStore(StateDatabase database) : IAttemptReceip
         }
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "INSERT INTO attempt_receipts VALUES($attempt,$run,$ordinal,$journal,$operation,$plan,$source,$engine,$business,$lifecycle,$recovery,$reason);";
+        command.CommandText = "INSERT INTO records.attempt_receipts VALUES($attempt,$run,$ordinal,$journal,$operation,$plan,$source,$engine,$business,$lifecycle,$recovery,$reason);";
         command.Parameters.AddWithValue("$attempt", receipt.Facts.AttemptId.ToString("D"));
         command.Parameters.AddWithValue("$run", receipt.Facts.RunId.ToString("D"));
         command.Parameters.AddWithValue("$ordinal", receipt.Facts.Ordinal);
@@ -59,7 +59,7 @@ public sealed class AttemptReceiptStore(StateDatabase database) : IAttemptReceip
     private static void CompleteOperation(SqliteConnection connection, SqliteTransaction transaction, AttemptReceipt receipt)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$operation AND initial_journal_id=$journal AND status IN ('accepted','completed');";
+        command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$operation AND initial_journal_id=$journal AND status IN ('accepted','completed');";
         command.Parameters.AddWithValue("$operation", receipt.OperationId.ToString("D"));
         command.Parameters.AddWithValue("$journal", receipt.JournalId.ToString("D"));
         if (command.ExecuteNonQuery() != 1) throw new IOException("attempt_receipt_operation_unbound");
@@ -67,7 +67,7 @@ public sealed class AttemptReceiptStore(StateDatabase database) : IAttemptReceip
 
     public AttemptReceipt? Read(Guid attemptId)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
         return ReadInside(connection, null, attemptId);
     }
 
@@ -75,7 +75,7 @@ public sealed class AttemptReceiptStore(StateDatabase database) : IAttemptReceip
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT run_id,ordinal,journal_id,operation_id,plan_digest,source_receipt_digest,engine_outcome,business_outcome,lifecycle_outcome,recovery_outcome,reason_code FROM attempt_receipts WHERE attempt_id=$id;";
+        command.CommandText = "SELECT run_id,ordinal,journal_id,operation_id,plan_digest,source_receipt_digest,engine_outcome,business_outcome,lifecycle_outcome,recovery_outcome,reason_code FROM records.attempt_receipts WHERE attempt_id=$id;";
         command.Parameters.AddWithValue("$id", attemptId.ToString("D"));
         using var reader = command.ExecuteReader();
         if (!reader.Read()) return null;

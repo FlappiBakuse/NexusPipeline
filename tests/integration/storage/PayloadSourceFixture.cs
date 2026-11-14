@@ -46,7 +46,7 @@ internal sealed class PayloadSourceFixture : IDisposable
             var journal = Guid.NewGuid(); var metadata = candidate.Use(_root, Package.Blobs, CancellationToken.None, (binding, tree) =>
             {
                 ExtensionCatalogSaved catalog;
-                using (var connection = DatabaseConnections.Open(Package.Catalog.Database.DatabasePath, readOnly: true))
+                using (var connection = DatabaseConnections.Open(Package.Catalog.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System))
                 using (var transaction = connection.BeginTransaction(deferred: true))
                 {
                     catalog = ExtensionCatalogRows.ReadHead(connection, transaction, binding.Catalog.Channel)

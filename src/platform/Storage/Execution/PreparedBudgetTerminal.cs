@@ -41,7 +41,7 @@ internal sealed class PreparedBudgetTerminal : IDisposable
                 document.Phase != NexusPipeline.Core.Configuration.JournalPhase.Committed)
                 throw RunBudgetRows.Invalid();
             var result = AttemptResultCodec.Read(document.Root, state.Attempt) ?? throw RunBudgetRows.Invalid();
-            using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
             using var transaction = connection.BeginTransaction(deferred: true);
             var saved = RunBudgetRows.Read(connection, transaction, result.Facts.RunId) ?? throw RunBudgetRows.Invalid();
             var wire = prepared.Total.Plan.ReadWire();

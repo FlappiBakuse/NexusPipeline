@@ -13,7 +13,7 @@ internal static class ConfigurationRunRows
         using (var command = Command(connection, transaction, sessionId))
         {
             command.CommandText = "SELECT s.owner_operation_id,s.parent_journal_id,s.step_id,s.binding_id,s.expected_binding_revision,s.revision,s.phase,s.writer_gate,o.subject_id,s.sync_ordinal,s.completion_operation_id,s.entered_running,s.closed_elapsed_milliseconds,s.primary_job_name,s.invocation_ordinal " +
-                "FROM configuration_run_sessions s JOIN operations o ON o.operation_id=s.session_id WHERE s.session_id=$session;";
+                "FROM configuration.configuration_run_sessions s JOIN main.operations o ON o.operation_id=s.session_id WHERE s.session_id=$session;";
             using var row = command.ExecuteReader();
             if (!row.Read()) return null;
             if (row.GetString(8) != subject) throw new NexusPipeline.Core.Operations.OperationConflictException();
@@ -26,7 +26,7 @@ internal static class ConfigurationRunRows
         }
         using var items = Command(connection, transaction, sessionId);
         items.CommandText = "SELECT resource_id,operation_id,journal_id,expected_revision,current_revision,contract_revision,contract_digest,instance_key,requires_instance,plan_path,plan_digest " +
-            "FROM configuration_run_resources WHERE session_id=$session ORDER BY resource_id LIMIT 33;";
+            "FROM configuration.configuration_run_resources WHERE session_id=$session ORDER BY resource_id LIMIT 33;";
         var resources = ImmutableArray.CreateBuilder<RunResourceStatus>();
         using (var row = items.ExecuteReader())
             while (row.Read()) resources.Add(new(new(binding, row.GetString(0)), Guid.Parse(row.GetString(1)), Guid.Parse(row.GetString(2)), row.GetInt64(3), row.GetInt64(4),
@@ -53,7 +53,7 @@ internal static class ConfigurationRunRows
         IReadOnlyDictionary<ConfigurationAddress, FrozenRunState> states)
     {
         using var command = Command(connection, transaction, sessionId);
-        command.CommandText = "INSERT INTO configuration_run_sessions(session_id,owner_operation_id,parent_journal_id,step_id,binding_id,expected_binding_revision," +
+        command.CommandText = "INSERT INTO configuration.configuration_run_sessions(session_id,owner_operation_id,parent_journal_id,step_id,binding_id,expected_binding_revision," +
             "revision,phase,writer_gate,sync_ordinal,completion_operation_id,entered_running,closed_elapsed_milliseconds,primary_job_name,invocation_ordinal) " +
             "VALUES($session,$owner,$parent,$step,$binding,$bindingRevision,1,0,0,0,NULL,0,NULL,NULL,$invocation);";
         command.Parameters.AddWithValue("$owner", owner.ToString("D")); command.Parameters.AddWithValue("$parent", parent.ToString("D")); command.Parameters.AddWithValue("$step", step);
@@ -63,7 +63,7 @@ internal static class ConfigurationRunRows
         {
             var target = request.Resources.Single(item => item.Target.Address == resource.Address).Target;
             using var item = Command(connection, transaction, sessionId);
-            item.CommandText = "INSERT INTO configuration_run_resources VALUES($session,$resource,$operation,$journal,$expected,$expected,$contractRevision,$contractDigest,$instance,$required,$path,$digest);";
+            item.CommandText = "INSERT INTO configuration.configuration_run_resources VALUES($session,$resource,$operation,$journal,$expected,$expected,$contractRevision,$contractDigest,$instance,$required,$path,$digest);";
             item.Parameters.AddWithValue("$resource", resource.Address.ResourceId); item.Parameters.AddWithValue("$operation", resource.Plan.OperationId.ToString("D"));
             item.Parameters.AddWithValue("$journal", resource.Plan.JournalId.ToString("D")); item.Parameters.AddWithValue("$expected", states[resource.Address].InitialPublicationRevision);
             item.Parameters.AddWithValue("$contractRevision", target.Contract.Revision); item.Parameters.AddWithValue("$contractDigest", target.Contract.DefinitionSha256);

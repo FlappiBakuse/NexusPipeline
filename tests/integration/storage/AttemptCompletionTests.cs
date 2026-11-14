@@ -76,15 +76,15 @@ public sealed class AttemptCompletionTests
         var resource = fixture.Group.Resources[0]; var changed = new string('c', 64);
         var sql = fault switch
         {
-            "parent-subject" => $"UPDATE operations SET subject_id='foreign' WHERE operation_id='{fixture.Source.Owner:D}';",
-            "group-subject" => $"UPDATE operations SET subject_id='foreign' WHERE operation_id='{fixture.Group.SessionId:D}';",
-            "child-subject" => $"UPDATE operations SET subject_id='foreign' WHERE operation_id='{resource.OperationId:D}';",
-            "group-owner" => $"UPDATE configuration_run_sessions SET owner_operation_id='{fixture.Group.SessionId:D}' WHERE session_id='{fixture.Group.SessionId:D}';",
-            "group-parent" => $"UPDATE configuration_run_sessions SET parent_journal_id='{resource.JournalId:D}' WHERE session_id='{fixture.Group.SessionId:D}';",
-            "child-plan" => $"UPDATE configuration_run_resources SET plan_path='blobs/plans/{changed}.json',plan_digest='{changed}' WHERE journal_id='{resource.JournalId:D}';",
-            "resource-operation" => $"UPDATE configuration_run_resources SET operation_id='{fixture.Group.SessionId:D}' WHERE journal_id='{resource.JournalId:D}';",
-            "child-mode" => $"UPDATE journal_resource_claims SET mode=0 WHERE journal_id='{resource.JournalId:D}' AND resource_key LIKE 'configuration:%';",
-            _ => $"DELETE FROM configuration_run_resources WHERE session_id='{fixture.Group.SessionId:D}'; DELETE FROM configuration_run_sessions WHERE session_id='{fixture.Group.SessionId:D}';"
+            "parent-subject" => $"UPDATE main.operations SET subject_id='foreign' WHERE operation_id='{fixture.Source.Owner:D}';",
+            "group-subject" => $"UPDATE main.operations SET subject_id='foreign' WHERE operation_id='{fixture.Group.SessionId:D}';",
+            "child-subject" => $"UPDATE main.operations SET subject_id='foreign' WHERE operation_id='{resource.OperationId:D}';",
+            "group-owner" => $"UPDATE configuration.configuration_run_sessions SET owner_operation_id='{fixture.Group.SessionId:D}' WHERE session_id='{fixture.Group.SessionId:D}';",
+            "group-parent" => $"UPDATE configuration.configuration_run_sessions SET parent_journal_id='{resource.JournalId:D}' WHERE session_id='{fixture.Group.SessionId:D}';",
+            "child-plan" => $"UPDATE configuration.configuration_run_resources SET plan_path='blobs/plans/{changed}.json',plan_digest='{changed}' WHERE journal_id='{resource.JournalId:D}';",
+            "resource-operation" => $"UPDATE configuration.configuration_run_resources SET operation_id='{fixture.Group.SessionId:D}' WHERE journal_id='{resource.JournalId:D}';",
+            "child-mode" => $"UPDATE main.journal_resource_claims SET mode=0 WHERE journal_id='{resource.JournalId:D}' AND resource_key LIKE 'configuration:%';",
+            _ => $"DELETE FROM configuration.configuration_run_resources WHERE session_id='{fixture.Group.SessionId:D}'; DELETE FROM configuration.configuration_run_sessions WHERE session_id='{fixture.Group.SessionId:D}';"
         };
         fixture.Source.Execute(sql); var before = fixture.ParentBytes();
         Assert.Throws<IOException>(() => ConfigurationCompletionBinding.Read(fixture.Source.Source.Instance,
@@ -153,7 +153,7 @@ public sealed class AttemptCompletionTests
         {
             Assert.Throws<SqliteException>(() => new SnapshotCompletionOwner(fixture.Source.Source.Instance,
                 fixture.Source.Source.Database, new(), fixture.Source.Lease).Prepare(completion, ConfigurationRunFixture.Subject, group, () =>
-                fixture.Source.Execute("CREATE TRIGGER fixture_fail_parent_projection BEFORE UPDATE ON operation_journals " +
+                fixture.Source.Execute("CREATE TRIGGER main.fixture_fail_parent_projection BEFORE UPDATE ON operation_journals " +
                     $"WHEN OLD.journal_id='{fixture.ParentJournalId:D}' BEGIN SELECT RAISE(ABORT,'fixture_parent_projection'); END;")));
         }
         finally { fixture.Source.Execute("DROP TRIGGER IF EXISTS fixture_fail_parent_projection;"); }

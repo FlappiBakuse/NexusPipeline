@@ -8,7 +8,10 @@ namespace NexusPipeline.Platform.Storage.Sqlite;
 public sealed class JournalEffectGate(StateDatabase database) : IJournalEffectGate
 {
     public EffectGateSnapshot Read(Guid journalId) => HistoryReadScope.ReadDatabase(database,
-        (connection, transaction) => Read(connection, transaction, journalId).Gate);
+        (connection, transaction) => ReadInside(connection, transaction, journalId));
+
+    internal EffectGateSnapshot ReadInside(SqliteConnection connection, SqliteTransaction transaction, Guid journalId)
+        => Read(connection, transaction, journalId).Gate;
 
     public EffectGateSnapshot Enter(RegisteredJournal expected, long expectedGateRevision)
         => Move(expected, expectedGateRevision, EffectGateState.Entered);
@@ -43,7 +46,7 @@ public sealed class JournalEffectGate(StateDatabase database) : IJournalEffectGa
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT j.operation_kind,g.state,j.phase,g.revision FROM operation_journals j LEFT JOIN journal_effect_gates g USING(journal_id) WHERE j.journal_id=$journal;";
+        command.CommandText = "SELECT j.operation_kind,g.state,j.phase,g.revision FROM main.operation_journals j LEFT JOIN main.journal_effect_gates g USING(journal_id) WHERE j.journal_id=$journal;";
         command.Parameters.AddWithValue("$journal", journalId.ToString("D"));
         using var reader = command.ExecuteReader();
         if (!reader.Read()) throw new IOException("effect_gate_journal_missing");
@@ -73,13 +76,13 @@ public sealed class JournalEffectGate(StateDatabase database) : IJournalEffectGa
             var revision = checked(expectedRevision + 1);
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
-            command.CommandText = "UPDATE journal_effect_gates SET state=$state,revision=$revision WHERE journal_id=$journal AND revision=$expected AND state='unentered';";
+            command.CommandText = "UPDATE main.journal_effect_gates SET state=$state,revision=$revision WHERE journal_id=$journal AND revision=$expected AND state='unentered';";
             command.Parameters.AddWithValue("$state", next.ToString().ToLowerInvariant());
             command.Parameters.AddWithValue("$revision", revision);
             command.Parameters.AddWithValue("$journal", expected.JournalId.ToString("D"));
             command.Parameters.AddWithValue("$expected", expectedRevision);
             if (command.ExecuteNonQuery() != 1) throw new IOException("effect_gate_revision_conflict");
-            command.CommandText = "UPDATE recovery_index_state SET revision=revision+1,ready=0 WHERE singleton=1;";
+            command.CommandText = "UPDATE main.recovery_index_state SET revision=revision+1,ready=0 WHERE singleton=1;";
             if (command.ExecuteNonQuery() != 1) throw new IOException("effect_gate_index_missing");
             return current.Gate with { Revision = revision, State = next };
         });
@@ -90,7 +93,7 @@ public sealed class JournalEffectGate(StateDatabase database) : IJournalEffectGa
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT j.operation_id,j.operation_kind,j.plan_digest,g.revision,g.state,j.phase,j.revision,j.plan_path FROM operation_journals j JOIN journal_effect_gates g USING(journal_id) WHERE j.journal_id=$journal;";
+        command.CommandText = "SELECT j.operation_id,j.operation_kind,j.plan_digest,g.revision,g.state,j.phase,j.revision,j.plan_path FROM main.operation_journals j JOIN main.journal_effect_gates g USING(journal_id) WHERE j.journal_id=$journal;";
         command.Parameters.AddWithValue("$journal", journalId.ToString("D"));
         EffectGateSnapshot gate;
         JournalPhase phase;
@@ -107,7 +110,7 @@ public sealed class JournalEffectGate(StateDatabase database) : IJournalEffectGa
             journalRevision = reader.GetInt64(6);
             planPath = reader.GetString(7);
         }
-        command.CommandText = "SELECT resource_key FROM journal_resources WHERE journal_id=$journal ORDER BY resource_key LIMIT 4097;";
+        command.CommandText = "SELECT resource_key FROM main.journal_resources WHERE journal_id=$journal ORDER BY resource_key LIMIT 4097;";
         using var resources = command.ExecuteReader();
         var keys = new List<string>();
         while (resources.Read()) keys.Add(resources.GetString(0));

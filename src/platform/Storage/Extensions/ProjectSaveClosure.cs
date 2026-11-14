@@ -17,11 +17,11 @@ internal static class ProjectSaveClosure
 
     internal static bool IsClosed(StateDatabase database, Guid operation, string subject, string digest)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT operation_kind FROM operations WHERE operation_id=$id;";
+        command.CommandText = "SELECT operation_kind FROM main.operations WHERE operation_id=$id;";
         command.Parameters.AddWithValue("$id", operation.ToString("D"));
         if (command.ExecuteScalar() is not "project.selection.closed") return false;
         return OperationRows.ReadExisting(connection, transaction, Identity(operation, subject, digest))?.Status == "completed";
@@ -36,7 +36,7 @@ internal static class ProjectSaveClosure
             var accepted = OperationRows.Accept(connection, transaction, identity, DateTimeOffset.UtcNow);
             if (!accepted.IsNew && accepted.Status != "completed") throw new OperationConflictException();
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$id;";
+            command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$id;";
             command.Parameters.AddWithValue("$id", operation.ToString("D")); command.ExecuteNonQuery();
             return true;
         });

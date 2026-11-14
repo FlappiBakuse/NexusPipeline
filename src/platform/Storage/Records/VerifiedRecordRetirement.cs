@@ -18,9 +18,9 @@ internal sealed class VerifiedRecordRetirement
     internal static VerifiedRecordRetirement? ForArtifact(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
         StepEvidenceBinding binding, string role, BlobReference artifact)
     {
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var command = RecordRetirementRows.Command(connection, null,
-            "SELECT EXISTS(SELECT 1 FROM record_content_retirements WHERE run_id=$0);", binding.RunId))
+            "SELECT EXISTS(SELECT 1 FROM records.record_content_retirements WHERE run_id=$0);", binding.RunId))
             if ((long)command.ExecuteScalar()! == 0) return null;
         var reader = new RetirementFamilyReader(instance, database, contracts);
         var family = reader.CaptureMetadata(binding.RunId);
@@ -41,7 +41,7 @@ internal sealed class VerifiedRecordRetirement
     {
         var blobs = new ImmutableBlobStore(instance, contracts);
         IReadOnlyList<BlobReference> proofs;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var transaction = connection.BeginTransaction(deferred: true))
         {
             RecordRetirementRows.RequireFamilyInside(connection, transaction, family.RunId, family.Attempts.Length);
@@ -81,7 +81,7 @@ internal sealed class VerifiedRecordRetirement
             if (unbound.Count == 0) break;
         }
         if (unbound.Count != 0) throw RecordRetirementCodec.Invalid();
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         _ = RecoveryJournalRegistry.ReadValidatedSnapshotInside(connection, transaction);
         RecordRetirementRows.RequireSavedInside(connection, transaction, document, reference);

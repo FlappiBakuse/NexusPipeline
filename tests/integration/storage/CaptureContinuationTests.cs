@@ -30,7 +30,7 @@ public sealed class CaptureContinuationTests
             originalPng = File.ReadAllBytes(ContentPath(fixture, png!));
             Assert.ThrowsAny<IOException>(() => new CaptureEvidenceReader(fixture.Source.Instance, fixture.Source.Database, new())
                 .OpenCaptured(saved.State.Binding, artifact!));
-            fixture.Base.Execute("CREATE TRIGGER fixture_capture_advance_failure BEFORE UPDATE OF revision ON operation_journals " +
+            fixture.Base.Execute("CREATE TRIGGER main.fixture_capture_advance_failure BEFORE UPDATE OF revision ON operation_journals " +
                 $"WHEN OLD.journal_id='{fixture.Accepted.JournalId:D}' BEGIN SELECT RAISE(ABORT,'fixture_capture_advance_failure'); END;");
             installed = true;
         });
@@ -54,11 +54,12 @@ public sealed class CaptureContinuationTests
             }
             finally
             {
-                if (installed) { fixture.Base.Execute("DROP TRIGGER fixture_capture_advance_failure;"); installed = false; }
+                if (installed) { fixture.Base.Execute("DROP TRIGGER main.fixture_capture_advance_failure;"); installed = false; }
             }
             fixture.Source.Lease.PublishExecution(() =>
             {
-                ExecutionAttemptProjection.Synchronize(fixture.Source.Instance, fixture.Source.Database, new(), fixture.State);
+                ExecutionAttemptProjection.Synchronize(fixture.Source.Instance, fixture.Source.Database, new(),
+                    AttemptWriterState.Read(fixture.Source.Instance, fixture.Source.Database, new(), fixture.Accepted.JournalId));
             });
             var projected = ReadCapture(fixture);
             Assert.Equal(artifact, projected.State.Result);
@@ -106,7 +107,7 @@ public sealed class CaptureContinuationTests
 
     private static CaptureSavedEvidence ReadCapture(AndroidRuntimeFixture fixture)
     {
-        var state = fixture.State;
+        var state = AttemptWriterState.Read(fixture.Source.Instance, fixture.Source.Database, new(), fixture.Accepted.JournalId);
         return Assert.Single(new CaptureEvidenceReader(fixture.Source.Instance, fixture.Source.Database, new())
             .ReadMetadata(state.Journal, state.Attempt, state.Total,
                 new JournalStore(fixture.Source.Instance, new()).ReadAllRevisions(state.Journal.JournalId)));

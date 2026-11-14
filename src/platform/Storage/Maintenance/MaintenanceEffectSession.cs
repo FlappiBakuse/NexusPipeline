@@ -59,9 +59,9 @@ internal sealed class MaintenanceEffectSession
         var stopped = actualJob.RequireStoppedRoot(actualRoot);
         lease.VerifyHeld(_inputs.Instance); _actor.RequireCurrent(lease);
         if (!_applied || actualRoot.InstanceId != _inputs.Instance.InstanceId || actualRoot.AttemptId != _inputs.Operation.HandoffId) throw Invalid();
-        using var connection = DatabaseConnections.Open(_inputs.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_inputs.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM journal_writers w JOIN journal_writer_jobs b USING(journal_id,writer_id) " +
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.journal_writers w JOIN main.journal_writer_jobs b USING(journal_id,writer_id) " +
             "WHERE w.journal_id=$journal AND b.job_name=$job AND w.process_id=$pid AND w.created_file_time=$created AND w.image_sha256=$hash);";
         command.Parameters.AddWithValue("$journal", _inputs.Plan.JournalId.ToString("D")); command.Parameters.AddWithValue("$job", actualJob.Name);
         command.Parameters.AddWithValue("$pid", stopped.ProcessId); command.Parameters.AddWithValue("$created", stopped.CreatedAtUtc.ToFileTimeUtc());

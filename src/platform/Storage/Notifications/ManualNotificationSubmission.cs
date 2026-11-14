@@ -16,7 +16,7 @@ internal sealed class ManualNotificationSubmission(RuntimeInstance instance, Sta
         var work = Require(submission);
         lease.PublishExecution(() =>
         {
-            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
             using var transaction = connection.BeginTransaction(deferred: true); work.RequireCurrent(connection, transaction);
         });
     }
@@ -52,13 +52,13 @@ internal sealed class ManualNotificationSubmission(RuntimeInstance instance, Sta
 
     private NotificationQueueAcceptance? ReadExisting(NotificationSubmission submission, WorkNotificationOrigin work)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true); work.RequireCurrent(connection, transaction);
         var reference = NotificationManualRows.Lookup(connection, transaction, submission.OperationId);
         if (reference is null)
         {
             using var occupied = NotificationDeliveryRows.Command(connection, transaction,
-                "SELECT 1 FROM operations WHERE operation_id=$0;", submission.OperationId.ToString("D"));
+                "SELECT 1 FROM main.operations WHERE operation_id=$0;", submission.OperationId.ToString("D"));
             if (occupied.ExecuteScalar() is not null) throw NotificationManualCodec.Invalid(); return null;
         }
         var source = new NotificationManualCodec(instance, contracts).Read(reference, connection, transaction);

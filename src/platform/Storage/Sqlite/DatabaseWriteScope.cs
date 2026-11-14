@@ -28,7 +28,8 @@ internal sealed class DatabaseWriteScope : IDisposable
                 scope._directory = StableDirectoryLease.Acquire(Path.GetDirectoryName(path)!);
                 scope._file = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
                 scope._identity = PhysicalObjectIdentity.Read(scope._file.SafeFileHandle);
-                scope._connection = DatabaseConnections.Open(path, allowPooling: false);
+                if (PhysicalObjectIdentity.Read(path) != scope._identity) throw new IOException("database_write_identity_changed");
+                scope._connection = DatabaseConnections.Open(path, domains: DatabaseDomain.All);
             }
             catch
             {
@@ -37,7 +38,7 @@ internal sealed class DatabaseWriteScope : IDisposable
                 throw;
             }
         }
-        if (PhysicalObjectIdentity.Read(path) != scope._identity) throw new IOException("database_write_identity_changed");
+        if (!scope._file!.CanRead) throw new IOException("database_write_identity_changed");
         return scope._connection;
     }
 

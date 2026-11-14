@@ -29,8 +29,8 @@ internal static class TargetJobProjection
             if (jobs.Any(job => job.JobName == item.Binding.JobName) ||
                 StepResultCodec.Read(before.Root, state.Total).Any(result => result.Binding.StepId == item.Binding.StepId)) throw Invalid();
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT EXISTS(SELECT 1 FROM journal_writers WHERE journal_id=$journal AND writer_id=$writer) " +
-                "AND NOT EXISTS(SELECT 1 FROM journal_writer_job_roots WHERE journal_id=$journal AND job_name=$main);";
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.journal_writers WHERE journal_id=$journal AND writer_id=$writer) " +
+                "AND NOT EXISTS(SELECT 1 FROM main.journal_writer_job_roots WHERE journal_id=$journal AND job_name=$main);";
             command.Parameters.AddWithValue("$journal", item.Binding.ParentJournalId.ToString("D"));
             command.Parameters.AddWithValue("$writer", item.Binding.OwnerWriterId.ToString("D"));
             command.Parameters.AddWithValue("$main", jobs.Single(job => job.StepId == item.Binding.StepId && job.Role == "process").JobName);

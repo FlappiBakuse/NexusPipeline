@@ -11,8 +11,8 @@ internal static class ExtensionImageRows
         string extensionId, string documentName)
     {
         using var command = Command(connection, transaction, extensionId);
-        command.CommandText = "SELECT i.image_id,i.content_type,length(i.content),i.width,i.height FROM extension_images i " +
-            "JOIN extension_image_references r ON r.extension_id=i.extension_id AND r.image_id=i.image_id " +
+        command.CommandText = "SELECT i.image_id,i.content_type,length(i.content),i.width,i.height FROM extensions.extension_images i " +
+            "JOIN extensions.extension_image_references r ON r.extension_id=i.extension_id AND r.image_id=i.image_id " +
             "WHERE r.extension_id=$extension AND r.document_name=$name ORDER BY i.image_id;";
         command.Parameters.AddWithValue("$name", documentName);
         using var rows = command.ExecuteReader(); var result = new List<ExtensionImageInfo>();
@@ -29,8 +29,8 @@ internal static class ExtensionImageRows
         string extensionId, string imageId)
     {
         using var command = Command(connection, transaction, extensionId);
-        command.CommandText = "SELECT content_type,content,width,height FROM extension_images i " +
-            "WHERE extension_id=$extension AND image_id=$image AND EXISTS(SELECT 1 FROM extension_image_references r " +
+        command.CommandText = "SELECT content_type,content,width,height FROM extensions.extension_images i " +
+            "WHERE extension_id=$extension AND image_id=$image AND EXISTS(SELECT 1 FROM extensions.extension_image_references r " +
             "WHERE r.extension_id=i.extension_id AND r.image_id=i.image_id);";
         command.Parameters.AddWithValue("$image", imageId);
         using var row = command.ExecuteReader();
@@ -50,23 +50,23 @@ internal static class ExtensionImageRows
         if (!commit.IsNew) return commit;
         using (var inventory = Command(connection, transaction, extensionId))
         {
-            inventory.CommandText = "SELECT COUNT(*) FROM extension_images i WHERE extension_id=$extension AND NOT EXISTS(" +
-                "SELECT 1 FROM extension_image_references r WHERE r.extension_id=i.extension_id AND r.image_id=i.image_id);";
+            inventory.CommandText = "SELECT COUNT(*) FROM extensions.extension_images i WHERE extension_id=$extension AND NOT EXISTS(" +
+                "SELECT 1 FROM extensions.extension_image_references r WHERE r.extension_id=i.extension_id AND r.image_id=i.image_id);";
             if (Convert.ToInt64(inventory.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) != 0)
                 throw new IOException("extension_image_orphan_unrecognized");
         }
         if (addition is not null) Insert(connection, transaction, extensionId, addition);
         using var command = Command(connection, transaction, extensionId);
         command.Parameters.AddWithValue("$name", name);
-        command.CommandText = "DELETE FROM extension_image_references WHERE extension_id=$extension AND document_name=$name;";
+        command.CommandText = "DELETE FROM extensions.extension_image_references WHERE extension_id=$extension AND document_name=$name;";
         command.ExecuteNonQuery();
         foreach (var id in images)
         {
-            command.CommandText = "INSERT INTO extension_image_references(extension_id,document_name,image_id) VALUES($extension,$name,$image);";
+            command.CommandText = "INSERT INTO extensions.extension_image_references(extension_id,document_name,image_id) VALUES($extension,$name,$image);";
             command.Parameters.AddWithValue("$image", id); command.ExecuteNonQuery(); command.Parameters.RemoveAt("$image");
         }
-        command.CommandText = "SELECT image_id FROM extension_images i WHERE extension_id=$extension AND NOT EXISTS(" +
-            "SELECT 1 FROM extension_image_references r WHERE r.extension_id=i.extension_id AND r.image_id=i.image_id);";
+        command.CommandText = "SELECT image_id FROM extensions.extension_images i WHERE extension_id=$extension AND NOT EXISTS(" +
+            "SELECT 1 FROM extensions.extension_image_references r WHERE r.extension_id=i.extension_id AND r.image_id=i.image_id);";
         var retiring = new List<string>();
         using (var rows = command.ExecuteReader())
         {
@@ -77,7 +77,7 @@ internal static class ExtensionImageRows
             }
         }
         foreach (var id in retiring) Retire(connection, transaction, extensionId, id);
-        command.CommandText = "SELECT COUNT(*),COALESCE(SUM(length(content)),0) FROM extension_images WHERE extension_id=$extension;";
+        command.CommandText = "SELECT COUNT(*),COALESCE(SUM(length(content)),0) FROM extensions.extension_images WHERE extension_id=$extension;";
         using var totals = command.ExecuteReader();
         if (!totals.Read() || totals.GetInt64(0) > 32 || totals.GetInt64(1) > 268435456)
             throw new IOException("extension_image_inventory_limit");
@@ -88,7 +88,7 @@ internal static class ExtensionImageRows
     {
         using var command = Command(connection, transaction, extensionId);
         command.Parameters.AddWithValue("$image", addition.Info.Id);
-        command.CommandText = "SELECT content_type,content,width,height FROM extension_images WHERE extension_id=$extension AND image_id=$image;";
+        command.CommandText = "SELECT content_type,content,width,height FROM extensions.extension_images WHERE extension_id=$extension AND image_id=$image;";
         using (var row = command.ExecuteReader())
         {
             if (row.Read())
@@ -99,7 +99,7 @@ internal static class ExtensionImageRows
                 return;
             }
         }
-        command.CommandText = "INSERT INTO extension_images(extension_id,image_id,content_type,content,width,height) " +
+        command.CommandText = "INSERT INTO extensions.extension_images(extension_id,image_id,content_type,content,width,height) " +
             "VALUES($extension,$image,$type,$content,$width,$height);";
         command.Parameters.AddWithValue("$type", addition.Info.ContentType); command.Parameters.AddWithValue("$content", addition.Content.ToArray());
         command.Parameters.AddWithValue("$width", addition.Info.Width); command.Parameters.AddWithValue("$height", addition.Info.Height);
@@ -110,7 +110,7 @@ internal static class ExtensionImageRows
     {
         using var command = Command(connection, transaction, extensionId);
         command.Parameters.AddWithValue("$image", imageId);
-        command.CommandText = "SELECT content_type,content,width,height FROM extension_images WHERE extension_id=$extension AND image_id=$image;";
+        command.CommandText = "SELECT content_type,content,width,height FROM extensions.extension_images WHERE extension_id=$extension AND image_id=$image;";
         using (var row = command.ExecuteReader())
         {
             if (!row.Read()) throw new IOException("extension_image_retirement_missing");
@@ -118,7 +118,7 @@ internal static class ExtensionImageRows
             if (info.Id != imageId || info.Width != row.GetInt32(2) || info.Height != row.GetInt32(3))
                 throw new IOException("extension_image_retirement_unrecognized");
         }
-        command.CommandText = "DELETE FROM extension_images WHERE extension_id=$extension AND image_id=$image;";
+        command.CommandText = "DELETE FROM extensions.extension_images WHERE extension_id=$extension AND image_id=$image;";
         if (command.ExecuteNonQuery() != 1) throw new IOException("extension_image_retirement_changed");
     }
 

@@ -58,7 +58,7 @@ internal sealed class ScheduleNativeFixture : IDisposable
 
     internal RunBudgetObservation? Budget(Guid runId)
     {
-        using var connection = DatabaseConnections.Open(Source.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(Source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         return RunBudgetRows.Read(connection, transaction, runId);
     }
@@ -78,13 +78,13 @@ internal sealed class ScheduleNativeFixture : IDisposable
 
     internal void Sql(string sql)
     {
-        using var connection = DatabaseConnections.Open(Source.Database.DatabasePath);
+        using var connection = DatabaseConnections.Open(Source.Database.DatabasePath, domains: DatabaseDomain.All);
         using var command = connection.CreateCommand(); command.CommandText = sql; command.ExecuteNonQuery();
     }
 
     internal long Count(string table)
     {
-        using var connection = DatabaseConnections.Open(Source.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(Source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var command = connection.CreateCommand(); command.CommandText = "SELECT COUNT(*) FROM " + table + ";";
         return (long)command.ExecuteScalar()!;
     }

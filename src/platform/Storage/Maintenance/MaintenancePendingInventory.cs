@@ -21,9 +21,9 @@ internal static class MaintenancePendingInventory
             throw new IOException("maintenance_inventory_instance_unbound");
         if (roots is null)
         {
-            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
-            using var command = connection.CreateCommand(); command.CommandText = "SELECT EXISTS(SELECT 1 FROM maintenance_operations) " +
-                "OR EXISTS(SELECT 1 FROM operations WHERE operation_kind='maintenance.update');";
+            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
+            using var command = connection.CreateCommand(); command.CommandText = "SELECT EXISTS(SELECT 1 FROM system.maintenance_operations) " +
+                "OR EXISTS(SELECT 1 FROM main.operations WHERE operation_kind='maintenance.update');";
             if ((long)command.ExecuteScalar()! != 0) throw new IOException("blob_reference_maintenance_roots_unavailable");
             return referenced;
         }
@@ -41,13 +41,13 @@ internal static class MaintenancePendingInventory
     {
         if (database.InstanceId != instance.InstanceId || !StringComparer.OrdinalIgnoreCase.Equals(database.RuntimeRoot, instance.RuntimeRoot))
             throw new IOException("maintenance_inventory_instance_unbound");
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         var rows = MaintenanceOperationRows.ReadAll(connection, transaction);
         using (var missing = connection.CreateCommand())
         {
             missing.Transaction = transaction;
-            missing.CommandText = "SELECT COUNT(*) FROM operations o LEFT JOIN maintenance_operations m ON m.operation_id=o.operation_id " +
+            missing.CommandText = "SELECT COUNT(*) FROM main.operations o LEFT JOIN system.maintenance_operations m ON m.operation_id=o.operation_id " +
                 "WHERE o.operation_kind='maintenance.update' AND m.operation_id IS NULL;";
             if ((long)missing.ExecuteScalar()! != 0) throw new IOException("maintenance_operation_metadata_missing");
         }
@@ -63,14 +63,14 @@ internal static class MaintenancePendingInventory
             if (row.InitialJournalId is null)
             {
                 using var command = connection.CreateCommand(); command.Transaction = transaction;
-                command.CommandText = "SELECT COUNT(*) FROM operation_journals WHERE operation_id=$operation;";
+                command.CommandText = "SELECT COUNT(*) FROM main.operation_journals WHERE operation_id=$operation;";
                 command.Parameters.AddWithValue("$operation", row.Identity.OperationId.ToString("D"));
                 if ((long)command.ExecuteScalar()! != 0) throw new IOException("maintenance_pending_has_journal");
             }
             else
             {
                 using var command = connection.CreateCommand(); command.Transaction = transaction;
-                command.CommandText = "SELECT operation_id,operation_kind,plan_path,plan_digest,phase FROM operation_journals WHERE journal_id=$journal;";
+                command.CommandText = "SELECT operation_id,operation_kind,plan_path,plan_digest,phase FROM main.operation_journals WHERE journal_id=$journal;";
                 command.Parameters.AddWithValue("$journal", row.InitialJournalId.Value.ToString("D"));
                 using var journal = command.ExecuteReader();
                 if (!journal.Read() || journal.GetString(0) != row.Identity.OperationId.ToString("D") || journal.GetString(1) != "updateApply" ||

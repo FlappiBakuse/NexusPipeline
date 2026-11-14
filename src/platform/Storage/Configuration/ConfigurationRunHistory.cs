@@ -16,7 +16,7 @@ internal static class ConfigurationRunHistory
         var operations = new List<Guid>(); long lastElapsed = 0;
         using (var command = ConfigurationRunRows.Command(connection, transaction, session.SessionId))
         {
-            command.CommandText = "SELECT ordinal,operation_id,elapsed_milliseconds FROM configuration_run_syncs WHERE session_id=$session ORDER BY ordinal LIMIT 10001;";
+            command.CommandText = "SELECT ordinal,operation_id,elapsed_milliseconds FROM configuration.configuration_run_syncs WHERE session_id=$session ORDER BY ordinal LIMIT 10001;";
             using var rows = command.ExecuteReader();
             while (rows.Read())
             {
@@ -51,12 +51,12 @@ internal static class ConfigurationRunHistory
         IReadOnlyDictionary<ConfigurationAddress, FrozenRunState> sources, ConfigurationSnapshotCodec snapshots)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT subject_id,operation_kind,status,request_digest FROM operations WHERE operation_id=$operation;";
+        command.CommandText = "SELECT subject_id,operation_kind,status,request_digest FROM main.operations WHERE operation_id=$operation;";
         command.Parameters.AddWithValue("$operation", operationId.ToString("D"));
         using (var row = command.ExecuteReader())
             if (!row.Read() || row.GetString(0) != subject || row.GetString(1) != (finish ? "configuration.run.finish" : "configuration.run.sync") ||
                 row.GetString(2) != "completed" || !FileTreePolicy.Digest(row.GetString(3))) throw new IOException("configuration_run_sync_operation_unbound");
-        command.CommandText = "SELECT resource_id,previous_revision,current_revision,reason_code FROM configuration_run_sync_items WHERE operation_id=$operation ORDER BY resource_id LIMIT 33;";
+        command.CommandText = "SELECT resource_id,previous_revision,current_revision,reason_code FROM configuration.configuration_run_sync_items WHERE operation_id=$operation ORDER BY resource_id LIMIT 33;";
         var items = new List<(ConfigurationAddress Address, long Previous, long Current, string Reason)>();
         using (var rows = command.ExecuteReader())
             while (rows.Read()) items.Add((new(session.Resources[0].Address.BindingId, rows.GetString(0)), rows.GetInt64(1), rows.GetInt64(2), rows.GetString(3)));
@@ -80,7 +80,7 @@ internal static class ConfigurationRunHistory
                     throw new IOException("configuration_run_history_revision_unbound");
             }
         }
-        command.CommandText = "SELECT binding_id,resource_id,revision,has_changes FROM configuration_batch_items WHERE operation_id=$operation;";
+        command.CommandText = "SELECT binding_id,resource_id,revision,has_changes FROM configuration.configuration_batch_items WHERE operation_id=$operation;";
         var published = new List<(ConfigurationAddress Address, long Revision)>();
         using (var rows = command.ExecuteReader())
             while (rows.Read())

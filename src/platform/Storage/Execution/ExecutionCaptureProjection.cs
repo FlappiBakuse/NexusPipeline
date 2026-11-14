@@ -32,7 +32,7 @@ internal static class ExecutionCaptureProjection
         var main = RequirePrimaryInside(connection, transaction, state, before, binding.Primary);
         if (main.ClosedElapsedMilliseconds is not null || main.WriterId != JournalWriterStore.CurrentWriter.WriterId) throw Invalid();
         using var command = Key(connection, transaction, binding.Primary);
-        command.CommandText = "SELECT NOT EXISTS(SELECT 1 FROM journal_writer_job_closures " +
+        command.CommandText = "SELECT NOT EXISTS(SELECT 1 FROM main.journal_writer_job_closures " +
             "WHERE journal_id=$journal AND writer_id=$writer AND job_name=$job);";
         if ((long)command.ExecuteScalar()! != 1) throw Invalid();
     }
@@ -59,8 +59,8 @@ internal static class ExecutionCaptureProjection
             .SingleOrDefault(job => job.StepId == binding.StepId && job.Role == "process") ?? throw Invalid();
         if (StepResultCodec.Binding(before.Root, main) != binding) throw Invalid();
         using var command = Key(connection, transaction, binding);
-        command.CommandText = "SELECT r.image_path,r.image_sha256 FROM journal_writer_jobs b " +
-            "JOIN journal_writers w USING(journal_id,writer_id) JOIN journal_writer_job_roots r USING(journal_id,writer_id,job_name) " +
+        command.CommandText = "SELECT r.image_path,r.image_sha256 FROM main.journal_writer_jobs b " +
+            "JOIN main.journal_writers w USING(journal_id,writer_id) JOIN main.journal_writer_job_roots r USING(journal_id,writer_id,job_name) " +
             "WHERE b.journal_id=$journal AND b.writer_id=$writer AND b.job_name=$job AND b.session_id=$session;";
         command.Parameters.AddWithValue("$session", binding.SessionId);
         var (image, digest) = ExecutionBindingRoles.Image(state.Total.Steps.Single(step => step.StepId == binding.StepId), "process");

@@ -22,17 +22,17 @@ internal static class WorkEffectInventory
             origins.Add(source.OperationId, new(source.ExtensionId, source.ProviderId, source.ManualTask?.TaskId ?? source.Task.TaskId,
                 source.Invocation.RunId, source.Invocation.AttemptId, source.HostLocalDate, state.Begin is not null));
         });
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         using (var versions = connection.CreateCommand())
         {
-            versions.Transaction = transaction; versions.CommandText = "SELECT extension_id,field,identity_version FROM work_identity_versions;";
+            versions.Transaction = transaction; versions.CommandText = "SELECT extension_id,field,identity_version FROM main.work_identity_versions;";
             using var rows = versions.ExecuteReader();
             while (rows.Read())
                 if (rows.GetString(0).Length == 0 || rows.GetString(1).Length == 0 || rows.GetString(2) is not { Length: >= 1 and <= 32 } version ||
                     version.Any(c => c is not (>= 'a' and <= 'z' or >= '0' and <= '9' or '-'))) throw WorkEffectRows.Invalid();
         }
-        using var ids = connection.CreateCommand(); ids.Transaction = transaction; ids.CommandText = "SELECT claim_id FROM work_effect_claims ORDER BY claim_id;";
+        using var ids = connection.CreateCommand(); ids.Transaction = transaction; ids.CommandText = "SELECT claim_id FROM main.work_effect_claims ORDER BY claim_id;";
         var claims = new List<Guid>();
         using (var rows = ids.ExecuteReader())
             while (rows.Read()) { if (claims.Count >= 100000) throw WorkEffectRows.Invalid(); claims.Add(Guid.ParseExact(rows.GetString(0), "D")); }
@@ -49,7 +49,7 @@ internal static class WorkEffectInventory
             else if (claim.RoleId.Length != 0 || claim.ServerId.Length != 0) throw WorkEffectRows.Invalid();
             using (var pin = connection.CreateCommand())
             {
-                pin.Transaction = transaction; pin.CommandText = "SELECT COUNT(*) FROM work_identity_versions WHERE extension_id=$ext AND field=$field;";
+                pin.Transaction = transaction; pin.CommandText = "SELECT COUNT(*) FROM main.work_identity_versions WHERE extension_id=$ext AND field=$field;";
                 pin.Parameters.AddWithValue("$ext", claim.Key.ExtensionId); pin.Parameters.AddWithValue("$field", claim.Key.Field);
                 if ((long)pin.ExecuteScalar()! != 1) throw WorkEffectRows.Invalid();
             }
@@ -62,7 +62,7 @@ internal static class WorkEffectInventory
                     throw WorkEffectRows.Invalid();
             }
             using var events = connection.CreateCommand(); events.Transaction = transaction;
-            events.CommandText = "SELECT operation_id,run_id,attempt_id,kind FROM work_effect_events WHERE claim_id=$id ORDER BY sequence;";
+            events.CommandText = "SELECT operation_id,run_id,attempt_id,kind FROM main.work_effect_events WHERE claim_id=$id ORDER BY sequence;";
             events.Parameters.AddWithValue("$id", id.ToString("D")); using var facts = events.ExecuteReader();
             while (facts.Read())
             {

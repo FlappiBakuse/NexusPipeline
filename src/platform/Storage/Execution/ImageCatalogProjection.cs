@@ -11,7 +11,7 @@ public sealed class ImageCatalogProjection(RuntimeInstance instance, StateDataba
     public void OnCommitted(AttemptReceipt receipt)
     {
         ArgumentNullException.ThrowIfNull(receipt); lease.VerifyHeld(instance);
-        if (!StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "nexus.db")))
+        if (!StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "runtime.db")))
             throw ImageCatalogRows.Invalid();
         lease.PublishExecution(() =>
         {
@@ -27,10 +27,10 @@ public sealed class ImageCatalogProjection(RuntimeInstance instance, StateDataba
         lease.VerifyHeld(instance);
         if (after == Guid.Empty || maximum is < 1 or > 200) throw new ArgumentOutOfRangeException(nameof(maximum));
         var ids = new List<Guid>();
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var command = connection.CreateCommand())
         {
-            command.CommandText = "SELECT a.attempt_id FROM attempt_receipts a LEFT JOIN execution_image_catalog c ON c.attempt_id=a.attempt_id " +
+            command.CommandText = "SELECT a.attempt_id FROM records.attempt_receipts a LEFT JOIN records.execution_image_catalog c ON c.attempt_id=a.attempt_id " +
                 "WHERE a.attempt_id>$after AND c.attempt_id IS NULL ORDER BY a.attempt_id LIMIT $limit;";
             command.Parameters.AddWithValue("$after", after?.ToString("D") ?? ""); command.Parameters.AddWithValue("$limit", maximum);
             using var rows = command.ExecuteReader();
@@ -58,13 +58,13 @@ public sealed class ImageCatalogProjection(RuntimeInstance instance, StateDataba
         lease.VerifyHeld(instance);
         if (after == Guid.Empty || maximum is < 1 or > 200) throw new ArgumentOutOfRangeException(nameof(maximum));
         var ids = new List<(Guid Run, Guid Attempt)>();
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var command = connection.CreateCommand())
         {
-            command.CommandText = "SELECT r.run_id,r.attempt_id FROM run_records r " +
-                "JOIN attempt_receipts a ON a.attempt_id=r.attempt_id AND a.run_id=r.run_id " +
-                "JOIN execution_start_sources s ON s.operation_id=a.operation_id " +
-                "LEFT JOIN execution_image_asset_catalog c ON c.run_id=r.run_id " +
+            command.CommandText = "SELECT r.run_id,r.attempt_id FROM records.run_records r " +
+                "JOIN records.attempt_receipts a ON a.attempt_id=r.attempt_id AND a.run_id=r.run_id " +
+                "JOIN main.execution_start_sources s ON s.operation_id=a.operation_id " +
+                "LEFT JOIN records.execution_image_asset_catalog c ON c.run_id=r.run_id " +
                 "WHERE r.run_id>$after AND c.run_id IS NULL ORDER BY r.run_id LIMIT $limit;";
             command.Parameters.AddWithValue("$after", after?.ToString("D") ?? ""); command.Parameters.AddWithValue("$limit", maximum);
             using var rows = command.ExecuteReader();

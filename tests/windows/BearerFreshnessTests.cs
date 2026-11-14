@@ -26,9 +26,9 @@ public sealed class BearerFreshnessTests
         proof.RequireCurrent();
         if (fault == "history")
         {
-            using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
             using var query = connection.CreateCommand();
-            query.CommandText = "SELECT journal_id FROM secret_preparations WHERE operation_id=$id;";
+            query.CommandText = "SELECT journal_id FROM system.secret_preparations WHERE operation_id=$id;";
             query.Parameters.AddWithValue("$id", operation.ToString("D"));
             var journal = (string)query.ExecuteScalar()!;
             var path = Path.Combine(fixture.Instance.RuntimeRoot, "journals", journal, "0000000001.json");
@@ -41,11 +41,11 @@ public sealed class BearerFreshnessTests
         }
         else
         {
-            using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath);
+            using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
             using var query = connection.CreateCommand();
             query.CommandText = fault == "subject"
-                ? "UPDATE operations SET subject_id='local:another-owner' WHERE operation_id=$id;"
-                : "UPDATE operations SET status='accepted' WHERE operation_id=$id;";
+                ? "UPDATE main.operations SET subject_id='local:another-owner' WHERE operation_id=$id;"
+                : "UPDATE main.operations SET status='accepted' WHERE operation_id=$id;";
             query.Parameters.AddWithValue("$id", operation.ToString("D"));
             Assert.Equal(1, query.ExecuteNonQuery());
         }

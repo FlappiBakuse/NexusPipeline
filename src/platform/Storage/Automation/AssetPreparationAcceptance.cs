@@ -54,7 +54,7 @@ public sealed class AssetPreparationAcceptance(RuntimeInstance instance, Contrac
             _ = AutomationEdits.Apply(AutomationRows.Read(connection, transaction), bundle.Definitions);
             VerifyAssetIds(connection, transaction, plan);
             RecoveryJournalRegistry.RegisterInside(connection, transaction, journal, effects, writer);
-            AutomationRowWriter.Row(connection, transaction, "INSERT INTO automation_imports VALUES($0,$1,0,NULL,'asset_preparation_pending');",
+            AutomationRowWriter.Row(connection, transaction, "INSERT INTO automation.automation_imports VALUES($0,$1,0,NULL,'asset_preparation_pending');",
                 operation.OperationId, journal.JournalId);
             return new(new(operation.OperationId, journal.JournalId, AutomationImportState.Accepted, null, "asset_preparation_pending", true), journal.PlanPath, journal.PlanDigest);
         });
@@ -64,7 +64,7 @@ public sealed class AssetPreparationAcceptance(RuntimeInstance instance, Contrac
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM automation_assets WHERE asset_id=$id);";
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM automation.automation_assets WHERE asset_id=$id);";
         var parameter = command.Parameters.Add("$id", SqliteType.Text);
         foreach (var asset in plan.Assets)
         {
@@ -89,8 +89,8 @@ public sealed class AssetPreparationAcceptance(RuntimeInstance instance, Contrac
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT i.journal_id,i.state,i.catalog_revision,i.reason_code,j.plan_path,j.plan_digest FROM automation_imports i " +
-            "JOIN operation_journals j ON i.journal_id=j.journal_id WHERE i.operation_id=$id AND j.operation_id=$id;";
+        command.CommandText = "SELECT i.journal_id,i.state,i.catalog_revision,i.reason_code,j.plan_path,j.plan_digest FROM automation.automation_imports i " +
+            "JOIN main.operation_journals j ON i.journal_id=j.journal_id WHERE i.operation_id=$id AND j.operation_id=$id;";
         command.Parameters.AddWithValue("$id", operationId.ToString("D"));
         using var reader = command.ExecuteReader();
         if (!reader.Read()) throw new IOException("asset_acceptance_requires_reconciliation");

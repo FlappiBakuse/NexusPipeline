@@ -29,7 +29,7 @@ internal sealed class WorkRuntimeFacts(RuntimeInstance instance, StateDatabase d
             item.ExtensionId == entry.ExtensionId && item.ProviderId == entry.ProviderId);
         var publicPlans = plans is null ? null : await plans.ReadPlansAsync(cancellation).ConfigureAwait(false);
         var saved = ReadRuns(entry.ExtensionId, providerId, ids.ToHashSet(), cancellation);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         var now = clock.GetUtcNow(); var after = now;
         var watermark = ScheduleMinuteRows.Checkpoint(connection, transaction);
@@ -108,7 +108,7 @@ internal sealed class WorkRuntimeFacts(RuntimeInstance instance, StateDatabase d
     private List<RecordedRun> ReadRuns(string extensionId, string? providerId, IReadOnlySet<Guid>? selected, CancellationToken cancellation)
     {
         var result = new List<RecordedRun>();
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         ManualWorkInventory.Visit(instance, database, contracts, state =>
         {
@@ -142,7 +142,7 @@ internal sealed class WorkRuntimeFacts(RuntimeInstance instance, StateDatabase d
 
     private static long Ordinal(SqliteConnection connection, SqliteTransaction transaction, Guid operationId)
     {
-        using var command = DatabaseConnections.Command(connection, transaction, "SELECT rowid FROM operations WHERE operation_id=$0;", operationId.ToString("D"));
+        using var command = DatabaseConnections.Command(connection, transaction, "SELECT rowid FROM main.operations WHERE operation_id=$0;", operationId.ToString("D"));
         return command.ExecuteScalar() is long value ? value : throw ManualWorkCodec.Invalid();
     }
 
@@ -150,7 +150,7 @@ internal sealed class WorkRuntimeFacts(RuntimeInstance instance, StateDatabase d
         Guid taskId, DateOnly date, int minute)
     {
         using var command = DatabaseConnections.Command(connection, transaction,
-            "SELECT EXISTS(SELECT 1 FROM scheduled_provider_occurrences WHERE extension_id=$0 AND provider_id=$1 AND task_id=$2 AND local_date=$3 AND local_minute=$4);",
+            "SELECT EXISTS(SELECT 1 FROM main.scheduled_provider_occurrences WHERE extension_id=$0 AND provider_id=$1 AND task_id=$2 AND local_date=$3 AND local_minute=$4);",
             extensionId, providerId, taskId.ToString("D"), date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture), minute);
         return (long)command.ExecuteScalar()! != 0;
     }

@@ -90,7 +90,7 @@ public sealed class SecretRetirementTests
         using var connection = new SqliteConnection($"Data Source={fixture.Database.DatabasePath};Pooling=False;Mode=ReadOnly");
         connection.Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT state FROM secret_retirements WHERE journal_id IS NULL;";
+        command.CommandText = "SELECT state FROM system.secret_retirements WHERE journal_id IS NULL;";
         Assert.Equal("unverified", command.ExecuteScalar());
     }
 

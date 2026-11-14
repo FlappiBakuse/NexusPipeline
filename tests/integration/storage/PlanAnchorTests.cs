@@ -73,12 +73,12 @@ public sealed class PlanAnchorTests
             fixture.Package.Catalog.Database.Write((connection, transaction) =>
             {
                 using var command = connection.CreateCommand(); command.Transaction = transaction;
-                command.CommandText = "UPDATE operation_journals SET plan_path=$path,plan_digest=$digest WHERE journal_id=$journal;";
+                command.CommandText = "UPDATE main.operation_journals SET plan_path=$path,plan_digest=$digest WHERE journal_id=$journal;";
                 command.Parameters.AddWithValue("$journal", journalId.ToString("D"));
                 command.Parameters.AddWithValue("$path", frozen.Reference.RelativePath);
                 command.Parameters.AddWithValue("$digest", frozen.Reference.Sha256);
                 Assert.Equal(1, command.ExecuteNonQuery());
-                command.CommandText = "UPDATE file_effects SET intent_digest=$digest,receipt_digest=$receipt WHERE journal_id=$journal;";
+                command.CommandText = "UPDATE main.file_effects SET intent_digest=$digest,receipt_digest=$receipt WHERE journal_id=$journal;";
                 command.Parameters.AddWithValue("$receipt", receipt); Assert.Equal(1, command.ExecuteNonQuery());
                 return true;
             });

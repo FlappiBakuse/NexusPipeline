@@ -50,5 +50,33 @@ export async function liveLogContract(): Promise<string[]> {
   const count = reads.length;
   await new Promise(resolve => setTimeout(resolve, 2100));
   check(reads.length === count, 'all active, waiting and rotation owners stop after the last listener leaves');
+  let streams = 0, tails = 0, finalText = '';
+  let activeSignal: AbortSignal | undefined;
+  const finalKey: LogIdentity = { runId: 'run', attemptId: 'attempt', stepId: 'finished', role: 'main' };
+  const complete = new LiveLogs(new ControlClient('http://logs.test', async (input, init) => {
+    if (String(input).endsWith('/tail')) {
+      tails++;
+      return Response.json({ description: { key: finalKey, isComplete: true }, prefixOmitted: false,
+        slices: [{ bytes: btoa('finished\n') }] });
+    }
+    streams++;
+    const signal = init!.signal as AbortSignal;
+    return new Response(new ReadableStream<Uint8Array>({ start(controller) {
+      if (String(input).includes('/finished/')) { controller.close(); return; }
+      activeSignal = signal;
+      signal.addEventListener('abort', () => controller.error(new DOMException('Aborted', 'AbortError')), { once: true });
+    } }), { headers: { 'Content-Type': 'text/event-stream' } });
+  }));
+  const releaseFinal = complete.subscribe(finalKey, value => { finalText = value.text; });
+  let releaseActive: (() => void) | undefined;
+  try {
+    await waitFor(() => finalText === 'finished\n');
+    releaseActive = complete.subscribe({ ...finalKey, stepId: 'active' }, () => {});
+    await waitFor(() => activeSignal !== undefined);
+    await new Promise(resolve => setTimeout(resolve, 2200));
+    check(streams === 2 && tails === 1 && finalText === 'finished\n',
+      'a complete durable tail stays visible without another archive read or stream reconnect');
+    check(!activeSignal!.aborted, 'a retained complete log cannot rotate the only active stream');
+  } finally { releaseFinal(); releaseActive?.(); }
   return checks;
 }

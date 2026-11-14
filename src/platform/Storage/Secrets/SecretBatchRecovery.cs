@@ -96,7 +96,7 @@ internal sealed class SecretBatchRecovery : IJournalRecoveryWork
         _database.Write((connection, transaction) =>
         {
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT 1 FROM journal_writers WHERE journal_id=$journal AND writer_id=$writer;";
+            command.CommandText = "SELECT 1 FROM main.journal_writers WHERE journal_id=$journal AND writer_id=$writer;";
             command.Parameters.AddWithValue("$journal", journalId.ToString("D")); command.Parameters.AddWithValue("$writer", writer.WriterId.ToString("D"));
             if (command.ExecuteScalar() is not null) throw new IOException("notification_recovery_original_writer_still_current");
             JournalWriterStore.Insert(connection, transaction, journalId, writer);

@@ -83,7 +83,7 @@ internal static class AndroidControlProjection
             var step = item.Startup.Binding.StepId;
             var main = beforeState.Jobs.Single(job => job.StepId == step && job.Role == "process");
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT EXISTS(SELECT 1 FROM journal_writer_job_roots WHERE journal_id=$journal AND job_name=$main);";
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.journal_writer_job_roots WHERE journal_id=$journal AND job_name=$main);";
             command.Parameters.AddWithValue("$journal", state.Journal.JournalId.ToString("D")); command.Parameters.AddWithValue("$main", main.JobName);
             if ((long)command.ExecuteScalar()! != 0) throw Invalid();
             if (item.Startup.Outcome == TargetExecutionOutcome.StoppedByRequest &&

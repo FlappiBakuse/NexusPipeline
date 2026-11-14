@@ -23,7 +23,7 @@ internal sealed class TaskTestService
     {
         lease.VerifyHeld(instance);
         if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot ||
-            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "nexus.db")))
+            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "runtime.db")))
             throw TaskTestCodec.Invalid();
         _instance = instance; _database = database; _contracts = contracts; _lease = lease;
     }
@@ -61,13 +61,13 @@ internal sealed class TaskTestService
 
     internal TaskTestAcceptance? ReadExisting(OperationIdentity identity)
     {
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         var reference = TaskTestRows.Lookup(connection, transaction, identity);
         if (reference is null) return null;
         var source = new TaskTestCodec(_instance, _database, _contracts).Read(reference, connection, transaction);
         using var command = NotificationDeliveryRows.Command(connection, transaction,
-            "SELECT relative_path,size_bytes,sha256 FROM notification_deliveries WHERE operation_id=$0;",
+            "SELECT relative_path,size_bytes,sha256 FROM notifications.notification_deliveries WHERE operation_id=$0;",
             TaskTestCodec.DeliveryId(source.Document).ToString("D"));
         BlobReference delivery;
         using (var row = command.ExecuteReader())

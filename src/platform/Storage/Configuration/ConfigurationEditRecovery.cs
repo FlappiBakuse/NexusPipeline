@@ -33,9 +33,9 @@ public static class ConfigurationEditRecovery
 
     private static IReadOnlyList<(Guid Id, string Subject)> OpenSessions(StateDatabase database)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT s.session_id,o.subject_id FROM configuration_edit_sessions s JOIN operations o ON o.operation_id=s.session_id WHERE s.phase IN (0,1) LIMIT 4097;";
+        command.CommandText = "SELECT s.session_id,o.subject_id FROM configuration.configuration_edit_sessions s JOIN main.operations o ON o.operation_id=s.session_id WHERE s.phase IN (0,1) LIMIT 4097;";
         var sessions = new List<(Guid, string)>();
         using var row = command.ExecuteReader();
         while (row.Read()) sessions.Add((Guid.Parse(row.GetString(0)), row.GetString(1)));

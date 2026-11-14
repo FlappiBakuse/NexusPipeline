@@ -55,7 +55,7 @@ public sealed class RestoredHistoryTests
         Assert.True(ready.Current.IsReady);
         var again = reader.Read(fixture.JournalId, fixture.Plan);
         Assert.Equal(before.Latest.Export(), again.Latest.Export());
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         Assert.Equal(hadInstalledVersion ? 2 : 1,
             ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, "fixture-plugin")!.Revision);

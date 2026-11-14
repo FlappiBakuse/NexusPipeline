@@ -44,7 +44,7 @@ public sealed class ConfigurationCursorsTests
     public void KeepsFrozenSources()
     {
         using var fixture = new ConfigurationCursorsFixture();
-        fixture.Execute($"DELETE FROM configuration_current WHERE binding_id='{fixture.Saved.Address.BindingId:D}' " +
+        fixture.Execute($"DELETE FROM configuration.configuration_current WHERE binding_id='{fixture.Saved.Address.BindingId:D}' " +
             $"AND resource_id='{fixture.Saved.Address.ResourceId}';");
         var before = fixture.Source.Snapshot();
         Assert.Equal("configuration_revision_conflict", Assert.Throws<ConfigurationException>(() => fixture.Accept()).Message);
@@ -89,7 +89,7 @@ public sealed class ConfigurationCursorsTests
     {
         using var fixture = new ConfigurationCursorsFixture();
         var assignment = owner ? $"user_id='{fixture.Source.UserA:D}',automation_id='{fixture.Source.OtherScriptId:D}'" : "revision=revision+1";
-        fixture.Execute($"UPDATE bindings SET {assignment} WHERE binding_id='{fixture.Source.BindingB:D}';");
+        fixture.Execute($"UPDATE automation.bindings SET {assignment} WHERE binding_id='{fixture.Source.BindingB:D}';");
         var before = fixture.Source.Snapshot();
         if (owner) Assert.Equal("configuration_binding_owner_changed", Assert.Throws<IOException>(() => fixture.Accept()).Message);
         else Assert.Equal("configuration_binding_revision_conflict", Assert.Throws<ConfigurationException>(() => fixture.Accept()).Message);
@@ -100,7 +100,7 @@ public sealed class ConfigurationCursorsTests
     public void RechecksAssetRelations()
     {
         using var fixture = new ConfigurationCursorsFixture();
-        fixture.Execute($"DELETE FROM configuration_revision_assets WHERE binding_id='{fixture.Saved.Address.BindingId:D}' " +
+        fixture.Execute($"DELETE FROM configuration.configuration_revision_assets WHERE binding_id='{fixture.Saved.Address.BindingId:D}' " +
             $"AND resource_id='{fixture.Saved.Address.ResourceId}' AND revision={fixture.Saved.Revision};");
         var before = fixture.Source.Snapshot();
         Assert.Equal("configuration_reference_closure_invalid", Assert.Throws<IOException>(() => fixture.Accept()).Message);
@@ -111,7 +111,7 @@ public sealed class ConfigurationCursorsTests
     public void RevertsClaimFailure()
     {
         using var fixture = new ConfigurationCursorsFixture();
-        fixture.Execute("CREATE TRIGGER fixture_fail_configuration_claim BEFORE INSERT ON journal_resource_claims " +
+        fixture.Execute("CREATE TRIGGER main.fixture_fail_configuration_claim BEFORE INSERT ON journal_resource_claims " +
             "WHEN NEW.resource_key LIKE 'configuration:%' BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
         var before = fixture.Source.Snapshot();
         try
@@ -119,7 +119,7 @@ public sealed class ConfigurationCursorsTests
             Assert.Contains("fixture_failure", Assert.Throws<SqliteException>(() => fixture.Accept()).Message);
             Assert.Null(fixture.Acceptance.LookupStart(fixture.Identity)); AssertUnchanged(fixture, before);
         }
-        finally { fixture.Execute("DROP TRIGGER fixture_fail_configuration_claim;"); }
+        finally { fixture.Execute("DROP TRIGGER main.fixture_fail_configuration_claim;"); }
         Assert.True(fixture.Accept().Acceptance.IsNew);
     }
 

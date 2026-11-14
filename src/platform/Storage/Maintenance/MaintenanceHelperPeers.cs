@@ -14,10 +14,10 @@ internal static class HelperPeerReader
     {
         bootstrap.RequireCurrent();
         var current = ProcessIdentityReader.Read(Environment.ProcessId); bootstrap.RequireHelper(current);
-        using var connection = DatabaseConnections.Open(bootstrap.Inputs.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(bootstrap.Inputs.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT writer_id,process_id,created_file_time,image_path,image_sha256,user_sid,elevated " +
-            "FROM journal_writers WHERE journal_id=$journal LIMIT 3;";
+            "FROM main.journal_writers WHERE journal_id=$journal LIMIT 3;";
         command.Parameters.AddWithValue("$journal", bootstrap.Inputs.Plan.JournalId.ToString("D"));
         var writers = new List<JournalWriter>();
         using (var rows = command.ExecuteReader())

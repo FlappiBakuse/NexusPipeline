@@ -62,7 +62,7 @@ public sealed class PreviewDomainTests
         var before = AttemptWriterState.Read(source.Instance, source.Database, new(), fixture.Parent);
         var domain = Assert.Single(Domains(before)); Assert.False(domain.Closed);
         Assert.Throws<IOException>(() => PreviewDomainEvidence.RequireColdStopped(domain.Source));
-        using (var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var transaction = connection.BeginTransaction(deferred: true))
         {
             PreviewDomainEvidence.RequireSourceInside(connection, transaction, domain.Source);
@@ -110,10 +110,10 @@ public sealed class PreviewDomainTests
                 RequireBound(fixture, open.Source);
                 Assert.Throws<IOException>(() => PreviewDomainEvidence.RequireColdStopped(open.Source));
                 Assert.True(OwnedPreviewJob.ObserveStopped(open.Source.JobName, open.Source.Primary.SessionId));
-                using (var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, readOnly: true))
+                using (var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
                 using (var command = connection.CreateCommand())
                 {
-                    command.CommandText = "SELECT COUNT(*) FROM journal_writer_jobs WHERE journal_id=$parent OR job_name=$preview;";
+                    command.CommandText = "SELECT COUNT(*) FROM main.journal_writer_jobs WHERE journal_id=$parent OR job_name=$preview;";
                     command.Parameters.AddWithValue("$parent", open.Source.Primary.ParentJournalId.ToString("D"));
                     command.Parameters.AddWithValue("$preview", open.Source.JobName);
                     Assert.Equal(fixture.State.Jobs.Length, (long)command.ExecuteScalar()!);
@@ -186,7 +186,7 @@ public sealed class PreviewDomainTests
         var next = JsonNode.Parse(state.Latest.Export())!.AsObject(); next["revision"] = state.Latest.Revision + 1;
         next["participants"]!.AsArray().Add(closed);
         var forged = JournalDocument.Read(JsonSerializer.SerializeToUtf8Bytes(next), new());
-        using var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.All);
         using var transaction = connection.BeginTransaction(deferred: true);
         Assert.Throws<IOException>(() => PreviewDomainProjection.RequireInside(connection, transaction, state,
             state.Latest, forged, null));
@@ -194,7 +194,7 @@ public sealed class PreviewDomainTests
 
     private static void RequireBound(PcStageFixture fixture, PreviewDomainSource source)
     {
-        using var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.All);
         using var transaction = connection.BeginTransaction(deferred: true);
         PreviewDomainEvidence.RequireSourceInside(connection, transaction, source); transaction.Commit();
     }

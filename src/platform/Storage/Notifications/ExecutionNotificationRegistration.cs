@@ -21,7 +21,7 @@ public sealed class ExecutionNotificationRegistration : IAttemptTerminalObserver
     {
         lease.VerifyHeld(instance);
         if (instance.InstanceId != database.InstanceId || database.RuntimeRoot != instance.RuntimeRoot ||
-            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "nexus.db")))
+            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "runtime.db")))
             throw NotificationReceiptCodec.Invalid();
         finality.RequireDatabase(database);
         _instance = instance; _database = database; _contracts = contracts; _lease = lease; _finality = finality;
@@ -41,7 +41,7 @@ public sealed class ExecutionNotificationRegistration : IAttemptTerminalObserver
             {
                 using var prepared = PreparedNotificationReceipt.Capture(_instance, _database, _contracts, source);
                 var accepted = prepared.Accept(_database, _lease);
-                using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+                using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
                 using var transaction = connection.BeginTransaction(deferred: true);
                 var saved = new NotificationReceiptCodec(_instance, _database, _contracts).Read(accepted, connection, transaction);
                 if (saved.Document.Receipt != receipt) throw NotificationReceiptCodec.Invalid();
@@ -58,9 +58,9 @@ public sealed class ExecutionNotificationRegistration : IAttemptTerminalObserver
     internal bool HasPending()
     {
         _lease.VerifyHeld(_instance);
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM run_records r LEFT JOIN notification_receipt_sources s " +
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM records.run_records r LEFT JOIN notifications.notification_receipt_sources s " +
             "ON s.attempt_id=r.attempt_id WHERE s.attempt_id IS NULL);";
         return (long)command.ExecuteScalar()! != 0;
     }
@@ -70,10 +70,10 @@ public sealed class ExecutionNotificationRegistration : IAttemptTerminalObserver
         _lease.VerifyHeld(_instance);
         if (limit is < 1 or > 200) throw new ArgumentOutOfRangeException(nameof(limit));
         var attempts = new List<Guid>();
-        using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var command = connection.CreateCommand())
         {
-            command.CommandText = "SELECT r.attempt_id FROM run_records r LEFT JOIN notification_receipt_sources s ON s.attempt_id=r.attempt_id " +
+            command.CommandText = "SELECT r.attempt_id FROM records.run_records r LEFT JOIN notifications.notification_receipt_sources s ON s.attempt_id=r.attempt_id " +
                 "WHERE s.attempt_id IS NULL ORDER BY r.run_id LIMIT $limit;";
             command.Parameters.AddWithValue("$limit", limit);
             using var row = command.ExecuteReader();
@@ -92,7 +92,7 @@ public sealed class ExecutionNotificationRegistration : IAttemptTerminalObserver
 
     private bool Existing(AttemptReceipt receipt)
     {
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         var reference = NotificationReceiptRows.Find(connection, transaction, receipt.Facts.AttemptId);
         if (reference is null) return false;

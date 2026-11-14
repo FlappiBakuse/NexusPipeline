@@ -12,7 +12,7 @@ internal static class RunInitialSources
         StateDatabase database, ContractReader contracts, IReadOnlyDictionary<ConfigurationAddress, FrozenRunState> states)
     {
         var snapshots = new ConfigurationSnapshotCodec(new(instance, contracts));
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         return states.ToDictionary(item => item.Key, item => ConfigurationRevisionRows.Read(connection, transaction,
             item.Key, item.Value.InitialPublicationRevision, snapshots));

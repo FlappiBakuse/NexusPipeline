@@ -44,9 +44,9 @@ public sealed class HistoryProjection(RuntimeInstance instance, StateDatabase da
 
     public bool IsAvailable(Guid runId, Guid attemptId, bool images)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM attempt_receipts a JOIN " +
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM records.attempt_receipts a JOIN " +
             (images ? "execution_image_catalog" : "execution_log_catalog") +
             " c ON c.attempt_id=a.attempt_id WHERE a.run_id=$run AND a.attempt_id=$attempt);";
         command.Parameters.AddWithValue("$run", runId.ToString("D"));

@@ -105,6 +105,7 @@ public sealed class JournalStore
         lock (_gate)
         {
             using var publication = JournalPublicationGate.Acquire(_instance, journalId);
+            if ((ReadProtectedHistory(journalId) ?? JournalReadScope.Read(this, journalId)) is { } held) return held;
             var revisions = new List<JournalDocument>();
             ReadHistory(journalId, revisions);
             return revisions.AsReadOnly();
@@ -140,9 +141,11 @@ public sealed class JournalStore
             VerifyPlan(next);
             var totalBytes = _protection?.JournalId == journalId ? _protection.TotalBytes :
                 Directory.EnumerateFiles(JournalDirectory(journalId)).Sum(path => new FileInfo(path).Length);
-            if (checked(totalBytes + next.Export().Length) > MaximumHistoryBytes) throw new IOException("journal_history_byte_limit");
-            WriteRevision(JournalDirectory(journalId), next, observer);
-            if (_protection?.JournalId == journalId) _protection.Include(next);
+            if (checked(totalBytes + next.ByteLength) > MaximumHistoryBytes) throw new IOException("journal_history_byte_limit");
+            var retained = _protection?.JournalId == journalId ? _protection : null;
+            retained?.RequireAppend();
+            var written = WriteRevision(JournalDirectory(journalId), next, observer, retain: retained is not null);
+            if (retained is not null) retained.Include(next, written!);
             return next;
         }
     }
@@ -229,12 +232,13 @@ public sealed class JournalStore
 
     private static string FileName(long revision) => revision.ToString("D10", CultureInfo.InvariantCulture) + ".json";
 
-    private void WriteRevision(string directory, JournalDocument document, IJournalPublicationObserver? observer = null)
+    private PhysicalObjectIdentity? WriteRevision(string directory, JournalDocument document, IJournalPublicationObserver? observer = null,
+        bool retain = false)
     {
         using var output = new FileStream(Path.Combine(directory, FileName(document.Revision)), FileMode.CreateNew,
-            FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough);
+            FileAccess.ReadWrite, FileShare.None, 4096, FileOptions.WriteThrough);
         (observer ?? _publicationObserver)?.RevisionCreated(output.Name);
-        output.Write(document.Export());
-        output.Flush(flushToDisk: true);
+        document.WriteTo(output); output.Flush(flushToDisk: true);
+        return retain ? PhysicalObjectIdentity.Read(output.SafeFileHandle) : null;
     }
 }

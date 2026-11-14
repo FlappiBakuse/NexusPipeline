@@ -89,12 +89,12 @@ public sealed class ExecutionHooksTests
     {
         using var fixture = new ExecutionHooksFixture(configuration: true);
         var bytes = File.ReadAllBytes(fixture.Source.Configuration); var original = PhysicalObjectIdentity.Read(fixture.Source.Configuration);
-        fixture.Base.Execute("CREATE TRIGGER fixture_hook_child_registration BEFORE INSERT ON journal_writer_jobs " +
-            "WHEN NEW.journal_id IN (SELECT journal_id FROM configuration_run_resources) AND " +
-            "(SELECT count(*) FROM journal_writer_jobs WHERE journal_id=NEW.journal_id)=1 " +
+        fixture.Base.Execute("CREATE TRIGGER main.fixture_hook_child_registration BEFORE INSERT ON journal_writer_jobs " +
+            "WHEN NEW.journal_id IN (SELECT journal_id FROM main.operation_journals WHERE operation_kind='configExchange') AND " +
+            "(SELECT count(*) FROM main.journal_writer_jobs WHERE journal_id=NEW.journal_id)=1 " +
             "BEGIN SELECT RAISE(ABORT,'fixture_hook_child_registration'); END;");
         try { await Assert.ThrowsAsync<SqliteException>(() => fixture.Consumer.RunNextAsync()); }
-        finally { fixture.Base.Execute("DROP TRIGGER fixture_hook_child_registration;"); }
+        finally { fixture.Base.Execute("DROP TRIGGER main.fixture_hook_child_registration;"); }
         var state = fixture.State; Assert.Equal(JournalPhase.Committed, state.Journal.Phase);
         var main = Assert.Single(StepResultCodec.Read(state.Latest.Root, state.Total));
         Assert.Equal(EngineOutcome.NotStarted, main.Latest.Engine); Assert.Equal(BusinessOutcome.Unverified, main.Latest.Business);

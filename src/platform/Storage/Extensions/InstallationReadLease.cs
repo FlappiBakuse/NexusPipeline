@@ -62,7 +62,7 @@ internal sealed class InstallationReadLease : IDisposable
                 result._bound = bound;
                 result._effects = PayloadEffectCursor.ExpectedEffects(bound.Registered, bound.Plan, bound.History, bound.Physical, bound.Restoration);
                 result._expected = ExtensionPayloadBinding.DerivedInstallation(bound.Plan, bound.Commit, bound.Footprint);
-                result._sql = new(database.DatabasePath);
+                result._sql = new(database);
                 result.RequireCurrent();
                 return result;
             }

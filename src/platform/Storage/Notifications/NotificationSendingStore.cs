@@ -13,7 +13,7 @@ internal sealed class NotificationSendingStore(RuntimeInstance instance, StateDa
         var sender = NotificationDeliveryOwner.Capture(JournalWriterStore.CurrentWriter);
         return lease.PublishExecution(() =>
         {
-            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System))
             using (var transaction = connection.BeginTransaction(deferred: true))
             {
                 _ = new NotificationDeliveryEvidence(instance, database, contracts).ReadFromSnapshot(snapshot.Reference, connection, transaction);
@@ -45,7 +45,7 @@ internal sealed class NotificationSendingStore(RuntimeInstance instance, StateDa
             throw new IOException("notification_delivery_sender_unbound");
         lease.PublishExecution(() =>
         {
-            using (var read = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+            using (var read = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System))
             using (var snapshotRead = read.BeginTransaction(deferred: true))
             {
                 _ = new NotificationDeliveryEvidence(instance, database, contracts).ReadFromSnapshot(snapshot.Reference, read, snapshotRead);
@@ -70,7 +70,7 @@ internal sealed class NotificationSendingStore(RuntimeInstance instance, StateDa
         lease.VerifyHeld(instance);
         var snapshot = new NotificationDeliveryEvidence(instance, database, contracts).Read(reference);
         NotificationDeliveryTransition prior;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System))
             prior = NotificationDeliveryRows.ReadState(connection, null, snapshot.Document.OperationId);
         if (prior.State != NotificationDeliveryState.Sending || prior.Sender is null ||
             WriterStopEvidence.ObserveProcess(prior.Sender.ToProcessIdentity()) != NexusPipeline.Core.Execution.WriterState.Stopped) return false;

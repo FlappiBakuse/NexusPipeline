@@ -26,9 +26,9 @@ public sealed class HistoryProjectionTests
             await projection.RunAsync(default); Assert.True(projection.IsComplete);
             var changed = fault switch
             {
-                "log" => "UPDATE execution_log_entries SET recorded_bytes=recorded_bytes+1,observed_bytes=observed_bytes+1;",
-                "image" => "UPDATE execution_image_entries SET png_size=png_size+1 WHERE png_size IS NOT NULL;",
-                "closure" => "UPDATE journal_writer_job_closures SET plan_size=plan_size+1;",
+                "log" => "UPDATE records.execution_log_entries SET recorded_bytes=recorded_bytes+1,observed_bytes=observed_bytes+1;",
+                "image" => "UPDATE records.execution_image_entries SET png_size=png_size+1 WHERE png_size IS NOT NULL;",
+                "closure" => "UPDATE main.journal_writer_job_closures SET plan_size=plan_size+1;",
                 _ => ""
             };
             if (changed.Length > 0) fixture.Base.Execute(changed);
@@ -59,12 +59,12 @@ public sealed class HistoryProjectionTests
         var first = new HistoryProjection(source.Instance, source.Database, new(), source.Lease);
         Assert.False(first.IsComplete);
         Assert.False(first.IsAvailable(receipt.Facts.RunId, receipt.Facts.AttemptId, false));
-        if (fail) fixture.Base.Execute("CREATE TRIGGER reject_history BEFORE INSERT ON execution_image_catalog BEGIN SELECT RAISE(ABORT,'fixture'); END;");
+        if (fail) fixture.Base.Execute("CREATE TRIGGER records.reject_history BEFORE INSERT ON execution_image_catalog BEGIN SELECT RAISE(ABORT,'fixture'); END;");
         using var stopping = new CancellationTokenSource();
         if (!fail) stopping.Cancel();
         await first.RunAsync(stopping.Token);
         Assert.False(first.IsComplete); Assert.Equal(fail ? "failed" : "pending", first.Status);
-        if (fail) fixture.Base.Execute("DROP TRIGGER reject_history;");
+        if (fail) fixture.Base.Execute("DROP TRIGGER records.reject_history;");
         var next = new HistoryProjection(source.Instance, source.Database, new(), source.Lease);
         await next.RunAsync(default);
         Assert.True(next.IsComplete);
@@ -90,7 +90,7 @@ public sealed class HistoryProjectionTests
             var source = fixture.Source;
             new ImageCatalogProjection(source.Instance, source.Database, new(), source.Lease).OnCommitted(receipt);
             var image = Assert.Single(new ImageCatalogReader(source.Instance, source.Database, new()).ReadPage(new(receipt.Facts.RunId, receipt.Facts.AttemptId)).Items);
-            fixture.Base.Execute("DELETE FROM execution_image_entries; DELETE FROM execution_image_catalog;");
+            fixture.Base.Execute("DELETE FROM records.execution_image_entries; DELETE FROM records.execution_image_catalog;");
             var blob = new BlobReference($"blobs/content/{image.ImageSha256}.bin", image.SizeBytes!.Value, image.ImageSha256!);
             var references = new BlobReferenceIndex(source.Instance, new(), source.Database, new(source.Instance, new()));
             Assert.True(references.IsReferenced(blob));

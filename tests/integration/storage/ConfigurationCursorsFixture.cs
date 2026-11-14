@@ -96,11 +96,11 @@ internal sealed class ConfigurationCursorsFixture : IDisposable
 
     internal void Execute(string sql)
     {
-        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Source.Database.DatabasePath, Pooling = false }.ToString());
+        using var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open(new SqliteConnectionStringBuilder { DataSource = Source.Database.DatabasePath, Pooling = false }.ToString());
         connection.Open(); using var command = connection.CreateCommand(); command.CommandText = sql; command.ExecuteNonQuery();
     }
 
-    internal void ChangeSavedHeader(string assignment) => Execute("UPDATE configuration_revisions SET " + assignment +
+    internal void ChangeSavedHeader(string assignment) => Execute("UPDATE configuration.configuration_revisions SET " + assignment +
         $" WHERE binding_id='{Saved.Address.BindingId:D}' AND resource_id='{Saved.Address.ResourceId}' AND revision={Saved.Revision};");
 
     internal void ReleasePreparation()

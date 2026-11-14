@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
+using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Configuration;
@@ -79,7 +80,8 @@ internal static class AttemptPreparedBinding
         JournalReadScope.SelectParent(instance, contracts, journalId);
         if (protectedHistory is not null && protectedHistory.Instance != instance)
             throw new IOException("attempt_journal_owner_unbound");
-        var snapshot = new RecoveryJournalRegistry(database).ReadSnapshot(journalId);
+        var sql = ReadSql(database, journalId);
+        var snapshot = sql.Registry;
         RecoveryRegistryPolicy.Verify(snapshot);
         var registered = snapshot.Journals.Single(item => item.JournalId == journalId);
         if (registered.Kind != JournalKind.RunAttempt) throw new IOException("attempt_kind_unbound");
@@ -87,24 +89,27 @@ internal static class AttemptPreparedBinding
         var inputs = heldInputs ?? openedInputs!;
         var plan = inputs.Plan; var total = inputs.Total;
         RequireRegistration(registered, plan);
-        JournalResourceClaims.VerifyAttempt(registered, plan, total, JournalResourceClaims.Read(database, journalId));
+        JournalResourceClaims.VerifyAttempt(registered, plan, total, sql.Claims);
         var journals = protectedHistory ?? new JournalStore(instance, contracts);
         using var historyScope = JournalReadScope.Hold(journals, journalId);
         var history = journals.ReadAllRevisions(journalId);
         using var parsedHistory = new AttemptReadScope(history, total, database.AttemptReads?.Find(journalId)?.ParsedHistory);
-        PreviewDomainCodec.RequireHistory(history, total, plan.ExecutionPlan.Sha256);
         var projected = history.SingleOrDefault(item => item.Revision == registered.Revision) ?? throw new IOException("attempt_sql_prefix_missing");
         if (projected.Phase != registered.Phase || snapshot.FileEffects.Any(item => item.JournalId == journalId)) throw new IOException("attempt_sql_projection_unbound");
-        var gate = new JournalEffectGate(database).Read(journalId);
-        var start = IsStart(database, registered.OperationId);
+        var gate = sql.Gate;
+        var start = sql.Start;
         if (gate.InstanceId != instance.InstanceId || gate.OperationId != registered.OperationId || gate.Kind != JournalKind.RunAttempt || gate.PlanDigest != registered.PlanDigest)
             throw new IOException("attempt_gate_binding_changed");
-        var previousInvocations = start ? ExecutionInvocationHistory.Before(instance, database, contracts, plan, total) : System.Collections.Immutable.ImmutableDictionary<string, int>.Empty;
-        var participantCount = 0; JournalDocument? preceding = null; var baselines = new HashSet<BlobReference>();
-        var hookResults = new HashSet<HookResultIntent>();
-        var stepResults = new HashSet<StepResultState>();
-        var targets = new HistoricalTargetEvidence(instance, database, contracts, total, plan.ExecutionPlan.Sha256);
-        foreach (var physical in history)
+        var owner = database.AttemptReads?.Find(journalId);
+        var prefix = owner?.ReadHistoryPrefix(history, gate.State) ?? new(instance, database, contracts, total, plan.ExecutionPlan.Sha256);
+        PreviewDomainCodec.RequireHistory(history.Skip(prefix.Count), total, plan.ExecutionPlan.Sha256, prefix.Previous);
+        var previousInvocations = prefix.PreviousInvocations ??= start
+            ? ExecutionInvocationHistory.Before(instance, database, contracts, plan, total)
+            : System.Collections.Immutable.ImmutableDictionary<string, int>.Empty;
+        var participantCount = prefix.Previous?.Root.GetProperty("participants").GetArrayLength() ?? 0;
+        var preceding = prefix.Previous; var baselines = prefix.Baselines;
+        var hookResults = prefix.Hooks; var stepResults = prefix.Results; var targets = prefix.Targets;
+        foreach (var physical in history.Skip(prefix.Count))
         {
             if (physical.Kind != JournalKind.RunAttempt || physical.Root.GetProperty("operationId").GetString() != plan.OperationId ||
                 physical.Root.GetProperty("runId").GetString() != plan.RunId || physical.Root.GetProperty("attemptId").GetString() != plan.AttemptId ||
@@ -289,7 +294,7 @@ internal static class AttemptPreparedBinding
             TargetRootFacts.Verify(instance, database, contracts, journalId, total, plan.ExecutionPlan.Sha256, history[^1].Root, gate.State);
             AttemptWriterState.VerifySql(database, registered, projected, total, plan.ExecutionPlan.Sha256, gate);
             _ = ExecutionCancellationRows.Verify(database, registered, plan, total, history[^1].Root, projected.Root);
-            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
             using var transaction = connection.BeginTransaction(deferred: true);
             ExecutionStepAdmission.RequireUndispatchedInside(connection, transaction,
                 new(registered, plan, total, history[^1], gate, WriterIntentCodec.Read(history[^1].Root, total)) { IsExecutionStart = true }, history[^1]);
@@ -299,6 +304,7 @@ internal static class AttemptPreparedBinding
         var committed = history.SingleOrDefault(item => item.Phase == JournalPhase.Committed);
         if (receipt is not null && (committed is null || receipt != ExpectedReceipt(plan, committed)) ||
             registered.Phase == JournalPhase.Committed && receipt is null) throw new IOException("attempt_receipt_projection_unbound");
+        owner?.RememberHistory(prefix, history, gate.State);
         return new(plan, history[^1], start, total,
             new AttemptValidatedRead(history, captures, plan.ExecutionPlan.Sha256, previousInvocations));
     }
@@ -326,13 +332,19 @@ internal static class AttemptPreparedBinding
         }
     }
 
-    private static bool IsStart(StateDatabase database, Guid operationId)
+    private static (RecoveryRegistrySnapshot Registry, IReadOnlyDictionary<string, ResourceClaimMode> Claims,
+        EffectGateSnapshot Gate, bool Start) ReadSql(StateDatabase database, Guid journalId)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT operation_kind FROM operations WHERE operation_id=$operation;";
-        command.Parameters.AddWithValue("$operation", operationId.ToString("D"));
-        return command.ExecuteScalar() as string == "execution.start";
+        return HistoryReadScope.ReadDatabase(database, (connection, transaction) =>
+        {
+            var registry = RecoveryJournalRegistry.ReadSnapshot(connection, transaction, journalId);
+            var claims = JournalResourceClaims.ReadInside(connection, transaction, journalId);
+            var gate = new JournalEffectGate(database).ReadInside(connection, transaction, journalId);
+            using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "SELECT operation_kind FROM main.operations WHERE operation_id=$operation;";
+            command.Parameters.AddWithValue("$operation", gate.OperationId.ToString("D"));
+            return (registry, claims, gate, command.ExecuteScalar() as string == "execution.start");
+        });
     }
 
     internal static AttemptReceipt ExpectedReceipt(RunAttemptPlan plan, JournalDocument document) => new(document.JournalId,

@@ -107,14 +107,14 @@ internal sealed class ExtensionCatalogFixture : IDisposable
     internal long Count(string table)
     {
         if (table is not ("extension_catalog_heads" or "extension_catalog_acceptances" or "operations")) throw new ArgumentException();
-        using var connection = DatabaseConnections.Open(Database.DatabasePath, readOnly: true);
-        using var command = connection.CreateCommand(); command.CommandText = "SELECT COUNT(*) FROM " + table + ";";
+        using var connection = DatabaseConnections.Open(Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions);
+        using var command = connection.CreateCommand(); command.CommandText = "SELECT COUNT(*) FROM " + DatabaseTables.Name(table) + ";";
         return (long)command.ExecuteScalar()!;
     }
 
     internal void Sql(string sql)
     {
-        using var connection = DatabaseConnections.Open(Database.DatabasePath);
+        using var connection = DatabaseConnections.Open(Database.DatabasePath, domains: DatabaseDomain.All);
         using var command = connection.CreateCommand(); command.CommandText = sql; command.ExecuteNonQuery();
     }
     public void Dispose() { if (_ownsLease) Lease.Dispose(); Signer.Dispose(); }

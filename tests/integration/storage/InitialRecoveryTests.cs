@@ -147,7 +147,7 @@ public sealed class InitialRecoveryTests
 
     private static string[] Fingerprints(string root)
     {
-        var database = Path.Combine(root, "state", "nexus.db");
+        var database = Path.Combine(root, "state", "runtime.db");
         // SQLite readers can maintain the shared-memory index and create an empty WAL without changing persistent pages.
         return Directory.GetFiles(root, "*", SearchOption.AllDirectories)
             .Where(path => !StringComparer.OrdinalIgnoreCase.Equals(path, database + "-shm") &&

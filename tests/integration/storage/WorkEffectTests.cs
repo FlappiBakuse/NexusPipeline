@@ -55,10 +55,10 @@ public sealed class WorkEffectTests
                 Assert.Equal(field == "credential" ? 2 : 1, (await secrets.GetStateAsync(new("fixture-plugin", taskId, field), default)).Revision);
             WorkEffectInventory.Verify(catalog.Instance, catalog.Database, new());
             new SecretDocumentInventory(catalog.Instance, catalog.Database, new()).Verify();
-            using var connection = DatabaseConnections.Open(catalog.Database.DatabasePath, readOnly: true);
-            using var command = connection.CreateCommand(); command.CommandText = "SELECT COUNT(*) FROM work_effect_rotations;";
+            using var connection = DatabaseConnections.Open(catalog.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.All);
+            using var command = connection.CreateCommand(); command.CommandText = "SELECT COUNT(*) FROM main.work_effect_rotations;";
             Assert.Equal(2L, command.ExecuteScalar());
-            command.CommandText = "SELECT revision FROM extension_documents WHERE extension_id='fixture-plugin' AND name='tasks';";
+            command.CommandText = "SELECT revision FROM extensions.extension_documents WHERE extension_id='fixture-plugin' AND name='tasks';";
             Assert.Equal(2L, command.ExecuteScalar());
         }
         finally { await schedules.StopAsync(); await installed.Activator.StopAllAsync(TimeSpan.FromSeconds(10)); }
@@ -109,9 +109,9 @@ public sealed class WorkEffectTests
             Assert.Equal("Unknown", unrecorded.RootElement.GetProperty("role").GetString());
             Assert.True(unrecorded.RootElement.GetProperty("submitDenied").GetBoolean());
             await Completed(unknown);
-            using (var read = DatabaseConnections.Open(catalog.Database.DatabasePath, readOnly: true))
+            using (var read = DatabaseConnections.Open(catalog.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.All))
             using (var count = read.CreateCommand())
-            { count.CommandText = "SELECT COUNT(*) FROM work_effect_claims;"; Assert.Equal(2L, count.ExecuteScalar()); }
+            { count.CommandText = "SELECT COUNT(*) FROM main.work_effect_claims;"; Assert.Equal(2L, count.ExecuteScalar()); }
             File.Delete(Path.Combine(installed.ActivationDirectory, "effects-" + second.ToString("D") + ".json"));
             Write(second, "recheck"); var resolving = await Run(second); using var resolved = await Report(second);
             Assert.Equal("Unknown", resolved.RootElement.GetProperty("game").GetString());
@@ -128,19 +128,18 @@ public sealed class WorkEffectTests
             Assert.True(final.RootElement.GetProperty("completedAcquireDenied").GetBoolean());
             await Completed(confirmed);
             WorkEffectInventory.Verify(catalog.Instance, catalog.Database, new());
-            using var connection = DatabaseConnections.Open(catalog.Database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(catalog.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.All);
             using var command = connection.CreateCommand();
-            command.CommandText = "SELECT COUNT(*) FROM work_effect_claims;"; Assert.Equal(4L, command.ExecuteScalar());
-            command.CommandText = "SELECT COUNT(*) FROM work_effect_events WHERE kind='submitted';"; Assert.Equal(2L, command.ExecuteScalar());
-            command.CommandText = "SELECT COUNT(*) FROM work_effect_events WHERE kind='confirmed';"; Assert.Equal(4L, command.ExecuteScalar());
+            command.CommandText = "SELECT COUNT(*) FROM main.work_effect_claims;"; Assert.Equal(4L, command.ExecuteScalar());
+            command.CommandText = "SELECT COUNT(*) FROM main.work_effect_events WHERE kind='submitted';"; Assert.Equal(2L, command.ExecuteScalar());
+            command.CommandText = "SELECT COUNT(*) FROM main.work_effect_events WHERE kind='confirmed';"; Assert.Equal(4L, command.ExecuteScalar());
             if (!concurrent)
             {
                 connection.Close();
-                using (var previous = DatabaseConnections.Open(catalog.Database.DatabasePath))
+                using (var previous = DatabaseConnections.Open(catalog.Database.DatabasePath, domains: DatabaseDomain.All))
                 {
-                    StateSchemaFixture.RevertTargetRoots(previous);
                     using var convert = previous.CreateCommand();
-                    convert.CommandText = "DROP TABLE work_effect_epoch_results; DROP TABLE work_effect_epochs; UPDATE schema_info SET contract_digest=$digest;";
+                    convert.CommandText = "DROP TABLE main.work_effect_epoch_results; DROP TABLE main.work_effect_epochs; UPDATE main.schema_info SET contract_digest=$digest;";
                     convert.Parameters.AddWithValue("$digest", LegacyStateSchema.NotificationDigest); convert.ExecuteNonQuery();
                     Assert.Throws<IOException>(() => DatabaseSchema.VerifyCatalog(previous));
                 }

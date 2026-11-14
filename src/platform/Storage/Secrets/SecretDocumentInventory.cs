@@ -11,17 +11,9 @@ internal sealed class SecretDocumentInventory(RuntimeInstance instance, StateDat
 {
     internal void VisitReferences(Action<BlobReference> include)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
-        using (var exists = SecretDocumentRows.Command(connection, null, "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='secret_document_publications';"))
-        {
-            if (exists.ExecuteScalar() is null)
-            {
-                if (DatabaseSchema.VerifyCatalog(connection) == DatabaseSchema.Digest) throw SecretDocumentFormat.Invalid();
-                return;
-            }
-        }
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         var sources = new List<BlobReference>();
-        using (var command = SecretDocumentRows.Command(connection, null, "SELECT relative_path,size_bytes,sha256 FROM secret_document_publications;"))
+        using (var command = SecretDocumentRows.Command(connection, null, "SELECT relative_path,size_bytes,sha256 FROM system.secret_document_publications;"))
         using (var rows = command.ExecuteReader())
             while (rows.Read()) sources.Add(new(rows.GetString(0), rows.GetInt64(1), rows.GetString(2)));
         foreach (var reference in sources)
@@ -36,9 +28,9 @@ internal sealed class SecretDocumentInventory(RuntimeInstance instance, StateDat
     internal void Verify()
     {
         var references = new List<(Guid OperationId, BlobReference Reference)>();
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var command = SecretDocumentRows.Command(connection, null,
-            "SELECT operation_id,relative_path,size_bytes,sha256 FROM secret_document_publications;"))
+            "SELECT operation_id,relative_path,size_bytes,sha256 FROM system.secret_document_publications;"))
         using (var rows = command.ExecuteReader())
             while (rows.Read()) references.Add((Guid.ParseExact(rows.GetString(0), "D"), new(rows.GetString(1), rows.GetInt64(2), rows.GetString(3))));
         var pending = new HashSet<(string, string)>();
@@ -57,10 +49,10 @@ internal sealed class SecretDocumentInventory(RuntimeInstance instance, StateDat
     {
         var plans = source.Document.Secrets.Where(change => change.Preparation is not null).ToDictionary(change => change.OperationId,
             change => new PreparationPlanCodec(instance, contracts, database).Read(change.Preparation!).ReadWire());
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         using (var command = SecretDocumentRows.Command(connection, transaction,
-            "SELECT child_operation_id,subject_id,field FROM secret_document_fields WHERE parent_operation_id=$0;", source.Document.OperationId.ToString("D")))
+            "SELECT child_operation_id,subject_id,field FROM system.secret_document_fields WHERE parent_operation_id=$0;", source.Document.OperationId.ToString("D")))
         using (var rows = command.ExecuteReader())
         {
             var fields = new HashSet<(Guid, Guid, string)>();
@@ -86,7 +78,7 @@ internal sealed class SecretDocumentInventory(RuntimeInstance instance, StateDat
             }
             else if (status == "accepted")
             {
-                using var result = SecretDocumentRows.Command(connection, transaction, "SELECT 1 FROM secret_mutations WHERE operation_id=$0;", change.OperationId.ToString("D"));
+                using var result = SecretDocumentRows.Command(connection, transaction, "SELECT 1 FROM system.secret_mutations WHERE operation_id=$0;", change.OperationId.ToString("D"));
                 if (result.ExecuteScalar() is not null) throw SecretDocumentFormat.Invalid();
             }
         }

@@ -10,13 +10,13 @@ internal static class ProviderLauncherRows
 {
     internal static IEnumerable<Guid> ReadRecoveryParents(StateDatabase database)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         var after = "";
         while (true)
         {
             using var command = connection.CreateCommand();
-            command.CommandText = "SELECT DISTINCT r.journal_id FROM execution_provider_launcher_roots r " +
-                "WHERE r.journal_id>$after AND NOT EXISTS(SELECT 1 FROM execution_provider_launcher_ended e " +
+            command.CommandText = "SELECT DISTINCT r.journal_id FROM main.execution_provider_launcher_roots r " +
+                "WHERE r.journal_id>$after AND NOT EXISTS(SELECT 1 FROM main.execution_provider_launcher_ended e " +
                 "WHERE e.journal_id=r.journal_id AND e.launcher_id=r.launcher_id) ORDER BY r.journal_id LIMIT 64;";
             command.Parameters.AddWithValue("$after", after);
             var ids = new List<Guid>();
@@ -29,9 +29,9 @@ internal static class ProviderLauncherRows
 
     internal static ProcessIdentity Creator(StateDatabase database, ProviderLauncherBinding binding)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT process_id,created_file_time,image_path,image_sha256,user_sid,elevated FROM journal_writers " +
+        command.CommandText = "SELECT process_id,created_file_time,image_path,image_sha256,user_sid,elevated FROM main.journal_writers " +
             "WHERE journal_id=$journal AND writer_id=$writer;";
         command.Parameters.AddWithValue("$journal", binding.ParentJournalId.ToString("D")); command.Parameters.AddWithValue("$writer", binding.OwnerWriterId.ToString("D"));
         using var row = command.ExecuteReader();
@@ -40,7 +40,7 @@ internal static class ProviderLauncherRows
 
     internal static ProcessIdentity? Root(StateDatabase database, ProviderLauncherBinding binding)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         var result = RootInside(connection, transaction, binding); transaction.Commit(); return result;
     }
@@ -49,7 +49,7 @@ internal static class ProviderLauncherRows
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT step_id,job_name,writer_id,session_id,total_plan_sha256,activation_id,extension_id,entry_id," +
-            "process_id,created_file_time,image_path,image_sha256,user_sid,elevated FROM execution_provider_launcher_roots " +
+            "process_id,created_file_time,image_path,image_sha256,user_sid,elevated FROM main.execution_provider_launcher_roots " +
             "WHERE journal_id=$journal AND launcher_id=$launcher;";
         command.Parameters.AddWithValue("$journal", binding.ParentJournalId.ToString("D"));
         command.Parameters.AddWithValue("$launcher", binding.LauncherId.ToString("D"));
@@ -76,7 +76,7 @@ internal static class ProviderLauncherRows
             root.ImageSha256 != image.Sha256) throw Invalid();
         ProviderLauncherProjection.RequireNewEffectInside(connection, transaction, state, binding.StepId);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "INSERT INTO execution_provider_launcher_roots(journal_id,launcher_id,step_id,job_name,writer_id,session_id," +
+        command.CommandText = "INSERT INTO main.execution_provider_launcher_roots(journal_id,launcher_id,step_id,job_name,writer_id,session_id," +
             "total_plan_sha256,activation_id,extension_id,entry_id,process_id,created_file_time,image_path,image_sha256,user_sid,elevated) " +
             "VALUES($journal,$launcher,$step,$job,$writer,$session,$plan,$activation,$extension,$entry,$pid,$created,$path,$sha,$sid,$elevated);";
         command.Parameters.AddWithValue("$journal", binding.ParentJournalId.ToString("D"));
@@ -92,11 +92,11 @@ internal static class ProviderLauncherRows
 
     internal static BlobReference? Ended(StateDatabase database, ProviderLauncherBinding binding, BlobReference retained)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT e.retained_path,e.retained_size,e.retained_sha256,e.artifact_path,e.artifact_size,e.artifact_sha256 " +
-            "FROM execution_provider_launcher_ended e JOIN operations o ON o.operation_id=e.operation_id " +
-            "JOIN operation_journals p ON p.journal_id=e.journal_id JOIN operations parent ON parent.operation_id=p.operation_id " +
+            "FROM main.execution_provider_launcher_ended e JOIN main.operations o ON o.operation_id=e.operation_id " +
+            "JOIN main.operation_journals p ON p.journal_id=e.journal_id JOIN main.operations parent ON parent.operation_id=p.operation_id " +
             "WHERE e.journal_id=$journal AND e.launcher_id=$launcher AND o.subject_id=parent.subject_id " +
             "AND o.operation_kind='execution.provider-launcher-ended' AND o.status='completed' AND o.request_digest=e.artifact_sha256;";
         command.Parameters.AddWithValue("$journal", binding.ParentJournalId.ToString("D"));
@@ -113,7 +113,7 @@ internal static class ProviderLauncherRows
     {
         OperationRows.Accept(connection, transaction, identity, DateTimeOffset.UtcNow);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "INSERT INTO execution_provider_launcher_ended(journal_id,launcher_id,operation_id," +
+        command.CommandText = "INSERT INTO main.execution_provider_launcher_ended(journal_id,launcher_id,operation_id," +
             "retained_path,retained_size,retained_sha256,artifact_path,artifact_size,artifact_sha256) " +
             "VALUES($journal,$launcher,$operation,$retained,$retainedSize,$retainedSha,$artifact,$artifactSize,$artifactSha) " +
             "ON CONFLICT(journal_id,launcher_id) DO NOTHING;";
@@ -124,11 +124,11 @@ internal static class ProviderLauncherRows
         command.Parameters.AddWithValue("$retainedSha", retained.Sha256); command.Parameters.AddWithValue("$artifact", artifact.RelativePath);
         command.Parameters.AddWithValue("$artifactSize", artifact.SizeBytes); command.Parameters.AddWithValue("$artifactSha", artifact.Sha256);
         command.ExecuteNonQuery();
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM execution_provider_launcher_ended WHERE journal_id=$journal AND launcher_id=$launcher " +
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.execution_provider_launcher_ended WHERE journal_id=$journal AND launcher_id=$launcher " +
             "AND operation_id=$operation AND retained_path=$retained AND retained_size=$retainedSize AND retained_sha256=$retainedSha " +
             "AND artifact_path=$artifact AND artifact_size=$artifactSize AND artifact_sha256=$artifactSha);";
         if ((long)command.ExecuteScalar()! != 1) throw Invalid();
-        command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$operation;"; command.ExecuteNonQuery();
+        command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$operation;"; command.ExecuteNonQuery();
     }
 
     internal static void Verify(StateDatabase database, System.Text.Json.JsonElement journal,
@@ -136,10 +136,10 @@ internal static class ProviderLauncherRows
     {
         var jobs = ExecutionInvocationCodec.Views(journal).SelectMany(view => ProviderLauncherCodec.Read(view, total, totalSha))
             .GroupBy(item => item.Binding.LauncherId).Select(group => group.Last()).ToArray();
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT launcher_id,job_name FROM execution_provider_launcher_roots WHERE journal_id=$journal LIMIT 1025;";
+        command.CommandText = "SELECT launcher_id,job_name FROM main.execution_provider_launcher_roots WHERE journal_id=$journal LIMIT 1025;";
         command.Parameters.AddWithValue("$journal", journal.GetProperty("journalId").GetString()!);
         var rows = new List<(Guid Id, string Job)>();
         using (var read = command.ExecuteReader()) while (read.Read()) rows.Add((Guid.Parse(read.GetString(0)), read.GetString(1)));
@@ -154,7 +154,7 @@ internal static class ProviderLauncherRows
                 if (root.ImageSha256 != image.Sha256 || !StringComparer.OrdinalIgnoreCase.Equals(root.ImagePath, image.Path)) throw Invalid();
             }
         }
-        command.CommandText = "SELECT launcher_id FROM execution_provider_launcher_ended WHERE journal_id=$journal LIMIT 1025;";
+        command.CommandText = "SELECT launcher_id FROM main.execution_provider_launcher_ended WHERE journal_id=$journal LIMIT 1025;";
         using (var read = command.ExecuteReader())
             while (read.Read())
                 if (!jobs.Any(job => job.Binding.LauncherId.ToString("D") == read.GetString(0) && job.Stage == "retained")) throw Invalid();
@@ -163,7 +163,7 @@ internal static class ProviderLauncherRows
         {
             // Presence and semantic validity are distinct; a damaged row must not look like no ending fact.
             using var check = connection.CreateCommand();
-            check.CommandText = "SELECT count(*) FROM execution_provider_launcher_ended WHERE journal_id=$journal AND launcher_id=$launcher;";
+            check.CommandText = "SELECT count(*) FROM main.execution_provider_launcher_ended WHERE journal_id=$journal AND launcher_id=$launcher;";
             check.Parameters.AddWithValue("$journal", job.Binding.ParentJournalId.ToString("D")); check.Parameters.AddWithValue("$launcher", job.Binding.LauncherId.ToString("D"));
             if ((long)check.ExecuteScalar()! > 0 && Ended(database, job.Binding, job.Artifact!) is null) throw Invalid();
         }

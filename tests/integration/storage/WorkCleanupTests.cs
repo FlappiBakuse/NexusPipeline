@@ -16,6 +16,38 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class WorkCleanupTests(ITestOutputHelper output)
 {
+    [Fact(DisplayName = "A Busy Final Cleanup Projection Resumes Under The Same Owner Without Repeating Physical Deletion")]
+    public async Task RetriesBusyProjection()
+    {
+        await using var fixture = await WorkCleanupFixture.CreateAsync();
+        var owner = fixture.Original.Package.Catalog;
+        var observer = new BusyProjection();
+        Assert.True(await fixture.Service().RunNextPageAsync(fixture.Producer.Plan.JournalId, default, observer));
+        Assert.False(Directory.Exists(fixture.Workspace)); Assert.True(observer.Interrupted);
+        Assert.Equal(1, observer.TerminalFlushes);
+        Assert.Equal(observer.Removals.Count, observer.Removals.Distinct().Count());
+        Assert.NotEmpty(observer.Removals);
+        var cleanup = Assert.Single(new RecoveryJournalRegistry(owner.Database).ReadHistory(), item => item.Kind == JournalKind.FileCleanup);
+        Assert.Equal(JournalPhase.Committed, cleanup.Phase); Assert.True(owner.Index.Current.IsReady);
+        Assert.All(new FileEffectOutbox(owner.Database).Read(cleanup.JournalId), item => Assert.Equal(FileEffectState.Completed, item.State));
+    }
+
+    private sealed class BusyProjection : ICleanupPersistenceObserver
+    {
+        internal bool Interrupted;
+        internal int TerminalFlushes;
+        internal List<long> Removals { get; } = [];
+        public void Reached(CleanupPersistencePoint point, Guid journal, long revision, JournalPhase phase)
+        {
+            if (point == CleanupPersistencePoint.FileRemoved) Removals.Add(revision);
+            if (point != CleanupPersistencePoint.JournalFlushed || phase != JournalPhase.Committed) return;
+            TerminalFlushes++;
+            if (Interrupted) return;
+            Interrupted = true;
+            throw new SqliteException("controlled_busy_projection", 5);
+        }
+    }
+
     [Theory(DisplayName = "Actual Committed Owned Backups Use The Existing Cleanup Journal And Preserve Installation History")]
     [InlineData(PayloadAction.Upgrade)]
     [InlineData(PayloadAction.Remove)]
@@ -191,7 +223,7 @@ public sealed class WorkCleanupTests(ITestOutputHelper output)
             owner.Contracts, fixture.Original.Roots, owner.Resources, fixture.Original.Activator, root, plan, "local", true, default);
         var accepted = new FileCleanupAcceptance(owner.Instance, owner.Contracts, owner.Database, payloadRoots: fixture.Original.Roots)
             .AcceptPrepared(prepared.Identity, prepared, DateTimeOffset.UtcNow);
-        Sql(owner.Database, "CREATE TRIGGER stop_work_commit BEFORE UPDATE OF phase ON operation_journals " +
+        Sql(owner.Database, "CREATE TRIGGER main.stop_work_commit BEFORE UPDATE OF phase ON operation_journals " +
             "WHEN NEW.operation_kind='fileCleanup' AND NEW.phase='committed' BEGIN SELECT RAISE(ABORT,'controlled_work_commit'); END;");
         var executor = new OwnedCleanupExecutor(owner.Instance, owner.Contracts, owner.Database, owner.Index);
         Assert.Throws<SqliteException>(() => executor.ExecutePrepared(accepted.JournalId, owner.Lease, root,
@@ -201,7 +233,7 @@ public sealed class WorkCleanupTests(ITestOutputHelper output)
         Assert.Equal(JournalPhase.Committed, physical.Phase);
         Assert.Equal(JournalPhase.Applied, new RecoveryJournalRegistry(owner.Database).ReadJournal(accepted.JournalId).Phase);
         var bytes = physical.Export();
-        Sql(owner.Database, "DROP TRIGGER stop_work_commit;");
+        Sql(owner.Database, "DROP TRIGGER main.stop_work_commit;");
         Assert.Equal(FileCleanupResult.AlreadyCompleted, executor.ExecutePrepared(accepted.JournalId, owner.Lease, root,
             fixture.Original.Roots, prepared.Execution, null));
         Assert.Equal(bytes, new JournalStore(owner.Instance, owner.Contracts).Read(accepted.JournalId).Export());
@@ -230,7 +262,7 @@ public sealed class WorkCleanupTests(ITestOutputHelper output)
 
     private static void Sql(StateDatabase database, string sql)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, domains: DatabaseDomain.Runtime);
         using var command = connection.CreateCommand(); command.CommandText = sql; command.ExecuteNonQuery();
     }
 }

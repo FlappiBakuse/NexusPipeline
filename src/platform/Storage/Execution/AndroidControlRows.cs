@@ -12,7 +12,7 @@ internal static class AndroidControlRows
         if (item.Binding != request.Binding || item.Sequence != request.Sequence ||
             item.RequestDigest != AndroidCommandIdentity.Digest(request)) throw Invalid();
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "INSERT INTO execution_target_command_jobs(journal_id,command_id,step_id,command_sequence,job_name,writer_id,document_json) " +
+        command.CommandText = "INSERT INTO main.execution_target_command_jobs(journal_id,command_id,step_id,command_sequence,job_name,writer_id,document_json) " +
             "VALUES($journal,$id,$step,$sequence,$job,$writer,$document) ON CONFLICT(journal_id,command_id) DO NOTHING;";
         Bind(command, item);
         command.Parameters.AddWithValue("$step", item.Binding.StepId); command.Parameters.AddWithValue("$sequence", item.Sequence);
@@ -26,7 +26,7 @@ internal static class AndroidControlRows
     internal static void RequireRegisteredInside(SqliteConnection connection, SqliteTransaction transaction, AndroidCommandRegistration item)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT step_id,command_sequence,job_name,writer_id,document_json FROM execution_target_command_jobs " +
+        command.CommandText = "SELECT step_id,command_sequence,job_name,writer_id,document_json FROM main.execution_target_command_jobs " +
             "WHERE journal_id=$journal AND command_id=$id;";
         Bind(command, item); using var row = command.ExecuteReader();
         if (!row.Read() || row.GetString(0) != item.Binding.StepId || row.GetInt32(1) != item.Sequence ||
@@ -39,7 +39,7 @@ internal static class AndroidControlRows
         Guid journalId, IReadOnlyList<AndroidCommandRegistration> projected)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT command_id FROM execution_target_command_jobs WHERE journal_id=$journal LIMIT 1025;";
+        command.CommandText = "SELECT command_id FROM main.execution_target_command_jobs WHERE journal_id=$journal LIMIT 1025;";
         command.Parameters.AddWithValue("$journal", journalId.ToString("D"));
         var ids = new List<Guid>();
         using (var row = command.ExecuteReader()) while (row.Read()) ids.Add(Guid.Parse(row.GetString(0)));

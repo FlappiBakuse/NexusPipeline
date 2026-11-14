@@ -112,9 +112,9 @@ public sealed class EditCompletionTests
         var completion = edit.Completion(); var operation = ConfigurationEditStore.SaveIdentity(Guid.NewGuid(), "fixture", completion);
         AssertSessionHolds(index, edit.Session);
         var before = index.Current.ResourceHolds.OrderBy(hold => hold.ResourceKey, StringComparer.Ordinal).ToArray();
-        edit.Base.Execute("CREATE TRIGGER fixture_fail_completion BEFORE UPDATE ON configuration_edit_sessions WHEN NEW.phase=2 BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
+        edit.Base.Execute("CREATE TRIGGER configuration.fixture_fail_completion BEFORE UPDATE ON configuration_edit_sessions WHEN NEW.phase=2 BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
         try { Assert.Throws<SqliteException>(() => service.Save(operation, completion, DateTimeOffset.UtcNow)); }
-        finally { edit.Base.Execute("DROP TRIGGER fixture_fail_completion;"); }
+        finally { edit.Base.Execute("DROP TRIGGER configuration.fixture_fail_completion;"); }
         Assert.Null(edit.Store.LookupSave(operation, completion));
         Assert.Equal(before, index.Current.ResourceHolds.OrderBy(hold => hold.ResourceKey, StringComparer.Ordinal));
         AssertOriginalSnapshots(edit, edit.Initial.Changes);

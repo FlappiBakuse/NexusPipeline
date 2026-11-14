@@ -37,9 +37,9 @@ public sealed class NotificationReceiptTests
             Assert.Equal(3, fixture.Delivery.MaterializePending(64, reads));
             var status = fixture.Delivery.ReadPendingForRun(fixture.Receipt.Facts.RunId);
             Assert.True(status.IsExpanded); Assert.Equal(6, status.Queued);
-            fixture.Sql("UPDATE notification_receipt_sources SET route_count=route_count+1;");
+            fixture.Sql("UPDATE notifications.notification_receipt_sources SET route_count=route_count+1;");
             try { Assert.ThrowsAny<Exception>(() => fixture.Delivery.ReadPendingForRun(fixture.Receipt.Facts.RunId)); }
-            finally { fixture.Sql("UPDATE notification_receipt_sources SET route_count=route_count-1;"); }
+            finally { fixture.Sql("UPDATE notifications.notification_receipt_sources SET route_count=route_count-1;"); }
             Assert.Throws<IOException>(() => new FileStream(planPath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read).Dispose());
         }
         finally
@@ -79,8 +79,8 @@ public sealed class NotificationReceiptTests
         Save(locale); await fixture.Execute();
         Save(locale == NexusPipeline.Core.Settings.HostLocale.ZhCn ? NexusPipeline.Core.Settings.HostLocale.EnUs : NexusPipeline.Core.Settings.HostLocale.ZhCn);
         Assert.Equal(1, fixture.Delivery.MaterializePending());
-        using var connection = NexusPipeline.Platform.Storage.Sqlite.DatabaseConnections.Open(fixture.Source.Database.DatabasePath, readOnly: true);
-        using var command = connection.CreateCommand(); command.CommandText = "SELECT relative_path,size_bytes,sha256 FROM notification_deliveries;";
+        using var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Notifications);
+        using var command = connection.CreateCommand(); command.CommandText = "SELECT relative_path,size_bytes,sha256 FROM notifications.notification_deliveries;";
         using var row = command.ExecuteReader(); Assert.True(row.Read());
         var delivery = new NotificationDeliveryCodec(fixture.Source.Instance, new()).Read(new(row.GetString(0), row.GetInt64(1), row.GetString(2))).Document;
         Assert.Contains(locale == NexusPipeline.Core.Settings.HostLocale.ZhCn ? "执行：" : "Execution:", delivery.Body);
@@ -135,14 +135,14 @@ public sealed class NotificationReceiptTests
     public async Task ReplaysFailedRoutes(string table)
     {
         using var fixture = new NotificationReceiptFixture(); await fixture.Execute();
-        fixture.Sql($"CREATE TRIGGER fail_route BEFORE INSERT ON {table} BEGIN SELECT RAISE(ABORT,'fixture'); END;");
+        fixture.Sql($"CREATE TRIGGER notifications.fail_route BEFORE INSERT ON {table} BEGIN SELECT RAISE(ABORT,'fixture'); END;");
         Assert.Throws<SqliteException>(() => fixture.Delivery.MaterializePending());
         Assert.Equal(0, fixture.Count("notification_receipt_routes")); Assert.Equal(0, fixture.Count("notification_deliveries"));
         Assert.Equal(1, fixture.Count("notification_receipt_sources"));
         var payload = Assert.Single(Assert.Single(fixture.Snapshot.Document.Tasks).Secrets.Where(item => item.Payload is not null)).Payload!;
         Assert.True(DeliveryReferenceIndex.IsSecretReferenced(fixture.Source.Instance, fixture.Source.Database,
             new(), payload.SecretId, payload.Digest, payload.SizeBytes));
-        fixture.Sql("DROP TRIGGER fail_route;");
+        fixture.Sql("DROP TRIGGER notifications.fail_route;");
         Assert.Equal(1, fixture.Delivery.MaterializePending()); Assert.Equal(0, fixture.Delivery.MaterializePending());
         Assert.Equal(1, fixture.Count("notification_deliveries"));
     }
@@ -168,7 +168,7 @@ public sealed class NotificationReceiptTests
     {
         using var fixture = new NotificationReceiptFixture(); await fixture.Execute();
         var before = fixture.Count("operations");
-        fixture.Sql("UPDATE notification_receipt_sources SET route_count=route_count+1;");
+        fixture.Sql("UPDATE notifications.notification_receipt_sources SET route_count=route_count+1;");
         var payload = Assert.Single(Assert.Single(fixture.Snapshot.Document.Tasks).Secrets.Where(item => item.Payload is not null)).Payload!;
         Assert.ThrowsAny<Exception>(() => DeliveryReferenceIndex.IsSecretReferenced(fixture.Source.Instance,
             fixture.Source.Database, new(), payload.SecretId, payload.Digest, payload.SizeBytes));

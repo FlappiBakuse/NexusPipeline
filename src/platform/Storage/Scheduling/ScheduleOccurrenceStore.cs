@@ -25,11 +25,11 @@ internal sealed class ScheduleOccurrenceStore(RuntimeInstance instance, StateDat
     public ScheduleCheckpoint ReadCheckpoint()
     {
         RequireInstance();
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation);
         using var transaction = connection.BeginTransaction(deferred: true);
         var watermark = ScheduleMinuteRows.Checkpoint(connection, transaction);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT revision FROM automation_catalog_state WHERE singleton=1;";
+        command.CommandText = "SELECT revision FROM automation.automation_catalog_state WHERE singleton=1;";
         var revision = command.ExecuteScalar() is long value ? value : throw ScheduleMinuteCodec.Invalid();
         return new(watermark, revision);
     }
@@ -46,7 +46,7 @@ internal sealed class ScheduleOccurrenceStore(RuntimeInstance instance, StateDat
     {
         if (clock.GetUtcNow().ToUnixTimeSeconds() / 60 != minute) return null;
         _ = CommitMinuteCore(null, retainEmpty: true);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         return ScheduleMinuteRows.ReadMinute(connection, transaction, ScheduleMinuteCodec.OperationId(instance.InstanceId, minute), instance.InstanceId);
     }
@@ -64,7 +64,7 @@ internal sealed class ScheduleOccurrenceStore(RuntimeInstance instance, StateDat
             var now = clock.GetUtcNow();
             if (now.Offset != TimeSpan.Zero || now < DateTimeOffset.UnixEpoch) throw new IOException("schedule_clock_invalid");
             var operationId = ScheduleMinuteCodec.OperationId(instance.InstanceId, now.ToUnixTimeSeconds() / 60);
-            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.System))
             using (var transaction = connection.BeginTransaction(deferred: true))
             {
                 var prior = ScheduleMinuteRows.ReadMinute(connection, transaction, operationId, instance.InstanceId);
@@ -73,13 +73,13 @@ internal sealed class ScheduleOccurrenceStore(RuntimeInstance instance, StateDat
             NexusPipeline.Core.Automation.AutomationCatalog catalog;
             ScheduleMinuteWatermark watermark;
             long settingsRevision;
-            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.System))
             using (var transaction = connection.BeginTransaction(deferred: true))
             {
                 catalog = AutomationRows.Read(connection, transaction);
                 watermark = ScheduleMinuteRows.Checkpoint(connection, transaction);
                 using var command = connection.CreateCommand(); command.Transaction = transaction;
-                command.CommandText = "SELECT revision FROM settings_current WHERE singleton=1;";
+                command.CommandText = "SELECT revision FROM system.settings_current WHERE singleton=1;";
                 settingsRevision = command.ExecuteScalar() is long value ? value : throw ScheduleMinuteCodec.Invalid();
             }
             var diagnostics = new List<ScheduleDiagnostic>();
@@ -101,16 +101,16 @@ internal sealed class ScheduleOccurrenceStore(RuntimeInstance instance, StateDat
                 if (actual != watermark || !BoundedJson.Serialize(AutomationRows.Read(connection, transaction)).AsSpan().SequenceEqual(catalogBytes))
                     throw new IOException("schedule_source_revision_conflict");
                 using var command = connection.CreateCommand(); command.Transaction = transaction;
-                command.CommandText = "SELECT revision FROM settings_current WHERE singleton=1;";
+                command.CommandText = "SELECT revision FROM system.settings_current WHERE singleton=1;";
                 if (command.ExecuteScalar() is not long current || current != settingsRevision)
                     throw new IOException("schedule_source_revision_conflict");
-                command.CommandText = "SELECT COUNT(*) FROM scheduled_occurrences c LEFT JOIN operations o ON o.operation_id=c.start_operation_id LEFT JOIN schedule_occurrence_outcomes b ON b.occurrence_id=c.occurrence_id WHERE o.operation_id IS NULL AND b.occurrence_id IS NULL;";
+                command.CommandText = "SELECT COUNT(*) FROM main.scheduled_occurrences c LEFT JOIN main.operations o ON o.operation_id=c.start_operation_id LEFT JOIN main.schedule_occurrence_outcomes b ON b.occurrence_id=c.occurrence_id WHERE o.operation_id IS NULL AND b.occurrence_id IS NULL;";
                 var waiting = (long)command.ExecuteScalar()!;
-                command.CommandText = "SELECT COUNT(*) FROM scheduled_provider_pending;";
+                command.CommandText = "SELECT COUNT(*) FROM main.scheduled_provider_pending;";
                 waiting += (long)command.ExecuteScalar()!;
                 foreach (var candidate in document.Scan.Occurrences)
                 {
-                    command.CommandText = "SELECT 1 FROM scheduled_occurrences WHERE occurrence_id=$occurrence;";
+                    command.CommandText = "SELECT 1 FROM main.scheduled_occurrences WHERE occurrence_id=$occurrence;";
                     command.Parameters.AddWithValue("$occurrence", candidate.OccurrenceId.ToString("D"));
                     if (command.ExecuteScalar() is null) waiting++;
                     command.Parameters.RemoveAt("$occurrence");
@@ -132,10 +132,10 @@ internal sealed class ScheduleOccurrenceStore(RuntimeInstance instance, StateDat
         RequireInstance();
         lock (_waitingGate)
         {
-            var revision = database.CommitSequence;
+            var revision = database.DomainSequence(DatabaseDomain.Runtime);
             if (_waitingRevision == revision && _waitingLimit == limit) return _waiting;
             var waiting = ReadWaitingCore(limit);
-            if (revision == database.CommitSequence)
+            if (revision == database.DomainSequence(DatabaseDomain.Runtime))
             { _waiting = waiting; _waitingRevision = revision; _waitingLimit = limit; }
             return waiting;
         }
@@ -143,10 +143,10 @@ internal sealed class ScheduleOccurrenceStore(RuntimeInstance instance, StateDat
 
     private ImmutableArray<ScheduledOccurrence> ReadWaitingCore(int limit)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT c.occurrence_id FROM scheduled_occurrences c LEFT JOIN operations o ON o.operation_id=c.start_operation_id LEFT JOIN schedule_occurrence_outcomes b ON b.occurrence_id=c.occurrence_id WHERE o.operation_id IS NULL AND b.occurrence_id IS NULL ORDER BY c.trigger_utc_minute,c.occurrence_id LIMIT $limit;";
+        command.CommandText = "SELECT c.occurrence_id FROM main.scheduled_occurrences c LEFT JOIN main.operations o ON o.operation_id=c.start_operation_id LEFT JOIN main.schedule_occurrence_outcomes b ON b.occurrence_id=c.occurrence_id WHERE o.operation_id IS NULL AND b.occurrence_id IS NULL ORDER BY c.trigger_utc_minute,c.occurrence_id LIMIT $limit;";
         command.Parameters.AddWithValue("$limit", limit);
         var ids = new List<Guid>();
         using (var reader = command.ExecuteReader()) while (reader.Read()) ids.Add(Guid.ParseExact(reader.GetString(0), "D"));

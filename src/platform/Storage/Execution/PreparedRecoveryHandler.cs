@@ -90,8 +90,8 @@ public sealed class PreparedRecoveryHandler(RuntimeInstance instance, ContractRe
     private string JournalPath(Guid id) => PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(instance.RuntimeRoot, "journals", id.ToString("D")));
     private bool HasConfigurationGroups(Guid journalId)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
-        using var command = connection.CreateCommand(); command.CommandText = "SELECT EXISTS(SELECT 1 FROM configuration_run_sessions WHERE parent_journal_id=$parent);";
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration);
+        using var command = connection.CreateCommand(); command.CommandText = "SELECT EXISTS(SELECT 1 FROM configuration.configuration_run_sessions WHERE parent_journal_id=$parent);";
         command.Parameters.AddWithValue("$parent", journalId.ToString("D")); return (long)command.ExecuteScalar()! != 0;
     }
     private sealed class Work(Func<JournalRecoveryResult> execute) : IJournalRecoveryWork

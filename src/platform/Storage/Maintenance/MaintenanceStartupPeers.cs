@@ -12,10 +12,10 @@ internal static class MaintenanceStartupPeers
         bootstrap.RequireCurrent();
         var inputs = bootstrap.Inputs;
         var current = ProcessIdentityReader.Read(Environment.ProcessId);
-        using var connection = DatabaseConnections.Open(inputs.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(inputs.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT w.process_id,w.created_file_time,w.image_path,w.image_sha256,w.user_sid,w.elevated,b.job_name " +
-            "FROM journal_writers w LEFT JOIN journal_writer_jobs b USING(journal_id,writer_id) WHERE w.journal_id=$journal LIMIT 5;";
+            "FROM main.journal_writers w LEFT JOIN main.journal_writer_jobs b USING(journal_id,writer_id) WHERE w.journal_id=$journal LIMIT 5;";
         command.Parameters.AddWithValue("$journal", inputs.Plan.JournalId.ToString("D"));
         var writers = new List<(ProcessIdentity Process, string? Job)>();
         using (var rows = command.ExecuteReader())

@@ -42,7 +42,7 @@ internal sealed class ExecutionAdmissionFixture : IDisposable
 
     internal long Count(string table)
     {
-        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        using var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open(new SqliteConnectionStringBuilder
             { DataSource = NexusPipeline.Platform.Storage.PhysicalPathPolicy.NativePath(Source.Database.DatabasePath), Pooling = false }.ToString());
         connection.Open(); using var command = connection.CreateCommand(); command.CommandText = $"SELECT count(*) FROM {table};";
         return (long)command.ExecuteScalar()!;
@@ -50,7 +50,7 @@ internal sealed class ExecutionAdmissionFixture : IDisposable
 
     internal void Execute(string sql)
     {
-        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        using var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open(new SqliteConnectionStringBuilder
             { DataSource = NexusPipeline.Platform.Storage.PhysicalPathPolicy.NativePath(Source.Database.DatabasePath), Pooling = false }.ToString());
         connection.Open(); using var command = connection.CreateCommand(); command.CommandText = sql; command.ExecuteNonQuery();
     }

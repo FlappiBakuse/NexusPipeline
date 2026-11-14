@@ -60,8 +60,8 @@ public sealed class ScheduledOwnerTests
         Assert.Equal(after.CloseReference, repeated.CloseReference); Assert.Equal(after.ResultReference, repeated.ResultReference);
         Assert.Equal(after.Result, repeated.Result);
         _ = StateDatabase.OpenExisting(instance, Path.Combine(root, "second-inspection"), new JournalStartupAdmission(instance, new(), roots));
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true); using var count = connection.CreateCommand();
-        count.CommandText = "SELECT (SELECT COUNT(*) FROM scheduled_provider_pending)+(SELECT COUNT(*) FROM attempt_receipts)+(SELECT COUNT(*) FROM notification_deliveries);";
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.All); using var count = connection.CreateCommand();
+        count.CommandText = "SELECT (SELECT COUNT(*) FROM main.scheduled_provider_pending)+(SELECT COUNT(*) FROM records.attempt_receipts)+(SELECT COUNT(*) FROM notifications.notification_deliveries);";
         Assert.Equal(0L, count.ExecuteScalar());
     }
 

@@ -231,9 +231,9 @@ public sealed class FrontendInstalledTests
         var sibling = Path.Combine(journal, "9999999999.json");
         void ChangePhase(string phase)
         {
-            using var connection = DatabaseConnections.Open(owner.Database.DatabasePath);
+            using var connection = DatabaseConnections.Open(owner.Database.DatabasePath, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
             using var command = connection.CreateCommand();
-            command.CommandText = "UPDATE operation_journals SET phase=$phase WHERE journal_id=$journal;";
+            command.CommandText = "UPDATE main.operation_journals SET phase=$phase WHERE journal_id=$journal;";
             command.Parameters.AddWithValue("$journal", installed.Metadata.JournalId.ToString("D"));
             command.Parameters.AddWithValue("$phase", phase);
             Assert.Equal(1, command.ExecuteNonQuery());

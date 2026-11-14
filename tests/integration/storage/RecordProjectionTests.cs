@@ -92,7 +92,7 @@ public sealed class RecordProjectionTests
         var source = fixture.Source;
         var projection = new ExecutionRecordProjection(source.Instance, source.Database, new(), source.Lease,
             new(source.Instance, source.Database, new()));
-        fixture.Base.Execute("CREATE TRIGGER reject_record BEFORE INSERT ON run_records BEGIN SELECT RAISE(ABORT,'fixture_record_reject'); END;");
+        fixture.Base.Execute("CREATE TRIGGER records.reject_record BEFORE INSERT ON run_records BEGIN SELECT RAISE(ABORT,'fixture_record_reject'); END;");
         var consumer = new ExecutionRuntimeConsumer(source.Instance, source.Database, new(), source.Lease,
             fixture.Base.Resources, fixture.Base.Index, fixture.Base.Inbox, projection);
         await Assert.ThrowsAsync<SqliteException>(() => consumer.RunNextAsync());
@@ -105,7 +105,7 @@ public sealed class RecordProjectionTests
         Assert.Equal(0, fixture.Base.Inbox.PendingCount); Assert.False(fixture.Base.Index.Current.IsReady);
         var worker = File.ReadAllText(fixture.Marker);
         var journal = state.Latest.Export();
-        fixture.Base.Execute("DROP TRIGGER reject_record;");
+        fixture.Base.Execute("DROP TRIGGER records.reject_record;");
         projection.OnCommitted(receipt);
         var row = Assert.Single(records.ReadPage(new()).Items);
         Assert.Equal(source.QueueId, row.AutomationId);

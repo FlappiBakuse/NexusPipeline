@@ -206,11 +206,11 @@ public sealed class EffectGateTests
     public void RejectsContradictoryEvidence(string state, int revision)
     {
         var (database, journal, _) = Create(JournalKind.RunAttempt);
-        using (var connection = new SqliteConnection($"Data Source={database.DatabasePath};Pooling=False"))
+        using (var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open($"Data Source={database.DatabasePath};Pooling=False"))
         {
             connection.Open();
             using var command = connection.CreateCommand();
-            command.CommandText = "UPDATE journal_effect_gates SET state=$state,revision=$revision WHERE journal_id=$id;";
+            command.CommandText = "UPDATE main.journal_effect_gates SET state=$state,revision=$revision WHERE journal_id=$id;";
             command.Parameters.AddWithValue("$state", state);
             command.Parameters.AddWithValue("$revision", revision);
             command.Parameters.AddWithValue("$id", journal.JournalId.ToString("D"));

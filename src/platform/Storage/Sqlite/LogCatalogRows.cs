@@ -6,14 +6,14 @@ namespace NexusPipeline.Platform.Storage.Sqlite;
 
 internal static class LogCatalogRows
 {
-    private const string SelectEntries = "SELECT position,step_id,role,raw_relative_path,raw_size_bytes,raw_sha256,observed_bytes,recorded_bytes,discarded_bytes,is_complete,part_count FROM execution_log_entries ";
+    private const string SelectEntries = "SELECT position,step_id,role,raw_relative_path,raw_size_bytes,raw_sha256,observed_bytes,recorded_bytes,discarded_bytes,is_complete,part_count FROM records.execution_log_entries ";
     internal static void PublishInside(SqliteConnection connection, SqliteTransaction transaction, LogCatalogSnapshot expected)
     {
         RequireCursor(connection, transaction, expected);
         if (Exists(connection, transaction, expected.Receipt.Facts.AttemptId))
         { RequireSaved(connection, transaction, expected); return; }
         using var header = Command(connection, transaction,
-            "INSERT INTO execution_log_catalog VALUES($0,$1,$2,$3,$4,$5);",
+            "INSERT INTO records.execution_log_catalog VALUES($0,$1,$2,$3,$4,$5);",
             expected.Receipt.Facts.AttemptId.ToString("D"), expected.Receipt.Facts.RunId.ToString("D"),
             expected.Receipt.JournalId.ToString("D"), expected.TerminalRevision, expected.TerminalSha256, expected.Entries.Count);
         header.ExecuteNonQuery();
@@ -21,7 +21,7 @@ internal static class LogCatalogRows
         {
             var item = entry.Item;
             using var insert = Command(connection, transaction,
-                "INSERT INTO execution_log_entries VALUES($0,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11);",
+                "INSERT INTO records.execution_log_entries VALUES($0,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11);",
                 item.Key.AttemptId.ToString("D"), item.Position, item.Key.StepId, (int)item.Key.Role,
                 entry.Raw.RelativePath, entry.Raw.SizeBytes, entry.Raw.Sha256, item.ObservedBytes, item.RecordedBytes,
                 item.DiscardedBytes, item.IsComplete ? 1 : 0, item.PartCount);
@@ -33,7 +33,7 @@ internal static class LogCatalogRows
     internal static bool Exists(SqliteConnection connection, SqliteTransaction transaction, Guid attempt)
     {
         using var command = Command(connection, transaction,
-            "SELECT 1 FROM execution_log_catalog WHERE attempt_id=$0;", attempt.ToString("D"));
+            "SELECT 1 FROM records.execution_log_catalog WHERE attempt_id=$0;", attempt.ToString("D"));
         return command.ExecuteScalar() is not null;
     }
 
@@ -42,7 +42,7 @@ internal static class LogCatalogRows
         RequireCursor(connection, transaction, expected);
         var receipt = expected.Receipt;
         using var header = Command(connection, transaction,
-            "SELECT run_id,journal_id,terminal_revision,terminal_sha256,entry_count FROM execution_log_catalog WHERE attempt_id=$0;",
+            "SELECT run_id,journal_id,terminal_revision,terminal_sha256,entry_count FROM records.execution_log_catalog WHERE attempt_id=$0;",
             receipt.Facts.AttemptId.ToString("D"));
         using (var row = header.ExecuteReader())
             if (!row.Read() || row.GetString(0) != receipt.Facts.RunId.ToString("D") || row.GetString(1) != receipt.JournalId.ToString("D") ||
@@ -86,7 +86,7 @@ internal static class LogCatalogRows
         var receipt = expected.Receipt;
         if (AttemptReceiptStore.ReadInside(connection, transaction, receipt.Facts.AttemptId) != receipt) throw Invalid();
         using var command = Command(connection, transaction,
-            "SELECT EXISTS(SELECT 1 FROM operation_journals j JOIN operations o ON o.operation_id=j.operation_id " +
+            "SELECT EXISTS(SELECT 1 FROM main.operation_journals j JOIN main.operations o ON o.operation_id=j.operation_id " +
             "WHERE j.journal_id=$0 AND j.operation_id=$1 AND j.phase='committed' AND j.revision=$2 AND j.plan_digest=$3 " +
             "AND o.operation_kind='execution.start' AND o.status='completed' AND o.initial_journal_id=j.journal_id);",
             receipt.JournalId.ToString("D"), receipt.OperationId.ToString("D"), expected.TerminalRevision, receipt.PlanDigest);

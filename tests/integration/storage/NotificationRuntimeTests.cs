@@ -11,6 +11,25 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class NotificationRuntimeTests
 {
+    [Fact(DisplayName = "An Idle Notification Worker Wakes For Each Committed Queue Registration Without Duplicating Delivery")]
+    public async Task WakesForCommittedWork()
+    {
+        await using var sink = new NotificationHttpSink((_, _) => Task.FromResult(new NotificationSinkReply(200, "")));
+        await using var fixture = new RuntimeFixture();
+        fixture.Runtime.Start();
+        await fixture.Save(sink.Address);
+        for (var expected = 1; expected <= 2; expected++)
+        {
+            _ = fixture.Enqueue();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            while (sink.Requests.Count < expected || fixture.Runtime.HasPendingActivity)
+                await Task.Delay(20, timeout.Token);
+            Assert.Equal(expected, sink.Requests.Count);
+            Assert.Null(fixture.Runtime.FailureCode);
+        }
+        Assert.True(fixture.Base.Index.Current.IsReady);
+    }
+
     [Fact(DisplayName = "Startup Defers Missing Historical Registration While Keeping Queue Ownership And Exact Once Delivery")]
     public async Task BackfillsAfterStartup()
     {
@@ -72,7 +91,7 @@ public sealed class NotificationRuntimeTests
         await using var sink = new NotificationHttpSink((_, _) => Task.FromResult(new NotificationSinkReply(200, "")));
         await using var fixture = new RuntimeFixture();
         await fixture.Save(sink.Address); _ = fixture.Enqueue();
-        fixture.Base.Execute("CREATE TRIGGER fail_runtime_notify_result BEFORE INSERT ON notification_delivery_transitions WHEN NEW.ordinal=2 BEGIN SELECT RAISE(ABORT,'fixture'); END;");
+        fixture.Base.Execute("CREATE TRIGGER notifications.fail_runtime_notify_result BEFORE INSERT ON notification_delivery_transitions WHEN NEW.ordinal=2 BEGIN SELECT RAISE(ABORT,'fixture'); END;");
         try
         {
             await fixture.Runtime.RunPassAsync();
@@ -80,7 +99,7 @@ public sealed class NotificationRuntimeTests
             Assert.Single(sink.Requests);
             Assert.Null(fixture.Base.Resources.TryAcquire(Guid.NewGuid(), [new("secrets:fields", ResourceClaimMode.Mutation)]).Lease);
         }
-        finally { fixture.Base.Execute("DROP TRIGGER fail_runtime_notify_result;"); }
+        finally { fixture.Base.Execute("DROP TRIGGER notifications.fail_runtime_notify_result;"); }
         await fixture.Runtime.RunPassAsync();
         Assert.False(fixture.Runtime.HasPendingActivity); Assert.Single(sink.Requests);
         Assert.NotNull(fixture.Base.Lifecycle.RequestClose(Guid.NewGuid(), Guid.NewGuid()).Permit);
@@ -92,7 +111,7 @@ public sealed class NotificationRuntimeTests
         await using var sink = new NotificationHttpSink((_, _) => Task.FromResult(new NotificationSinkReply(200, "")));
         await using var fixture = new RuntimeFixture();
         await fixture.Save(sink.Address); _ = fixture.Enqueue();
-        fixture.Base.Execute("DELETE FROM notification_delivery_pending;");
+        fixture.Base.Execute("DELETE FROM notifications.notification_delivery_pending;");
         Assert.Throws<IOException>(() => fixture.Runtime.TryReleaseSettled());
         Assert.True(fixture.Runtime.HasPendingActivity); Assert.Empty(sink.Requests);
         Assert.Null(fixture.Base.Lifecycle.RequestClose(Guid.NewGuid(), Guid.NewGuid()).Permit);

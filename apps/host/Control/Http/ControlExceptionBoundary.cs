@@ -17,6 +17,13 @@ internal static class ControlExceptionBoundary
         catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) { }
         catch (Exception error) when (!context.Response.HasStarted)
         {
+            if (error is IOException && context.Request.Path != "/control/v1/extensions/reconcile")
+            {
+                var method = new System.Diagnostics.StackTrace(error, false).GetFrame(0)?.GetMethod();
+                context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("NexusPipeline.Host")
+                    .LogWarning("Control IO request rejected: {FailureType}; {Owner}; {Method}", error.GetType().Name,
+                        method?.DeclaringType?.FullName, method?.Name);
+            }
             if (error is IOException && context.Request.Path == "/control/v1/extensions/reconcile")
             {
                 var reason = error.Message is "extension_preference_resources_unavailable" or "extension_runtime_revision_conflict" or

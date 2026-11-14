@@ -170,7 +170,7 @@ public sealed class ImageRetirementTests
                 if (fault == "rollback")
                 {
                     var counts = fixture.Fixture.Base.Counts();
-                    fixture.Fixture.Base.Execute("CREATE TRIGGER fixture_image_retire BEFORE INSERT ON record_retired_contents " +
+                    fixture.Fixture.Base.Execute("CREATE TRIGGER records.fixture_image_retire BEFORE INSERT ON record_retired_contents " +
                         "BEGIN SELECT RAISE(ABORT,'fixture_image_retire'); END;");
                     try
                     {
@@ -181,12 +181,12 @@ public sealed class ImageRetirementTests
                         using var input = fixture.Images.OpenOriginal(image.Key, image.ResultSha256);
                         Assert.Equal(image.SizeBytes!.Value, input.Length);
                     }
-                    finally { fixture.Fixture.Base.Execute("DROP TRIGGER fixture_image_retire;"); }
+                    finally { fixture.Fixture.Base.Execute("DROP TRIGGER records.fixture_image_retire;"); }
                 }
                 var page = fixture.Retire(operation);
                 if (fault == "proof")
                 {
-                    fixture.Fixture.Base.Execute($"UPDATE record_content_retirements SET family_digest='{new string('0', 64)}' WHERE operation_id='{operation:D}';");
+                    fixture.Fixture.Base.Execute($"UPDATE records.record_content_retirements SET family_digest='{new string('0', 64)}' WHERE operation_id='{operation:D}';");
                     Assert.ThrowsAny<IOException>(() => RecordRetirementInventory.VerifyReadOnly(source.Instance, source.Database, new()));
                     Assert.ThrowsAny<IOException>(() => fixture.Images.OpenOriginal(image.Key, image.ResultSha256));
                     Assert.True(File.Exists(path));
@@ -238,9 +238,9 @@ public sealed class ImageRetirementTests
     }
     private static string ReadMarker(PlanBuilderFixture source, Guid runId)
     {
-        using var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT family_sha256 FROM execution_image_asset_catalog WHERE run_id=$run;";
+        command.CommandText = "SELECT family_sha256 FROM records.execution_image_asset_catalog WHERE run_id=$run;";
         command.Parameters.AddWithValue("$run", runId.ToString("D"));
         return Assert.IsType<string>(command.ExecuteScalar());
     }

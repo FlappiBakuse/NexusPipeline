@@ -1,6 +1,7 @@
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Scheduling;
 using NexusPipeline.Platform.Storage.Automation;
+using Microsoft.Data.Sqlite;
 
 namespace NexusPipeline.Platform.Storage.Scheduling;
 
@@ -17,9 +18,13 @@ internal sealed class ScheduleRuntimeService(IScheduleOccurrenceStore store, ISc
 
     internal void Initialize()
     {
-        runDays?.Tick();
-        startup?.Initialize();
-        CommitMinute();
+        try
+        {
+            runDays?.Tick();
+            startup?.Initialize();
+            CommitMinute();
+        }
+        catch (SqliteException error) when (error.SqliteErrorCode == 5) { }
     }
 
     internal Task RunAsync()
@@ -31,26 +36,30 @@ internal sealed class ScheduleRuntimeService(IScheduleOccurrenceStore store, ISc
     internal Task TickAsync() => _ticks.Run(async () =>
     {
         if (_stopping.IsCancellationRequested || lifecycle?.Phase == NexusPipeline.Core.Maintenance.HostLifecyclePhase.ClosePermitted) return;
-        var canCommit = lifecycle is null || lifecycle.Phase == NexusPipeline.Core.Maintenance.HostLifecyclePhase.Running;
-        if (canCommit) runDays?.Tick();
-        startup?.Tick(_stopping.Token, canCommit);
-        if (canCommit) CommitMinute();
-        if (providers is not null) await providers.TickAsync(canCommit).ConfigureAwait(false);
-        foreach (var occurrence in store.ReadWaiting(64))
+        try
         {
-            if (_stopping.IsCancellationRequested) break;
-            try { _ = await admission.StartAsync(occurrence, _stopping.Token).ConfigureAwait(false); }
-            catch (ExecutionSelectionException error) when (error.Message is "execution_resource_conflict" or "execution_host_unavailable" or "execution_admission_inbox_full" or
-                "execution_catalog_revision_conflict" or "execution_settings_revision_conflict")
-            { }
-            catch (ExecutionSelectionException error) when (error.Message == "execution_schedule_cancelled")
-            { _ = store.BlockWaiting(occurrence, "schedule_source_cancelled"); }
-            catch (ExecutionSelectionException) { _ = store.BlockWaiting(occurrence, "schedule_source_unavailable"); }
-            catch (NexusPipeline.Core.Configuration.ConfigurationException)
-            { _ = store.BlockWaiting(occurrence, "schedule_source_unavailable"); }
-            catch (IOException error) when (error.Message == "execution_budget_continuity_unknown")
-            { _ = store.BlockWaiting(occurrence, "schedule_budget_continuity_unknown"); }
+            var canCommit = lifecycle is null || lifecycle.Phase == NexusPipeline.Core.Maintenance.HostLifecyclePhase.Running;
+            if (canCommit) runDays?.Tick();
+            startup?.Tick(_stopping.Token, canCommit);
+            if (canCommit) CommitMinute();
+            if (providers is not null) await providers.TickAsync(canCommit).ConfigureAwait(false);
+            foreach (var occurrence in store.ReadWaiting(64))
+            {
+                if (_stopping.IsCancellationRequested) break;
+                try { _ = await admission.StartAsync(occurrence, _stopping.Token).ConfigureAwait(false); }
+                catch (ExecutionSelectionException error) when (error.Message is "execution_resource_conflict" or "execution_host_unavailable" or "execution_admission_inbox_full" or
+                    "execution_catalog_revision_conflict" or "execution_settings_revision_conflict")
+                { }
+                catch (ExecutionSelectionException error) when (error.Message == "execution_schedule_cancelled")
+                { _ = store.BlockWaiting(occurrence, "schedule_source_cancelled"); }
+                catch (ExecutionSelectionException) { _ = store.BlockWaiting(occurrence, "schedule_source_unavailable"); }
+                catch (NexusPipeline.Core.Configuration.ConfigurationException)
+                { _ = store.BlockWaiting(occurrence, "schedule_source_unavailable"); }
+                catch (IOException error) when (error.Message == "execution_budget_continuity_unknown")
+                { _ = store.BlockWaiting(occurrence, "schedule_budget_continuity_unknown"); }
+            }
         }
+        catch (SqliteException error) when (error.SqliteErrorCode == 5) { }
     });
 
     private void CommitMinute()
@@ -66,7 +75,8 @@ internal sealed class ScheduleRuntimeService(IScheduleOccurrenceStore store, ISc
     internal async Task StopAsync()
     {
         _stopping.Cancel(); providers?.RequestStop();
-        await _ticks.StopAsync().ConfigureAwait(false);
+        try { await _ticks.StopAsync().ConfigureAwait(false); }
+        catch (OperationCanceledException) when (_stopping.IsCancellationRequested) { }
         if (providers is not null) await providers.StopAsync().ConfigureAwait(false);
         try { await _loop.ConfigureAwait(false); }
         catch (OperationCanceledException) when (_stopping.IsCancellationRequested) { }

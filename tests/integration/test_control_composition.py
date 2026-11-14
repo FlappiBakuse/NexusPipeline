@@ -45,13 +45,7 @@ class ControlCompositionTests(unittest.TestCase):
 
         reader = threading.Thread(target=collect, daemon=True)
         reader.start()
-        deadline = time.monotonic() + 10
-        while True:
-            with contextlib.closing(sqlite3.connect((runtime / "state/nexus.db").as_uri() + "?mode=ro", uri=True)) as database:
-                if database.execute("SELECT count(*) FROM schedule_minute_claims;").fetchone()[0]:
-                    break
-            self.assertLess(time.monotonic(), deadline, "Initial scheduling did not complete")
-            time.sleep(0.02)
+        self.assertEqual("ready", self.get(started["address"], "/control/v1/status")["admission"])
 
         def save(level):
             current = self.get(started["address"], "/control/v1/settings")["saved"]

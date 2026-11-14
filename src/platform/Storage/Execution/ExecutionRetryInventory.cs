@@ -13,7 +13,7 @@ internal static class ExecutionRetryInventory
     internal static void Verify(RuntimeInstance instance, StateDatabase database, ContractReader contracts)
     {
         ExecutionRetryCancellation.VerifyInventory(database);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         foreach (var id in ReadIds(connection, transaction, retries: true))
@@ -38,7 +38,7 @@ internal static class ExecutionRetryInventory
                 retry.Frozen.NotBefore != decision.NotBefore || retry.Frozen.DeadlineUtc != DateTimeOffset.Parse(total.RetryPolicy.DeadlineUtc, CultureInfo.InvariantCulture) ||
                 retry.Frozen.IdempotencyKey != total.RetryPolicy.IdempotencyKey) throw RetryIntentCodec.Invalid();
             var declined = ExecutionRetryOutcomes.HasOutcome(connection, transaction, retry);
-            command.CommandText = "SELECT EXISTS(SELECT 1 FROM operations WHERE operation_id=$next);";
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operations WHERE operation_id=$next);";
             command.Parameters.Clear(); command.Parameters.AddWithValue("$next", retry.Frozen.NextOperationId.ToString("D"));
             if ((long)command.ExecuteScalar()! == 0) continue;
             if (declined) throw RetryIntentCodec.Invalid();
@@ -51,9 +51,9 @@ internal static class ExecutionRetryInventory
                 AttemptPlanCodec.Reference(nextAttempt.ExecutionPlan) != totalRef) throw RetryIntentCodec.Invalid();
         }
         command.Parameters.Clear();
-        command.CommandText = "SELECT 1 FROM operations o LEFT JOIN execution_retry_intents r ON r.operation_id=o.operation_id WHERE o.operation_kind='execution.retry.prepare' AND r.operation_id IS NULL LIMIT 1;";
+        command.CommandText = "SELECT 1 FROM main.operations o LEFT JOIN main.execution_retry_intents r ON r.operation_id=o.operation_id WHERE o.operation_kind='execution.retry.prepare' AND r.operation_id IS NULL LIMIT 1;";
         if (command.ExecuteScalar() is not null) throw RetryIntentCodec.Invalid();
-        command.CommandText = "SELECT 1 FROM operations o LEFT JOIN execution_retry_outcomes r ON r.operation_id=o.operation_id WHERE o.operation_kind='execution.retry.decline' AND r.operation_id IS NULL LIMIT 1;";
+        command.CommandText = "SELECT 1 FROM main.operations o LEFT JOIN main.execution_retry_outcomes r ON r.operation_id=o.operation_id WHERE o.operation_kind='execution.retry.decline' AND r.operation_id IS NULL LIMIT 1;";
         if (command.ExecuteScalar() is not null) throw RetryIntentCodec.Invalid();
         foreach (var run in ReadIds(connection, transaction, retries: false))
             _ = RunBudgetRows.Read(connection, transaction, run, boundary =>
@@ -76,7 +76,7 @@ internal static class ExecutionRetryInventory
         Guid run, Guid journal, string digest)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT attempt_id FROM attempt_receipts WHERE journal_id=$journal AND run_id=$run AND source_receipt_digest=$digest;";
+        command.CommandText = "SELECT attempt_id FROM records.attempt_receipts WHERE journal_id=$journal AND run_id=$run AND source_receipt_digest=$digest;";
         command.Parameters.AddWithValue("$journal", journal.ToString("D"));
         command.Parameters.AddWithValue("$run", run.ToString("D")); command.Parameters.AddWithValue("$digest", digest);
         var id = command.ExecuteScalar() as string ?? throw RetryIntentCodec.Invalid();
@@ -90,8 +90,8 @@ internal static class ExecutionRetryInventory
         {
             using var command = connection.CreateCommand(); command.Transaction = transaction;
             command.CommandText = retries
-                ? "SELECT operation_id FROM execution_retry_intents WHERE operation_id>$after ORDER BY operation_id LIMIT 64;"
-                : "SELECT run_id FROM execution_run_budget_states WHERE run_id>$after ORDER BY run_id LIMIT 64;";
+                ? "SELECT operation_id FROM main.execution_retry_intents WHERE operation_id>$after ORDER BY operation_id LIMIT 64;"
+                : "SELECT run_id FROM main.execution_run_budget_states WHERE run_id>$after ORDER BY run_id LIMIT 64;";
             command.Parameters.AddWithValue("$after", after);
             var page = new List<string>(64);
             using (var reader = command.ExecuteReader()) while (reader.Read()) page.Add(reader.GetString(0));

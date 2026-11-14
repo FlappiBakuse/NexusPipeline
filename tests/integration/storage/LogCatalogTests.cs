@@ -33,7 +33,7 @@ public sealed class LogCatalogTests
             instance = source.Instance; root = source.Root;
             runId = receipt.Facts.RunId; attemptId = receipt.Facts.AttemptId;
         }
-        var databasePath = Path.Combine(instance.RuntimeRoot, "state", "nexus.db");
+        var databasePath = Path.Combine(instance.RuntimeRoot, "state", "runtime.db");
         using (var lease = InstanceLease.Acquire(instance, new()))
         {
             var reopened = StateDatabase.OpenExisting(instance, Path.Combine(root, "log-limit-migration-inspection"),
@@ -91,10 +91,10 @@ public sealed class LogCatalogTests
         var selected = $"attempt_id='{receipt.Facts.AttemptId:D}' AND position=0";
         switch (fault)
         {
-            case "binding": fixture.Base.Execute("UPDATE execution_log_entries SET step_id='foreign-step' WHERE " + selected + ";"); break;
-            case "snapshot": fixture.Base.Execute("UPDATE execution_log_entries SET raw_sha256='" + new string('0', 64) + "' WHERE " + selected + ";"); break;
-            case "missing": fixture.Base.Execute("DELETE FROM execution_log_entries WHERE " + selected + ";"); break;
-            case "header": fixture.Base.Execute("UPDATE execution_log_catalog SET terminal_sha256='" + new string('0', 64) + "';"); break;
+            case "binding": fixture.Base.Execute("UPDATE records.execution_log_entries SET step_id='foreign-step' WHERE " + selected + ";"); break;
+            case "snapshot": fixture.Base.Execute("UPDATE records.execution_log_entries SET raw_sha256='" + new string('0', 64) + "' WHERE " + selected + ";"); break;
+            case "missing": fixture.Base.Execute("DELETE FROM records.execution_log_entries WHERE " + selected + ";"); break;
+            case "header": fixture.Base.Execute("UPDATE records.execution_log_catalog SET terminal_sha256='" + new string('0', 64) + "';"); break;
             case "raw": File.WriteAllText(Path.Combine(source.Instance.RuntimeRoot, "blobs", "content", raw.Parts[0].Sha256 + ".bin"), "preserve-unknown-bytes"); break;
         }
         if (fault == "raw")
@@ -117,13 +117,13 @@ public sealed class LogCatalogTests
         var receipt = Assert.IsType<AttemptReceipt>(await fixture.Consumer.RunNextAsync()); var source = fixture.Source;
         var original = new JournalStore(source.Instance, new()).Read(receipt.JournalId).Export();
         var projection = new LogCatalogProjection(source.Instance, source.Database, new(), source.Lease);
-        fixture.Base.Execute("CREATE TRIGGER fail_log_catalog BEFORE INSERT ON execution_log_entries BEGIN SELECT RAISE(ABORT,'fixture'); END;");
+        fixture.Base.Execute("CREATE TRIGGER records.fail_log_catalog BEFORE INSERT ON execution_log_entries BEGIN SELECT RAISE(ABORT,'fixture'); END;");
         try
         {
             Assert.Throws<Microsoft.Data.Sqlite.SqliteException>(() => projection.OnCommitted(receipt));
             Assert.Equal(0, fixture.Base.Count("execution_log_catalog")); Assert.Equal(0, fixture.Base.Count("execution_log_entries"));
         }
-        finally { fixture.Base.Execute("DROP TRIGGER fail_log_catalog;"); }
+        finally { fixture.Base.Execute("DROP TRIGGER records.fail_log_catalog;"); }
         projection.OnCommitted(receipt); projection.OnCommitted(receipt);
         var reader = new LogCatalogReader(source.Instance, source.Database, new());
         Assert.Equal(3, reader.ReadPage(new(receipt.Facts.RunId, receipt.Facts.AttemptId)).Items.Count);

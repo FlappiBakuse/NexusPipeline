@@ -10,6 +10,7 @@ internal sealed class JournalHistoryProtection : IDisposable
     private readonly List<FileStream> _revisions = [];
     private readonly List<string> _names = [];
     private readonly List<JournalDocument> _documents = [];
+    private IReadOnlyList<JournalDocument>? _view;
     private readonly StableDirectoryLease _directoryLease;
     private StableDirectoryLease? _planDirectory;
     private FileStream? _plan;
@@ -70,9 +71,11 @@ internal sealed class JournalHistoryProtection : IDisposable
 
     internal IReadOnlyList<JournalDocument> Read()
     {
-        RequireInventory();
-        return _documents.ToArray();
+        if (DirectoryAttributeScope.FirstRead(this)) RequireInventory();
+        return _view ??= Array.AsReadOnly(_documents.ToArray());
     }
+
+    internal void RequireAppend() => RequireInventory();
 
     internal void RequirePlan(JournalDocument document)
     {
@@ -80,19 +83,18 @@ internal sealed class JournalHistoryProtection : IDisposable
             document.PlanDigest != _planDigest) throw Invalid();
     }
 
-    internal void Include(JournalDocument document)
+    internal void Include(JournalDocument document, PhysicalObjectIdentity identity)
     {
-        if (!CanRetain(document.Export().Length) || document.Revision != _documents.Count + 1) throw Invalid();
-        RequirePlan(document);
         var name = document.Revision.ToString("D10", System.Globalization.CultureInfo.InvariantCulture) + ".json";
         var input = new FileStream(Path.Combine(_directory, name), FileMode.Open, FileAccess.Read, FileShare.Read);
         try
         {
-            var expected = document.Export();
-            if (input.Length != expected.Length) throw Invalid();
-            var bytes = new byte[expected.Length]; input.ReadExactly(bytes);
-            if (!bytes.AsSpan().SequenceEqual(expected)) throw Invalid();
+            if (!CanRetain(document.ByteLength) || document.Revision != _documents.Count + 1 || input.Length != document.ByteLength ||
+                PhysicalObjectIdentity.Read(input.SafeFileHandle) != identity)
+                throw Invalid();
+            RequirePlan(document);
             _revisions.Add(input); _names.Add(name); _documents.Add(document); TotalBytes += input.Length;
+            _view = null;
         }
         catch { input.Dispose(); throw; }
         RequireInventory();

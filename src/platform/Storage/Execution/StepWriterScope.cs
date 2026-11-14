@@ -185,8 +185,8 @@ internal sealed class StepWriterScope : IConfigurationWriterScope
             ExecutionCancellationRows.RequireDispatchOpen(connection, transaction, _journalId);
             ExecutionStepAdmission.RequireJobsInside(connection, transaction, _journalId, state.AllJobs);
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT EXISTS(SELECT 1 FROM journal_writer_job_roots WHERE journal_id=$journal " +
-                "AND writer_id=$writer AND job_name=$job) AND NOT EXISTS(SELECT 1 FROM journal_writer_job_closures " +
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.journal_writer_job_roots WHERE journal_id=$journal " +
+                "AND writer_id=$writer AND job_name=$job) AND NOT EXISTS(SELECT 1 FROM main.journal_writer_job_closures " +
                 "WHERE journal_id=$journal AND writer_id=$writer AND job_name=$job);";
             command.Parameters.AddWithValue("$journal", _journalId.ToString("D"));
             command.Parameters.AddWithValue("$writer", job.WriterId.ToString("D")); command.Parameters.AddWithValue("$job", job.JobName);
@@ -211,9 +211,9 @@ internal sealed class StepWriterScope : IConfigurationWriterScope
             ExecutionCancellationRows.RequireDispatchOpen(connection, transaction, _journalId);
             ExecutionStepAdmission.RequireJobsInside(connection, transaction, _journalId, state.AllJobs);
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT EXISTS(SELECT 1 FROM journal_writer_job_roots WHERE journal_id=$journal AND writer_id=$writer AND job_name=$job) " +
-                "AND EXISTS(SELECT 1 FROM journal_writer_job_roots WHERE journal_id=$journal AND writer_id=$primaryWriter AND job_name=$primaryJob) " +
-                "AND NOT EXISTS(SELECT 1 FROM journal_writer_job_closures WHERE journal_id=$journal AND writer_id=$writer AND job_name=$job);";
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.journal_writer_job_roots WHERE journal_id=$journal AND writer_id=$writer AND job_name=$job) " +
+                "AND EXISTS(SELECT 1 FROM main.journal_writer_job_roots WHERE journal_id=$journal AND writer_id=$primaryWriter AND job_name=$primaryJob) " +
+                "AND NOT EXISTS(SELECT 1 FROM main.journal_writer_job_closures WHERE journal_id=$journal AND writer_id=$writer AND job_name=$job);";
             command.Parameters.AddWithValue("$journal", _journalId.ToString("D")); command.Parameters.AddWithValue("$writer", job.WriterId.ToString("D"));
             command.Parameters.AddWithValue("$job", job.JobName); command.Parameters.AddWithValue("$primaryWriter", primary.WriterId.ToString("D"));
             command.Parameters.AddWithValue("$primaryJob", primary.JobName);
@@ -266,13 +266,13 @@ internal sealed class StepWriterScope : IConfigurationWriterScope
     {
         var state = Read();
         if (state.Jobs.Any(job => job.JobName == jobName)) throw new IOException("execution_unregistered_job_release_unverified");
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         AttemptWriterState.RequireCursor(connection, transaction, state.Journal, state.Gate.State);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM journal_writer_jobs WHERE job_name=$job) OR " +
-            "EXISTS(SELECT 1 FROM journal_writer_job_roots WHERE job_name=$job) OR " +
-            "EXISTS(SELECT 1 FROM journal_writer_job_closures WHERE job_name=$job);";
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.journal_writer_jobs WHERE job_name=$job) OR " +
+            "EXISTS(SELECT 1 FROM main.journal_writer_job_roots WHERE job_name=$job) OR " +
+            "EXISTS(SELECT 1 FROM main.journal_writer_job_closures WHERE job_name=$job);";
         command.Parameters.AddWithValue("$job", jobName);
         if ((long)command.ExecuteScalar()! != 0) throw new IOException("execution_unregistered_job_release_unverified");
     }
@@ -287,20 +287,20 @@ internal sealed class StepWriterScope : IConfigurationWriterScope
             binding.PlanDigest != _capturePlanDigest || native.InstanceId != _instance.InstanceId || native.AttemptId != ProcessScopeId ||
             !StringComparer.OrdinalIgnoreCase.Equals(native.ImagePath, Command.ExecutablePath) || native.ImageSha256 != Command.ExecutableSha256)
             throw new IOException("execution_capture_writer_unbound");
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         ExecutionCancellationRows.RequireDispatchOpen(connection, transaction, _journalId);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT r.process_id,r.created_file_time,r.image_path,r.image_sha256,r.user_sid,r.elevated," +
-            "w.process_id,w.created_file_time,w.image_path,w.image_sha256,w.user_sid,w.elevated FROM journal_writer_jobs b " +
-            "JOIN journal_writers w USING(journal_id,writer_id) JOIN journal_writer_job_roots r USING(journal_id,writer_id,job_name) " +
-            "JOIN operation_journals j ON j.journal_id=b.journal_id JOIN operations o ON o.operation_id=j.operation_id " +
-            "JOIN journal_effect_gates g ON g.journal_id=j.journal_id WHERE b.journal_id=$journal AND b.writer_id=$writer " +
+            "w.process_id,w.created_file_time,w.image_path,w.image_sha256,w.user_sid,w.elevated FROM main.journal_writer_jobs b " +
+            "JOIN main.journal_writers w USING(journal_id,writer_id) JOIN main.journal_writer_job_roots r USING(journal_id,writer_id,job_name) " +
+            "JOIN main.operation_journals j ON j.journal_id=b.journal_id JOIN main.operations o ON o.operation_id=j.operation_id " +
+            "JOIN main.journal_effect_gates g ON g.journal_id=j.journal_id WHERE b.journal_id=$journal AND b.writer_id=$writer " +
             "AND b.job_name=$job AND b.session_id=$session AND j.operation_id=$operation AND j.operation_kind='runAttempt' " +
             "AND j.phase='applying' AND g.state='entered' AND o.operation_kind='execution.start' AND o.initial_journal_id=j.journal_id " +
-            "AND j.plan_digest=$digest AND j.plan_path=$plan AND NOT EXISTS(SELECT 1 FROM journal_writer_job_closures c " +
+            "AND j.plan_digest=$digest AND j.plan_path=$plan AND NOT EXISTS(SELECT 1 FROM main.journal_writer_job_closures c " +
             "WHERE c.journal_id=b.journal_id AND c.writer_id=b.writer_id AND c.job_name=b.job_name) " +
-            "AND NOT EXISTS(SELECT 1 FROM execution_start_sources s WHERE s.operation_id=o.operation_id AND " +
+            "AND NOT EXISTS(SELECT 1 FROM main.execution_start_sources s WHERE s.operation_id=o.operation_id AND " +
             "(s.journal_id<>j.journal_id OR s.run_id<>$run OR s.attempt_ordinal<>$ordinal OR s.subject_id<>o.subject_id));";
         command.Parameters.AddWithValue("$journal", _journalId.ToString("D"));
         command.Parameters.AddWithValue("$writer", writer.WriterId.ToString("D"));

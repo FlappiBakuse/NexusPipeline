@@ -16,12 +16,12 @@ internal static class StepWritersEvidence
     internal static void RequireConfigurationStopped(RuntimeInstance instance, StateDatabase database, ContractReader contracts, Guid childJournalId, AttemptWriterState? verifiedParent = null)
     {
         Guid parentId; string stepId;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var command = connection.CreateCommand())
         {
-            command.CommandText = "SELECT s.parent_journal_id,s.step_id,o.operation_kind FROM configuration_run_resources r " +
-                "JOIN configuration_run_sessions s USING(session_id) JOIN operation_journals p ON p.journal_id=s.parent_journal_id " +
-                "JOIN operations o ON o.operation_id=p.operation_id WHERE r.journal_id=$child;";
+            command.CommandText = "SELECT s.parent_journal_id,s.step_id,o.operation_kind FROM configuration.configuration_run_resources r " +
+                "JOIN configuration.configuration_run_sessions s USING(session_id) JOIN main.operation_journals p ON p.journal_id=s.parent_journal_id " +
+                "JOIN main.operations o ON o.operation_id=p.operation_id WHERE r.journal_id=$child;";
             command.Parameters.AddWithValue("$child", childJournalId.ToString("D"));
             using var row = command.ExecuteReader();
             if (!row.Read()) return;
@@ -70,7 +70,7 @@ internal static class StepWritersEvidence
             var represented = GroupRoles(document.Root, total, stepId, jobs.Where(job => job.StepId == stepId));
             if (gate.State == EffectGateState.Entered && !represented.SetEquals(ExecutionBindingRoles.Required(input))) throw new IOException("execution_hook_dispatch_pending");
         }
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var transaction = connection.BeginTransaction(deferred: true))
         {
             ExecutionStepAdmission.RequireJobsInside(connection, transaction, parentId, WriterIntentCodec.ReadAllJobs(document.Root, total)); transaction.Commit();

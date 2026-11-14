@@ -53,13 +53,13 @@ internal sealed class MaintenancePendingStore
     internal IReadOnlyList<PendingHostUpdate> Pending()
     {
         _lease.VerifyHeld(_instance);
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         var ids = new List<(Guid Id, string Subject)>();
         using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
-            command.CommandText = "SELECT m.operation_id,o.subject_id FROM maintenance_operations m JOIN operations o ON o.operation_id=m.operation_id WHERE m.state=0 ORDER BY o.created_at,m.operation_id LIMIT 64;";
+            command.CommandText = "SELECT m.operation_id,o.subject_id FROM system.maintenance_operations m JOIN main.operations o ON o.operation_id=m.operation_id WHERE m.state=0 ORDER BY o.created_at,m.operation_id LIMIT 64;";
             using var rows = command.ExecuteReader();
             while (rows.Read()) ids.Add((Guid.Parse(rows.GetString(0)), rows.GetString(1)));
         }
@@ -76,7 +76,7 @@ internal sealed class MaintenancePendingStore
     internal HostUpdateOperation? Read(Guid operationId, string subject)
     {
         RequireIdentity(operationId, subject); _lease.VerifyHeld(_instance);
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         var row = MaintenanceOperationRows.ReadOwned(connection, transaction, operationId, subject);
         transaction.Commit(); return row is null ? null : Snapshot(row);
@@ -114,7 +114,7 @@ internal sealed class MaintenancePendingStore
             {
                 cancellation.ThrowIfCancellationRequested();
                 MaintenanceOperationRow row;
-                using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true))
+                using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System))
                 using (var transaction = connection.BeginTransaction(deferred: true))
                 { row = MaintenanceOperationRows.ReadOwned(connection, transaction, operationId, subject) ?? throw Invalid(); transaction.Commit(); }
                 if (row.State != HostUpdateState.Pending) throw Invalid();

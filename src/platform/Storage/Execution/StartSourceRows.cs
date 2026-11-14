@@ -16,7 +16,7 @@ internal static class StartSourceRows
     internal static FrozenStartSource Read(SqliteConnection connection, SqliteTransaction transaction, Guid operationId)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT s.subject_id,s.run_id,s.journal_id,s.request_json,s.retry_source_operation_id,o.subject_id,o.request_digest,o.operation_kind,o.initial_journal_id,s.attempt_ordinal FROM execution_start_sources s JOIN operations o ON o.operation_id=s.operation_id WHERE s.operation_id=$id;";
+        command.CommandText = "SELECT s.subject_id,s.run_id,s.journal_id,s.request_json,s.retry_source_operation_id,o.subject_id,o.request_digest,o.operation_kind,o.initial_journal_id,s.attempt_ordinal FROM main.execution_start_sources s JOIN main.operations o ON o.operation_id=s.operation_id WHERE s.operation_id=$id;";
         command.Parameters.AddWithValue("$id", operationId.ToString("D"));
         using var reader = command.ExecuteReader();
         if (!reader.Read()) throw Invalid();
@@ -40,7 +40,7 @@ internal static class StartSourceRows
         if (identity != ExecutionStartIdentity.Create(identity.OperationId, identity.SubjectId, request) ||
             attempt.OperationId != identity.OperationId.ToString("D")) throw Invalid();
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "INSERT INTO execution_start_sources(operation_id,subject_id,run_id,journal_id,request_json,retry_source_operation_id,attempt_ordinal) VALUES($operation,$subject,$run,$journal,$request,$source,$ordinal);";
+        command.CommandText = "INSERT INTO main.execution_start_sources(operation_id,subject_id,run_id,journal_id,request_json,retry_source_operation_id,attempt_ordinal) VALUES($operation,$subject,$run,$journal,$request,$source,$ordinal);";
         command.Parameters.AddWithValue("$operation", identity.OperationId.ToString("D")); command.Parameters.AddWithValue("$subject", identity.SubjectId);
         command.Parameters.AddWithValue("$ordinal", attempt.AttemptOrdinal);
         command.Parameters.AddWithValue("$run", attempt.RunId); command.Parameters.AddWithValue("$journal", attempt.JournalId);
@@ -55,12 +55,12 @@ internal static class StartSourceRows
 
     internal static void VerifyInventory(RuntimeInstance instance, StateDatabase database, ContractReader contracts)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT o.operation_id FROM operations o LEFT JOIN execution_start_sources s ON s.operation_id=o.operation_id WHERE o.operation_kind='execution.start' AND s.operation_id IS NULL LIMIT 1;";
+        command.CommandText = "SELECT o.operation_id FROM main.operations o LEFT JOIN main.execution_start_sources s ON s.operation_id=o.operation_id WHERE o.operation_kind='execution.start' AND s.operation_id IS NULL LIMIT 1;";
         if (command.ExecuteScalar() is not null) throw Invalid();
-        command.CommandText = "SELECT operation_id FROM execution_start_sources ORDER BY operation_id;";
+        command.CommandText = "SELECT operation_id FROM main.execution_start_sources ORDER BY operation_id;";
         var operations = new List<Guid>();
         using (var reader = command.ExecuteReader()) while (reader.Read()) operations.Add(Guid.ParseExact(reader.GetString(0), "D"));
         foreach (var id in operations)

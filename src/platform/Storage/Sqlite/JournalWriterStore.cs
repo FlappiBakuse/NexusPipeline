@@ -21,7 +21,7 @@ public sealed class JournalWriterStore(StateDatabase database)
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "INSERT INTO journal_writers VALUES($journal,$writer,$pid,$created,$path,$hash,$sid,$elevated);";
+        command.CommandText = "INSERT INTO main.journal_writers VALUES($journal,$writer,$pid,$created,$path,$hash,$sid,$elevated);";
         command.Parameters.AddWithValue("$journal", journalId.ToString("D"));
         command.Parameters.AddWithValue("$writer", writer.WriterId.ToString("D"));
         command.Parameters.AddWithValue("$pid", writer.Process.ProcessId);
@@ -56,7 +56,7 @@ public sealed class JournalWriterStore(StateDatabase database)
                 using (var members = connection.CreateCommand())
                 {
                     members.Transaction = transaction;
-                    members.CommandText = "SELECT r.journal_id FROM configuration_run_resources r JOIN configuration_run_sessions s USING(session_id) " +
+                    members.CommandText = "SELECT r.journal_id FROM configuration.configuration_run_resources r JOIN configuration.configuration_run_sessions s USING(session_id) " +
                         "WHERE s.parent_journal_id=$parent AND s.owner_operation_id=$owner AND s.step_id=$step AND s.invocation_ordinal=$invocation ORDER BY r.journal_id LIMIT 33;";
                     members.Parameters.AddWithValue("$parent", execution.Journal.JournalId.ToString("D"));
                     members.Parameters.AddWithValue("$owner", execution.Journal.OperationId.ToString("D")); members.Parameters.AddWithValue("$step", stepId);
@@ -74,13 +74,13 @@ public sealed class JournalWriterStore(StateDatabase database)
             }
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
-            command.CommandText = "INSERT INTO journal_writer_jobs SELECT $journal,$writer,$job,$session WHERE EXISTS " +
-                "(SELECT 1 FROM operation_journals WHERE journal_id=$journal AND (phase='prepared' OR $grouped=1 AND phase='applied')) AND NOT EXISTS " +
-                "(SELECT 1 FROM configuration_edit_sessions s JOIN operation_journals j ON j.operation_id=s.session_id WHERE j.journal_id=$journal AND s.writer_gate=1) AND NOT EXISTS " +
-                "(SELECT 1 FROM configuration_edit_sessions s JOIN operation_journals j ON j.operation_id=s.session_id JOIN journal_writer_jobs b ON b.journal_id=j.journal_id WHERE j.journal_id=$journal) AND NOT EXISTS " +
-                "(SELECT 1 FROM configuration_run_resources r JOIN configuration_run_sessions s ON s.session_id=r.session_id WHERE r.journal_id=$journal AND s.writer_gate=1) AND NOT EXISTS " +
-                "(SELECT 1 FROM configuration_run_resources r JOIN journal_writer_jobs b ON b.journal_id=r.journal_id WHERE r.journal_id=$journal AND $grouped=0) AND NOT EXISTS " +
-                "(SELECT 1 FROM operation_journals j JOIN operations o ON o.operation_id=j.operation_id WHERE j.journal_id=$journal AND o.operation_kind='execution.start');";
+            command.CommandText = "INSERT INTO main.journal_writer_jobs SELECT $journal,$writer,$job,$session WHERE EXISTS " +
+                "(SELECT 1 FROM main.operation_journals WHERE journal_id=$journal AND (phase='prepared' OR $grouped=1 AND phase='applied')) AND NOT EXISTS " +
+                "(SELECT 1 FROM configuration.configuration_edit_sessions s JOIN main.operation_journals j ON j.operation_id=s.session_id WHERE j.journal_id=$journal AND s.writer_gate=1) AND NOT EXISTS " +
+                "(SELECT 1 FROM configuration.configuration_edit_sessions s JOIN main.operation_journals j ON j.operation_id=s.session_id JOIN main.journal_writer_jobs b ON b.journal_id=j.journal_id WHERE j.journal_id=$journal) AND NOT EXISTS " +
+                "(SELECT 1 FROM configuration.configuration_run_resources r JOIN configuration.configuration_run_sessions s ON s.session_id=r.session_id WHERE r.journal_id=$journal AND s.writer_gate=1) AND NOT EXISTS " +
+                "(SELECT 1 FROM configuration.configuration_run_resources r JOIN main.journal_writer_jobs b ON b.journal_id=r.journal_id WHERE r.journal_id=$journal AND $grouped=0) AND NOT EXISTS " +
+                "(SELECT 1 FROM main.operation_journals j JOIN main.operations o ON o.operation_id=j.operation_id WHERE j.journal_id=$journal AND o.operation_kind='execution.start');";
             var journal = command.Parameters.Add("$journal", SqliteType.Text);
             command.Parameters.AddWithValue("$writer", owner.WriterId.ToString("D"));
             command.Parameters.AddWithValue("$job", jobName);
@@ -93,12 +93,12 @@ public sealed class JournalWriterStore(StateDatabase database)
                 if (isPrimary)
                 {
                     using var primary = connection.CreateCommand(); primary.Transaction = transaction;
-                    primary.CommandText = "UPDATE configuration_run_sessions SET primary_job_name=$job WHERE session_id IN " +
-                        "(SELECT session_id FROM configuration_run_resources WHERE journal_id=$journal) AND writer_gate=0 " +
+                    primary.CommandText = "UPDATE configuration.configuration_run_sessions SET primary_job_name=$job WHERE session_id IN " +
+                        "(SELECT session_id FROM configuration.configuration_run_resources WHERE journal_id=$journal) AND writer_gate=0 " +
                         "AND (primary_job_name IS NULL OR primary_job_name=$job);";
                     primary.Parameters.AddWithValue("$job", jobName); primary.Parameters.AddWithValue("$journal", id.ToString("D"));
                     primary.ExecuteNonQuery();
-                    primary.CommandText = "SELECT NOT EXISTS(SELECT 1 FROM configuration_run_resources r JOIN configuration_run_sessions s USING(session_id) " +
+                    primary.CommandText = "SELECT NOT EXISTS(SELECT 1 FROM configuration.configuration_run_resources r JOIN configuration.configuration_run_sessions s USING(session_id) " +
                         "WHERE r.journal_id=$journal AND (s.primary_job_name IS NULL OR s.primary_job_name<>$job));";
                     if ((long)primary.ExecuteScalar()! != 1) throw new IOException("configuration_primary_job_unbound");
                 }
@@ -128,12 +128,12 @@ public sealed class JournalWriterStore(StateDatabase database)
         if (owner.WriterId != step.WriterId || process.SessionId != step.SessionId || ProcessIdentityReader.Read(Environment.ProcessId) != owner.Process)
             throw new IOException("execution_writer_executor_unbound");
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "INSERT INTO journal_writer_jobs SELECT $journal,$writer,$job,$session WHERE EXISTS " +
-            "(SELECT 1 FROM operation_journals j JOIN operations o ON o.operation_id=j.operation_id JOIN journal_effect_gates g ON g.journal_id=j.journal_id " +
+        command.CommandText = "INSERT INTO main.journal_writer_jobs SELECT $journal,$writer,$job,$session WHERE EXISTS " +
+            "(SELECT 1 FROM main.operation_journals j JOIN main.operations o ON o.operation_id=j.operation_id JOIN main.journal_effect_gates g ON g.journal_id=j.journal_id " +
             "WHERE j.journal_id=$journal AND j.operation_id=$operation AND j.operation_kind='runAttempt' AND j.phase=$phase " +
             "AND j.revision=$revision AND o.operation_kind='execution.start' AND o.initial_journal_id=j.journal_id AND g.state=$gate) " +
-            "AND EXISTS(SELECT 1 FROM journal_writers WHERE journal_id=$journal AND writer_id=$writer) " +
-            "AND NOT EXISTS(SELECT 1 FROM journal_writer_jobs WHERE journal_id=$journal AND job_name=$job);";
+            "AND EXISTS(SELECT 1 FROM main.journal_writers WHERE journal_id=$journal AND writer_id=$writer) " +
+            "AND NOT EXISTS(SELECT 1 FROM main.journal_writer_jobs WHERE journal_id=$journal AND job_name=$job);";
         command.Parameters.AddWithValue("$journal", expected.JournalId.ToString("D")); command.Parameters.AddWithValue("$operation", expected.OperationId.ToString("D"));
         command.Parameters.AddWithValue("$revision", expected.Revision); command.Parameters.AddWithValue("$writer", step.WriterId.ToString("D"));
         command.Parameters.AddWithValue("$phase", expected.Phase.ToString().ToLowerInvariant());
@@ -170,11 +170,11 @@ public sealed class JournalWriterStore(StateDatabase database)
         var writer = CurrentWriter;
         if (((executor ?? database.ExecutorIdentity)?.ReadCurrent() ?? ProcessIdentityReader.Read(Environment.ProcessId)) != writer.Process)
             throw new IOException("cleanup_executor_identity_changed");
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM journal_writers WHERE journal_id=$journal AND writer_id=$writer " +
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.journal_writers WHERE journal_id=$journal AND writer_id=$writer " +
             "AND process_id=$pid AND created_file_time=$created AND image_path=$path AND image_sha256=$hash AND user_sid=$sid AND elevated=$elevated) " +
-            "AND ($noWorkers=0 OR NOT EXISTS(SELECT 1 FROM journal_writer_jobs WHERE journal_id=$journal AND writer_id=$writer));";
+            "AND ($noWorkers=0 OR NOT EXISTS(SELECT 1 FROM main.journal_writer_jobs WHERE journal_id=$journal AND writer_id=$writer));";
         command.Parameters.AddWithValue("$noWorkers", requireNoWorkers);
         command.Parameters.AddWithValue("$journal", journalId.ToString("D"));
         command.Parameters.AddWithValue("$writer", writer.WriterId.ToString("D"));
@@ -190,9 +190,9 @@ public sealed class JournalWriterStore(StateDatabase database)
 
     internal bool IsRegistered(Guid journalId, Guid writerId)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM journal_writers WHERE journal_id=$journal AND writer_id=$writer);";
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.journal_writers WHERE journal_id=$journal AND writer_id=$writer);";
         command.Parameters.AddWithValue("$journal", journalId.ToString("D"));
         command.Parameters.AddWithValue("$writer", writerId.ToString("D"));
         return (long)command.ExecuteScalar()! == 1;
@@ -217,7 +217,7 @@ public sealed class JournalWriterStore(StateDatabase database)
         Maintenance.MaintenanceRegisteredActor? maintenanceActor = null, bool creatorsOnly = false)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         var result = ObserveInside(connection, transaction, journalId, executingRecovery, executingProcess, maintenanceActor, creatorsOnly);
         transaction.Commit();
@@ -232,7 +232,7 @@ public sealed class JournalWriterStore(StateDatabase database)
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         maintenanceActor?.RequireRegisteredInside(connection, transaction, journalId);
-        command.CommandText = "SELECT writer_id,process_id,created_file_time,image_path,image_sha256,user_sid,elevated FROM journal_writers WHERE journal_id=$journal LIMIT 1025;";
+        command.CommandText = "SELECT writer_id,process_id,created_file_time,image_path,image_sha256,user_sid,elevated FROM main.journal_writers WHERE journal_id=$journal LIMIT 1025;";
         command.Parameters.AddWithValue("$journal", journalId.ToString("D"));
         var writers = new List<JournalWriter>();
         using (var reader = command.ExecuteReader())
@@ -253,7 +253,7 @@ public sealed class JournalWriterStore(StateDatabase database)
             // Other live owners retain their kill-on-close lifetime; observation must not extend it.
             if (observed == WriterState.Running) { state = WriterState.Running; continue; }
             if (creatorsOnly) continue;
-            command.CommandText = $"SELECT job_name,session_id FROM journal_writer_jobs WHERE journal_id=$journal AND writer_id=$writer LIMIT {JournalCapacityLimits.MaximumWriterJobs + 1};";
+            command.CommandText = $"SELECT job_name,session_id FROM main.journal_writer_jobs WHERE journal_id=$journal AND writer_id=$writer LIMIT {JournalCapacityLimits.MaximumWriterJobs + 1};";
             command.Parameters.Clear();
             command.Parameters.AddWithValue("$journal", journalId.ToString("D"));
             command.Parameters.AddWithValue("$writer", writer.WriterId.ToString("D"));

@@ -35,11 +35,11 @@ public sealed class AndroidCancellationTests
         var fixture = new AndroidRuntimeFixture(forceClose: false);
         await fixture.ExecuteAsync(async () =>
         {
-            fixture.Base.Execute("CREATE TRIGGER reject_android_root BEFORE INSERT ON execution_target_job_roots " +
+            fixture.Base.Execute("CREATE TRIGGER main.reject_android_root BEFORE INSERT ON execution_target_job_roots " +
                 "WHEN NEW.command_sequence IS NOT NULL BEGIN SELECT RAISE(ABORT,'fixture_android_root_failure'); END;");
             Exception? failure;
             try { failure = await Record.ExceptionAsync(async () => await fixture.Consumer.RunNextAsync()); }
-            finally { fixture.Base.Execute("DROP TRIGGER reject_android_root;"); }
+            finally { fixture.Base.Execute("DROP TRIGGER main.reject_android_root;"); }
             Assert.NotNull(failure);
             Assert.Contains("fixture_android_root_failure", failure.ToString());
             Assert.Equal(1, fixture.Consumer.PendingReconciliationCount);

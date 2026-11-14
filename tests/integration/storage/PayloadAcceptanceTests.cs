@@ -56,7 +56,7 @@ public sealed class PayloadAcceptanceTests
         catalog.Database.Write((connection, transaction) =>
         {
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "UPDATE journal_resource_claims SET mode=$mode WHERE journal_id=$journal AND resource_key='settings:host';";
+            command.CommandText = "UPDATE main.journal_resource_claims SET mode=$mode WHERE journal_id=$journal AND resource_key='settings:host';";
             command.Parameters.AddWithValue("$mode", (int)ResourceClaimMode.Reference);
             command.Parameters.AddWithValue("$journal", accepted.JournalId.ToString("D"));
             Assert.Equal(1, command.ExecuteNonQuery());
@@ -82,7 +82,7 @@ public sealed class PayloadAcceptanceTests
         var currentRevision = HistoryReadScope.ReadDatabase(database, (connection, transaction) =>
         {
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT revision FROM recovery_index_state WHERE singleton=1;";
+            command.CommandText = "SELECT revision FROM main.recovery_index_state WHERE singleton=1;";
             Assert.Equal(before.Revision, (long)command.ExecuteScalar()!);
             Assert.Equal(EffectGateState.Entered, gate.Enter(journal, 1).State);
             Assert.Equal(EffectGateState.Entered, gate.Read(accepted.JournalId).State);
@@ -123,8 +123,8 @@ public sealed class PayloadAcceptanceTests
             var change = new HostSettingsChange(before.Revision, before.Values with { Extensions = [new("fixture-plugin", false)] });
             _ = store.Commit(HostSettingsStore.Identity(Guid.NewGuid(), "local", change), change, DateTimeOffset.UtcNow);
         }
-        else if (changed == "catalog") fixture.Package.Catalog.Sql("UPDATE extension_catalog_heads SET sequence=1," +
-            "catalog_sha=(SELECT catalog_sha FROM extension_catalog_acceptances WHERE channel='stable' AND sequence=1) WHERE channel='stable';");
+        else if (changed == "catalog") fixture.Package.Catalog.Sql("UPDATE extensions.extension_catalog_heads SET sequence=1," +
+            "catalog_sha=(SELECT catalog_sha FROM extensions.extension_catalog_acceptances WHERE channel='stable' AND sequence=1) WHERE channel='stable';");
         else if (changed == "physical") Directory.CreateDirectory(fixture.Target);
         else fixture.Package.Catalog.Index.BlockUnknown("fixture_recovery_block");
         var count = fixture.Package.Catalog.Count("operations");
@@ -166,10 +166,10 @@ public sealed class PayloadAcceptanceTests
         _ = fixture.Prepare();
         var original = new HostSettingsStore(fixture.Package.Catalog.Database).Read();
         var count = fixture.Package.Catalog.Count("operations");
-        fixture.Package.Catalog.Sql("CREATE TRIGGER fixture_reject_extension_registration BEFORE INSERT ON operation_journals " +
+        fixture.Package.Catalog.Sql("CREATE TRIGGER main.fixture_reject_extension_registration BEFORE INSERT ON operation_journals " +
             "WHEN NEW.operation_kind='extensionApply' BEGIN SELECT RAISE(ABORT,'fixture'); END;");
         try { Assert.Throws<SqliteException>(() => fixture.Accept()); }
-        finally { fixture.Package.Catalog.Sql("DROP TRIGGER fixture_reject_extension_registration;"); }
+        finally { fixture.Package.Catalog.Sql("DROP TRIGGER main.fixture_reject_extension_registration;"); }
         Assert.Equal(count, fixture.Package.Catalog.Count("operations"));
         Assert.Equal(BoundedJson.Serialize(original), BoundedJson.Serialize(new HostSettingsStore(fixture.Package.Catalog.Database).Read()));
         var actual = fixture.Accept(); Assert.True(actual.Acceptance.IsNew);

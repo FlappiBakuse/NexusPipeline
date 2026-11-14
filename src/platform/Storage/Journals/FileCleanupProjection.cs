@@ -38,7 +38,7 @@ internal sealed class FileCleanupProjection(JournalStore store, RecoveryJournalR
                 if (next.Phase == JournalPhase.Committed)
                 {
                     using var command = connection.CreateCommand(); command.Transaction = transaction;
-                    command.CommandText = "UPDATE operations SET status='completed' WHERE initial_journal_id=$journal " +
+                    command.CommandText = "UPDATE main.operations SET status='completed' WHERE initial_journal_id=$journal " +
                         "AND operation_id=$operation AND operation_kind IN ($kind,$content) AND status='accepted';";
                     command.Parameters.AddWithValue("$journal", plan.JournalId.ToString("D"));
                     command.Parameters.AddWithValue("$operation", plan.OperationId.ToString("D"));
@@ -85,7 +85,7 @@ internal sealed class FileCleanupProjection(JournalStore store, RecoveryJournalR
                 if (next.Phase == JournalPhase.Committed)
                 {
                     using var command = connection.CreateCommand(); command.Transaction = transaction;
-                    command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$operation " +
+                    command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$operation " +
                         "AND operation_kind='file.cleanup' AND status='accepted' AND initial_journal_id=$journal;";
                     command.Parameters.AddWithValue("$operation", plan.OperationId.ToString("D"));
                     command.Parameters.AddWithValue("$journal", plan.JournalId.ToString("D"));

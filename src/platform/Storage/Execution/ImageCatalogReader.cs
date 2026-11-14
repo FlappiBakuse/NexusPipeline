@@ -13,7 +13,7 @@ public sealed class ImageCatalogReader(RuntimeInstance instance, StateDatabase d
         ImageCatalogPolicy.Validate(query);
         var expected = Read(query.RunId, query.AttemptId);
         var selected = new List<ImageCatalogItem>();
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var transaction = connection.BeginTransaction(deferred: true))
         {
             ImageCatalogRows.RequireSaved(connection, transaction, expected);
@@ -51,7 +51,7 @@ public sealed class ImageCatalogReader(RuntimeInstance instance, StateDatabase d
         var expected = Read(key.RunId, key.AttemptId, original: true);
         var entry = expected.Entries.SingleOrDefault(value => value.Item.Key == key && value.Result.Sha256 == resultSha256);
         if (entry is not { Png: not null } || entry.Item.Outcome != RunImageOutcome.Captured) throw ImageCatalogRows.Invalid();
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var transaction = connection.BeginTransaction(deferred: true))
         { ImageCatalogRows.RequireSaved(connection, transaction, expected); transaction.Commit(); }
         return new CaptureEvidenceReader(instance, database, contracts)

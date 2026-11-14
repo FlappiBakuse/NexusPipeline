@@ -39,7 +39,7 @@ public sealed class SenderOwnerTests
         await arrived.Task.WaitAsync(TimeSpan.FromSeconds(30));
         NotificationDeliveryTransition claimed;
         var delivery = new NotificationDeliveryCodec(instance, new()).Read(reference);
-        using (var connection = DatabaseConnections.Open(Path.Combine(instance.RuntimeRoot, "state", "nexus.db"), readOnly: true))
+        using (var connection = DatabaseConnections.Open(Path.Combine(instance.RuntimeRoot, "state", "runtime.db"), readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         {
             claimed = NotificationDeliveryRows.ReadState(connection, null, delivery.Document.OperationId);
             Assert.Equal(NotificationDeliveryState.Sending, claimed.State);
@@ -75,14 +75,14 @@ public sealed class SenderOwnerTests
         Assert.Equal(NotificationDeliveryState.Unknown, await reopened.SendOwnedAsync(sending, resources, reference));
         Assert.Empty(reopened.ReadQueuedForSource(source)); Assert.Empty(reopened.ReadSendingForSource(source));
         Assert.Single(sink.Requests);
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         {
             var unknown = NotificationDeliveryRows.ReadState(connection, null, delivery.Document.OperationId);
             Assert.Equal(NotificationDeliveryState.Unknown, unknown.State);
             Assert.Equal(claimed.Sender, unknown.Sender); Assert.Equal(claimed.Network, unknown.Network);
             Assert.Equal(claimed.Ordinal + 1, unknown.Ordinal);
             using var count = connection.CreateCommand();
-            count.CommandText = "SELECT (SELECT COUNT(*) FROM attempt_receipts)+(SELECT COUNT(*) FROM run_records);";
+            count.CommandText = "SELECT (SELECT COUNT(*) FROM records.attempt_receipts)+(SELECT COUNT(*) FROM records.run_records);";
             Assert.Equal(0L, count.ExecuteScalar());
         }
         var credential = Assert.Single(delivery.Document.Secrets.Where(item => item.Payload is not null)).Payload!;

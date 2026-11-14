@@ -64,9 +64,9 @@ public sealed class WorkScopeTests
             File.WriteAllBytes(Path.Combine(owner.Instance.RuntimeRoot, "journals", fixture.Producer.Plan.JournalId.ToString("D"), "unknown.bin"), [8, 6, 4]);
         else
         {
-            using var connection = DatabaseConnections.Open(owner.Database.DatabasePath);
+            using var connection = DatabaseConnections.Open(owner.Database.DatabasePath, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
             using var command = connection.CreateCommand();
-            command.CommandText = "UPDATE operations SET status='accepted' WHERE operation_id=$operation;";
+            command.CommandText = "UPDATE main.operations SET status='accepted' WHERE operation_id=$operation;";
             command.Parameters.AddWithValue("$operation", fixture.Producer.Plan.OperationId.ToString("D"));
             Assert.Equal(1, command.ExecuteNonQuery());
         }

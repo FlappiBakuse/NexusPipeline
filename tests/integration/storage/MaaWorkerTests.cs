@@ -145,8 +145,8 @@ public sealed class MaaWorkerTests
                 var finality = new ExecutionRunFinality(catalog.Instance, catalog.Database, new());
                 var records = new ExecutionRecordProjection(catalog.Instance, catalog.Database, new(), catalog.Lease, finality);
                 records.OnCommitted(receipt); records.ReconcileStopped(receipt); Assert.Null(records.ReconcileStoppedPage());
-                using var connection = DatabaseConnections.Open(catalog.Database.DatabasePath, readOnly: true);
-                using var command = connection.CreateCommand(); command.CommandText = "SELECT count(*) FROM run_records;";
+                using var connection = DatabaseConnections.Open(catalog.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.All);
+                using var command = connection.CreateCommand(); command.CommandText = "SELECT count(*) FROM records.run_records;";
                 Assert.Equal(0L, command.ExecuteScalar());
             }
             else AssertNativeFacts(catalog, state, blocked, android);

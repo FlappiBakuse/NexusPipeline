@@ -17,7 +17,7 @@ internal sealed class RunBudgetOwner(InstanceLease lease)
     internal DateTimeOffset? PreparedAt(StateDatabase database, Guid runId)
     {
         Require(database);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         return RunBudgetRows.Read(connection, transaction, runId)?.FirstPreparedAtUtc;
     }
@@ -35,7 +35,7 @@ internal sealed class RunBudgetOwner(InstanceLease lease)
         return lease.PublishExecution(() =>
         {
             RunBudgetObservation? saved;
-            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime))
             using (var transaction = connection.BeginTransaction(deferred: true))
                 saved = RunBudgetRows.Read(connection, transaction, origin.RunId);
             var budget = GetOrCreate(origin.RunId, origin.OperationId, total, deadline, saved, clock, startedTimestamp, firstPreparedAt);
@@ -66,7 +66,7 @@ internal sealed class RunBudgetOwner(InstanceLease lease)
             Require(database);
             var saved = Read(database, runId);
             Guid initialOperation;
-            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime))
             using (var transaction = connection.BeginTransaction(deferred: true))
                 initialOperation = StartSourceRows.Original(connection, transaction,
                     StartSourceRows.Read(connection, transaction, prepared.Identity.OperationId)).Identity.OperationId;
@@ -155,7 +155,7 @@ internal sealed class RunBudgetOwner(InstanceLease lease)
     internal void ReleaseBlockedOccurrence(StateDatabase database, NexusPipeline.Core.Scheduling.ScheduledOccurrence occurrence)
     {
         Require(database);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         var actual = ScheduleMinuteRows.ReadOccurrence(connection, transaction, occurrence.Frozen.OccurrenceId, lease.Instance.InstanceId);
         if (actual != occurrence || actual.Phase != NexusPipeline.Core.Scheduling.ScheduleOccurrencePhase.Blocked)
@@ -166,7 +166,7 @@ internal sealed class RunBudgetOwner(InstanceLease lease)
     internal void ReleaseBlockedStartup(StateDatabase database, Guid occurrenceId)
     {
         Require(database);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         var actual = StartupQueueRows.Read(connection, transaction, occurrenceId, lease.Instance.InstanceId);
         if (actual.BlockReason is null) throw RunBudgetRows.Invalid();
@@ -230,7 +230,7 @@ internal sealed class RunBudgetOwner(InstanceLease lease)
 
     private static RunBudgetObservation? Read(StateDatabase database, Guid runId)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         return RunBudgetRows.Read(connection, transaction, runId);
     }
@@ -257,7 +257,7 @@ internal sealed class RunBudgetOwner(InstanceLease lease)
     {
         lease.VerifyHeld(lease.Instance);
         if (database.InstanceId != lease.Instance.InstanceId || database.RuntimeRoot != lease.Instance.RuntimeRoot ||
-            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(lease.Instance.RuntimeRoot, "state", "nexus.db")))
+            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(lease.Instance.RuntimeRoot, "state", "runtime.db")))
             throw RunBudgetRows.Invalid();
     }
     private sealed record MeasuredRun(ExecutionTimeBudget Budget, Guid OperationId, TimeSpan Total, DateTimeOffset Deadline)

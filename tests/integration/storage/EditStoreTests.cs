@@ -86,12 +86,12 @@ public sealed class EditStoreTests
     {
         var fixture = new ConfigurationEditFixture(); fixture.InstallAll(); fixture.RestoreAll();
         var completion = fixture.Completion(); var operation = ConfigurationEditStore.SaveIdentity(Guid.NewGuid(), "fixture", completion);
-        fixture.Base.Execute("CREATE TRIGGER fixture_fail_edit BEFORE UPDATE ON configuration_edit_sessions WHEN NEW.phase=2 BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
+        fixture.Base.Execute("CREATE TRIGGER configuration.fixture_fail_edit BEFORE UPDATE ON configuration_edit_sessions WHEN NEW.phase=2 BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
         Assert.Throws<SqliteException>(() => fixture.Store.Save(operation, completion, DateTimeOffset.UtcNow));
         Assert.Null(fixture.Store.LookupSave(operation, completion));
         Assert.Equal(ConfigurationEditPhase.Editing, fixture.Store.Read(fixture.SessionId, "fixture")!.Phase);
         Assert.All(fixture.Initial.Changes, change => Assert.Equal(1, fixture.Base.Revisions.Read(change.Address)!.Revision));
-        fixture.VerifyOriginals(); fixture.Base.Execute("DROP TRIGGER fixture_fail_edit;");
+        fixture.VerifyOriginals(); fixture.Base.Execute("DROP TRIGGER configuration.fixture_fail_edit;");
         Assert.True(fixture.Store.Save(operation, completion, DateTimeOffset.UtcNow).IsNew);
         Assert.All(fixture.Initial.Changes, change => Assert.Equal(2, fixture.Base.Revisions.Read(change.Address)!.Revision));
     }
@@ -217,9 +217,9 @@ public sealed class EditStoreTests
         var fixture = new ConfigurationEditFixture();
         fixture.Base.Execute(field switch
         {
-            "instance" => "UPDATE configuration_edit_resources SET requires_instance=1;",
-            "contract" => "UPDATE configuration_edit_resources SET contract_digest='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';",
-            _ => "UPDATE configuration_edit_resources SET expected_revision=12345;"
+            "instance" => "UPDATE configuration.configuration_edit_resources SET requires_instance=1;",
+            "contract" => "UPDATE configuration.configuration_edit_resources SET contract_digest='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';",
+            _ => "UPDATE configuration.configuration_edit_resources SET expected_revision=12345;"
         });
         byte[] Bytes() => new[] { "", "-wal", "-shm" }.Where(suffix => File.Exists(fixture.Base.Database.DatabasePath + suffix))
             .SelectMany(suffix => File.ReadAllBytes(fixture.Base.Database.DatabasePath + suffix)).ToArray();
@@ -245,7 +245,7 @@ public sealed class EditStoreTests
         var expected = prepared.Use((_, resources) => resources);
         var journals = expected.Select(resource => resource.JournalId).ToHashSet();
         var registry = new RecoveryJournalRegistry(fixture.Database);
-        fixture.Execute("CREATE TRIGGER fixture_fail_begin BEFORE INSERT ON configuration_edit_resources WHEN NEW.resource_id='main' BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
+        fixture.Execute("CREATE TRIGGER configuration.fixture_fail_begin BEFORE INSERT ON configuration_edit_resources WHEN NEW.resource_id='main' BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
         Assert.Throws<SqliteException>(() => store.Begin(operation, prepared, DateTimeOffset.UtcNow));
         Assert.Null(store.Read(operation.OperationId, operation.SubjectId));
         Assert.Null(store.LookupBegin(operation, request));
@@ -253,7 +253,7 @@ public sealed class EditStoreTests
         Assert.DoesNotContain(failed.Journals, journal => journals.Contains(journal.JournalId) || journal.OperationId == operation.OperationId);
         Assert.DoesNotContain(failed.FileEffects, effect => journals.Contains(effect.JournalId));
         Assert.DoesNotContain(failed.Isolations, isolation => journals.Contains(isolation.JournalId));
-        fixture.Execute("DROP TRIGGER fixture_fail_begin;");
+        fixture.Execute("DROP TRIGGER configuration.fixture_fail_begin;");
         var accepted = store.Begin(operation, prepared, DateTimeOffset.UtcNow);
         Assert.True(accepted.IsNew);
         Assert.Equal(operation.OperationId, accepted.SessionId);

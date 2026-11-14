@@ -45,7 +45,7 @@ internal sealed class WorkEffectRotation(RuntimeInstance instance, StateDatabase
     {
         if (prepared.Count == 0) return [];
         BoundSecretDocument source;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System))
         {
             var reference = SecretDocumentRows.Find(connection, null, operationId) ?? throw WorkEffectRows.Invalid();
             source = new SecretDocumentFormat(instance, contracts).Read(reference);
@@ -74,7 +74,7 @@ internal sealed class WorkEffectRotation(RuntimeInstance instance, StateDatabase
                 foreach (var claim in result.Before.Claims)
                 {
                     using var command = connection.CreateCommand(); command.Transaction = transaction;
-                    command.CommandText = "INSERT INTO work_effect_rotations VALUES($claim,$op,$source,$run,$attempt,$before,$revision,$after,$next);";
+                    command.CommandText = "INSERT INTO main.work_effect_rotations VALUES($claim,$op,$source,$run,$attempt,$before,$revision,$after,$next);";
                     command.Parameters.AddWithValue("$claim", claim.ToString("D")); command.Parameters.AddWithValue("$op", operationId.ToString("D"));
                     command.Parameters.AddWithValue("$source", work.OperationId.ToString("D"));
                     command.Parameters.AddWithValue("$run", work.FrozenInvocation.RunId.ToString("D"));
@@ -91,7 +91,7 @@ internal sealed class WorkEffectRotation(RuntimeInstance instance, StateDatabase
     private string Family(IInstalledWork work, SecretFieldKey key, SecretValue material)
     {
         using var projected = work.ProjectIdentity(key.Field, material);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         return SecretReplayProof.Identity(instance, connection, key, work.RequireIdentity(), projected);
     }
 }

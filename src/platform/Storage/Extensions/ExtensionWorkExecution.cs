@@ -71,7 +71,7 @@ internal sealed class ExtensionWorkExecution
         _authority();
         if (_evidence is not null)
         {
-            using var heldConnection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+            using var heldConnection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System);
             using var heldTransaction = heldConnection.BeginTransaction(deferred: true);
             RequireInside(heldConnection, heldTransaction, allowUnaccepted); heldTransaction.Commit();
             return;
@@ -87,7 +87,7 @@ internal sealed class ExtensionWorkExecution
             var protectedIds = current.Footprint.Payload.OriginalObjects.Select(item => item.Identity).ToHashSet();
             if (actual.Origin.Proof.Nodes.Any(node => protectedIds.Contains(node.Identity))) throw Pending();
         }
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         RequireInside(connection, transaction, allowUnaccepted); transaction.Commit();
     }
@@ -103,7 +103,7 @@ internal sealed class ExtensionWorkExecution
             ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, _work.Origin.Producer.Source.ExtensionId) != _installed)
             throw Pending();
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM operation_journals WHERE journal_id=$journal);";
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operation_journals WHERE journal_id=$journal);";
         command.Parameters.AddWithValue("$journal", _work.Page.JournalId.ToString("D"));
         if ((long)command.ExecuteScalar()! == 0)
         {
@@ -115,7 +115,7 @@ internal sealed class ExtensionWorkExecution
         if (current.Kind != NexusPipeline.Core.Configuration.JournalKind.FileCleanup ||
             current.OperationId != _work.Page.OperationId || current.PlanPath != _planReference.RelativePath ||
             current.PlanDigest != _planReference.Sha256 || !current.ResourceKeys.SequenceEqual(claims.Select(item => item.ResourceKey))) throw Pending();
-        command.CommandText = "SELECT resource_key,mode FROM journal_resource_claims WHERE journal_id=$journal ORDER BY resource_key LIMIT 4097;";
+        command.CommandText = "SELECT resource_key,mode FROM main.journal_resource_claims WHERE journal_id=$journal ORDER BY resource_key LIMIT 4097;";
         using var rows = command.ExecuteReader(); var index = 0;
         while (rows.Read())
             if (index >= claims.Length || rows.GetString(0) != claims[index].ResourceKey || rows.GetInt32(1) != (int)claims[index++].Mode) throw Pending();

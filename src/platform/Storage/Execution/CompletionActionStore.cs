@@ -88,7 +88,7 @@ internal sealed class CompletionActionStore(StateDatabase database, InstanceLeas
     public CompletionActionSnapshot? Read(Guid operationId, string subject)
     {
         lease.VerifyHeld(lease.Instance);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         return CompletionActionRows.Read(connection, transaction, operationId, subject);
     }

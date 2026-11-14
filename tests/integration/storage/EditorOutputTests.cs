@@ -127,7 +127,7 @@ public sealed class EditorOutputTests
         using var fixture = new EditorOutputFixture();
         await fixture.WriteAsync(fixture.Edit.Request.Targets.Select(target => (object)new { target = target.TargetPath, kind = "file", value = "retry-stopped" }).ToArray());
         var writers = await fixture.ReadWritersAsync();
-        fixture.Edit.Base.Execute("CREATE TRIGGER fixture_fail_closure BEFORE INSERT ON journal_writer_job_closures " +
+        fixture.Edit.Base.Execute("CREATE TRIGGER main.fixture_fail_closure BEFORE INSERT ON journal_writer_job_closures " +
             "BEGIN SELECT RAISE(ABORT,'fixture_editor_digest:' || NEW.plan_digest); END;");
         SqliteException failure;
         try
@@ -135,7 +135,7 @@ public sealed class EditorOutputTests
             failure = await Assert.ThrowsAsync<SqliteException>(() => fixture.Editor.StopAsync(TimeSpan.FromSeconds(5)));
             Assert.All(writers, writer => Assert.Equal(WriterState.Stopped, WriterStopEvidence.ObserveProcess(writer)));
         }
-        finally { fixture.Edit.Base.Execute("DROP TRIGGER fixture_fail_closure;"); }
+        finally { fixture.Edit.Base.Execute("DROP TRIGGER main.fixture_fail_closure;"); }
         var stopped = await fixture.Editor.StopAsync(TimeSpan.FromSeconds(5));
         Assert.Contains("fixture_editor_digest:" + stopped.Reference.Sha256, failure.Message, StringComparison.Ordinal);
         fixture.Editor.Dispose(); var completion = fixture.Seal(stopped); fixture.Edit.RestoreAll(); fixture.Edit.VerifyOriginals();

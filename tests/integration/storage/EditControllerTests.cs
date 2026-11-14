@@ -167,12 +167,12 @@ public sealed class EditControllerTests
         using var process = Process.GetProcessById(pid);
         var session = fixture.Controller.Read(fixture.SessionId, "fixture")!;
         var operations = new OperationQueryService(fixture.Base.Instance, fixture.Lease, fixture.Base.Database);
-        fixture.Base.Execute("CREATE TRIGGER fixture_fail_controller BEFORE UPDATE ON configuration_edit_sessions WHEN NEW.phase=2 BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
+        fixture.Base.Execute("CREATE TRIGGER configuration.fixture_fail_controller BEFORE UPDATE ON configuration_edit_sessions WHEN NEW.phase=2 BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
         try
         {
             await Assert.ThrowsAsync<SqliteException>(() => fixture.Controller.SaveAsync(operation, "fixture", fixture.SessionId, 2, DateTimeOffset.UtcNow));
         }
-        finally { fixture.Base.Execute("DROP TRIGGER fixture_fail_controller;"); }
+        finally { fixture.Base.Execute("DROP TRIGGER configuration.fixture_fail_controller;"); }
         Assert.True(process.HasExited);
         Assert.Null(operations.Read(operation, "fixture"));
         fixture.VerifyOriginals();
@@ -264,7 +264,7 @@ public sealed class EditControllerTests
     {
         await using var fixture = new EditControllerFixture(); await fixture.BeginAsync();
         await fixture.Controller.CancelAsync(Guid.NewGuid(), "fixture", fixture.SessionId, 2, DateTimeOffset.UtcNow);
-        fixture.Base.Execute("UPDATE journal_resource_claims SET mode=0 WHERE resource_key LIKE 'filesystem:entry:%';");
+        fixture.Base.Execute("UPDATE main.journal_resource_claims SET mode=0 WHERE resource_key LIKE 'filesystem:entry:%';");
         var path = fixture.Base.Database.DatabasePath;
         var evidence = new[] { "", "-wal", "-shm", "-journal" }.Where(suffix => File.Exists(path + suffix))
             .ToDictionary(suffix => suffix, suffix => File.ReadAllBytes(path + suffix));

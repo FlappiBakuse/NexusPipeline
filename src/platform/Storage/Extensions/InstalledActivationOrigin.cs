@@ -74,7 +74,7 @@ internal sealed class InstalledActivationOrigin : IDisposable
                 result._processIdentity = executor ?? lease.ExecutorIdentity;
                 var package = installed.Operation.Source.Package ?? throw Invalid();
                 result._catalogEvidence = catalog.ProtectInstalledHistory(root, package.Catalog, package.Entry);
-                result._sql = new(database.DatabasePath, "activation.sql.validate");
+                result._sql = new(database, "activation.sql.validate");
                 _ = result.RequireCurrent(); return result;
             }
             catch { result.Dispose(); throw; }

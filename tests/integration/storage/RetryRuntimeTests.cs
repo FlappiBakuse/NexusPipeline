@@ -169,10 +169,10 @@ public sealed class RetryRuntimeTests
         var first = await fixture.RunInterruptedAsync();
         fixture.Base.Execute(damage switch
         {
-            "missing" => "DELETE FROM execution_retry_intents;",
-            "digest" => "UPDATE operations SET request_digest='" + new string('a', 64) + "' WHERE operation_kind='execution.retry.prepare';",
-            "subject" => "UPDATE execution_retry_intents SET document_json=json_set(document_json,'$.subjectId','foreign');",
-            _ => "UPDATE execution_retry_intents SET document_json=json_set(document_json,'$.totalPlan.sha256','" + new string('b', 64) + "');"
+            "missing" => "DELETE FROM main.execution_retry_intents;",
+            "digest" => "UPDATE main.operations SET request_digest='" + new string('a', 64) + "' WHERE operation_kind='execution.retry.prepare';",
+            "subject" => "UPDATE main.execution_retry_intents SET document_json=json_set(document_json,'$.subjectId','foreign');",
+            _ => "UPDATE main.execution_retry_intents SET document_json=json_set(document_json,'$.totalPlan.sha256','" + new string('b', 64) + "');"
         });
         var before = File.ReadAllBytes(fixture.Source.Database.DatabasePath);
         var wal = fixture.Source.Database.DatabasePath + "-wal";

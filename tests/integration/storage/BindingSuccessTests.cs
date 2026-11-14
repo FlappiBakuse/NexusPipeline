@@ -68,7 +68,7 @@ public sealed class BindingSuccessTests
         fixture.Source.Database.Write((connection, transaction) =>
         {
             using var reset = connection.CreateCommand(); reset.Transaction = transaction;
-            reset.CommandText = "DELETE FROM execution_binding_successes;"; reset.ExecuteNonQuery();
+            reset.CommandText = "DELETE FROM main.execution_binding_successes;"; reset.ExecuteNonQuery();
             ExecutionBindingSuccesses.Project(connection, transaction, fixture.State, history[^1], temporalHistory);
             return true;
         });

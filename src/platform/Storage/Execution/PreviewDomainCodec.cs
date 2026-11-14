@@ -71,9 +71,10 @@ internal static class PreviewDomainCodec
         return total.Steps.Where(step => states.ContainsKey(step.StepId)).Select(step => states[step.StepId]).ToImmutableArray();
     }
 
-    internal static void RequireHistory(IReadOnlyList<JournalDocument> history, ExecutionPlan total, string totalSha256)
+    internal static void RequireHistory(IEnumerable<JournalDocument> history, ExecutionPlan total, string totalSha256,
+        JournalDocument? previous = null)
     {
-        JsonElement[] prior = [];
+        JsonElement[] prior = previous is null ? [] : previous.Root.GetProperty("participants").EnumerateArray().Where(IsParticipant).ToArray();
         foreach (var document in history)
         {
             _ = Read(document.Root, total, totalSha256);

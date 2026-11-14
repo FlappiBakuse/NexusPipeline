@@ -17,10 +17,10 @@ internal static class SnapshotCompletionFacts
             resource.PlanPath, resource.PlanDigest,
             JournalDigest = Convert.ToHexStringLower(SHA256.HashData(journals.Read(resource.JournalId).Export()))
         }).ToArray();
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration);
         using var command = ConfigurationRunRows.Command(connection, null, session.SessionId);
         command.CommandText = "SELECT r.journal_id,c.writer_id,c.job_name,c.plan_path,c.plan_digest,c.plan_size " +
-            "FROM configuration_run_resources r JOIN journal_writer_job_closures c ON c.journal_id=r.journal_id " +
+            "FROM configuration.configuration_run_resources r JOIN main.journal_writer_job_closures c ON c.journal_id=r.journal_id " +
             "WHERE r.session_id=$session ORDER BY r.resource_id LIMIT 33;";
         var closures = new List<object>();
         using (var rows = command.ExecuteReader())

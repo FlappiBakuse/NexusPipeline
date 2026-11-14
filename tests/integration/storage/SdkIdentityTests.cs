@@ -49,7 +49,7 @@ public sealed class SdkIdentityTests
             Assert.False(File.Exists(Path.Combine(fixture.ActivationDirectory, "resource.bin")));
             Assert.Empty(duplicates);
             Assert.Empty(fixture.Activator.ReadPublishedScopes());
-            using var connection = DatabaseConnections.Open(fixture.Package.Catalog.Database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(fixture.Package.Catalog.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
             using var transaction = connection.BeginTransaction(deferred: true);
             Assert.Null(ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, "fixture-plugin"));
             Assert.Null(fixture.Binding().Read(fixture.Accepted.JournalId, fixture.Accepted.Plan).Commit);

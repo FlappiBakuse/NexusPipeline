@@ -15,7 +15,7 @@ internal static class JournalResourceClaims
     internal static void Insert(SqliteConnection connection, SqliteTransaction transaction, Guid journalId, IReadOnlyList<ResourceClaim> claims)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "INSERT INTO journal_resource_claims VALUES($journal,$resource,$mode);";
+        command.CommandText = "INSERT INTO main.journal_resource_claims VALUES($journal,$resource,$mode);";
         command.Parameters.AddWithValue("$journal", journalId.ToString("D"));
         var key = command.Parameters.Add("$resource", SqliteType.Text); var mode = command.Parameters.Add("$mode", SqliteType.Integer);
         foreach (var claim in claims)
@@ -27,10 +27,13 @@ internal static class JournalResourceClaims
 
     internal static IReadOnlyDictionary<string, ResourceClaimMode> Read(StateDatabase database, Guid journalId)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
-        return ReadBatch(connection, transaction, [journalId])[journalId];
+        return ReadInside(connection, transaction, journalId);
     }
+
+    internal static IReadOnlyDictionary<string, ResourceClaimMode> ReadInside(SqliteConnection connection,
+        SqliteTransaction transaction, Guid journalId) => ReadBatch(connection, transaction, [journalId])[journalId];
 
     private static Dictionary<Guid, Dictionary<string, ResourceClaimMode>> ReadBatch(SqliteConnection connection,
         SqliteTransaction transaction, IReadOnlyList<Guid> journals)
@@ -44,7 +47,7 @@ internal static class JournalResourceClaims
             command.Parameters.AddWithValue(name, id.ToString("D"));
             return name;
         });
-        command.CommandText = "SELECT journal_id,resource_key,mode FROM journal_resource_claims WHERE journal_id IN (" +
+        command.CommandText = "SELECT journal_id,resource_key,mode FROM main.journal_resource_claims WHERE journal_id IN (" +
             string.Join(',', parameters) + ") ORDER BY journal_id,resource_key;";
         var result = journals.ToDictionary(id => id, _ => new Dictionary<string, ResourceClaimMode>(StringComparer.Ordinal));
         using var row = command.ExecuteReader();
@@ -60,7 +63,7 @@ internal static class JournalResourceClaims
 
     internal static void VerifyInventory(RuntimeInstance instance, StateDatabase database, ContractReader contracts, PayloadApplyRoots? payloadRoots = null)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         VerifyScope(instance, database, contracts, RecoveryJournalRegistry.ReadHistoryInside(connection, transaction), payloadRoots);
     }
@@ -68,7 +71,7 @@ internal static class JournalResourceClaims
     internal static void VerifyScope(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
         IEnumerable<RegisteredJournal> registered, PayloadApplyRoots? payloadRoots = null)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         foreach (var batch in registered.Chunk(128))
         {

@@ -18,7 +18,14 @@
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.13" />
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
     <EmbeddedResource Include="../../contracts/schemas/*.schema.json" LogicalName="Contracts.%(Filename)%(Extension)" />
-    <EmbeddedResource Include="Storage/Sqlite/StateSchema.sql" LogicalName="Storage.StateSchema.sql" />
+    <EmbeddedResource Include="Storage/Sqlite/RuntimeSchema.sql" LogicalName="Storage.runtime.sql" />
+    <EmbeddedResource Include="Storage/Sqlite/AutomationSchema.sql" LogicalName="Storage.automation.sql" />
+    <EmbeddedResource Include="Storage/Sqlite/ConfigurationSchema.sql" LogicalName="Storage.configuration.sql" />
+    <EmbeddedResource Include="Storage/Sqlite/RecordsSchema.sql" LogicalName="Storage.records.sql" />
+    <EmbeddedResource Include="Storage/Sqlite/NotificationsSchema.sql" LogicalName="Storage.notifications.sql" />
+    <EmbeddedResource Include="Storage/Sqlite/ExtensionsSchema.sql" LogicalName="Storage.extensions.sql" />
+    <EmbeddedResource Include="Storage/Sqlite/SystemSchema.sql" LogicalName="Storage.system.sql" />
+    <EmbeddedResource Include="Storage/Sqlite/ContentSchema.sql" LogicalName="Storage.content.sql" />
     <EmbeddedResource Include="Security/release-trust.json" LogicalName="Security.ReleaseTrust.json" />
     <ProjectReference Include="../core/NexusPipeline.Core.csproj" />
     <ProjectReference Include="../../sdk/dotnet/NexusPipeline.Extensibility.csproj" />

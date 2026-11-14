@@ -13,10 +13,10 @@ internal sealed class RunProgressStore(RuntimeInstance instance, StateDatabase d
 {
     internal RunSyncResult? Lookup(Guid operationId, string subject, Guid sessionId, ConfigurationRunPhase? terminal = null)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT subject_id,operation_kind,status FROM operations WHERE operation_id=$operation;";
+        command.CommandText = "SELECT subject_id,operation_kind,status FROM main.operations WHERE operation_id=$operation;";
         command.Parameters.AddWithValue("$operation", operationId.ToString("D"));
         using (var row = command.ExecuteReader())
         {
@@ -26,8 +26,8 @@ internal sealed class RunProgressStore(RuntimeInstance instance, StateDatabase d
         }
         var session = ConfigurationRunStore.Required(connection, transaction, sessionId, subject);
         if (terminal.HasValue && session.Phase != terminal) throw new OperationConflictException();
-        command.CommandText = terminal.HasValue ? "SELECT EXISTS(SELECT 1 FROM configuration_run_sessions WHERE session_id=$session AND completion_operation_id=$operation);" :
-            "SELECT EXISTS(SELECT 1 FROM configuration_run_syncs WHERE session_id=$session AND operation_id=$operation);";
+        command.CommandText = terminal.HasValue ? "SELECT EXISTS(SELECT 1 FROM configuration.configuration_run_sessions WHERE session_id=$session AND completion_operation_id=$operation);" :
+            "SELECT EXISTS(SELECT 1 FROM configuration.configuration_run_syncs WHERE session_id=$session AND operation_id=$operation);";
         command.Parameters.AddWithValue("$session", sessionId.ToString("D"));
         if ((long)command.ExecuteScalar()! != 1) throw new OperationConflictException();
         return ReadResult(connection, transaction, operationId, session);
@@ -90,11 +90,11 @@ internal sealed class RunProgressStore(RuntimeInstance instance, StateDatabase d
         {
             var next = published?.Items.SingleOrDefault(value => value.Saved.Address == item.Resource.Address)?.Saved.Revision ?? item.Resource.CurrentRevision;
             using var command = ConfigurationRunRows.Command(connection, transaction, session.SessionId);
-            command.CommandText = "INSERT INTO configuration_run_sync_items VALUES($operation,$resource,$previous,$current,$reason);";
+            command.CommandText = "INSERT INTO configuration.configuration_run_sync_items VALUES($operation,$resource,$previous,$current,$reason);";
             command.Parameters.AddWithValue("$operation", operation.OperationId.ToString("D")); command.Parameters.AddWithValue("$resource", item.Resource.Address.ResourceId);
             command.Parameters.AddWithValue("$previous", item.Resource.CurrentRevision); command.Parameters.AddWithValue("$current", next);
             command.Parameters.AddWithValue("$reason", item.ReasonCode); command.ExecuteNonQuery();
-            command.CommandText = "UPDATE configuration_run_resources SET current_revision=$current WHERE session_id=$session AND resource_id=$resource AND current_revision=$previous;";
+            command.CommandText = "UPDATE configuration.configuration_run_resources SET current_revision=$current WHERE session_id=$session AND resource_id=$resource AND current_revision=$previous;";
             if (command.ExecuteNonQuery() != 1) throw new ConfigurationException("configuration_run_revision_conflict");
         }
         var due = executed && (terminal.HasValue || sample.ElapsedMilliseconds >= 15000);
@@ -103,18 +103,18 @@ internal sealed class RunProgressStore(RuntimeInstance instance, StateDatabase d
             command.Parameters.AddWithValue("$operation", operation.OperationId.ToString("D"));
             if (due)
             {
-                command.CommandText = "INSERT INTO configuration_run_syncs VALUES($session,$ordinal,$operation,$elapsed);";
+                command.CommandText = "INSERT INTO configuration.configuration_run_syncs VALUES($session,$ordinal,$operation,$elapsed);";
                 command.Parameters.AddWithValue("$ordinal", checked(session.SyncOrdinal + 1)); command.Parameters.AddWithValue("$elapsed", sample.ElapsedMilliseconds); command.ExecuteNonQuery();
             }
-            command.CommandText = "UPDATE configuration_run_sessions SET revision=revision+1,sync_ordinal=sync_ordinal+$due,phase=$phase,completion_operation_id=$completion WHERE session_id=$session;";
+            command.CommandText = "UPDATE configuration.configuration_run_sessions SET revision=revision+1,sync_ordinal=sync_ordinal+$due,phase=$phase,completion_operation_id=$completion WHERE session_id=$session;";
             command.Parameters.AddWithValue("$due", due ? 1 : 0); command.Parameters.AddWithValue("$phase", (int)(terminal ?? session.Phase));
             command.Parameters.AddWithValue("$completion", terminal.HasValue ? operation.OperationId.ToString("D") : DBNull.Value); command.ExecuteNonQuery();
             if (terminal.HasValue)
             {
-                command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id IN (SELECT operation_id FROM configuration_run_resources WHERE session_id=$session) OR operation_id=$session;";
+                command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id IN (SELECT operation_id FROM configuration.configuration_run_resources WHERE session_id=$session) OR operation_id=$session;";
                 command.ExecuteNonQuery();
             }
-            command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$operation;"; command.ExecuteNonQuery();
+            command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$operation;"; command.ExecuteNonQuery();
         }
         var result = ReadResult(connection, transaction, operation.OperationId, ConfigurationRunStore.Required(connection, transaction, session.SessionId, operation.SubjectId));
         return result with { IsNew = true };
@@ -123,7 +123,7 @@ internal sealed class RunProgressStore(RuntimeInstance instance, StateDatabase d
     private static RunSyncResult ReadResult(SqliteConnection connection, SqliteTransaction transaction, Guid operationId, ConfigurationRunStatus session)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT resource_id,previous_revision,current_revision,reason_code FROM configuration_run_sync_items WHERE operation_id=$operation ORDER BY resource_id LIMIT 33;";
+        command.CommandText = "SELECT resource_id,previous_revision,current_revision,reason_code FROM configuration.configuration_run_sync_items WHERE operation_id=$operation ORDER BY resource_id LIMIT 33;";
         command.Parameters.AddWithValue("$operation", operationId.ToString("D"));
         var items = ImmutableArray.CreateBuilder<RunSyncItem>();
         using (var rows = command.ExecuteReader())

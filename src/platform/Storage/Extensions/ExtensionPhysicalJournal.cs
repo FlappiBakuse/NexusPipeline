@@ -187,7 +187,7 @@ internal sealed class ExtensionPhysicalJournal(RuntimeInstance instance, StateDa
     private void RequireEffects(RegisteredJournal registered, FrozenPayloadApply plan,
         IReadOnlyList<JournalDocument> history, ImmutableArray<ExtensionPhysicalEntry> entries)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.All);
         using var transaction = connection.BeginTransaction(deferred: true);
         PayloadEffectCursor.RequireEffectsInside(connection, transaction, registered, plan, history, entries);
         transaction.Commit();

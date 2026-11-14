@@ -149,31 +149,33 @@ internal sealed class PlanBuilderFixture : IDisposable
 
     internal (string[] Rows, string[] Files) Snapshot()
     {
-        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        using var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open(new SqliteConnectionStringBuilder
             { DataSource = Database.DatabasePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
         connection.Open();
         using var transaction = connection.BeginTransaction(deferred: true);
-        var tables = new List<string>();
-        using (var command = connection.CreateCommand())
+        var tables = new List<(string Alias, string Name)>();
+        foreach (var domain in DatabaseLayout.Domains)
         {
+            var alias = DatabaseLayout.Alias(domain);
+            using var command = connection.CreateCommand();
             command.Transaction = transaction;
-            command.CommandText = "SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name;";
-            using var reader = command.ExecuteReader(); while (reader.Read()) tables.Add(reader.GetString(0));
+            command.CommandText = "SELECT name FROM " + alias + ".sqlite_schema WHERE type='table' ORDER BY name;";
+            using var reader = command.ExecuteReader(); while (reader.Read()) tables.Add((alias, reader.GetString(0)));
         }
         var rows = new List<string>();
         foreach (var table in tables)
         {
             rows.Add("table:" + table);
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT * FROM \"" + table.Replace("\"", "\"\"", StringComparison.Ordinal) + "\";";
+            command.CommandText = "SELECT * FROM " + table.Alias + ".\"" + table.Name.Replace("\"", "\"\"", StringComparison.Ordinal) + "\";";
             using var reader = command.ExecuteReader();
             while (reader.Read()) rows.Add(table + ":" + JsonSerializer.Serialize(Enumerable.Range(0, reader.FieldCount)
                 .Select(index => reader.IsDBNull(index) ? null : reader.GetValue(index)).ToArray()));
         }
-        // SQLite read connections may checkpoint or create sidecars; compare every logical row and the remaining physical scene separately.
+        // Rollback journals retain undo bytes after a failed transaction; compare the complete logical group and user files.
         var files = Directory.GetFiles(Root, "*", SearchOption.AllDirectories)
-            .Where(path => Path.GetFileName(path) != "instance.lock" && path != Database.DatabasePath &&
-                path != Database.DatabasePath + "-wal" && path != Database.DatabasePath + "-shm")
+            .Where(path => Path.GetFileName(path) != "instance.lock" && !(Path.GetDirectoryName(path) ==
+                Path.GetDirectoryName(Database.DatabasePath) && DatabaseJournals.Known(Path.GetFileName(path))))
             .Select(path => "file:" + Path.GetRelativePath(Root, path) + ":" + PhysicalObjectIdentity.Read(path) + ":" +
                 Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path))))
             .Concat(Directory.GetDirectories(Root, "*", SearchOption.AllDirectories)

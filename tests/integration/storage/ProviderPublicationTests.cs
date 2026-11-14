@@ -58,7 +58,7 @@ public sealed class ProviderPublicationTests
         await using var fixture = await ManualProvider.CreateAsync();
         fixture.Collector.Start(); await fixture.Runtime.ReadyAsync();
         var before = fixture.State;
-        fixture.Runtime.Base.Execute("CREATE TRIGGER fixture_provider_terminal BEFORE UPDATE OF revision ON operation_journals " +
+        fixture.Runtime.Base.Execute("CREATE TRIGGER main.fixture_provider_terminal BEFORE UPDATE OF revision ON operation_journals " +
             $"WHEN NEW.journal_id='{fixture.Parent:D}' AND NEW.revision={before.Latest.Revision + 1} " +
             "BEGIN SELECT RAISE(ABORT,'fixture_provider_terminal'); END;");
         try
@@ -66,7 +66,7 @@ public sealed class ProviderPublicationTests
             fixture.ReleaseTerminal();
             await WaitAsync(() => fixture.State.Latest.Revision > fixture.State.Journal.Revision);
         }
-        finally { fixture.Runtime.Base.Execute("DROP TRIGGER fixture_provider_terminal;"); }
+        finally { fixture.Runtime.Base.Execute("DROP TRIGGER main.fixture_provider_terminal;"); }
         var ahead = fixture.State;
         var intended = Assert.Single(ProviderTerminalCodec.Read(ahead.Latest.Root, ahead.Total));
         Assert.Equal(before.Journal.Revision, ahead.Journal.Revision);

@@ -24,14 +24,14 @@ public static class ConfigurationRecoveryHolds
 
     private static IReadOnlyList<RecoveryResourceHold> Read(StateDatabase database, PayloadApplyRoots? payloadRoots)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Extensions | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         var groups = new List<(Guid Session, Guid Owner, bool Run)>();
         using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
-            command.CommandText = "SELECT session_id,session_id,0 FROM configuration_edit_sessions WHERE phase IN (0,1) " +
-                "UNION ALL SELECT session_id,owner_operation_id,1 FROM configuration_run_sessions WHERE phase IN (0,1) LIMIT 4097;";
+            command.CommandText = "SELECT session_id,session_id,0 FROM configuration.configuration_edit_sessions WHERE phase IN (0,1) " +
+                "UNION ALL SELECT session_id,owner_operation_id,1 FROM configuration.configuration_run_sessions WHERE phase IN (0,1) LIMIT 4097;";
             using var rows = command.ExecuteReader();
             while (rows.Read()) groups.Add((Guid.Parse(rows.GetString(0)), Guid.Parse(rows.GetString(1)), rows.GetBoolean(2)));
         }
@@ -45,7 +45,7 @@ public static class ConfigurationRecoveryHolds
             {
                 registered.Add(RecoveryJournalRegistry.ReadInside(connection, transaction, journal));
                 using var command = connection.CreateCommand(); command.Transaction = transaction;
-                command.CommandText = "SELECT r.resource_key,c.mode FROM journal_resources r LEFT JOIN journal_resource_claims c " +
+                command.CommandText = "SELECT r.resource_key,c.mode FROM main.journal_resources r LEFT JOIN main.journal_resource_claims c " +
                     "ON c.journal_id=r.journal_id AND c.resource_key=r.resource_key WHERE r.journal_id=$journal ORDER BY r.resource_key LIMIT 4097;";
                 command.Parameters.AddWithValue("$journal", journal.ToString("D"));
                 var claims = new List<(string Key, ResourceClaimMode? Mode)>();
@@ -74,9 +74,9 @@ public static class ConfigurationRecoveryHolds
     private static IReadOnlyList<Guid> Members(SqliteConnection connection, SqliteTransaction transaction, Guid session, bool run)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = run ? "SELECT r.journal_id,j.operation_id=r.operation_id FROM configuration_run_resources r LEFT JOIN operation_journals j " +
+        command.CommandText = run ? "SELECT r.journal_id,j.operation_id=r.operation_id FROM configuration.configuration_run_resources r LEFT JOIN main.operation_journals j " +
             "ON j.journal_id=r.journal_id WHERE r.session_id=$session LIMIT 33;" :
-            "SELECT r.journal_id,j.operation_id=r.session_id FROM configuration_edit_resources r LEFT JOIN operation_journals j " +
+            "SELECT r.journal_id,j.operation_id=r.session_id FROM configuration.configuration_edit_resources r LEFT JOIN main.operation_journals j " +
             "ON j.journal_id=r.journal_id WHERE r.session_id=$session LIMIT 33;";
         command.Parameters.AddWithValue("$session", session.ToString("D"));
         var result = new List<Guid>(); using var rows = command.ExecuteReader();

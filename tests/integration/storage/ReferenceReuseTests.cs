@@ -69,8 +69,8 @@ public sealed class ReferenceReuseTests
         source.Database.Write((connection, transaction) =>
         {
             using var command = DatabaseConnections.Command(connection, transaction,
-                change == "revision" ? "UPDATE operation_journals SET revision=revision+1 WHERE journal_id=$0;" :
-                    "INSERT INTO journal_resources(journal_id,resource_key) VALUES($0,'fixture:changed');", registered.JournalId.ToString("D"));
+                change == "revision" ? "UPDATE main.operation_journals SET revision=revision+1 WHERE journal_id=$0;" :
+                    "INSERT INTO main.journal_resources(journal_id,resource_key) VALUES($0,'fixture:changed');", registered.JournalId.ToString("D"));
             return command.ExecuteNonQuery();
         });
         Assert.Throws<IOException>(() => reader.Read(registry.ReadJournal(registered.JournalId), reference));

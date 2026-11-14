@@ -53,7 +53,7 @@ internal sealed class ExtensionCatalogStore
                 var prior = OperationRows.ReadExisting(connection, transaction, identity);
                 _ = OperationRows.Accept(connection, transaction, identity, DateTimeOffset.UtcNow);
                 using var command = connection.CreateCommand(); command.Transaction = transaction;
-                command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$operation;";
+                command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$operation;";
                 command.Parameters.AddWithValue("$operation", operationId.ToString("D"));
                 if (command.ExecuteNonQuery() != 1 || prior is { Status: not "completed" }) throw Invalid();
                 ExtensionCatalogRows.AcceptInside(connection, transaction, saved, _verifier.Floor(saved.Identity.Channel), operationId);
@@ -72,13 +72,13 @@ internal sealed class ExtensionCatalogStore
         return borrow.Use(() =>
         {
             ExtensionCatalogSaved? saved;
-            using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions))
             using (var transaction = connection.BeginTransaction(deferred: true))
             { saved = ExtensionCatalogRows.ReadHead(connection, transaction, channel); transaction.Commit(); }
             if (saved is null) return null;
             var verified = _verifier.Verify(Read(saved.Pointer), Read(saved.Catalog), Read(saved.Signature), channel);
             if (verified.Identity != saved.Identity || verified.KeyId != saved.KeyId) throw Invalid();
-            using var fresh = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+            using var fresh = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions);
             using var tx = fresh.BeginTransaction(deferred: true);
             if (ExtensionCatalogRows.ReadHead(fresh, tx, channel) != saved) throw Invalid();
             tx.Commit(); return verified;
@@ -96,7 +96,7 @@ internal sealed class ExtensionCatalogStore
             return borrow.Use(() =>
             {
                 ExtensionCatalogSaved current;
-                using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true))
+                using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions))
                 using (var transaction = connection.BeginTransaction(deferred: true))
                 {
                     ExtensionCatalogRows.RequireAcceptedInside(connection, transaction, original);
@@ -117,7 +117,7 @@ internal sealed class ExtensionCatalogStore
                     _verifier.RequireRecorded(bytes[current.Pointer], bytes[current.Catalog], bytes[current.Signature],
                         current.Identity, current.KeyId, null);
                 if (current.Identity.Sequence < original.Identity.Sequence) throw Invalid();
-                var sql = new DatabaseValidationLease(_database.DatabasePath, "catalog.sql.validate");
+                var sql = new DatabaseValidationLease(_database, "catalog.sql.validate", DatabaseDomain.Extensions);
                 held.Add(sql);
                 var result = new InstalledHistory(this, borrow, original, current, held, sql);
                 result.RequireCurrent(); return result;

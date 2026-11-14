@@ -47,9 +47,9 @@ public sealed class BearerPublicationTests
         else if (changed == "request") request.Dispose();
         if (changed == "credential")
         {
-            using var connection = NexusPipeline.Platform.Storage.Sqlite.DatabaseConnections.Open(fixture.Database.DatabasePath);
+            using var connection = NexusPipeline.Platform.Storage.Sqlite.DatabaseConnections.Open(fixture.Database.DatabasePath, domains: Sqlite.DatabaseDomain.Runtime | Sqlite.DatabaseDomain.Configuration | Sqlite.DatabaseDomain.Records | Sqlite.DatabaseDomain.Notifications | Sqlite.DatabaseDomain.Extensions | Sqlite.DatabaseDomain.System | Sqlite.DatabaseDomain.Content);
             using var command = connection.CreateCommand();
-            command.CommandText = "UPDATE secret_fields SET revision=revision+1 WHERE owner_kind='host' AND field='control-bearer';";
+            command.CommandText = "UPDATE system.secret_fields SET revision=revision+1 WHERE owner_kind='host' AND field='control-bearer';";
             Assert.Equal(1, command.ExecuteNonQuery());
         }
         if (changed == "credential") Assert.Throws<InvalidOperationException>(() => proof.RequireCurrent());

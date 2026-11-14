@@ -35,7 +35,7 @@ internal static class ProjectChoicePublisher
         if (OperationRows.ReadExisting(connection, transaction, ConfigurationRevisionStore.Identity(child, subject, change))?.Status != "completed")
             throw new IOException("project_secret_result_unbound");
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT binding_id,resource_id,revision,has_changes,source_request_digest FROM configuration_mutations WHERE operation_id=$id;";
+        command.CommandText = "SELECT binding_id,resource_id,revision,has_changes,source_request_digest FROM configuration.configuration_mutations WHERE operation_id=$id;";
         command.Parameters.AddWithValue("$id", child.ToString("D"));
         using (var row = command.ExecuteReader())
             if (!row.Read() || row.GetString(0) != change.Address.BindingId.ToString("D") || row.GetString(1) != change.Address.ResourceId ||

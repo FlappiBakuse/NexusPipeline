@@ -36,9 +36,9 @@ public sealed class ProviderConsumptionTests
             File.WriteAllText(sibling, "{}");
             try { Assert.ThrowsAny<IOException>(() => provider.Use(package => package.Manifest.ExtensionId)); }
             finally { File.Delete(sibling); }
-            using var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath);
+            using var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
             using var command = connection.CreateCommand();
-            command.CommandText = "UPDATE operation_journals SET phase=$phase WHERE journal_id=$journal;";
+            command.CommandText = "UPDATE main.operation_journals SET phase=$phase WHERE journal_id=$journal;";
             command.Parameters.AddWithValue("$journal", fixture.Accepted.JournalId.ToString("D"));
             var phase = command.Parameters.AddWithValue("$phase", "applied");
             command.ExecuteNonQuery();

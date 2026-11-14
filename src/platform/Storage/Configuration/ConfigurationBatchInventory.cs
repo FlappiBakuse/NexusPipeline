@@ -10,13 +10,13 @@ internal static class ConfigurationBatchInventory
     {
         try
         {
-            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Content);
             using var transaction = connection.BeginTransaction(deferred: true);
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT o.operation_id,o.operation_kind,o.status FROM operations o WHERE " +
+            command.CommandText = "SELECT o.operation_id,o.operation_kind,o.status FROM main.operations o WHERE " +
                 "o.operation_kind IN ('configuration.save-batch','configuration.patch-batch','configuration.import-batch') OR " +
-                "EXISTS(SELECT 1 FROM configuration_batch_results h WHERE h.operation_id=o.operation_id) OR " +
-                "EXISTS(SELECT 1 FROM configuration_batch_items i WHERE i.operation_id=o.operation_id) LIMIT 4097;";
+                "EXISTS(SELECT 1 FROM configuration.configuration_batch_results h WHERE h.operation_id=o.operation_id) OR " +
+                "EXISTS(SELECT 1 FROM configuration.configuration_batch_items i WHERE i.operation_id=o.operation_id) LIMIT 4097;";
             var operations = new List<(Guid Id, string Kind, string Status)>();
             using (var row = command.ExecuteReader())
                 while (row.Read()) operations.Add((Guid.Parse(row.GetString(0)), row.GetString(1), row.GetString(2)));
@@ -33,7 +33,7 @@ internal static class ConfigurationBatchInventory
                 {
                     var saved = ConfigurationRevisionRows.Read(connection, transaction, item.Address, item.Revision, codec).Revision;
                     using var owner = connection.CreateCommand(); owner.Transaction = transaction;
-                    owner.CommandText = "SELECT user_id,automation_id FROM bindings WHERE binding_id=$binding;";
+                    owner.CommandText = "SELECT user_id,automation_id FROM automation.bindings WHERE binding_id=$binding;";
                     owner.Parameters.AddWithValue("$binding", item.Address.BindingId.ToString("D"));
                     using var binding = owner.ExecuteReader();
                     if (binding.Read() && (saved.UserId != Guid.Parse(binding.GetString(0)) || saved.ScriptId != Guid.Parse(binding.GetString(1))))

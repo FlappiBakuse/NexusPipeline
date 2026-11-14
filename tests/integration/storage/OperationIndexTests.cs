@@ -12,7 +12,7 @@ public sealed class OperationIndexTests
     public void PreservesInspectionSource()
     {
         var instance = CreateInstance(); var database = StateDatabase.CreateFresh(instance);
-        using (var connection = DatabaseConnections.Open(database.DatabasePath))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, domains: DatabaseDomain.Runtime))
         {
             using var command = connection.CreateCommand();
             command.CommandText = "DROP INDEX operations_parent_read; DROP INDEX operations_kind_read; DROP INDEX account_run_records_ended_read;";
@@ -24,7 +24,7 @@ public sealed class OperationIndexTests
             "('operations_parent_read','operations_kind_read','account_run_records_ended_read');";
         try
         {
-            using var copy = DatabaseConnections.Open(Path.Combine(inspection.DiagnosticCopyRoot, "nexus.db"), readOnly: true);
+            using var copy = DatabaseConnections.Open(Path.Combine(inspection.DiagnosticCopyRoot, "runtime.db"), readOnly: true, domains: DatabaseDomain.Runtime);
             Assert.Equal(StateDatabase.SchemaDigest, DatabaseSchema.VerifyCatalog(copy));
             Assert.Equal(3L, DatabaseConnections.Scalar(copy, restoredIndexes));
         }
@@ -33,7 +33,7 @@ public sealed class OperationIndexTests
         Assert.False(Directory.Exists(inspection.DiagnosticCopyRoot));
         using var lease = InstanceLease.Acquire(instance, new());
         StateDatabase.OpenExisting(instance, Path.Combine(instance.RuntimeRoot, "reopen"), new JournalStartupAdmission(instance, new()), lease);
-        using var current = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var current = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         Assert.Equal(3L, DatabaseConnections.Scalar(current, restoredIndexes));
     }
 
@@ -44,7 +44,7 @@ public sealed class OperationIndexTests
     public void RejectsAlteredIndexes(int kind)
     {
         var instance = CreateInstance(); var database = StateDatabase.CreateFresh(instance);
-        using (var connection = DatabaseConnections.Open(database.DatabasePath))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, domains: DatabaseDomain.Runtime))
         {
             using var command = connection.CreateCommand();
             command.CommandText = kind switch
@@ -66,7 +66,7 @@ public sealed class OperationIndexTests
     {
         var instance = CreateInstance(); var database = StateDatabase.CreateFresh(instance);
         database.Accept(new OperationIdentity(Guid.NewGuid(), "subject", new string('a', 64), "execution.cancel"), DateTimeOffset.UtcNow);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         Assert.Equal("execution_cancel_operation_unbound", Assert.Throws<IOException>(() =>
             ExecutionCancellationRows.RequireRecognizedTargets(connection, transaction, Guid.NewGuid())).Message);

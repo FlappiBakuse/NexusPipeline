@@ -27,10 +27,10 @@ public sealed class ReceiptFanoutTests
             Assert.False(status.IsSettled);
         }
         Assert.Equal(0, fixture.Delivery.MaterializePending(1));
-        using var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.All);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT operation_id,acceptance_id,task_id,relative_path,size_bytes,sha256 FROM notification_deliveries ORDER BY operation_id;";
+        command.CommandText = "SELECT operation_id,acceptance_id,task_id,relative_path,size_bytes,sha256 FROM notifications.notification_deliveries ORDER BY operation_id;";
         var delivered = new Dictionary<Guid, int>(); var ids = new HashSet<Guid>();
         using (var rows = command.ExecuteReader())
             while (rows.Read())

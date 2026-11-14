@@ -123,7 +123,7 @@ public sealed class RunControllerTests
     public async Task ReplaysFailedFinish()
     {
         await using var fixture = new ControllerFixture();
-        fixture.Base.Execute("CREATE TRIGGER fixture_fail_run_progress BEFORE INSERT ON configuration_batch_items WHEN NEW.ordinal=1 BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
+        fixture.Base.Execute("CREATE TRIGGER configuration.fixture_fail_run_progress BEFORE INSERT ON configuration_batch_items WHEN NEW.ordinal=1 BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
         var operation = Guid.NewGuid();
         try
         {
@@ -144,7 +144,7 @@ public sealed class RunControllerTests
             Assert.True(fixture.Controller.Read().IsWriterAdmissionClosed);
             AssertPendingClaims(fixture); AssertBlocked(fixture);
         }
-        finally { fixture.Base.Execute("DROP TRIGGER fixture_fail_run_progress;"); }
+        finally { fixture.Base.Execute("DROP TRIGGER configuration.fixture_fail_run_progress;"); }
         var roots = fixture.Base.Count("journal_writer_job_roots");
         var closures = fixture.Base.Count("journal_writer_job_closures");
         var result = await fixture.FinishAsync(operation);
@@ -181,9 +181,9 @@ public sealed class RunControllerTests
     public async Task RejectsUnexecutedSamples(bool recoverCompletion)
     {
         await using var fixture = new ControllerFixture();
-        fixture.Base.Execute("CREATE TRIGGER fixture_fail_root BEFORE INSERT ON journal_writer_job_roots BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
+        fixture.Base.Execute("CREATE TRIGGER main.fixture_fail_root BEFORE INSERT ON journal_writer_job_roots BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
         try { Assert.Throws<SqliteException>(() => fixture.Controller.Start()); }
-        finally { fixture.Base.Execute("DROP TRIGGER fixture_fail_root;"); }
+        finally { fixture.Base.Execute("DROP TRIGGER main.fixture_fail_root;"); }
         var running = fixture.Controller.Read();
         Assert.True(running.EnteredRunning); Assert.Equal(ConfigurationRunPhase.Running, running.Phase);
         Assert.False(File.Exists(fixture.Base.NativeReport));
@@ -215,9 +215,10 @@ public sealed class RunControllerTests
             var trigger = boundary == "second-install"
                 ? $"BEFORE UPDATE ON operation_journals WHEN NEW.journal_id='{second:D}' AND NEW.phase='applied'"
                 : $"BEFORE UPDATE ON configuration_run_sessions WHEN NEW.session_id='{session.SessionId:D}' AND OLD.phase=0 AND NEW.phase=1";
-            fixture.Base.Execute($"CREATE TRIGGER fixture_fail_run_start {trigger} BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
+            var triggerName = (boundary == "second-install" ? "main" : "configuration") + ".fixture_fail_run_start";
+            fixture.Base.Execute($"CREATE TRIGGER {triggerName} {trigger} BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
             try { Assert.Throws<SqliteException>(() => fixture.Controller.Start()); }
-            finally { fixture.Base.Execute("DROP TRIGGER fixture_fail_run_start;"); }
+            finally { fixture.Base.Execute("DROP TRIGGER " + triggerName + ";"); }
             var journals = new JournalStore(fixture.Base.Source.Instance, new());
             var registered = new RecoveryJournalRegistry(fixture.Base.Source.Database).ReadSnapshot().Journals;
             foreach (var resource in session.Resources)
@@ -307,10 +308,10 @@ public sealed class RunControllerTests
         }
         internal FrozenJobClosure[] ClosedWriters()
         {
-            using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+            using var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open(new SqliteConnectionStringBuilder
                 { DataSource = Base.Source.Database.DatabasePath, Pooling = false }.ToString());
             connection.Open(); using var command = connection.CreateCommand();
-            command.CommandText = "SELECT c.journal_id,c.writer_id,c.job_name,j.session_id FROM journal_writer_job_closures c JOIN journal_writer_jobs j " +
+            command.CommandText = "SELECT c.journal_id,c.writer_id,c.job_name,j.session_id FROM main.journal_writer_job_closures c JOIN main.journal_writer_jobs j " +
                 "ON j.journal_id=c.journal_id AND j.writer_id=c.writer_id AND j.job_name=c.job_name;";
             var keys = new List<(Guid Journal, Guid Writer, string Job, int Session)>();
             using (var rows = command.ExecuteReader())

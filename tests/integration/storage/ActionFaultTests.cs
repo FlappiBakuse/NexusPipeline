@@ -18,7 +18,7 @@ public sealed class ActionFaultTests
     public async Task PreservesFailedPersistence()
     {
         await using var fixture = new CompletionActionFixture();
-        fixture.Base.Execute("CREATE TRIGGER fail_completion_candidate BEFORE INSERT ON completion_candidates BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
+        fixture.Base.Execute("CREATE TRIGGER main.fail_completion_candidate BEFORE INSERT ON completion_candidates BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
         var receipt = await fixture.RunToReceipt();
         Assert.Equal("completion_registration_failed", fixture.Completion.FailureCode);
         Assert.Equal(0, fixture.Base.Count("completion_candidates"));
@@ -32,7 +32,7 @@ public sealed class ActionFaultTests
     {
         await using var fixture = new CompletionActionFixture();
         var (receipt, countdown) = await fixture.RunToCountdown();
-        fixture.Base.Execute("CREATE TRIGGER fail_completion_cancel BEFORE INSERT ON completion_action_transitions WHEN json_extract(NEW.snapshot_json,'$.phase')='Cancelled' BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
+        fixture.Base.Execute("CREATE TRIGGER main.fail_completion_cancel BEFORE INSERT ON completion_action_transitions WHEN json_extract(NEW.snapshot_json,'$.phase')='Cancelled' BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
         try
         {
             await Assert.ThrowsAsync<SqliteException>(() => fixture.Completion.CancelAsync(countdown.OperationId, CompletionActionStore.HostSubject, default));
@@ -42,7 +42,7 @@ public sealed class ActionFaultTests
             Assert.Equal(0, fixture.Power.Calls);
             Assert.Equal(receipt, new AttemptReceiptStore(fixture.Source.Database).Read(receipt.Facts.AttemptId));
         }
-        finally { fixture.Base.Execute("DROP TRIGGER fail_completion_cancel;"); }
+        finally { fixture.Base.Execute("DROP TRIGGER main.fail_completion_cancel;"); }
         await fixture.Completion.CancelAsync(countdown.OperationId, CompletionActionStore.HostSubject, default);
         Assert.Equal(HostLifecyclePhase.Running, fixture.Base.Lifecycle.Phase);
     }
@@ -53,7 +53,7 @@ public sealed class ActionFaultTests
         var clock = new CompletionControlledClock();
         await using var fixture = new CompletionActionFixture(clock: clock);
         var (receipt, countdown) = await fixture.RunToCountdown();
-        fixture.Base.Execute("CREATE TRIGGER fail_completion_entry BEFORE INSERT ON completion_action_transitions WHEN json_extract(NEW.snapshot_json,'$.phase')='Entered' BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
+        fixture.Base.Execute("CREATE TRIGGER main.fail_completion_entry BEFORE INSERT ON completion_action_transitions WHEN json_extract(NEW.snapshot_json,'$.phase')='Entered' BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
         try
         {
             clock.Advance(TimeSpan.FromSeconds(60));
@@ -64,7 +64,7 @@ public sealed class ActionFaultTests
             Assert.Equal(0, EffectEntries(fixture));
             Assert.Equal(receipt, new AttemptReceiptStore(fixture.Source.Database).Read(receipt.Facts.AttemptId));
         }
-        finally { fixture.Base.Execute("DROP TRIGGER fail_completion_entry;"); }
+        finally { fixture.Base.Execute("DROP TRIGGER main.fail_completion_entry;"); }
     }
 
     [Fact(DisplayName = "Revoked Local Approval Prevents Effect Entry After The Countdown")]
@@ -102,9 +102,9 @@ public sealed class ActionFaultTests
 
     private static long EffectEntries(CompletionActionFixture fixture)
     {
-        using var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM completion_action_transitions WHERE json_extract(snapshot_json,'$.phase')='Entered';";
+        command.CommandText = "SELECT COUNT(*) FROM main.completion_action_transitions WHERE json_extract(snapshot_json,'$.phase')='Entered';";
         return (long)command.ExecuteScalar()!;
     }
 

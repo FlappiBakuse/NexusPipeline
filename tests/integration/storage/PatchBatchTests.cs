@@ -209,9 +209,10 @@ public sealed class PatchBatchTests
         var initial = batch.Changes.Select(change => fixture.Base.Revisions.Read(change.Address)!).ToArray();
         var previous = initial.SelectMany(saved => ContentReferences(saved.Tree)).ToHashSet();
         var candidates = batch.Changes.SelectMany(change => ContentReferences(change.Tree)).Concat(previous).ToHashSet();
-        fixture.Base.Execute($"CREATE TRIGGER fixture_patch_fail BEFORE INSERT ON {table} WHEN {when} BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
+        var triggerName = NexusPipeline.Platform.Storage.Sqlite.DatabaseTables.Name(table).Split('.')[0] + ".fixture_patch_fail";
+        fixture.Base.Execute($"CREATE TRIGGER {triggerName} BEFORE INSERT ON {table} WHEN {when} BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
         try { Assert.Throws<SqliteException>(() => fixture.Service.Commit(prepared, DateTimeOffset.UtcNow)); }
-        finally { fixture.Base.Execute("DROP TRIGGER fixture_patch_fail;"); }
+        finally { fixture.Base.Execute("DROP TRIGGER " + triggerName + ";"); }
         fixture.AssertSavedBaselines(1);
         foreach (var saved in initial) AssertSnapshot(saved, fixture.Base.Revisions.Read(saved.Address)!);
         var index = new BlobReferenceIndex(fixture.Base.Instance, new(), fixture.Base.Database, new(fixture.Base.Instance, new()));
@@ -244,12 +245,12 @@ public sealed class PatchBatchTests
         var id = operation.ToString("D");
         fixture.Base.Execute(damage switch
         {
-            "tail" => $"DELETE FROM configuration_batch_items WHERE operation_id='{id}' AND ordinal=1;",
-            "header" => $"DELETE FROM configuration_batch_results WHERE operation_id='{id}';",
-            "all-items" => $"DELETE FROM configuration_batch_items WHERE operation_id='{id}';",
-            "null-digest" => $"UPDATE configuration_batch_results SET source_request_digest=NULL WHERE operation_id='{id}';",
-            "invalid-digest" => $"UPDATE configuration_batch_results SET source_request_digest='{new string('z', 64)}' WHERE operation_id='{id}';",
-            _ => $"UPDATE operations SET operation_kind='configuration.run.sync' WHERE operation_id='{id}';"
+            "tail" => $"DELETE FROM configuration.configuration_batch_items WHERE operation_id='{id}' AND ordinal=1;",
+            "header" => $"DELETE FROM configuration.configuration_batch_results WHERE operation_id='{id}';",
+            "all-items" => $"DELETE FROM configuration.configuration_batch_items WHERE operation_id='{id}';",
+            "null-digest" => $"UPDATE configuration.configuration_batch_results SET source_request_digest=NULL WHERE operation_id='{id}';",
+            "invalid-digest" => $"UPDATE configuration.configuration_batch_results SET source_request_digest='{new string('z', 64)}' WHERE operation_id='{id}';",
+            _ => $"UPDATE main.operations SET operation_kind='configuration.run.sync' WHERE operation_id='{id}';"
         });
         var before = fixture.Fingerprints();
         Assert.Throws<IOException>(() => StateDatabase.OpenExisting(fixture.Base.Instance, Path.Combine(fixture.Base.Root, "diagnostics"),
@@ -267,7 +268,7 @@ public sealed class PatchBatchTests
         var replacementDigest = different.Use((batch, _, _) => Convert.ToHexStringLower(SHA256.HashData(BoundedJson.Serialize(
             batch.Changes.Select(change => new { change.Address, Digest = change.SourceRequestDigest }).ToArray()))));
         fixture.Service.Apply("fixture", request, DateTimeOffset.UtcNow);
-        fixture.Base.Execute($"UPDATE configuration_batch_results SET source_request_digest='{replacementDigest}' WHERE operation_id='{operation:D}';");
+        fixture.Base.Execute($"UPDATE configuration.configuration_batch_results SET source_request_digest='{replacementDigest}' WHERE operation_id='{operation:D}';");
         var before = fixture.Fingerprints();
         Assert.Throws<OperationConflictException>(() => fixture.Service.Apply("fixture", altered, DateTimeOffset.UtcNow));
         Assert.Equal(before, fixture.Fingerprints()); fixture.AssertSavedBaselines(2);

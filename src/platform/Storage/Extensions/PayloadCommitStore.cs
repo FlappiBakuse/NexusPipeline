@@ -208,7 +208,7 @@ internal sealed class PayloadCommitStore(RuntimeInstance instance, StateDatabase
             _registry.AdvanceInside(connection, transaction, bound.Registered with
                 { Revision = bound.Latest.Revision, Phase = JournalPhase.Committed }, bound.Registered.Revision);
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$operation " +
+            command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$operation " +
                 "AND status='accepted' AND initial_journal_id=$journal;";
             command.Parameters.AddWithValue("$operation", bound.Plan.OperationId.ToString("D"));
             command.Parameters.AddWithValue("$journal", bound.Plan.JournalId.ToString("D"));

@@ -23,7 +23,7 @@ public sealed class BlobReferenceIndex
     public BlobReferenceIndex(RuntimeInstance instance, ContractReader contracts, StateDatabase database, ImmutableBlobStore blobs, PayloadApplyRoots? payloadRoots = null)
     {
         if (database.InstanceId != instance.InstanceId || blobs.Instance.InstanceId != instance.InstanceId ||
-            !string.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "nexus.db"), StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "runtime.db"), StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(blobs.Instance.RuntimeRoot, instance.RuntimeRoot, StringComparison.OrdinalIgnoreCase))
             throw new IOException("blob_reference_index_instance_unbound");
         _instance = instance; _contracts = contracts; _database = database; _blobs = blobs;
@@ -53,10 +53,10 @@ public sealed class BlobReferenceIndex
                     blob.Sha256.Any(character => character is not (>= '0' and <= '9' or >= 'a' and <= 'f')))
                     throw new ArgumentException("blob_reference_query_invalid");
                 content.Add(blob);
-                using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+                using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.All);
                 using var command = connection.CreateCommand();
-                command.CommandText = "SELECT EXISTS(SELECT 1 FROM automation_assets WHERE digest=$digest) " +
-                    "OR EXISTS(SELECT 1 FROM configuration_revision_assets WHERE digest=$digest);";
+                command.CommandText = "SELECT EXISTS(SELECT 1 FROM automation.automation_assets WHERE digest=$digest) " +
+                    "OR EXISTS(SELECT 1 FROM configuration.configuration_revision_assets WHERE digest=$digest);";
                 command.Parameters.AddWithValue("$digest", blob.Sha256);
                 if ((long)command.ExecuteScalar()! != 0 || RetiredAssetReferences.IsReferenced(_instance, _database, _contracts, blob))
                     referenced.Add(blob);
@@ -173,9 +173,9 @@ public sealed class BlobReferenceIndex
                     throw new IOException("blob_reference_secret_plan_unbound");
                 if (plan.NotificationPublication is { } notification)
                 {
-                    using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+                    using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.All);
                     using var command = connection.CreateCommand();
-                    command.CommandText = "SELECT status FROM operations WHERE operation_id=$id AND request_digest=$digest AND operation_kind='notification.task.save';";
+                    command.CommandText = "SELECT status FROM main.operations WHERE operation_id=$id AND request_digest=$digest AND operation_kind='notification.task.save';";
                     command.Parameters.AddWithValue("$id", notification.ParentOperationId);
                     command.Parameters.AddWithValue("$digest", notification.ParentRequestDigest);
                     var state = command.ExecuteScalar() as string;
@@ -184,8 +184,8 @@ public sealed class BlobReferenceIndex
                 }
                 if (plan.DocumentPublication is { } document)
                 {
-                    using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
-                    using var command = SecretDocumentRows.Command(connection, null, "SELECT status FROM operations " +
+                    using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.All);
+                    using var command = SecretDocumentRows.Command(connection, null, "SELECT status FROM main.operations " +
                         "WHERE operation_id=$0 AND request_digest=$1 AND operation_kind='extension.document.write';",
                         document.ParentOperationId, document.ParentRequestDigest);
                     var state = command.ExecuteScalar() as string;
@@ -233,9 +233,9 @@ public sealed class BlobReferenceIndex
 
     private HashSet<Guid> ReadRetiredJournals()
     {
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT a.journal_id FROM record_content_retirements r JOIN attempt_receipts a USING(run_id);";
+        command.CommandText = "SELECT a.journal_id FROM records.record_content_retirements r JOIN records.attempt_receipts a USING(run_id);";
         using var rows = command.ExecuteReader();
         var result = new HashSet<Guid>();
         while (rows.Read()) result.Add(Guid.Parse(rows.GetString(0)));
@@ -245,12 +245,12 @@ public sealed class BlobReferenceIndex
     private bool SecretIsCurrent(BlobReference item, Guid id)
     {
         CleanupCandidateFiles.Validate(item);
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT digest,size_bytes,state,EXISTS(SELECT 1 FROM secret_fields f WHERE f.secret_id=p.secret_id) " +
-            "FROM secret_payloads p WHERE secret_id=$id;";
+        command.CommandText = "SELECT digest,size_bytes,state,EXISTS(SELECT 1 FROM system.secret_fields f WHERE f.secret_id=p.secret_id) " +
+            "FROM system.secret_payloads p WHERE secret_id=$id;";
         command.Parameters.AddWithValue("$id", id.ToString("D"));
         using var row = command.ExecuteReader();
         if (!row.Read() || row.GetString(0) != item.Sha256 || row.GetInt64(1) != item.SizeBytes ||
@@ -262,9 +262,9 @@ public sealed class BlobReferenceIndex
 
     private bool RetainsAssetContents(RegisteredJournal journal)
     {
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT state FROM automation_imports WHERE operation_id=$operation AND journal_id=$journal;";
+        command.CommandText = "SELECT state FROM automation.automation_imports WHERE operation_id=$operation AND journal_id=$journal;";
         command.Parameters.AddWithValue("$operation", journal.OperationId.ToString("D"));
         command.Parameters.AddWithValue("$journal", journal.JournalId.ToString("D"));
         var value = command.ExecuteScalar();

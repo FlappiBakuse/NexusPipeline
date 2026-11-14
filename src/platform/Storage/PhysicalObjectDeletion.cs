@@ -31,6 +31,7 @@ public static class PhysicalObjectDeletion
 
     internal static FileLease HoldFile(FileObjectDeletion intent)
     {
+        DirectoryAttributeScope.Refresh();
         Validate(intent, 1_073_741_824);
         if (intent.Kind != FileObjectKind.File) throw new ArgumentException("A content file is required");
         var path = PhysicalPathPolicy.NormalizeWithoutLinks(intent.Path);
@@ -53,6 +54,7 @@ public static class PhysicalObjectDeletion
     private static bool Delete(FileObjectDeletion intent, Func<bool> authorize, long maximumBytes = 1_073_741_824,
         bool singleLink = false)
     {
+        DirectoryAttributeScope.Refresh();
         Validate(intent, maximumBytes);
         var path = PhysicalPathPolicy.NormalizeWithoutLinks(intent.Path);
         var parent = Path.GetDirectoryName(path) ?? throw new IOException("deletion_root_rejected");
@@ -117,6 +119,7 @@ public static class PhysicalObjectDeletion
 
         internal bool TryDelete(FileObjectDeletion intent, Func<bool> authorize)
         {
+            DirectoryAttributeScope.Refresh();
             Require(intent);
             if (!authorize()) return false;
             MarkDeleted(source.SafeFileHandle);

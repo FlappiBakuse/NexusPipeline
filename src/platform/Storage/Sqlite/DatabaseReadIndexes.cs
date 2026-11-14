@@ -45,8 +45,11 @@ internal static class DatabaseReadIndexes
     {
         foreach (var definition in Definitions.Values)
         {
+            var domain = DatabaseTables.Domain(definition.Table);
+            if ((DatabaseConnections.Domains(connection) & domain) == 0) continue;
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = definition.Sql.Replace("CREATE INDEX ", "CREATE INDEX IF NOT EXISTS ", StringComparison.Ordinal);
+            command.CommandText = definition.Sql.Replace("CREATE INDEX ",
+                "CREATE INDEX IF NOT EXISTS " + DatabaseLayout.Alias(domain) + ".", StringComparison.Ordinal);
             command.ExecuteNonQuery();
         }
     }

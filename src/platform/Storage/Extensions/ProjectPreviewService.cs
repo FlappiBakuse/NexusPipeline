@@ -145,7 +145,7 @@ internal sealed class ProjectPreviewService : IAsyncDisposable
         if (_installed.ReadCurrent(value.Consumer.ExtensionId)?.Metadata != value.Consumer ||
             _installed.ReadCurrent(value.Provider.ExtensionId)?.Metadata != value.Provider) throw Unavailable();
         _ = _activator.RequirePublishedRuntime(value.Consumer.ExtensionId); _ = _activator.RequirePublishedRuntime(value.Provider.ExtensionId);
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         new ConfigurationRevisionStore(_instance, _database, _contracts).RequireReadSet(connection, transaction, value.ReadSet);
     }

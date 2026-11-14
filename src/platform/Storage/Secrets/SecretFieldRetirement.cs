@@ -28,10 +28,10 @@ internal sealed class SecretFieldRetirement : IDisposable
     internal static SecretFieldRetirement Prepare(RuntimeInstance instance, StateDatabase database, Guid operationId, Guid id)
     {
         BlobReference candidate;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System))
         using (var command = connection.CreateCommand())
         {
-            command.CommandText = "SELECT digest,size_bytes,state FROM secret_payloads WHERE secret_id=$id;";
+            command.CommandText = "SELECT digest,size_bytes,state FROM system.secret_payloads WHERE secret_id=$id;";
             command.Parameters.AddWithValue("$id", id.ToString("D"));
             using var row = command.ExecuteReader();
             if (!row.Read() || row.GetString(2) != "committed") throw new IOException("secret_retirement_owner_unverified");
@@ -63,11 +63,11 @@ internal sealed class SecretFieldRetirement : IDisposable
         using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
-            command.CommandText = "UPDATE secret_payloads SET state='retired' WHERE secret_id=$id AND state='committed' " +
-                "AND NOT EXISTS(SELECT 1 FROM secret_fields WHERE secret_id=$id);";
+            command.CommandText = "UPDATE system.secret_payloads SET state='retired' WHERE secret_id=$id AND state='committed' " +
+                "AND NOT EXISTS(SELECT 1 FROM system.secret_fields WHERE secret_id=$id);";
             command.Parameters.AddWithValue("$id", _secretId.ToString("D"));
             if (command.ExecuteNonQuery() != 1) throw new IOException("secret_retirement_reference_changed");
-            command.CommandText = "INSERT INTO secret_retirements VALUES($id,$operation,$journal,$state);";
+            command.CommandText = "INSERT INTO system.secret_retirements VALUES($id,$operation,$journal,$state);";
             command.Parameters.AddWithValue("$operation", _operationId.ToString("D"));
             command.Parameters.AddWithValue("$journal", _plan is null ? DBNull.Value : _plan.JournalId.ToString("D"));
             command.Parameters.AddWithValue("$state", _plan is null ? "unverified" : "planned");

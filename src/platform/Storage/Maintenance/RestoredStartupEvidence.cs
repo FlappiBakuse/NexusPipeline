@@ -33,10 +33,10 @@ internal sealed class RestoredStartupEvidence : IDisposable
             bound.Operation.TerminalCode != "maintenance_original_restored" || bound.Restoration.IsEmpty ||
             bound.Restoration[^1].Record.Stage != "committed" || bound.Restoration[0].Record.Failure is not { } helper)
             throw Invalid();
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT w.process_id,w.created_file_time,w.image_path,w.image_sha256,w.user_sid,w.elevated " +
-            "FROM journal_writers w LEFT JOIN journal_writer_jobs b USING(journal_id,writer_id) " +
+            "FROM main.journal_writers w LEFT JOIN main.journal_writer_jobs b USING(journal_id,writer_id) " +
             "WHERE w.journal_id=$journal AND b.writer_id IS NULL LIMIT 2;";
         command.Parameters.AddWithValue("$journal", expected.JournalId.ToString("D"));
         ProcessIdentity original;
@@ -65,7 +65,7 @@ internal sealed class RestoredStartupEvidence : IDisposable
     internal void RequireCurrent()
     {
         if (_contents is null) throw Invalid();
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         RequireInside(connection, transaction); transaction.Commit();
     }

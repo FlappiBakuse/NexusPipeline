@@ -40,13 +40,13 @@ public sealed class ExecutionRecordProjection(RuntimeInstance instance, StateDat
         lease.VerifyHeld(instance);
         if (maximum is < 1 or > 200 || after == Guid.Empty) throw new ArgumentOutOfRangeException(nameof(maximum));
         var attempts = new List<Guid>();
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var command = connection.CreateCommand())
         {
-            command.CommandText = "SELECT a.attempt_id FROM attempt_receipts a JOIN execution_start_sources s ON s.operation_id=a.operation_id " +
-                "LEFT JOIN run_records r ON r.run_id=a.run_id WHERE a.attempt_id>$after AND r.run_id IS NULL " +
-                "AND NOT EXISTS(SELECT 1 FROM execution_start_sources n WHERE n.run_id=a.run_id AND n.attempt_ordinal>a.ordinal) " +
-                "AND NOT EXISTS(SELECT 1 FROM execution_retry_intents i LEFT JOIN execution_retry_outcomes d ON d.retry_operation_id=i.operation_id " +
+            command.CommandText = "SELECT a.attempt_id FROM records.attempt_receipts a JOIN main.execution_start_sources s ON s.operation_id=a.operation_id " +
+                "LEFT JOIN records.run_records r ON r.run_id=a.run_id WHERE a.attempt_id>$after AND r.run_id IS NULL " +
+                "AND NOT EXISTS(SELECT 1 FROM main.execution_start_sources n WHERE n.run_id=a.run_id AND n.attempt_ordinal>a.ordinal) " +
+                "AND NOT EXISTS(SELECT 1 FROM main.execution_retry_intents i LEFT JOIN main.execution_retry_outcomes d ON d.retry_operation_id=i.operation_id " +
                 "WHERE i.previous_attempt_id=a.attempt_id AND d.operation_id IS NULL) ORDER BY a.attempt_id LIMIT $limit;";
             command.Parameters.AddWithValue("$after", after?.ToString("D") ?? "");
             command.Parameters.AddWithValue("$limit", maximum);
@@ -89,9 +89,9 @@ public sealed class ExecutionRecordProjection(RuntimeInstance instance, StateDat
     internal static bool RequireRecoveredRecord(RuntimeInstance instance, StateDatabase database,
         ContractReader contracts, AttemptReceipt receipt)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT end_time_kind FROM run_records WHERE run_id=$run;";
+        command.CommandText = "SELECT end_time_kind FROM records.run_records WHERE run_id=$run;";
         command.Parameters.AddWithValue("$run", receipt.Facts.RunId.ToString("D"));
         if (command.ExecuteScalar() is not long kind || kind != (int)EndTimeKind.ReconciledTerminalObservation) return false;
         var timing = RecoveredRecordTiming.Capture(instance, database, contracts, receipt);

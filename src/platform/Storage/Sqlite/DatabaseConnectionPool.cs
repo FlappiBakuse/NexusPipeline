@@ -12,9 +12,18 @@ internal sealed class DatabaseConnectionPool : IDisposable
     private readonly StableDirectoryLease _directory;
     private readonly FileStream _file;
     private readonly PhysicalObjectIdentity _identity;
-    private readonly HashSet<string> _keys = [];
+    private readonly List<FileStream> _domains = [];
+    internal sealed class Slot(int index)
+    {
+        internal int Index { get; } = index;
+        internal bool Active;
+        internal long Used;
+        internal (DatabaseDomain Domains, bool ReadOnly)? Role;
+        internal string? ConnectionString;
+    }
+    private readonly Slot[] _slots = [new(0), new(1), new(2), new(3)];
+    private long _clock;
     private int _readers;
-    private int _pooled;
     private bool _disposed;
 
     internal DatabaseConnectionPool(string path)
@@ -29,16 +38,25 @@ internal sealed class DatabaseConnectionPool : IDisposable
                 _identity = PhysicalObjectIdentity.Read(_file.SafeFileHandle);
                 if (PhysicalPathPolicy.NormalizeWithoutLinks(_path) != _path || PhysicalObjectIdentity.Read(_path) != _identity)
                     throw new IOException("database_read_identity_changed");
+                foreach (var domain in DatabaseLayout.Domains.Where(domain => domain != DatabaseDomain.Runtime))
+                {
+                    var member = PhysicalPathPolicy.NormalizeWithoutLinks(DatabaseLayout.PathFor(_path, domain));
+                    var input = new FileStream(member, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    _domains.Add(input);
+                    if (PhysicalObjectIdentity.Read(input.SafeFileHandle) != PhysicalObjectIdentity.Read(member))
+                        throw new IOException("database_read_identity_changed");
+                }
                 RequireIdentity();
                 lock (PoolsGate)
                     if (!Pools.TryAdd(_path, this)) throw new IOException("database_read_owner_already_bound");
             }
-            catch { _file.Dispose(); throw; }
+            catch { foreach (var input in _domains) input.Dispose(); _file.Dispose(); throw; }
         }
         catch { _directory.Dispose(); throw; }
     }
 
-    internal static BorrowLease? Borrow(string path, bool connection = true)
+    internal static BorrowLease? Borrow(string path, bool connection = true,
+        DatabaseDomain domains = DatabaseDomain.All, bool readOnly = false)
     {
         lock (PoolsGate)
         {
@@ -46,10 +64,28 @@ internal sealed class DatabaseConnectionPool : IDisposable
             lock (pool._gate)
             {
                 pool.RequireIdentity();
-                var pooled = connection && pool._pooled < 4;
+                Slot? selected = null;
+                if (connection)
+                {
+                    var role = (domains, readOnly);
+                    foreach (var slot in pool._slots)
+                    {
+                        if (slot.Active) continue;
+                        if (slot.Role == role) { selected = slot; break; }
+                        if (selected is null || slot.Used < selected.Used) selected = slot;
+                    }
+                    if (selected is not null)
+                    {
+                        if (selected.Role != role && selected.ConnectionString is { } prior)
+                        {
+                            using var stale = new SqliteConnection(prior);
+                            SqliteConnection.ClearPool(stale); selected.ConnectionString = null;
+                        }
+                        selected.Role = role; selected.Active = true; selected.Used = ++pool._clock;
+                    }
+                }
                 pool._readers++;
-                if (pooled) pool._pooled++;
-                return new(pool, pooled);
+                return new(pool, selected);
             }
         }
     }
@@ -57,26 +93,26 @@ internal sealed class DatabaseConnectionPool : IDisposable
     private void RequireIdentity()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        // The open file and every ancestor deny deletion for this owner's lifetime.
-        if (PhysicalObjectIdentity.Read(_file.SafeFileHandle) != _identity)
+        // Retained handles deny deletion, so their file identities cannot change during this ownership.
+        if (!_file.CanRead || _domains.Any(input => !input.CanRead))
             throw new IOException("database_read_identity_changed");
     }
 
-    private void Track(SqliteConnection connection)
+    private void Track(SqliteConnection connection, Slot slot)
     {
         lock (_gate)
         {
-            _keys.Add(connection.ConnectionString);
+            slot.ConnectionString = connection.ConnectionString;
             if (_disposed) SqliteConnection.ClearPool(connection);
         }
     }
 
-    private void Return(bool pooled)
+    private void Return(Slot? slot)
     {
         lock (_gate)
         {
             _readers--;
-            if (pooled) _pooled--;
+            if (slot is not null) { slot.Active = false; slot.Used = ++_clock; }
             if (_disposed && _readers == 0) ReleaseFiles();
         }
     }
@@ -89,34 +125,37 @@ internal sealed class DatabaseConnectionPool : IDisposable
             if (_disposed) return;
             _disposed = true;
             Pools.Remove(_path);
-            foreach (var key in _keys)
-            {
-                using var connection = new SqliteConnection(key);
-                SqliteConnection.ClearPool(connection);
-            }
-            _keys.Clear();
+            foreach (var slot in _slots)
+                if (slot.ConnectionString is { } key)
+                {
+                    using var connection = new SqliteConnection(key);
+                    SqliteConnection.ClearPool(connection); slot.ConnectionString = null;
+                }
             if (_readers == 0) ReleaseFiles();
         }
     }
 
     private void ReleaseFiles()
     {
-        try { _file.Dispose(); }
+        try { foreach (var input in _domains) input.Dispose(); _file.Dispose(); }
         finally { _directory.Dispose(); }
     }
 
-    internal sealed class BorrowLease(DatabaseConnectionPool owner, bool pooled) : IDisposable
+    internal sealed class BorrowLease : IDisposable
     {
-        private DatabaseConnectionPool? _owner = owner;
+        private DatabaseConnectionPool? _owner;
+        private readonly Slot? _slot;
+        internal BorrowLease(DatabaseConnectionPool owner, Slot? slot) { _owner = owner; _slot = slot; }
         private SqliteConnection? _connection;
-        internal bool IsPooled => pooled;
+        internal bool IsPooled => _slot is not null;
+        internal string PoolSuffix => _slot is null ? "" : "&nexus_pool=" + _slot.Index.ToString(System.Globalization.CultureInfo.InvariantCulture);
         internal string Path => _owner?._path ?? throw new ObjectDisposedException(nameof(BorrowLease));
 
         internal void Attach(SqliteConnection connection)
         {
             _connection = connection;
             connection.StateChange += OnStateChange;
-            if (pooled) _owner!.Track(connection);
+            if (_slot is not null) _owner!.Track(connection, _slot);
         }
 
         private void OnStateChange(object? sender, StateChangeEventArgs change)
@@ -130,7 +169,7 @@ internal sealed class DatabaseConnectionPool : IDisposable
             if (current is null) return;
             if (_connection is { } connection) connection.StateChange -= OnStateChange;
             _connection = null;
-            current.Return(pooled);
+            current.Return(_slot);
         }
     }
 }

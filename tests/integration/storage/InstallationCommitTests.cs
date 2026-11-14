@@ -54,13 +54,13 @@ public sealed class InstallationCommitTests
         var store = fixture.Committer();
         var preparation = store.PrepareActivation(fixture.Prepared, inventory, activation, default);
         activation.Publish(preparation);
-        fixture.Package.Catalog.Sql("CREATE TRIGGER fixture_commit_failure BEFORE UPDATE OF phase ON operation_journals " +
+        fixture.Package.Catalog.Sql("CREATE TRIGGER main.fixture_commit_failure BEFORE UPDATE OF phase ON operation_journals " +
             "WHEN NEW.operation_kind='extensionApply' AND NEW.phase='committed' BEGIN SELECT RAISE(ABORT,'fixture'); END;");
         try { Assert.Throws<SqliteException>(() => store.Commit(fixture.Prepared, inventory, activation, default)); }
-        finally { fixture.Package.Catalog.Sql("DROP TRIGGER fixture_commit_failure;"); }
+        finally { fixture.Package.Catalog.Sql("DROP TRIGGER main.fixture_commit_failure;"); }
         Assert.True(System.Text.Json.JsonElement.DeepEquals(System.Text.Json.JsonSerializer.SerializeToElement(before),
             System.Text.Json.JsonSerializer.SerializeToElement(new HostSettingsStore(fixture.Package.Catalog.Database).Read())));
-        using (var connection = DatabaseConnections.Open(fixture.Package.Catalog.Database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(fixture.Package.Catalog.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var transaction = connection.BeginTransaction(deferred: true))
             Assert.Null(ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, "fixture-plugin"));
         var physical = new JournalStore(fixture.Package.Catalog.Instance, fixture.Package.Catalog.Contracts).Read(fixture.Accepted.JournalId);

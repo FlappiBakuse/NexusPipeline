@@ -16,6 +16,18 @@ namespace NexusPipeline.StorageTests;
 
 public sealed class RecoveryRegistryTests
 {
+    [Fact(DisplayName = "History Callbacks Permit Independent Business Commits")]
+    public void ReleasesHistoryReads()
+    {
+        var fixture = Create();
+        using var history = fixture.Registry.ReadHistory().GetEnumerator();
+        Assert.True(history.MoveNext());
+        var identity = new OperationIdentity(Guid.NewGuid(), "test:history-callback", new string('a', 64), "automation.change");
+        Assert.True(fixture.Database.Accept(identity, DateTimeOffset.UtcNow).IsNew);
+        Assert.Equal(fixture.Registered.JournalId, history.Current.JournalId);
+        Assert.False(history.MoveNext());
+    }
+
     [Fact(DisplayName = "An Unknown Journal Root File Cannot Be Treated As An Empty Or Uncreated Journal Directory")]
     public void RejectsUnknownRoots()
     {
@@ -198,7 +210,7 @@ public sealed class RecoveryRegistryTests
     public void RejectsIncoherentFacts(string fault)
     {
         var fixture = Create();
-        using (var connection = new SqliteConnection($"Data Source={fixture.Database.DatabasePath};Pooling=False"))
+        using (var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open($"Data Source={fixture.Database.DatabasePath};Pooling=False"))
         {
             connection.Open();
             using var command = connection.CreateCommand();
@@ -207,15 +219,15 @@ public sealed class RecoveryRegistryTests
             command.Parameters.AddWithValue("$unknown", new string('z', 64));
             command.CommandText = fault switch
             {
-                "missing-isolation" => "DELETE FROM resource_isolations WHERE journal_id=$id;",
-                "foreign-isolation" => "INSERT INTO resource_isolations VALUES('unknown-resource',$id,'verified','unknown');",
-                "unknown-effect-digest" => "INSERT INTO file_effects VALUES($id,'fixture-step','installCandidate','pending',$unknown,NULL);",
-                _ => "INSERT INTO file_effects VALUES($id,'fixture-step','installCandidate','started',$digest,$digest); " +
-                    "UPDATE operation_journals SET phase='committed',revision=2 WHERE journal_id=$id; DELETE FROM resource_isolations WHERE journal_id=$id;"
+                "missing-isolation" => "DELETE FROM main.resource_isolations WHERE journal_id=$id;",
+                "foreign-isolation" => "INSERT INTO main.resource_isolations VALUES('unknown-resource',$id,'verified','unknown');",
+                "unknown-effect-digest" => "INSERT INTO main.file_effects VALUES($id,'fixture-step','installCandidate','pending',$unknown,NULL);",
+                _ => "INSERT INTO main.file_effects VALUES($id,'fixture-step','installCandidate','started',$digest,$digest); " +
+                    "UPDATE main.operation_journals SET phase='committed',revision=2 WHERE journal_id=$id; DELETE FROM main.resource_isolations WHERE journal_id=$id;"
             };
             // Fund the deliberately corrupt row so this fixture reaches recovery-content validation.
             if (fault is "unknown-effect-digest" or "terminal-unclosed-effect")
-                command.CommandText = "UPDATE recovery_capacity_reservations SET effect_limit=1,remaining_effects=1 WHERE owner_journal_id=$id;" + command.CommandText;
+                command.CommandText = "UPDATE main.recovery_capacity_reservations SET effect_limit=1,remaining_effects=1 WHERE owner_journal_id=$id;" + command.CommandText;
             command.ExecuteNonQuery();
         }
         using var observation = new DatabaseObservation(fixture.Database);

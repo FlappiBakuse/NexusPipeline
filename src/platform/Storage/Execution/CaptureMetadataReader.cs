@@ -239,9 +239,9 @@ internal sealed class CaptureMetadataReader(RuntimeInstance instance, StateDatab
     {
         TargetJobEvidence.RequireIdentity(creator.Process);
         if (creator.WriterId != primary.WriterId) throw Invalid();
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT process_id,created_file_time,image_path,image_sha256,user_sid,elevated FROM journal_writers " +
+        command.CommandText = "SELECT process_id,created_file_time,image_path,image_sha256,user_sid,elevated FROM main.journal_writers " +
             "WHERE journal_id=$journal AND writer_id=$writer;";
         command.Parameters.AddWithValue("$journal", primary.ParentJournalId.ToString("D"));
         command.Parameters.AddWithValue("$writer", primary.WriterId.ToString("D"));

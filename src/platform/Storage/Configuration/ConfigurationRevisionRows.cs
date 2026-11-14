@@ -11,7 +11,7 @@ internal static class ConfigurationRevisionRows
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT revision,user_id,automation_id FROM bindings WHERE binding_id=$binding;";
+        command.CommandText = "SELECT revision,user_id,automation_id FROM automation.bindings WHERE binding_id=$binding;";
         command.Parameters.AddWithValue("$binding", id.ToString("D"));
         using var row = command.ExecuteReader();
         if (!row.Read()) throw new ConfigurationException("configuration_binding_missing");
@@ -22,9 +22,9 @@ internal static class ConfigurationRevisionRows
         ConfigurationAddress address, ConfigurationSnapshotCodec codec)
     {
         using var command = KeyCommand(connection, transaction, address);
-        command.CommandText = "SELECT revision FROM configuration_current WHERE binding_id=$binding AND resource_id=$resource;";
+        command.CommandText = "SELECT revision FROM configuration.configuration_current WHERE binding_id=$binding AND resource_id=$resource;";
         if (command.ExecuteScalar() is long revision) return Read(connection, transaction, address, revision, codec);
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM configuration_revisions WHERE binding_id=$binding AND resource_id=$resource);";
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM configuration.configuration_revisions WHERE binding_id=$binding AND resource_id=$resource);";
         if ((long)command.ExecuteScalar()! != 0) throw new IOException("configuration_current_missing");
         return null;
     }
@@ -38,7 +38,7 @@ internal static class ConfigurationRevisionRows
         using (var command = KeyCommand(connection, transaction, address))
         {
             command.CommandText = "SELECT user_id,automation_id,contract_revision,contract_digest,instance_key,requires_instance," +
-                "manifest_path,manifest_size,manifest_digest FROM configuration_revisions WHERE binding_id=$binding AND resource_id=$resource AND revision=$revision;";
+                "manifest_path,manifest_size,manifest_digest FROM configuration.configuration_revisions WHERE binding_id=$binding AND resource_id=$resource AND revision=$revision;";
             command.Parameters.AddWithValue("$revision", revision);
             using var row = command.ExecuteReader();
             if (!row.Read()) throw new IOException("configuration_revision_missing");
@@ -76,9 +76,9 @@ internal static class ConfigurationRevisionRows
         if (binding.UserId != source.UserId || binding.ScriptId != source.ScriptId) throw new IOException("configuration_binding_owner_changed");
         using var command = KeyCommand(connection, transaction, source.Address);
         command.CommandText = "SELECT r.revision,r.user_id,r.automation_id,r.contract_revision,r.contract_digest,r.instance_key,r.requires_instance," +
-            "r.manifest_path,r.manifest_size,r.manifest_digest FROM configuration_revisions r " +
+            "r.manifest_path,r.manifest_size,r.manifest_digest FROM configuration.configuration_revisions r " +
             "WHERE r.binding_id=$binding AND r.resource_id=$resource AND r.revision=$revision " +
-            "AND ($current=0 OR EXISTS(SELECT 1 FROM configuration_current c WHERE c.binding_id=r.binding_id AND c.resource_id=r.resource_id AND c.revision=r.revision));";
+            "AND ($current=0 OR EXISTS(SELECT 1 FROM configuration.configuration_current c WHERE c.binding_id=r.binding_id AND c.resource_id=r.resource_id AND c.revision=r.revision));";
         command.Parameters.AddWithValue("$revision", source.Revision);
         command.Parameters.AddWithValue("$current", requireCurrent);
         using (var row = command.ExecuteReader())
@@ -98,7 +98,7 @@ internal static class ConfigurationRevisionRows
         var references = source.Tree.Entries.Where(entry => entry.Kind == FileObjectKind.File)
             .Select(entry => (entry.Sha256!, entry.SizeBytes, $"blobs/content/{entry.Sha256}.bin")).Distinct().OrderBy(entry => entry.Item1, StringComparer.Ordinal).ToArray();
         using var assets = KeyCommand(connection, transaction, source.Address);
-        assets.CommandText = "SELECT a.digest,b.size_bytes,b.relative_path FROM configuration_revision_assets a JOIN blobs b ON b.digest=a.digest " +
+        assets.CommandText = "SELECT a.digest,b.size_bytes,b.relative_path FROM configuration.configuration_revision_assets a JOIN content.blobs b ON b.digest=a.digest " +
             "WHERE binding_id=$binding AND resource_id=$resource AND revision=$revision ORDER BY a.digest;";
         assets.Parameters.AddWithValue("$revision", source.Revision);
         var actual = new List<(string, long, string)>();
@@ -110,7 +110,7 @@ internal static class ConfigurationRevisionRows
     internal static void Insert(SqliteConnection connection, SqliteTransaction transaction, ConfigurationRevision value, BlobReference manifest)
     {
         using var command = KeyCommand(connection, transaction, value.Address);
-        command.CommandText = "INSERT INTO configuration_revisions VALUES($binding,$resource,$revision,$user,$script,$contractRevision," +
+        command.CommandText = "INSERT INTO configuration.configuration_revisions VALUES($binding,$resource,$revision,$user,$script,$contractRevision," +
             "$contractDigest,$instance,$required,$path,$digest,$size);";
         command.Parameters.AddWithValue("$revision", value.Revision);
         command.Parameters.AddWithValue("$user", value.UserId.ToString("D"));
@@ -123,7 +123,7 @@ internal static class ConfigurationRevisionRows
         command.Parameters.AddWithValue("$digest", manifest.Sha256);
         command.Parameters.AddWithValue("$size", manifest.SizeBytes);
         command.ExecuteNonQuery();
-        command.CommandText = "INSERT INTO configuration_current VALUES($binding,$resource,$revision) " +
+        command.CommandText = "INSERT INTO configuration.configuration_current VALUES($binding,$resource,$revision) " +
             "ON CONFLICT(binding_id,resource_id) DO UPDATE SET revision=excluded.revision;";
         command.ExecuteNonQuery();
     }
@@ -133,16 +133,16 @@ internal static class ConfigurationRevisionRows
         foreach (var entry in value.Tree.Entries.Where(entry => entry.Kind == FileObjectKind.File).DistinctBy(entry => entry.Sha256))
         {
             using var command = KeyCommand(connection, transaction, value.Address);
-            command.CommandText = "INSERT INTO blobs VALUES($digest,$size,$path) ON CONFLICT(digest) DO NOTHING;";
+            command.CommandText = "INSERT INTO content.blobs VALUES($digest,$size,$path) ON CONFLICT(digest) DO NOTHING;";
             command.Parameters.AddWithValue("$digest", entry.Sha256!);
             command.Parameters.AddWithValue("$size", entry.SizeBytes);
             command.Parameters.AddWithValue("$path", $"blobs/content/{entry.Sha256}.bin");
             command.ExecuteNonQuery();
-            command.CommandText = "SELECT size_bytes,relative_path FROM blobs WHERE digest=$digest;";
+            command.CommandText = "SELECT size_bytes,relative_path FROM content.blobs WHERE digest=$digest;";
             using (var row = command.ExecuteReader())
                 if (!row.Read() || row.GetInt64(0) != entry.SizeBytes || row.GetString(1) != $"blobs/content/{entry.Sha256}.bin")
                     throw new IOException("configuration_blob_identity_conflict");
-            command.CommandText = "INSERT INTO configuration_revision_assets VALUES($binding,$resource,$revision,$digest);";
+            command.CommandText = "INSERT INTO configuration.configuration_revision_assets VALUES($binding,$resource,$revision,$digest);";
             command.Parameters.AddWithValue("$revision", value.Revision);
             command.ExecuteNonQuery();
         }

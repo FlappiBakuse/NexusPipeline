@@ -20,7 +20,7 @@ internal static class ProviderLauncherProjection
             {
                 RequireNewEffectInside(connection, transaction, state, item.Binding.StepId);
                 using var command = connection.CreateCommand(); command.Transaction = transaction;
-                command.CommandText = "SELECT EXISTS(SELECT 1 FROM journal_writers WHERE journal_id=$journal AND writer_id=$writer);";
+                command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.journal_writers WHERE journal_id=$journal AND writer_id=$writer);";
                 command.Parameters.AddWithValue("$journal", item.Binding.ParentJournalId.ToString("D"));
                 command.Parameters.AddWithValue("$writer", item.Binding.OwnerWriterId.ToString("D"));
                 if ((long)command.ExecuteScalar()! != 1) throw Invalid();
@@ -39,7 +39,7 @@ internal static class ProviderLauncherProjection
         PcStageProjection.RequireConfigurationInstalledInside(connection, transaction, state, stepId);
         var primary = state.Jobs.Single(job => job.StepId == stepId && job.Role == "process");
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT NOT EXISTS(SELECT 1 FROM journal_writer_job_roots WHERE journal_id=$journal AND job_name=$job);";
+        command.CommandText = "SELECT NOT EXISTS(SELECT 1 FROM main.journal_writer_job_roots WHERE journal_id=$journal AND job_name=$job);";
         command.Parameters.AddWithValue("$journal", state.Journal.JournalId.ToString("D")); command.Parameters.AddWithValue("$job", primary.JobName);
         if ((long)command.ExecuteScalar()! != 1) throw Invalid();
         ExecutionStepAdmission.RequirePredecessorsInside(connection, transaction, state, state.Latest,

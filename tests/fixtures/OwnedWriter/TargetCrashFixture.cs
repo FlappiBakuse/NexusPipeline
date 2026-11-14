@@ -83,7 +83,7 @@ internal static class TargetCrashFixture
             if (point == "stage-ahead")
             {
                 var registered = AttemptWriterState.Read(instance, database, new(), parent);
-                Execute(database, "CREATE TRIGGER fixture_target_ahead BEFORE UPDATE OF revision ON operation_journals " +
+                Execute(database, "CREATE TRIGGER main.fixture_target_ahead BEFORE UPDATE OF revision ON operation_journals " +
                     $"WHEN NEW.journal_id='{parent:D}' AND NEW.revision={registered.Latest.Revision + 4} " +
                     "BEGIN SELECT RAISE(ABORT,'fixture_target_ahead'); END;");
             }
@@ -94,7 +94,7 @@ internal static class TargetCrashFixture
                 if (point == "stage-ahead") throw new IOException("fixture_target_failure_not_observed");
             }
             catch (SqliteException error) when (point == "stage-ahead" && error.Message.Contains("fixture_target_ahead", StringComparison.Ordinal)) { }
-            finally { if (point == "stage-ahead") Execute(database, "DROP TRIGGER fixture_target_ahead;"); }
+            finally { if (point == "stage-ahead") Execute(database, "DROP TRIGGER main.fixture_target_ahead;"); }
             if (imageRetirement)
             {
                 await session.RestoreStepAsync(stepId);
@@ -177,7 +177,7 @@ internal static class TargetCrashFixture
 
     private static void Execute(StateDatabase database, string sql)
     {
-        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = database.DatabasePath, Pooling = false }.ToString());
+        using var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open(new SqliteConnectionStringBuilder { DataSource = database.DatabasePath, Pooling = false }.ToString());
         connection.Open(); using var command = connection.CreateCommand(); command.CommandText = sql; command.ExecuteNonQuery();
     }
 }

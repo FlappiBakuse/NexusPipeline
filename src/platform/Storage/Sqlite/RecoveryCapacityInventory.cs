@@ -9,7 +9,7 @@ internal static class RecoveryCapacityInventory
 {
     internal static void Verify(RuntimeInstance instance, StateDatabase database, ContractReader contracts)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         RecoveryCapacityStore.VerifyCounts(connection, transaction);
         foreach (var row in RecoveryCapacityStore.ReadReservations(connection, transaction))
@@ -34,7 +34,7 @@ internal static class RecoveryCapacityInventory
             if (journal.Kind == JournalKind.UpdateApply && row.Released)
             {
                 using var command = connection.CreateCommand(); command.Transaction = transaction;
-                command.CommandText = "SELECT EXISTS(SELECT 1 FROM maintenance_operations WHERE operation_id=$operation AND state=2);";
+                command.CommandText = "SELECT EXISTS(SELECT 1 FROM system.maintenance_operations WHERE operation_id=$operation AND state=2);";
                 command.Parameters.AddWithValue("$operation", journal.OperationId.ToString("D"));
                 var stopped = new JournalWriterStore(database).Observe(journal.JournalId);
                 if (journal.Phase != JournalPhase.Committed || (long)command.ExecuteScalar()! != 1 ||

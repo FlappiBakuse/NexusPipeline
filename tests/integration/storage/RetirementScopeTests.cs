@@ -36,14 +36,14 @@ public sealed class RetirementScopeTests(ITestOutputHelper output)
         var journalBytes = new JournalStore(source.Instance, new()).Read(first.JournalId).Export();
         var id = unrelated.JournalId.ToString("D");
         fixture.Base.Execute(damage == "path"
-            ? "UPDATE operation_journals SET plan_path='blobs/plans/" + new string('0', 64) + ".json' WHERE journal_id='" + id + "';"
-            : "DELETE FROM journal_resource_claims WHERE journal_id='" + id + "'; DELETE FROM journal_resources WHERE journal_id='" + id + "';");
+            ? "UPDATE main.operation_journals SET plan_path='blobs/plans/" + new string('0', 64) + ".json' WHERE journal_id='" + id + "';"
+            : "DELETE FROM main.journal_resource_claims WHERE journal_id='" + id + "'; DELETE FROM main.journal_resources WHERE journal_id='" + id + "';");
         var global = Record.Exception(() => new RecoveryJournalRegistry(source.Database).ReadSnapshot());
         Assert.True(global is IOException or InvalidOperationException);
         var retirement = new ContentRetirementService(source.Instance, source.Database, new(), source.Lease,
             fixture.Base.Resources, fixture.Base.Index);
         Assert.NotNull(retirement.RetireLogsPage(Guid.NewGuid(), "retirement-local-read", first.Facts.RunId));
-        fixture.Base.Execute("UPDATE operation_journals SET phase='applying' WHERE journal_id='" + id + "';");
+        fixture.Base.Execute("UPDATE main.operation_journals SET phase='applying' WHERE journal_id='" + id + "';");
         var commits = source.Database.CommitSequence;
         var rejected = Record.Exception(() => retirement.RetireLogsPage(Guid.NewGuid(), "retirement-local-read", first.Facts.RunId));
         Assert.NotNull(rejected); Assert.Equal(global!.GetType(), rejected.GetType()); Assert.Equal(global.Message, rejected.Message);
@@ -60,7 +60,7 @@ public sealed class RetirementScopeTests(ITestOutputHelper output)
         var reader = new RetirementFamilyReader(source.Instance, source.Database, new());
         _ = reader.CaptureMetadata(fixture.Receipt.Facts.RunId);
         var journalBytes = new JournalStore(source.Instance, new()).Read(fixture.Receipt.JournalId).Export();
-        fixture.Hooks.Base.Execute("UPDATE journal_writer_job_roots SET image_sha256='" + new string('0', 64) +
+        fixture.Hooks.Base.Execute("UPDATE main.journal_writer_job_roots SET image_sha256='" + new string('0', 64) +
             "' WHERE journal_id='" + fixture.Receipt.JournalId.ToString("D") + "';");
         Assert.ThrowsAny<IOException>(() => reader.CaptureMetadata(fixture.Receipt.Facts.RunId));
         var commits = source.Database.CommitSequence;

@@ -7,7 +7,7 @@ public sealed class FileEffectOutbox(StateDatabase database)
 {
     public IReadOnlyList<FileEffect> Read(Guid journalId)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         return FileEffectRows.Read(connection, journalId);
     }
 
@@ -33,9 +33,9 @@ public sealed class FileEffectOutbox(StateDatabase database)
                 requireApplying: nextState == FileEffectState.Started);
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "UPDATE file_effects SET state=$next,receipt_digest=$receipt WHERE journal_id=$journal AND step_id=$step AND state=$expected AND " +
-            "(action='removeOwned' OR EXISTS(SELECT 1 FROM operation_journals WHERE journal_id=$journal AND phase<>'committed')) AND " +
-            "($skipStarted=0 OR action='removeOwned' AND EXISTS(SELECT 1 FROM operation_journals WHERE journal_id=$journal AND operation_kind='fileCleanup'));";
+        command.CommandText = "UPDATE main.file_effects SET state=$next,receipt_digest=$receipt WHERE journal_id=$journal AND step_id=$step AND state=$expected AND " +
+            "(action='removeOwned' OR EXISTS(SELECT 1 FROM main.operation_journals WHERE journal_id=$journal AND phase<>'committed')) AND " +
+            "($skipStarted=0 OR action='removeOwned' AND EXISTS(SELECT 1 FROM main.operation_journals WHERE journal_id=$journal AND operation_kind='fileCleanup'));";
         command.Parameters.AddWithValue("$skipStarted", expectedState == FileEffectState.Started && nextState == FileEffectState.NotExecuted ? 1 : 0);
         command.Parameters.AddWithValue("$next", FileEffectRows.Wire(nextState));
         command.Parameters.AddWithValue("$receipt", receiptDigest);

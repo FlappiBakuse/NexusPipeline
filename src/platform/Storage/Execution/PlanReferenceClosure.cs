@@ -23,9 +23,9 @@ internal sealed class PlanReferenceClosure(RuntimeInstance instance, ContractRea
 
     private bool HasRetiredContent(Guid journal)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
         using var command = DatabaseConnections.Command(connection, null,
-            "SELECT EXISTS(SELECT 1 FROM record_content_retirements r JOIN attempt_receipts a USING(run_id) WHERE a.journal_id=$0);",
+            "SELECT EXISTS(SELECT 1 FROM records.record_content_retirements r JOIN records.attempt_receipts a USING(run_id) WHERE a.journal_id=$0);",
             journal.ToString("D"));
         return (long)command.ExecuteScalar()! != 0;
     }
@@ -101,7 +101,7 @@ internal sealed class PlanReferenceClosure(RuntimeInstance instance, ContractRea
                     invocation.StepId, child.TargetPath, attempt, total, blobs, contracts, laterInvocation: true, taskRetry: invocation.TaskRetry);
                 contents.Add(referenceToChild); contents.AddRange(codec.References(child));
             }
-            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
             using (var transaction = connection.BeginTransaction(deferred: true))
             {
                 if (LogCatalogRows.Exists(connection, transaction, Guid.Parse(attempt.AttemptId)))

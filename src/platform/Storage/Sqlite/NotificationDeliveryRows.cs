@@ -68,16 +68,16 @@ internal static class NotificationDeliveryRows
         if (document.Attachment is { } attachment) RequireAsset(connection, transaction, attachment);
         _ = OperationRows.Accept(connection, transaction, operation, acceptedAt);
         var reference = snapshot.Reference;
-        Execute(connection, transaction, "INSERT INTO notification_deliveries VALUES($0,$1,$2,$3,$4,$5,$6);",
+        Execute(connection, transaction, "INSERT INTO notifications.notification_deliveries VALUES($0,$1,$2,$3,$4,$5,$6);",
             document.OperationId.ToString("D"), document.AcceptanceId.ToString("D"),
             document.Source.Kind == "executionReceipt" ? document.Source.Receipt.Facts.AttemptId.ToString("D") : DBNull.Value, document.Task.TaskId.ToString("D"),
             reference.RelativePath, reference.SizeBytes, reference.Sha256);
         foreach (var field in document.Secrets)
-            Execute(connection, transaction, "INSERT INTO notification_delivery_secrets VALUES($0,$1,$2,$3);",
+            Execute(connection, transaction, "INSERT INTO notifications.notification_delivery_secrets VALUES($0,$1,$2,$3);",
                 document.OperationId.ToString("D"), NotificationSecretFields.Name(field.Field), field.Reference.Revision,
                 field.Reference.SecretId is { } id ? id.ToString("D") : DBNull.Value);
         if (document.Attachment is { } asset)
-            Execute(connection, transaction, "INSERT INTO notification_delivery_assets VALUES($0,$1,$2,$3,$4);",
+            Execute(connection, transaction, "INSERT INTO notifications.notification_delivery_assets VALUES($0,$1,$2,$3,$4);",
                 document.OperationId.ToString("D"), asset.RunId.ToString("D"), asset.Sha256, (int)asset.Kind, asset.SizeBytes);
         AppendInside(connection, transaction, snapshot, new("nexus.notification.delivery-transition", 1,
             document.OperationId, 0, NotificationDeliveryState.Queued, generation, null, "notification_queued", null));
@@ -100,8 +100,8 @@ internal static class NotificationDeliveryRows
         if (AttemptReceiptStore.ReadInside(connection, transaction, receipt.Facts.AttemptId) != receipt)
             throw new IOException("notification_delivery_receipt_unbound");
         using var command = Command(connection, transaction,
-            "SELECT j.phase,j.plan_digest,o.status,o.operation_kind,o.subject_id FROM operation_journals j " +
-            "JOIN operations o ON o.initial_journal_id=j.journal_id WHERE j.journal_id=$0 AND o.operation_id=$1;",
+            "SELECT j.phase,j.plan_digest,o.status,o.operation_kind,o.subject_id FROM main.operation_journals j " +
+            "JOIN main.operations o ON o.initial_journal_id=j.journal_id WHERE j.journal_id=$0 AND o.operation_id=$1;",
             receipt.JournalId.ToString("D"), receipt.OperationId.ToString("D"));
         using var row = command.ExecuteReader();
         if (!row.Read() || row.GetString(0) != "committed" || row.GetString(1) != receipt.PlanDigest ||
@@ -115,7 +115,7 @@ internal static class NotificationDeliveryRows
         var document = snapshot.Document;
         using var command = Command(connection, transaction,
             "SELECT acceptance_id,source_attempt_id,task_id,relative_path,size_bytes,sha256 " +
-            "FROM notification_deliveries WHERE operation_id=$0;", document.OperationId.ToString("D"));
+            "FROM notifications.notification_deliveries WHERE operation_id=$0;", document.OperationId.ToString("D"));
         using var row = command.ExecuteReader();
         if (!row.Read() || row.GetString(0) != document.AcceptanceId.ToString("D") ||
             (row.IsDBNull(1) ? null : row.GetString(1)) != (document.Source.Kind == "executionReceipt" ? document.Source.Receipt.Facts.AttemptId.ToString("D") : null) ||
@@ -128,7 +128,7 @@ internal static class NotificationDeliveryRows
         SqliteTransaction? transaction, Guid operationId)
     {
         using var command = Command(connection, transaction,
-            "SELECT ordinal,document_json FROM notification_delivery_transitions WHERE operation_id=$0 ORDER BY ordinal;",
+            "SELECT ordinal,document_json FROM notifications.notification_delivery_transitions WHERE operation_id=$0 ORDER BY ordinal;",
             operationId.ToString("D"));
         using var rows = command.ExecuteReader();
         NotificationDeliveryTransition? prior = null;
@@ -150,22 +150,22 @@ internal static class NotificationDeliveryRows
         RequireSaved(connection, transaction, snapshot);
         NotificationDeliveryTransition? before = null;
         using (var count = Command(connection, transaction,
-            "SELECT count(*) FROM notification_delivery_transitions WHERE operation_id=$0;", next.OperationId.ToString("D")))
+            "SELECT count(*) FROM notifications.notification_delivery_transitions WHERE operation_id=$0;", next.OperationId.ToString("D")))
             if ((long)count.ExecuteScalar()! != 0) before = ReadState(connection, transaction, next.OperationId);
         if (before == next) { RequirePendingProjection(connection, transaction, next, NotificationDeliveryOrigins.SourceOperation(snapshot.Document)); return; }
         NotificationDeliveryStates.RequireSuccessor(before, next);
         if (next.OperationId != snapshot.Document.OperationId) throw new IOException("notification_delivery_transition_unbound");
-        Execute(connection, transaction, "INSERT INTO notification_delivery_transitions VALUES($0,$1,$2);",
+        Execute(connection, transaction, "INSERT INTO notifications.notification_delivery_transitions VALUES($0,$1,$2);",
             next.OperationId.ToString("D"), next.Ordinal,
             System.Text.Encoding.UTF8.GetString(NotificationCatalogCodec.Encode(next)));
         if (NotificationDeliveryStates.ReleasesReferences(next.State))
-            Execute(connection, transaction, "DELETE FROM notification_delivery_pending WHERE operation_id=$0;", next.OperationId.ToString("D"));
+            Execute(connection, transaction, "DELETE FROM notifications.notification_delivery_pending WHERE operation_id=$0;", next.OperationId.ToString("D"));
         else
-            Execute(connection, transaction, "INSERT INTO notification_delivery_pending VALUES($0,$1,$2) ON CONFLICT(operation_id) DO UPDATE SET state=excluded.state;",
+            Execute(connection, transaction, "INSERT INTO notifications.notification_delivery_pending VALUES($0,$1,$2) ON CONFLICT(operation_id) DO UPDATE SET state=excluded.state;",
                 next.OperationId.ToString("D"), NotificationDeliveryOrigins.SourceOperation(snapshot.Document) is { } source ? source.ToString("D") : DBNull.Value,
                 next.State.ToString().ToLowerInvariant());
         if (next.State is not (NotificationDeliveryState.Queued or NotificationDeliveryState.Sending))
-            Execute(connection, transaction, "UPDATE operations SET status='completed' WHERE operation_id=$0 AND status='accepted';",
+            Execute(connection, transaction, "UPDATE main.operations SET status='completed' WHERE operation_id=$0 AND status='accepted';",
                 next.OperationId.ToString("D"));
     }
 
@@ -173,7 +173,7 @@ internal static class NotificationDeliveryRows
         NotificationDeliveryTransition state, Guid? source = null)
     {
         using var command = Command(connection, transaction,
-            "SELECT state,source_operation_id FROM notification_delivery_pending WHERE operation_id=$0;", state.OperationId.ToString("D"));
+            "SELECT state,source_operation_id FROM notifications.notification_delivery_pending WHERE operation_id=$0;", state.OperationId.ToString("D"));
         using var row = command.ExecuteReader();
         var present = row.Read();
         if (NotificationDeliveryStates.ReleasesReferences(state.State))
@@ -193,7 +193,7 @@ internal static class NotificationDeliveryRows
         SecretPayloadIdentity expected, bool allowRetired)
     {
         using var command = Command(connection, transaction,
-            "SELECT protection_scheme,owner_sid,digest,size_bytes,state FROM secret_payloads WHERE secret_id=$0;",
+            "SELECT protection_scheme,owner_sid,digest,size_bytes,state FROM system.secret_payloads WHERE secret_id=$0;",
             expected.SecretId.ToString("D"));
         using var row = command.ExecuteReader();
         if (!row.Read() || new SecretPayloadIdentity(expected.SecretId, row.GetString(0), row.GetString(1),
@@ -205,7 +205,7 @@ internal static class NotificationDeliveryRows
     internal static void RequireAsset(SqliteConnection connection, SqliteTransaction? transaction, RecordAsset asset)
     {
         using var command = Command(connection, transaction,
-            "SELECT b.size_bytes,b.relative_path FROM record_assets a JOIN blobs b ON a.digest=b.digest " +
+            "SELECT b.size_bytes,b.relative_path FROM records.record_assets a JOIN content.blobs b ON a.digest=b.digest " +
             "WHERE a.run_id=$0 AND a.digest=$1 AND a.kind=$2;", asset.RunId.ToString("D"), asset.Sha256, (int)asset.Kind);
         using var row = command.ExecuteReader();
         if (!row.Read() || row.GetInt64(0) != asset.SizeBytes || row.GetString(1) != $"blobs/content/{asset.Sha256}.bin")

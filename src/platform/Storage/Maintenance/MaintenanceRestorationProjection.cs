@@ -90,8 +90,8 @@ internal static class MaintenanceRestorationProjection
         void Move(string step, FileEffectState previous, FileEffectState next)
         {
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "UPDATE file_effects SET state=$next,receipt_digest=$digest WHERE journal_id=$journal " +
-                "AND step_id=$step AND state=$previous AND EXISTS(SELECT 1 FROM operation_journals WHERE journal_id=$journal " +
+            command.CommandText = "UPDATE main.file_effects SET state=$next,receipt_digest=$digest WHERE journal_id=$journal " +
+                "AND step_id=$step AND state=$previous AND EXISTS(SELECT 1 FROM main.operation_journals WHERE journal_id=$journal " +
                 "AND operation_kind='updateApply' AND revision=$revision AND phase=$phase);";
             command.Parameters.AddWithValue("$next", FileEffectRows.Wire(next));
             command.Parameters.AddWithValue("$digest", digest);

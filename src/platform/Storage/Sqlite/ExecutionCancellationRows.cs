@@ -15,7 +15,7 @@ internal static class ExecutionCancellationRows
     {
         RequireRecognizedTargets(connection, transaction, parentJournalId);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM operations c JOIN operation_journals j ON j.journal_id=c.initial_journal_id " +
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operations c JOIN main.operation_journals j ON j.journal_id=c.initial_journal_id " +
             "WHERE j.journal_id=$parent AND c.operation_id<>j.operation_id);";
         command.Parameters.AddWithValue("$parent", parentJournalId.ToString("D"));
         if ((long)command.ExecuteScalar()! != 0) throw new IOException("execution_dispatch_closed");
@@ -26,7 +26,7 @@ internal static class ExecutionCancellationRows
         RequireRecognizedTargets(connection, transaction, parent.JournalId);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT c.operation_id,c.subject_id,c.request_digest,c.operation_kind,c.status,p.subject_id,p.operation_kind,p.initial_journal_id " +
-            "FROM operations c JOIN operation_journals j ON j.journal_id=c.initial_journal_id JOIN operations p ON p.operation_id=j.operation_id " +
+            "FROM main.operations c JOIN main.operation_journals j ON j.journal_id=c.initial_journal_id JOIN main.operations p ON p.operation_id=j.operation_id " +
             "WHERE j.journal_id=$parent AND c.operation_id<>j.operation_id AND c.operation_kind<>'execution.retry.cancel' LIMIT 2;";
         command.Parameters.AddWithValue("$parent", parent.JournalId.ToString("D"));
         using var row = command.ExecuteReader();
@@ -47,14 +47,21 @@ internal static class ExecutionCancellationRows
     internal static ExecutionCancellationIntent? Verify(StateDatabase database, RegisteredJournal parent, RunAttemptPlan plan, ExecutionPlan total,
         JsonElement latest, JsonElement projected)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
+        var row = VerifyInside(connection, transaction, parent, plan, total, latest, projected);
+        transaction.Commit(); return row;
+    }
+
+    internal static ExecutionCancellationIntent? VerifyInside(SqliteConnection connection, SqliteTransaction transaction,
+        RegisteredJournal parent, RunAttemptPlan plan, ExecutionPlan total, JsonElement latest, JsonElement projected)
+    {
         var row = Read(connection, transaction, parent, plan);
         var physical = DispatchIntentCodec.Read(latest, total);
         var indexed = DispatchIntentCodec.Read(projected, total);
         if (physical is not null && (row is null || !Matches(row.Identity, physical)) || row?.Status == "completed" && indexed is null)
             throw new IOException("execution_cancel_projection_unbound");
-        transaction.Commit(); return row;
+        return row;
     }
 
     internal static void CompleteInside(SqliteConnection connection, SqliteTransaction transaction, DispatchCloseIntent physical)
@@ -63,8 +70,8 @@ internal static class ExecutionCancellationRows
             physical.ParentJournalId, physical.ParentOperationId, physical.RunId, physical.AttemptId, physical.ReasonCode);
         var accepted = OperationRows.ReadExisting(connection, transaction, identity) ?? throw new IOException("execution_cancel_operation_missing");
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$operation AND initial_journal_id=$parent AND status=$status " +
-            "AND EXISTS(SELECT 1 FROM operation_journals j JOIN operations p ON p.operation_id=j.operation_id WHERE j.journal_id=$parent " +
+        command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$operation AND initial_journal_id=$parent AND status=$status " +
+            "AND EXISTS(SELECT 1 FROM main.operation_journals j JOIN main.operations p ON p.operation_id=j.operation_id WHERE j.journal_id=$parent " +
             "AND j.operation_id=$parentOperation AND p.operation_kind='execution.start' AND p.initial_journal_id=j.journal_id AND p.subject_id=$subject);";
         command.Parameters.AddWithValue("$operation", identity.OperationId.ToString("D")); command.Parameters.AddWithValue("$parent", physical.ParentJournalId.ToString("D"));
         command.Parameters.AddWithValue("$status", accepted.Status);
@@ -80,11 +87,11 @@ internal static class ExecutionCancellationRows
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         if (parentJournalId is not null)
         {
-            command.CommandText = "SELECT EXISTS(SELECT 1 FROM operations WHERE operation_kind IN ('execution.cancel','execution.close') AND initial_journal_id IS NULL);";
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operations WHERE operation_kind IN ('execution.cancel','execution.close') AND initial_journal_id IS NULL);";
             if ((long)command.ExecuteScalar()! != 0) throw new IOException("execution_cancel_operation_unbound");
         }
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM operations c LEFT JOIN operation_journals j ON j.journal_id=c.initial_journal_id " +
-            "LEFT JOIN operations p ON p.operation_id=j.operation_id WHERE " +
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operations c LEFT JOIN main.operation_journals j ON j.journal_id=c.initial_journal_id " +
+            "LEFT JOIN main.operations p ON p.operation_id=j.operation_id WHERE " +
             (parentJournalId is null ? "" : "c.initial_journal_id=$parent AND ") +
             "c.operation_kind IN ('execution.cancel','execution.close') AND " +
             "(j.journal_id IS NULL OR j.operation_kind<>'runAttempt' OR c.operation_id=j.operation_id OR p.operation_id IS NULL " +

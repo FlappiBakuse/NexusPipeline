@@ -33,8 +33,8 @@ public sealed class DeferredRegistrationTests
             sessionId, ExecutionSequentialFixture.Subject, fixture.Accepted.Prepared.Configurations[stepId], scope, deferRegistration: true);
         Assert.Empty(fixture.State.Steps);
         Assert.True(stopEvidence.HasNoJobs(session));
-        fixture.Base.Execute("CREATE TRIGGER fixture_child_registration BEFORE INSERT ON journal_writer_jobs " +
-            "WHEN EXISTS(SELECT 1 FROM configuration_run_resources r WHERE r.journal_id=NEW.journal_id) " +
+        fixture.Base.Execute("CREATE TRIGGER main.fixture_child_registration BEFORE INSERT ON journal_writer_jobs " +
+            "WHEN EXISTS(SELECT 1 FROM main.operation_journals j WHERE j.journal_id=NEW.journal_id AND j.operation_kind='configExchange') " +
             "BEGIN SELECT RAISE(ABORT,'fixture_child_registration'); END;");
         StepEvidenceBinding binding;
         try
@@ -56,7 +56,7 @@ public sealed class DeferredRegistrationTests
             Assert.Equal(original, PhysicalObjectIdentity.Read(source.Configuration));
             Assert.Equal(originalBytes, File.ReadAllBytes(source.Configuration));
         }
-        finally { fixture.Base.Execute("DROP TRIGGER fixture_child_registration;"); }
+        finally { fixture.Base.Execute("DROP TRIGGER main.fixture_child_registration;"); }
         if (retryRegistration)
         {
             controller.RegisterPreparedJob(); controller.RegisterPreparedJob();
@@ -118,15 +118,15 @@ public sealed class DeferredRegistrationTests
     {
         using var fixture = new ExecutionRuntimeFixture(configuration: true); var source = fixture.Source;
         var original = PhysicalObjectIdentity.Read(source.Configuration); var bytes = File.ReadAllBytes(source.Configuration);
-        fixture.Base.Execute("CREATE TRIGGER fixture_runtime_child_registration BEFORE INSERT ON journal_writer_jobs " +
-            "WHEN EXISTS(SELECT 1 FROM configuration_run_resources r WHERE r.journal_id=NEW.journal_id) " +
+        fixture.Base.Execute("CREATE TRIGGER main.fixture_runtime_child_registration BEFORE INSERT ON journal_writer_jobs " +
+            "WHEN EXISTS(SELECT 1 FROM main.operation_journals j WHERE j.journal_id=NEW.journal_id AND j.operation_kind='configExchange') " +
             "BEGIN SELECT RAISE(ABORT,'fixture_runtime_child_registration'); END;");
         try
         {
             var failure = await Assert.ThrowsAsync<SqliteException>(() => fixture.Consumer.RunNextAsync());
             Assert.Contains("fixture_runtime_child_registration", failure.Message, StringComparison.Ordinal);
         }
-        finally { fixture.Base.Execute("DROP TRIGGER fixture_runtime_child_registration;"); }
+        finally { fixture.Base.Execute("DROP TRIGGER main.fixture_runtime_child_registration;"); }
         var state = fixture.State; var job = Assert.Single(state.Steps);
         var binding = StepResultCodec.Binding(state.Latest.Root, job);
         Assert.Null(new StepEvidenceReader(source.Instance, source.Database, new()).Context(binding).Root);

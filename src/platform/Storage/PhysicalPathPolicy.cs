@@ -33,7 +33,7 @@ internal static class PhysicalPathPolicy
     internal static string NormalizeWithoutLinks(string path)
     {
         var syntax = ReadSyntax(path);
-        // Attribute scopes pin directory names; their handles still supply current attributes on every call.
+        // A synchronous publication shares its pinned ancestor facts; mutation boundaries refresh them.
         foreach (var current in syntax.Ancestors)
         {
             try
@@ -52,6 +52,7 @@ internal static class PhysicalPathPolicy
 
     internal static string NormalizeParent(string path)
     {
+        DirectoryAttributeScope.Refresh();
         var full = NormalizeSyntax(path);
         NormalizeWithoutLinks(Path.GetDirectoryName(full) ?? throw new IOException("filesystem_file_path_required"));
         return full;

@@ -35,7 +35,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
         {
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
-            command.CommandText = "SELECT initial_journal_id FROM operations WHERE operation_id=$operation;";
+            command.CommandText = "SELECT initial_journal_id FROM main.operations WHERE operation_id=$operation;";
             command.Parameters.AddWithValue("$operation", identity.OperationId.ToString("D"));
             using var reader = command.ExecuteReader();
             if (!reader.Read() || reader.IsDBNull(0)) throw new IOException("accepted_operation_requires_reconciliation");
@@ -81,7 +81,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
 
     internal RegisteredJournal ReadJournal(Guid journalId)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         var result = ReadJournalInside(connection, transaction, journalId);
         transaction.Commit(); return result;
@@ -89,20 +89,20 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
 
     internal RegisteredJournal? FindJournal(Guid journalId)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM operation_journals WHERE journal_id=$id);";
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operation_journals WHERE journal_id=$id);";
         command.Parameters.AddWithValue("$id", journalId.ToString("D"));
         return (long)command.ExecuteScalar()! == 0 ? null : ReadJournalInside(connection, transaction, journalId);
     }
 
     internal RegisteredJournal ReadOperationJournal(Guid operationId)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT initial_journal_id FROM operations WHERE operation_id=$id;";
+        command.CommandText = "SELECT initial_journal_id FROM main.operations WHERE operation_id=$id;";
         command.Parameters.AddWithValue("$id", operationId.ToString("D"));
         var id = command.ExecuteScalar() as string ?? throw new IOException("journal_not_registered");
         var journal = ReadJournalInside(connection, transaction, Guid.ParseExact(id, "D"));
@@ -112,13 +112,13 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
 
     internal IReadOnlySet<Guid> ReadInactiveIds()
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT j.journal_id,CASE WHEN j.phase='committed' AND r.owner_journal_id IS NOT NULL AND NOT " +
             RecoveryCapacityStore.ActiveReservation + " THEN 1 ELSE 0 END " +
-            "FROM operation_journals j LEFT JOIN recovery_capacity_members m ON m.journal_id=j.journal_id " +
-            "LEFT JOIN recovery_capacity_reservations r USING(owner_journal_id) " +
+            "FROM main.operation_journals j LEFT JOIN main.recovery_capacity_members m ON m.journal_id=j.journal_id " +
+            "LEFT JOIN main.recovery_capacity_reservations r USING(owner_journal_id) " +
             "WHERE j.journal_id>$after ORDER BY j.journal_id LIMIT 128;";
         var after = command.Parameters.AddWithValue("$after", "");
         var result = new HashSet<Guid>();
@@ -140,7 +140,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
     internal static RegisteredJournal ReadJournalInside(SqliteConnection connection, SqliteTransaction transaction, Guid journalId)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT operation_id,operation_kind,phase,revision,plan_path,plan_digest FROM operation_journals WHERE journal_id=$id;";
+        command.CommandText = "SELECT operation_id,operation_kind,phase,revision,plan_path,plan_digest FROM main.operation_journals WHERE journal_id=$id;";
         command.Parameters.AddWithValue("$id", journalId.ToString("D"));
         RegisteredJournal result;
         using (var row = command.ExecuteReader())
@@ -151,7 +151,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
             result = new(journalId, Guid.ParseExact(row.GetString(0), "D"), kind, phase,
                 row.GetInt64(3), row.GetString(4), row.GetString(5), []);
         }
-        command.CommandText = "SELECT resource_key FROM journal_resources WHERE journal_id=$id ORDER BY resource_key LIMIT 4097;";
+        command.CommandText = "SELECT resource_key FROM main.journal_resources WHERE journal_id=$id ORDER BY resource_key LIMIT 4097;";
         var resources = new List<string>();
         using (var rows = command.ExecuteReader()) while (rows.Read()) resources.Add(rows.GetString(0));
         if (resources.Count is 0 or > 4096) throw new IOException("recovery_registry_resource_limit");
@@ -163,9 +163,19 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
 
     internal IEnumerable<RegisteredJournal> ReadHistory(bool completedFamiliesOnly = false, string after = "")
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
-        using var transaction = connection.BeginTransaction(deferred: true);
-        foreach (var journal in ReadHistoryInside(connection, transaction, completedFamiliesOnly, after)) yield return journal;
+        while (true)
+        {
+            RegisteredJournal[] page;
+            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime))
+            using (var transaction = connection.BeginTransaction(deferred: true))
+            {
+                page = ReadHistoryInside(connection, transaction, completedFamiliesOnly, after).Take(128).ToArray();
+                transaction.Commit();
+            }
+            foreach (var journal in page) yield return journal;
+            if (page.Length < 128) yield break;
+            after = page[^1].JournalId.ToString("D");
+        }
     }
 
     internal static IEnumerable<RegisteredJournal> ReadHistoryInside(SqliteConnection connection, SqliteTransaction transaction,
@@ -175,9 +185,9 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
         {
             using var command = connection.CreateCommand(); command.Transaction = transaction;
             command.CommandText = completedFamiliesOnly
-                ? "SELECT j.journal_id FROM operation_journals j JOIN recovery_capacity_reservations r ON r.owner_journal_id=j.journal_id " +
+                ? "SELECT j.journal_id FROM main.operation_journals j JOIN main.recovery_capacity_reservations r ON r.owner_journal_id=j.journal_id " +
                     "WHERE j.journal_id>$after AND NOT " + RecoveryCapacityStore.ActiveReservation + " ORDER BY j.journal_id LIMIT 128;"
-                : "SELECT journal_id FROM operation_journals WHERE journal_id>$after ORDER BY journal_id LIMIT 128;";
+                : "SELECT journal_id FROM main.operation_journals WHERE journal_id>$after ORDER BY journal_id LIMIT 128;";
             command.Parameters.AddWithValue("$after", after);
             var ids = new List<Guid>();
             using (var reader = command.ExecuteReader()) while (reader.Read()) ids.Add(Guid.ParseExact(reader.GetString(0), "D"));
@@ -189,14 +199,14 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
 
     internal IEnumerable<RecoveryRegistrySnapshot> ReadCompleted()
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         RecoveryCapacityStore.VerifyGlobal(connection, transaction);
         var after = "";
         while (true)
         {
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT r.owner_journal_id FROM recovery_capacity_reservations r WHERE r.owner_journal_id>$after AND NOT " +
+            command.CommandText = "SELECT r.owner_journal_id FROM main.recovery_capacity_reservations r WHERE r.owner_journal_id>$after AND NOT " +
                 RecoveryCapacityStore.ActiveReservation + " ORDER BY r.owner_journal_id LIMIT 128;";
             command.Parameters.AddWithValue("$after", after);
             var owners = new List<Guid>();
@@ -213,7 +223,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
         if (journal.Phase != JournalPhase.Prepared || journal.Revision != 1) throw new IOException("journal_initial_state_invalid");
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "INSERT INTO operation_journals VALUES($id,$operation,$kind,'prepared',1,$path,$digest,$created);";
+        command.CommandText = "INSERT INTO main.operation_journals VALUES($id,$operation,$kind,'prepared',1,$path,$digest,$created);";
         command.Parameters.AddWithValue("$id", journal.JournalId.ToString("D"));
         command.Parameters.AddWithValue("$operation", journal.OperationId.ToString("D"));
         command.Parameters.AddWithValue("$kind", Wire(journal.Kind));
@@ -223,12 +233,12 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
         command.ExecuteNonQuery();
         if (journal.Kind is JournalKind.RunAttempt or JournalKind.UpdateApply or JournalKind.ExtensionApply or JournalKind.AssetPrepare or JournalKind.SecretPrepare)
         {
-            command.CommandText = "INSERT INTO journal_effect_gates VALUES($id,'unentered',1);";
+            command.CommandText = "INSERT INTO main.journal_effect_gates VALUES($id,'unentered',1);";
             command.ExecuteNonQuery();
         }
-        command.CommandText = "UPDATE operations SET initial_journal_id=$id WHERE operation_id=$operation AND initial_journal_id IS NULL;";
+        command.CommandText = "UPDATE main.operations SET initial_journal_id=$id WHERE operation_id=$operation AND initial_journal_id IS NULL;";
         command.ExecuteNonQuery();
-        command.CommandText = "INSERT INTO journal_resources VALUES($id,$resource); INSERT INTO resource_isolations VALUES($resource,$id,'verified','recovery_pending');";
+        command.CommandText = "INSERT INTO main.journal_resources VALUES($id,$resource); INSERT INTO main.resource_isolations VALUES($resource,$id,'verified','recovery_pending');";
         var resource = command.Parameters.Add("$resource", SqliteType.Text);
         foreach (var key in journal.ResourceKeys)
         {
@@ -264,7 +274,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
                     journal.Phase == JournalPhase.Applying ? EffectGateState.Entered : EffectGateState.Sealed);
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
-            command.CommandText = "UPDATE operation_journals SET phase=$phase,revision=$revision WHERE journal_id=$id AND revision=$expected;";
+            command.CommandText = "UPDATE main.operation_journals SET phase=$phase,revision=$revision WHERE journal_id=$id AND revision=$expected;";
             command.Parameters.AddWithValue("$phase", Wire(journal.Phase));
             command.Parameters.AddWithValue("$revision", journal.Revision);
             command.Parameters.AddWithValue("$id", journal.JournalId.ToString("D"));
@@ -272,18 +282,18 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
             if (command.ExecuteNonQuery() != 1) throw new IOException("journal_revision_conflict");
             if (journal.Phase == JournalPhase.Committed)
             {
-                command.CommandText = "SELECT count(*) FROM file_effects WHERE journal_id=$id AND ($cleanup=1 OR action<>'removeOwned') AND state NOT IN ('completed','notExecuted') " +
+                command.CommandText = "SELECT count(*) FROM main.file_effects WHERE journal_id=$id AND ($cleanup=1 OR action<>'removeOwned') AND state NOT IN ('completed','notExecuted') " +
                     "AND NOT ($extension=1 AND state='reverted' AND action IN ('preserveOriginal','installCandidate'));";
                 command.Parameters.AddWithValue("$cleanup", journal.Kind == JournalKind.FileCleanup ? 1 : 0);
                 command.Parameters.AddWithValue("$extension", journal.Kind is JournalKind.ExtensionApply or JournalKind.UpdateApply ? 1 : 0);
                 if (Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture) != 0)
                     throw new IOException("file_effects_not_closed");
-                command.CommandText = "DELETE FROM resource_isolations WHERE journal_id=$id;";
+                command.CommandText = "DELETE FROM main.resource_isolations WHERE journal_id=$id;";
                 command.ExecuteNonQuery();
             }
             else
             {
-                command.CommandText = "UPDATE resource_isolations SET reason_code=$reason WHERE journal_id=$id;";
+                command.CommandText = "UPDATE main.resource_isolations SET reason_code=$reason WHERE journal_id=$id;";
                 command.Parameters.AddWithValue("$reason", journal.Phase == JournalPhase.Quarantined ? "recovery_quarantined" : "recovery_pending");
                 command.ExecuteNonQuery();
             }
@@ -292,7 +302,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
 
     public RecoveryRegistrySnapshot ReadSnapshot()
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         var result = ReadSnapshot(connection, transaction, includeHistory: true);
         transaction.Commit(); return result;
@@ -306,8 +316,8 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
 
     internal static RecoveryRegistrySnapshot ReadInspectedSnapshot(DatabaseInspection inspection)
     {
-        var path = Path.Combine(inspection.DiagnosticCopyRoot, "nexus.db");
-        using var connection = DatabaseConnections.Open(path);
+        var path = Path.Combine(inspection.DiagnosticCopyRoot, "runtime.db");
+        using var connection = DatabaseConnections.Open(path, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         var result = ReadSnapshot(connection, transaction);
         transaction.Commit();
@@ -320,7 +330,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
         {
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
-            command.CommandText = "UPDATE recovery_index_state SET ready=1,revision=max(revision+1,$minimum) WHERE singleton=1 AND revision=$expected;";
+            command.CommandText = "UPDATE main.recovery_index_state SET ready=1,revision=max(revision+1,$minimum) WHERE singleton=1 AND revision=$expected;";
             command.Parameters.AddWithValue("$expected", expectedRevision);
             command.Parameters.AddWithValue("$minimum", minimumRevision);
             if (command.ExecuteNonQuery() != 1) throw new IOException("recovery_index_revision_conflict");
@@ -328,7 +338,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
         });
     }
 
-    private static RecoveryRegistrySnapshot ReadSnapshot(SqliteConnection connection, SqliteTransaction transaction, Guid? requiredJournalId = null,
+    internal static RecoveryRegistrySnapshot ReadSnapshot(SqliteConnection connection, SqliteTransaction transaction, Guid? requiredJournalId = null,
         bool includeHistory = false)
     {
         using var timing = StartupProfile.Measure("history.sql-snapshot");
@@ -343,10 +353,10 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = "SELECT i.resource_key,i.journal_id,i.reason_code,i.scope_quality,COALESCE(c.mode,1) FROM " +
-            (requiredJournalId is null ? "resource_isolations i " :
-                "recovery_capacity_members m JOIN resource_isolations i ON i.journal_id=m.journal_id ") +
-            "LEFT JOIN journal_resource_claims c ON c.journal_id=i.journal_id AND c.resource_key=i.resource_key " +
-            (requiredJournalId is null ? "" : "WHERE m.owner_journal_id=(SELECT owner_journal_id FROM recovery_capacity_members WHERE journal_id=$required) ") +
+            (requiredJournalId is null ? "main.resource_isolations i " :
+                "main.recovery_capacity_members m JOIN main.resource_isolations i ON i.journal_id=m.journal_id ") +
+            "LEFT JOIN main.journal_resource_claims c ON c.journal_id=i.journal_id AND c.resource_key=i.resource_key " +
+            (requiredJournalId is null ? "" : "WHERE m.owner_journal_id=(SELECT owner_journal_id FROM main.recovery_capacity_members WHERE journal_id=$required) ") +
             "ORDER BY i.resource_key,i.journal_id LIMIT 65537;";
         command.Parameters.AddWithValue("$required", requiredJournalId is { } required ? required.ToString("D") : DBNull.Value);
         var isolations = new List<ResourceIsolation>();
@@ -360,7 +370,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
                 isolations.Add(new(reader.GetString(0), Guid.Parse(reader.GetString(1)), reader.GetString(2)) { Mode = mode });
             }
         }
-        command.CommandText = "SELECT ready,revision FROM recovery_index_state WHERE singleton=1;";
+        command.CommandText = "SELECT ready,revision FROM main.recovery_index_state WHERE singleton=1;";
         using var state = command.ExecuteReader();
         if (!state.Read()) throw new IOException("recovery_registry_state_missing");
         var result = new RecoveryRegistrySnapshot(state.GetInt64(1), state.GetInt64(0) == 1, journals, isolations.AsReadOnly(), effects.AsReadOnly());
@@ -374,10 +384,10 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
         command.Transaction = transaction;
         const string columns = "SELECT j.journal_id,j.operation_id,j.operation_kind,j.phase,j.revision,j.plan_path,j.plan_digest ";
         command.CommandText = requiredJournalId is not null ? FamilyQuery : includeHistory
-            ? columns + "FROM operation_journals j ORDER BY j.journal_id LIMIT 10001;"
-            : columns + "FROM operation_journals j WHERE j.journal_id IN (" +
-                "SELECT journal_id FROM operation_journals INDEXED BY journals_unfinished_read WHERE phase<>'committed' " +
-                "UNION SELECT m.journal_id FROM recovery_capacity_members m WHERE m.owner_journal_id IN (" +
+            ? columns + "FROM main.operation_journals j ORDER BY j.journal_id LIMIT 10001;"
+            : columns + "FROM main.operation_journals j WHERE j.journal_id IN (" +
+                "SELECT journal_id FROM main.operation_journals INDEXED BY journals_unfinished_read WHERE phase<>'committed' " +
+                "UNION SELECT m.journal_id FROM main.recovery_capacity_members m WHERE m.owner_journal_id IN (" +
                 RecoveryCapacityStore.ActiveOwners + ")) ORDER BY j.journal_id LIMIT 10001;";
         command.Parameters.AddWithValue("$required", requiredJournalId is { } required ? required.ToString("D") : DBNull.Value);
         var result = new List<RegisteredJournal>();
@@ -392,7 +402,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
         }
         if (requiredJournalId is { } familyJournal && !result.Any(item => item.JournalId == familyJournal))
             throw new IOException("recovery_family_unbound");
-        command.CommandText = "SELECT resource_key FROM journal_resources WHERE journal_id=$id ORDER BY resource_key LIMIT 4097;";
+        command.CommandText = "SELECT resource_key FROM main.journal_resources WHERE journal_id=$id ORDER BY resource_key LIMIT 4097;";
         var id = command.Parameters.Add("$id", SqliteType.Text);
         for (var index = 0; index < result.Count; index++)
         {
@@ -407,15 +417,15 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
     }
 
     internal const string FamilyQuery = "SELECT j.journal_id,j.operation_id,j.operation_kind,j.phase,j.revision,j.plan_path,j.plan_digest " +
-        "FROM recovery_capacity_members m JOIN operation_journals j ON j.journal_id=m.journal_id " +
-        "WHERE m.owner_journal_id=(SELECT owner_journal_id FROM recovery_capacity_members WHERE journal_id=$required) " +
+        "FROM main.recovery_capacity_members m JOIN main.operation_journals j ON j.journal_id=m.journal_id " +
+        "WHERE m.owner_journal_id=(SELECT owner_journal_id FROM main.recovery_capacity_members WHERE journal_id=$required) " +
         "ORDER BY j.journal_id LIMIT 10001;";
 
     private static void IncrementIndex(SqliteConnection connection, SqliteTransaction transaction)
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "UPDATE recovery_index_state SET ready=0,revision=revision+1 WHERE singleton=1;";
+        command.CommandText = "UPDATE main.recovery_index_state SET ready=0,revision=revision+1 WHERE singleton=1;";
         if (command.ExecuteNonQuery() != 1) throw new IOException("recovery_registry_state_missing");
     }
 

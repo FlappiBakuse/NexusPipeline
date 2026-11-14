@@ -8,15 +8,15 @@ internal static class ImageCatalogRows
 {
     private const string SelectEntries = "SELECT position,step_id,capture_id,width,height,outcome,reason_code," +
         "source_path,source_size,source_sha256,root_path,root_size,root_sha256,result_path,result_size,result_sha256," +
-        "png_path,png_size,png_sha256 FROM execution_image_entries ";
+        "png_path,png_size,png_sha256 FROM records.execution_image_entries ";
 
     internal static void PublishInside(SqliteConnection connection, SqliteTransaction transaction, ImageCatalogSnapshot expected)
     {
         RequireCursor(connection, transaction, expected);
-        using (var exists = Command(connection, transaction, "SELECT 1 FROM execution_image_catalog WHERE attempt_id=$0;",
+        using (var exists = Command(connection, transaction, "SELECT 1 FROM records.execution_image_catalog WHERE attempt_id=$0;",
             expected.Receipt.Facts.AttemptId.ToString("D")))
             if (exists.ExecuteScalar() is not null) { RequireSaved(connection, transaction, expected); return; }
-        using var header = Command(connection, transaction, "INSERT INTO execution_image_catalog VALUES($0,$1,$2,$3,$4,$5);",
+        using var header = Command(connection, transaction, "INSERT INTO records.execution_image_catalog VALUES($0,$1,$2,$3,$4,$5);",
             expected.Receipt.Facts.AttemptId.ToString("D"), expected.Receipt.Facts.RunId.ToString("D"),
             expected.Receipt.JournalId.ToString("D"), expected.TerminalRevision, expected.TerminalSha256, expected.Entries.Count);
         header.ExecuteNonQuery();
@@ -24,7 +24,7 @@ internal static class ImageCatalogRows
         {
             var item = entry.Item;
             using var insert = Command(connection, transaction,
-                "INSERT INTO execution_image_entries VALUES($0,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19);",
+                "INSERT INTO records.execution_image_entries VALUES($0,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19);",
                 item.Key.AttemptId.ToString("D"), item.Position, item.Key.StepId, item.Key.CaptureId.ToString("D"),
                 Value(item.Width), Value(item.Height), (int)item.Outcome, item.ReasonCode,
                 entry.Source.RelativePath, entry.Source.SizeBytes, entry.Source.Sha256,
@@ -41,7 +41,7 @@ internal static class ImageCatalogRows
         RequireCursor(connection, transaction, expected);
         var receipt = expected.Receipt;
         using var header = Command(connection, transaction,
-            "SELECT run_id,journal_id,terminal_revision,terminal_sha256,entry_count FROM execution_image_catalog WHERE attempt_id=$0;",
+            "SELECT run_id,journal_id,terminal_revision,terminal_sha256,entry_count FROM records.execution_image_catalog WHERE attempt_id=$0;",
             receipt.Facts.AttemptId.ToString("D"));
         using (var row = header.ExecuteReader())
             if (!row.Read() || row.GetString(0) != receipt.Facts.RunId.ToString("D") || row.GetString(1) != receipt.JournalId.ToString("D") ||
@@ -111,7 +111,7 @@ internal static class ImageCatalogRows
         if (AttemptReceiptStore.ReadInside(connection, transaction, receipt.Facts.AttemptId) != receipt ||
             StartSourceRows.Read(connection, transaction, receipt.OperationId) != expected.StartSource) throw Invalid();
         using var command = Command(connection, transaction,
-            "SELECT EXISTS(SELECT 1 FROM operation_journals j JOIN operations o ON o.operation_id=j.operation_id " +
+            "SELECT EXISTS(SELECT 1 FROM main.operation_journals j JOIN main.operations o ON o.operation_id=j.operation_id " +
             "WHERE j.journal_id=$0 AND j.operation_id=$1 AND j.phase='committed' AND j.revision=$2 AND j.plan_digest=$3 " +
             "AND o.operation_kind='execution.start' AND o.status='completed' AND o.initial_journal_id=j.journal_id);",
             receipt.JournalId.ToString("D"), receipt.OperationId.ToString("D"), expected.TerminalRevision, receipt.PlanDigest);

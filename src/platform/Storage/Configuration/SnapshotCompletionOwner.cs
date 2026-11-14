@@ -79,11 +79,11 @@ internal sealed class SnapshotCompletionOwner(RuntimeInstance instance, StateDat
 
     private void RequireOperationBindings(RegisteredJournal parent, ConfigurationRunStatus session, string subject)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM operations WHERE operation_id=$parent AND subject_id=$subject AND status=$parentStatus) " +
-            "AND EXISTS(SELECT 1 FROM operations WHERE operation_id=$session AND subject_id=$subject AND operation_kind='configuration.run.begin' AND status=$status);";
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operations WHERE operation_id=$parent AND subject_id=$subject AND status=$parentStatus) " +
+            "AND EXISTS(SELECT 1 FROM main.operations WHERE operation_id=$session AND subject_id=$subject AND operation_kind='configuration.run.begin' AND status=$status);";
         command.Parameters.AddWithValue("$parent", parent.OperationId.ToString("D")); command.Parameters.AddWithValue("$subject", subject);
         command.Parameters.AddWithValue("$parentStatus", parent.Phase == JournalPhase.Committed ? "completed" : "accepted");
         command.Parameters.AddWithValue("$session", session.SessionId.ToString("D"));
@@ -92,7 +92,7 @@ internal sealed class SnapshotCompletionOwner(RuntimeInstance instance, StateDat
         foreach (var resource in session.Resources)
         {
             var physical = new JournalStore(instance, contracts).Read(resource.JournalId);
-            command.CommandText = "SELECT EXISTS(SELECT 1 FROM operation_journals j JOIN operations o ON o.operation_id=j.operation_id " +
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operation_journals j JOIN main.operations o ON o.operation_id=j.operation_id " +
                 "WHERE j.journal_id=$journal AND j.operation_id=$child AND j.operation_kind='configExchange' AND j.phase='committed' " +
                 "AND j.revision=$revision AND j.plan_path=$path AND j.plan_digest=$digest AND o.subject_id=$subject " +
                 "AND o.operation_kind='configuration.run.resource' AND o.request_digest=$digest AND o.status=$childStatus);";

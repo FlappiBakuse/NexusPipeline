@@ -43,7 +43,7 @@ public sealed class RecoveryCapacityTests
         fixture.Database.Write((connection, transaction) =>
         {
             using var change = connection.CreateCommand(); change.Transaction = transaction;
-            change.CommandText = "UPDATE journal_resources SET resource_key=' ' WHERE journal_id=$id;";
+            change.CommandText = "UPDATE main.journal_resources SET resource_key=' ' WHERE journal_id=$id;";
             change.Parameters.AddWithValue("$id", completed.Order().Last().ToString("D")); change.ExecuteNonQuery();
             return true;
         });
@@ -76,15 +76,15 @@ public sealed class RecoveryCapacityTests
         {
             using var command = connection.CreateCommand(); command.Transaction = transaction;
             command.CommandText = "WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<10001) " +
-                "INSERT INTO operations SELECT printf('10000000-0000-0000-0000-%012x',x),'maintenance-history-fixture',$digest,'maintenance.update','completed','fixture',NULL FROM n;" +
-                "INSERT INTO maintenance_operations(operation_id,plan_sha256,plan_size,source_sha256,source_size,state,terminal_code) " +
-                "SELECT operation_id,$digest,1,$digest,1,3,'cancelled-before-handoff' FROM operations WHERE subject_id='maintenance-history-fixture';";
+                "INSERT INTO main.operations SELECT printf('10000000-0000-0000-0000-%012x',x),'maintenance-history-fixture',$digest,'maintenance.update','completed','fixture',NULL FROM n;" +
+                "INSERT INTO system.maintenance_operations(operation_id,plan_sha256,plan_size,source_sha256,source_size,state,terminal_code) " +
+                "SELECT operation_id,$digest,1,$digest,1,3,'cancelled-before-handoff' FROM main.operations WHERE subject_id='maintenance-history-fixture';";
             command.Parameters.AddWithValue("$digest", new string('b', 64)); command.ExecuteNonQuery();
             var expected = Enumerable.Range(1, 10001).Select(index => Guid.Parse($"10000000-0000-0000-0000-{index:x12}"));
             var history = MaintenanceOperationRows.ReadAll(connection, transaction).ToArray();
             Assert.Equal(expected.Order(), history.Select(item => item.Identity.OperationId).Order());
             Assert.All(history, item => Assert.Equal("cancelled-before-handoff", item.TerminalCode));
-            command.CommandText = "UPDATE operations SET status='accepted' WHERE operation_id=$last;";
+            command.CommandText = "UPDATE main.operations SET status='accepted' WHERE operation_id=$last;";
             command.Parameters.AddWithValue("$last", expected.Last().ToString("D"));
             command.ExecuteNonQuery();
             Assert.Equal("maintenance_operation_unbound", Assert.Throws<IOException>(() => MaintenanceOperationRows.ReadAll(connection, transaction).ToArray()).Message);
@@ -212,7 +212,7 @@ public sealed class RecoveryCapacityTests
         source.Database.Write((connection, transaction) =>
         {
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = $"UPDATE recovery_capacity_reservations SET {field}_limit={field}_limit+1,{remaining}={remaining}+1 WHERE owner_journal_id=$owner;";
+            command.CommandText = $"UPDATE main.recovery_capacity_reservations SET {field}_limit={field}_limit+1,{remaining}={remaining}+1 WHERE owner_journal_id=$owner;";
             command.Parameters.AddWithValue("$owner", accepted.JournalId.ToString("D"));
             Assert.Equal(1, command.ExecuteNonQuery());
             return true;
@@ -238,11 +238,11 @@ public sealed class RecoveryCapacityTests
         {
             using var command = connection.CreateCommand(); command.Transaction = transaction;
             command.CommandText = "WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<$count) " +
-                "INSERT INTO operations SELECT printf('00000000-0000-0000-0000-%012x',x),'history-capacity-fixture',$digest,'fixture.capacity','completed','fixture',NULL FROM n;" +
-                "INSERT INTO recovery_capacity_reservations SELECT operation_id,1,0,1,1,0,1,0 FROM operations WHERE subject_id='history-capacity-fixture';" +
-                "INSERT INTO recovery_capacity_members SELECT operation_id,operation_id FROM operations WHERE subject_id='history-capacity-fixture';" +
-                "INSERT INTO operation_journals SELECT operation_id,operation_id,'fileCleanup','prepared',1,'blobs/plans/'||$digest||'.json',$digest,'fixture' FROM operations WHERE subject_id='history-capacity-fixture';" +
-                "INSERT INTO journal_resources SELECT journal_id,'capacity:'||journal_id FROM operation_journals;UPDATE operation_journals SET phase='committed';";
+                "INSERT INTO main.operations SELECT printf('00000000-0000-0000-0000-%012x',x),'history-capacity-fixture',$digest,'fixture.capacity','completed','fixture',NULL FROM n;" +
+                "INSERT INTO main.recovery_capacity_reservations SELECT operation_id,1,0,1,1,0,1,0 FROM main.operations WHERE subject_id='history-capacity-fixture';" +
+                "INSERT INTO main.recovery_capacity_members SELECT operation_id,operation_id FROM main.operations WHERE subject_id='history-capacity-fixture';" +
+                "INSERT INTO main.operation_journals SELECT operation_id,operation_id,'fileCleanup','prepared',1,'blobs/plans/'||$digest||'.json',$digest,'fixture' FROM main.operations WHERE subject_id='history-capacity-fixture';" +
+                "INSERT INTO main.journal_resources SELECT journal_id,'capacity:'||journal_id FROM main.operation_journals;UPDATE main.operation_journals SET phase='committed';";
             command.Parameters.AddWithValue("$count", count); command.Parameters.AddWithValue("$digest", new string('a', 64));
             command.ExecuteNonQuery();
             return true;
@@ -294,16 +294,16 @@ public sealed class RecoveryCapacityTests
     {
         Assert.Equal("recovery_capacity_exceeded", Assert.Throws<IOException>(() => Accept(database, journal, budget)).Message);
         Assert.Null(new RecoveryJournalRegistry(database).FindJournal(journal.JournalId));
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         Assert.Null(OperationRows.ReadExisting(connection, transaction, Identity(journal)));
     }
 
     private static void AssertJobOwners(StateDatabase database, string name, IReadOnlyList<Guid> expected)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT journal_id FROM journal_writer_jobs WHERE job_name=$name AND writer_id=$writer;";
+        command.CommandText = "SELECT journal_id FROM main.journal_writer_jobs WHERE job_name=$name AND writer_id=$writer;";
         command.Parameters.AddWithValue("$name", name);
         command.Parameters.AddWithValue("$writer", JournalWriterStore.CurrentWriter.WriterId.ToString("D"));
         using var rows = command.ExecuteReader();
@@ -315,7 +315,7 @@ public sealed class RecoveryCapacityTests
     private static void CommitMetadata(StateDatabase database, Guid journal) => database.Write((connection, transaction) =>
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "UPDATE operation_journals SET phase='committed' WHERE journal_id=$id;";
+        command.CommandText = "UPDATE main.operation_journals SET phase='committed' WHERE journal_id=$id;";
         command.Parameters.AddWithValue("$id", journal.ToString("D")); command.ExecuteNonQuery(); return true;
     });
 }

@@ -12,7 +12,7 @@ internal static class ExecutionRetryOutcomes
     {
         var retryId = RetryIntentCodec.Identity(retry).OperationId;
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT r.operation_id,r.reason_code,o.subject_id,o.request_digest,o.operation_kind,o.status,o.initial_journal_id FROM execution_retry_outcomes r JOIN operations o ON o.operation_id=r.operation_id WHERE r.retry_operation_id=$id;";
+        command.CommandText = "SELECT r.operation_id,r.reason_code,o.subject_id,o.request_digest,o.operation_kind,o.status,o.initial_journal_id FROM main.execution_retry_outcomes r JOIN main.operations o ON o.operation_id=r.operation_id WHERE r.retry_operation_id=$id;";
         command.Parameters.AddWithValue("$id", retryId.ToString("D"));
         using var reader = command.ExecuteReader();
         if (!reader.Read()) return null;
@@ -30,7 +30,7 @@ internal static class ExecutionRetryOutcomes
     {
         if (HasOutcome(connection, transaction, retry)) throw new IOException("execution_retry_declined");
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM operations WHERE operation_id=$id);";
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operations WHERE operation_id=$id);";
         command.Parameters.AddWithValue("$id", retry.Frozen.NextOperationId.ToString("D"));
         if ((long)command.ExecuteScalar()! != 0) throw new IOException("execution_retry_already_accepted");
     }
@@ -48,11 +48,11 @@ internal static class ExecutionRetryOutcomes
         RequireWaiting(connection, transaction, retry);
         _ = OperationRows.Accept(connection, transaction, identity, now);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "INSERT INTO execution_retry_outcomes(retry_operation_id,operation_id,reason_code) VALUES($retry,$id,$reason);";
+        command.CommandText = "INSERT INTO main.execution_retry_outcomes(retry_operation_id,operation_id,reason_code) VALUES($retry,$id,$reason);";
         command.Parameters.AddWithValue("$retry", RetryIntentCodec.Identity(retry).OperationId.ToString("D"));
         command.Parameters.AddWithValue("$id", identity.OperationId.ToString("D")); command.Parameters.AddWithValue("$reason", reason);
         command.ExecuteNonQuery();
-        command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$id;";
+        command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$id;";
         if (command.ExecuteNonQuery() != 1 || !HasOutcome(connection, transaction, retry)) throw RetryIntentCodec.Invalid();
     }
 

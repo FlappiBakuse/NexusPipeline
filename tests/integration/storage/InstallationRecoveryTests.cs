@@ -94,7 +94,7 @@ public sealed class InstallationRecoveryTests
         {
             var error = Assert.Throws<IOException>(() => recovery.Recover(lease));
             Assert.Equal("extension_payload_entered_recovery_pending", error.Message);
-            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
             using var transaction = connection.BeginTransaction(deferred: true);
             Assert.Null(ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, "fixture-plugin"));
             Assert.NotEmpty(new RecoveryJournalRegistry(database).ReadSnapshot().Isolations);
@@ -118,15 +118,15 @@ public sealed class InstallationRecoveryTests
         var ownership = new JournalRecoveryOwnership(database);
         using (ownership.Begin(before.Journals))
         {
-            Sql(database, "CREATE TRIGGER fixture_install_recovery_failure BEFORE UPDATE OF phase ON operation_journals " +
+            Sql(database, "CREATE TRIGGER main.fixture_install_recovery_failure BEFORE UPDATE OF phase ON operation_journals " +
                 "WHEN NEW.operation_kind='extensionApply' AND NEW.phase='committed' BEGIN SELECT RAISE(ABORT,'fixture'); END;");
             var settings = new HostSettingsStore(database).Read();
             var reconciler = new ExtensionCommittedReconciliation(fixture.Instance, database, new(), fixture.Roots, lease, ownership);
             try { Assert.Throws<SqliteException>(() => reconciler.Reconcile(fixture.JournalId)); }
-            finally { Sql(database, "DROP TRIGGER fixture_install_recovery_failure;"); }
+            finally { Sql(database, "DROP TRIGGER main.fixture_install_recovery_failure;"); }
             Assert.Equal(settings.Revision, new HostSettingsStore(database).Read().Revision);
             Assert.Equal(JournalPhase.Applied, registry.ReadJournal(fixture.JournalId).Phase);
-            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
             using (var transaction = connection.BeginTransaction(deferred: true))
                 Assert.Null(ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, "fixture-plugin"));
             Assert.Equal(JournalRecoveryResult.Completed, reconciler.Reconcile(fixture.JournalId));
@@ -141,7 +141,7 @@ public sealed class InstallationRecoveryTests
 
     private static void Sql(StateDatabase database, string statement)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, domains: DatabaseDomain.Runtime);
         using var command = connection.CreateCommand(); command.CommandText = statement; command.ExecuteNonQuery();
     }
 }

@@ -50,13 +50,13 @@ public sealed class ControlBearerTests
         await fixture.Service.ApplyAsync(operation, key, 0, SecretDisposition.Set, first, default);
         var foreign = await fixture.Service.ApplyAsync(Guid.NewGuid(), SecretFieldKey.HostProxyPassword(fixture.Instance.InstanceId),
             0, SecretDisposition.Set, second, default);
-        using (var connection = DatabaseConnections.Open(fixture.Database.DatabasePath))
+        using (var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var command = connection.CreateCommand())
         {
             command.CommandText = fault == "foreignPayload"
-                ? "UPDATE secret_fields SET secret_id=NULL WHERE owner_kind='host' AND field='proxy-password'; " +
-                  "UPDATE secret_fields SET secret_id=$id WHERE owner_kind='host' AND field='control-bearer';"
-                : "UPDATE operations SET subject_id=$subject WHERE operation_id=$operation;";
+                ? "UPDATE system.secret_fields SET secret_id=NULL WHERE owner_kind='host' AND field='proxy-password'; " +
+                  "UPDATE system.secret_fields SET secret_id=$id WHERE owner_kind='host' AND field='control-bearer';"
+                : "UPDATE main.operations SET subject_id=$subject WHERE operation_id=$operation;";
             command.Parameters.AddWithValue("$id", foreign.SecretId!.Value.ToString("D"));
             command.Parameters.AddWithValue("$subject", "host/" + fixture.Instance.InstanceId.ToString("D") + "/proxy-password");
             command.Parameters.AddWithValue("$operation", operation.ToString("D"));

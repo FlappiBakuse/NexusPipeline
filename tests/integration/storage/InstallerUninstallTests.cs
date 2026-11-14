@@ -17,7 +17,7 @@ public sealed class InstallerUninstallTests
         var runtime = Environment.GetEnvironmentVariable("NEXUS_INSTALLER_RUNTIME") ?? Path.Combine(Path.GetDirectoryName(assembly)!, "runtime");
         var instance = new InstanceRoot(new()).OpenExisting(runtime);
         using var lease = InstanceLease.Acquire(instance, new());
-        var files = new[] { "", "-wal", "-shm", "-journal" }.Select(suffix => Path.Combine(runtime, "state/nexus.db") + suffix).Where(File.Exists).ToArray();
+        var files = new[] { "", "-wal", "-shm", "-journal" }.Select(suffix => Path.Combine(runtime, "state/runtime.db") + suffix).Where(File.Exists).ToArray();
         var before = files.Select(path => Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path)))).ToArray();
         var work = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "installer-admission-" + Guid.NewGuid().ToString("N"));
         var root = Path.GetDirectoryName(runtime)!;
@@ -90,7 +90,7 @@ public sealed class InstallerUninstallTests
     {
         using var fixture = new InstallerUninstallFixture();
         var file = Path.Combine(fixture.Instance.RuntimeRoot, "foreign.json");
-        if (fault == "database") { fixture.Initialize(); file = Path.Combine(fixture.Instance.RuntimeRoot, "state/nexus.db"); }
+        if (fault == "database") { fixture.Initialize(); file = Path.Combine(fixture.Instance.RuntimeRoot, "state/runtime.db"); }
         if (fault == "payload") file = Path.Combine(fixture.Product.Application, "README.md");
         if (fault == "manager") file = Path.Combine(fixture.Product.Paths.ManagerRoot, "foreign.txt");
         if (fault == "uninstall") file = Path.Combine(fixture.Product.Application, "uninstall/foreign.txt");

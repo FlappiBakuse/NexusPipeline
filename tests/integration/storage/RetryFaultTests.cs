@@ -92,7 +92,8 @@ public sealed class RetryFaultTests
     {
         await using var fixture = await Create("retry-interrupted");
         Assert.Contains(table, new[] { "attempt_receipts", "execution_retry_intents" });
-        fixture.Base.Execute("CREATE TRIGGER fail_retry_terminal BEFORE INSERT ON " + table +
+        var triggerName = NexusPipeline.Platform.Storage.Sqlite.DatabaseTables.Name(table).Split('.')[0] + ".fail_retry_terminal";
+        fixture.Base.Execute("CREATE TRIGGER " + triggerName + " BEFORE INSERT ON " + table +
             " BEGIN SELECT RAISE(ABORT,'retry_terminal_fixture_fault'); END;");
         await Assert.ThrowsAnyAsync<Exception>(() => fixture.RunInterruptedAsync());
         Assert.Equal(0, fixture.Base.Count("attempt_receipts"));
@@ -106,10 +107,10 @@ public sealed class RetryFaultTests
             item => item.JournalId == fixture.Accepted.JournalId);
         Assert.Equal(JournalPhase.Applied, registered.Phase);
         Assert.Equal(registered.Revision + 1, physical.Revision);
-        using (var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var command = connection.CreateCommand())
         {
-            command.CommandText = "SELECT status FROM operations WHERE operation_id=$id;";
+            command.CommandText = "SELECT status FROM main.operations WHERE operation_id=$id;";
             command.Parameters.AddWithValue("$id", registered.OperationId.ToString("D"));
             Assert.Equal("accepted", command.ExecuteScalar());
         }

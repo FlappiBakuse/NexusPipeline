@@ -83,7 +83,7 @@ internal sealed class ExtensionPayloadBinding(RuntimeInstance instance, StateDat
                 preparationIntent, preparation, commitIntent, commit, footprint, restoration);
             RequireInside(connection, transaction, result, null, identity);
             return result;
-        });
+        }, DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System);
     }
 
     internal void RequireInside(SqliteConnection connection, SqliteTransaction transaction, BoundExtensionPayload bound,
@@ -211,7 +211,7 @@ internal sealed class ExtensionPayloadBinding(RuntimeInstance instance, StateDat
         RegisteredJournal registered, ExtensionPayloadSource source)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT subject_id,request_digest,operation_kind,status,initial_journal_id FROM operations WHERE operation_id=$operation;";
+        command.CommandText = "SELECT subject_id,request_digest,operation_kind,status,initial_journal_id FROM main.operations WHERE operation_id=$operation;";
         command.Parameters.AddWithValue("$operation", source.OperationId.ToString("D"));
         OperationIdentity identity;
         using (var row = command.ExecuteReader())
@@ -222,7 +222,7 @@ internal sealed class ExtensionPayloadBinding(RuntimeInstance instance, StateDat
             identity = ExtensionApplyRequest.FromSource(source).Identity(source.OperationId, row.GetString(0));
             if (identity.RequestDigest != row.GetString(1)) throw Invalid();
         }
-        command.CommandText = "SELECT resource_key,mode FROM journal_resource_claims WHERE journal_id=$journal ORDER BY resource_key LIMIT 4097;";
+        command.CommandText = "SELECT resource_key,mode FROM main.journal_resource_claims WHERE journal_id=$journal ORDER BY resource_key LIMIT 4097;";
         command.Parameters.AddWithValue("$journal", source.JournalId.ToString("D"));
         using (var row = command.ExecuteReader())
         {

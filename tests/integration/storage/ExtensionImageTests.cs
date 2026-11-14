@@ -80,17 +80,17 @@ public sealed class ExtensionImageTests
         {
             _ = await Invoke(frontend, "image-write", Input("settings", 0, [id], image), Guid.NewGuid());
             var catalog = fixture.Package.Catalog;
-            using var connection = DatabaseConnections.Open(catalog.Database.DatabasePath);
+            using var connection = DatabaseConnections.Open(catalog.Database.DatabasePath, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
             using var command = connection.CreateCommand();
             var unknown = orphan ? image : Image(7);
-            command.CommandText = orphan ? "DELETE FROM extension_image_references WHERE extension_id='fixture-plugin';" :
-                "UPDATE extension_images SET content=$bytes WHERE extension_id='fixture-plugin';";
+            command.CommandText = orphan ? "DELETE FROM extensions.extension_image_references WHERE extension_id='fixture-plugin';" :
+                "UPDATE extensions.extension_images SET content=$bytes WHERE extension_id='fixture-plugin';";
             command.Parameters.AddWithValue("$bytes", unknown); command.ExecuteNonQuery();
             await Assert.ThrowsAsync<IOException>(() => Invoke(frontend, "image-write", Input("settings", 1, [], null), Guid.NewGuid()));
             Assert.Equal(orphan ? 0 : 1, (await Invoke(frontend, "image-list", new { name = "settings" })).GetArrayLength());
-            command.CommandText = "SELECT content FROM extension_images WHERE extension_id='fixture-plugin';";
+            command.CommandText = "SELECT content FROM extensions.extension_images WHERE extension_id='fixture-plugin';";
             Assert.Equal(unknown, Assert.IsType<byte[]>(command.ExecuteScalar()));
-            command.CommandText = "SELECT revision FROM extension_documents WHERE extension_id='fixture-plugin' AND name='settings';";
+            command.CommandText = "SELECT revision FROM extensions.extension_documents WHERE extension_id='fixture-plugin' AND name='settings';";
             Assert.Equal(1L, command.ExecuteScalar());
         }
         finally { await fixture.Activator.StopAllAsync(TimeSpan.FromSeconds(10)); }
@@ -108,7 +108,7 @@ public sealed class ExtensionImageTests
 
     private static long Count(InstallRuntimeFixture fixture, string table)
     {
-        using var connection = DatabaseConnections.Open(fixture.Package.Catalog.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(fixture.Package.Catalog.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var command = connection.CreateCommand(); command.CommandText = "SELECT COUNT(*) FROM " + table;
         return (long)command.ExecuteScalar()!;
     }

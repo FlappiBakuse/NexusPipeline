@@ -40,7 +40,7 @@ public sealed class NotificationCatalogService
     {
         _lease.VerifyHeld(_instance);
         NotificationCatalogCursor? cursor;
-        using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications))
             cursor = NotificationCatalogRows.ReadCurrent(connection, null);
         if (cursor is null) return NotificationTaskCatalog.Empty;
         var saved = new NotificationCatalogCodec(_instance, _contracts).Read(cursor.Reference);
@@ -51,7 +51,7 @@ public sealed class NotificationCatalogService
     public NotificationTargetCatalog ReadTargets()
     {
         _lease.VerifyHeld(_instance);
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         var cursor = NotificationCatalogRows.ReadCurrent(connection, transaction);
         if (cursor is null) return new(0, []);
@@ -124,11 +124,11 @@ public sealed class NotificationCatalogService
         IReadOnlyList<NotificationSecretEdit> secrets)
     {
         BlobReference reference;
-        using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System))
         using (var command = connection.CreateCommand())
         {
             command.CommandText = "SELECT o.subject_id,o.operation_kind,p.relative_path,p.size_bytes,p.sha256 " +
-                "FROM operations o LEFT JOIN notification_publications p ON p.operation_id=o.operation_id WHERE o.operation_id=$id;";
+                "FROM main.operations o LEFT JOIN notifications.notification_publications p ON p.operation_id=o.operation_id WHERE o.operation_id=$id;";
             command.Parameters.AddWithValue("$id", operationId.ToString("D"));
             using var row = command.ExecuteReader();
             if (!row.Read()) return null;

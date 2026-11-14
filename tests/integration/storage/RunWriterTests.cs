@@ -112,11 +112,11 @@ public sealed class RunWriterTests
     {
         await using var fixture = new RunWriterFixture(child: true);
         var ids = await fixture.StartAsync(child: true);
-        fixture.Base.Execute("CREATE TRIGGER fixture_fail_run_stop BEFORE INSERT ON journal_writer_job_closures " +
+        fixture.Base.Execute("CREATE TRIGGER main.fixture_fail_run_stop BEFORE INSERT ON journal_writer_job_closures " +
             "BEGIN SELECT RAISE(ABORT,'fixture_stop_digest:' || NEW.plan_digest); END;");
         SqliteException failure;
         try { failure = await Assert.ThrowsAsync<SqliteException>(() => fixture.Writer.StopAsync(TimeSpan.FromSeconds(10))); }
-        finally { fixture.Base.Execute("DROP TRIGGER fixture_fail_run_stop;"); }
+        finally { fixture.Base.Execute("DROP TRIGGER main.fixture_fail_run_stop;"); }
         foreach (var id in ids) Assert.False(IsRunning(id));
         var source = fixture.Base.Source;
         var closures = new JobClosureStore(source.Instance, source.Database, new());

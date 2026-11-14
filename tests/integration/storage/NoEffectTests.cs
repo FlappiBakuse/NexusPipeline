@@ -20,7 +20,7 @@ public sealed class NoEffectTests
         using var fixture = PayloadTestFixture.Create(JournalKind.ExtensionApply, PayloadAction.Install);
         fixture.Accept();
         var id = fixture.Plan.OperationId.ToString("D");
-        Sql("CREATE TRIGGER reject_no_effect_operation BEFORE UPDATE OF status ON operations " +
+        Sql("CREATE TRIGGER main.reject_no_effect_operation BEFORE UPDATE OF status ON operations " +
             "WHEN OLD.operation_id='" + id + "' AND NEW.status='completed' BEGIN SELECT RAISE(" +
             (ignore ? "IGNORE" : "ABORT,'fixture-operation-failure'") + "); END;");
         var error = Record.Exception(() => fixture.Recover());
@@ -37,7 +37,7 @@ public sealed class NoEffectTests
         var history = new JournalStore(fixture.Instance, new ContractReader()).ReadAllRevisions(pending.JournalId);
         Assert.Equal(JournalPhase.Committed, history[^1].Phase); Assert.Equal(3, history[^1].Revision);
         var bytes = history.Select(item => Convert.ToHexStringLower(SHA256.HashData(item.Export()))).ToArray();
-        Sql("DROP TRIGGER reject_no_effect_operation;");
+        Sql("DROP TRIGGER main.reject_no_effect_operation;");
         Assert.Equal(JournalRecoveryResult.AlreadyCompleted, fixture.Recover());
         Assert.Equal("completed", Status());
         Assert.Equal(JournalPhase.Committed, registry.ReadJournal(pending.JournalId).Phase);
@@ -50,9 +50,9 @@ public sealed class NoEffectTests
             command.CommandText = sql; command.ExecuteNonQuery(); return true; });
         string Status()
         {
-            using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
             using var command = connection.CreateCommand();
-            command.CommandText = "SELECT status FROM operations WHERE operation_id=$id;";
+            command.CommandText = "SELECT status FROM main.operations WHERE operation_id=$id;";
             command.Parameters.AddWithValue("$id", id); return (string)command.ExecuteScalar()!;
         }
     }

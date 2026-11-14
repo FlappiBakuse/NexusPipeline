@@ -59,13 +59,13 @@ public sealed class JournalRecoveryOwnership(StateDatabase database) : IRecovery
 
     private bool CanIsolateExecution(RegisteredJournal journal)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT j.journal_id FROM operation_journals j JOIN operations o ON o.operation_id=j.operation_id " +
+        command.CommandText = "SELECT j.journal_id FROM main.operation_journals j JOIN main.operations o ON o.operation_id=j.operation_id " +
             "WHERE j.journal_id=$id AND j.operation_kind='runAttempt' AND o.operation_kind='execution.start' AND o.initial_journal_id=j.journal_id " +
-            "UNION SELECT p.journal_id FROM configuration_run_resources r JOIN configuration_run_sessions s USING(session_id) " +
-            "JOIN operation_journals c ON c.journal_id=r.journal_id JOIN operation_journals p ON p.journal_id=s.parent_journal_id " +
-            "JOIN operations o ON o.operation_id=p.operation_id WHERE r.journal_id=$id AND c.operation_kind='configExchange' " +
+            "UNION SELECT p.journal_id FROM configuration.configuration_run_resources r JOIN configuration.configuration_run_sessions s USING(session_id) " +
+            "JOIN main.operation_journals c ON c.journal_id=r.journal_id JOIN main.operation_journals p ON p.journal_id=s.parent_journal_id " +
+            "JOIN main.operations o ON o.operation_id=p.operation_id WHERE r.journal_id=$id AND c.operation_kind='configExchange' " +
             "AND p.operation_kind='runAttempt' AND o.operation_kind='execution.start' AND o.initial_journal_id=p.journal_id;";
         command.Parameters.AddWithValue("$id", journal.JournalId.ToString("D"));
         if (command.ExecuteScalar() is not string parent) return false;
@@ -88,7 +88,7 @@ public sealed class JournalRecoveryOwnership(StateDatabase database) : IRecovery
         if (!ReferenceEquals(database, expected) || _executing is not { } executor ||
             database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot ||
             !StringComparer.OrdinalIgnoreCase.Equals(Path.GetFullPath(database.DatabasePath),
-                Path.Combine(instance.RuntimeRoot, "state", "nexus.db")))
+                Path.Combine(instance.RuntimeRoot, "state", "runtime.db")))
             throw new IOException("extension_recovery_owner_unbound");
         var before = ReadExtensionWriters(journalId);
         if (before.SingleOrDefault(item => item.WriterId == executor)?.Process != JournalWriterStore.CurrentWriter.Process)
@@ -101,7 +101,7 @@ public sealed class JournalRecoveryOwnership(StateDatabase database) : IRecovery
 
     private ImmutableArray<JournalWriter> ReadExtensionWriters(Guid journalId)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.All);
         using var transaction = connection.BeginTransaction(deferred: true);
         var result = ReadExtensionWritersInside(connection, transaction, journalId);
         transaction.Commit();
@@ -112,11 +112,11 @@ public sealed class JournalRecoveryOwnership(StateDatabase database) : IRecovery
         SqliteTransaction transaction, Guid journalId)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM journal_writer_jobs WHERE journal_id=$id);";
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.journal_writer_jobs WHERE journal_id=$id);";
         command.Parameters.AddWithValue("$id", journalId.ToString("D"));
         if ((long)command.ExecuteScalar()! != 0) throw new IOException("extension_recovery_jobs_unrecognized");
         command.CommandText = "SELECT writer_id,process_id,created_file_time,image_path,image_sha256,user_sid,elevated " +
-            "FROM journal_writers WHERE journal_id=$id ORDER BY writer_id LIMIT 1025;";
+            "FROM main.journal_writers WHERE journal_id=$id ORDER BY writer_id LIMIT 1025;";
         using var rows = command.ExecuteReader();
         var result = ImmutableArray.CreateBuilder<JournalWriter>();
         while (rows.Read())
@@ -164,7 +164,7 @@ public sealed class JournalRecoveryOwnership(StateDatabase database) : IRecovery
             failure.Require(instance, expected, lease, failure.JournalId);
             if (!ReferenceEquals(owner.Database, expected) || expected.InstanceId != instance.InstanceId ||
                 expected.RuntimeRoot != instance.RuntimeRoot || !StringComparer.OrdinalIgnoreCase.Equals(
-                    Path.GetFullPath(expected.DatabasePath), Path.Combine(instance.RuntimeRoot, "state", "nexus.db")))
+                    Path.GetFullPath(expected.DatabasePath), Path.Combine(instance.RuntimeRoot, "state", "runtime.db")))
                 throw new IOException("extension_live_failure_owner_unbound");
             var before = owner.ReadExtensionWriters(failure.JournalId);
             var writer = JournalWriterStore.CurrentWriter;
@@ -184,8 +184,7 @@ public sealed class JournalRecoveryOwnership(StateDatabase database) : IRecovery
             _lease.VerifyHeld(_instance);
             _failure?.Require(_instance, _owner.Database, _lease, journal);
             if (journal != _journal || _failure is null && _owner._executing != _executor ||
-                !StringComparer.OrdinalIgnoreCase.Equals(connection.DataSource,
-                    PhysicalPathPolicy.NativePath(Path.Combine(_instance.RuntimeRoot, "state", "nexus.db"))) ||
+                !DatabaseConnections.IsBound(connection, Path.Combine(_instance.RuntimeRoot, "state", "runtime.db")) ||
                 !ReferenceEquals(connection, transaction.Connection) ||
                 !_writers.SequenceEqual(ReadExtensionWritersInside(connection, transaction, journal)))
                 throw new IOException("extension_recovery_writer_set_changed");
@@ -218,7 +217,7 @@ public sealed class JournalRecoveryOwnership(StateDatabase database) : IRecovery
             lease.VerifyHeld(instance);
             if (!ReferenceEquals(owner.Database, expected) || expected.InstanceId != instance.InstanceId ||
                 expected.RuntimeRoot != instance.RuntimeRoot || !StringComparer.OrdinalIgnoreCase.Equals(Path.GetFullPath(expected.DatabasePath),
-                    Path.Combine(instance.RuntimeRoot, "state", "nexus.db"))) throw Invalid();
+                    Path.Combine(instance.RuntimeRoot, "state", "runtime.db"))) throw Invalid();
             var registered = new RecoveryJournalRegistry(expected).ReadJournal(journalId);
             if (registered.Kind != JournalKind.ExtensionApply || registered.Phase != JournalPhase.Committed) throw Invalid();
             using var borrow = root is null ? null : root.Borrow(resources ?? throw Invalid(), root.OperationId,
@@ -234,8 +233,7 @@ public sealed class JournalRecoveryOwnership(StateDatabase database) : IRecovery
         {
             _lease.VerifyHeld(_instance);
             if (journal != _journal || _root is { IsActive: false } ||
-                !StringComparer.OrdinalIgnoreCase.Equals(connection.DataSource,
-                    PhysicalPathPolicy.NativePath(Path.Combine(_instance.RuntimeRoot, "state", "nexus.db"))) ||
+                !DatabaseConnections.IsBound(connection, Path.Combine(_instance.RuntimeRoot, "state", "runtime.db")) ||
                 !ReferenceEquals(connection, transaction.Connection) ||
                 !_writers.SequenceEqual(ReadExtensionWritersInside(connection, transaction, journal))) throw Invalid();
         }
@@ -265,7 +263,7 @@ public sealed class JournalRecoveryOwnership(StateDatabase database) : IRecovery
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.Parameters.AddWithValue("$journal", journal.ToString("D"));
         command.CommandText = "SELECT writer_id,process_id,created_file_time,image_path,image_sha256,user_sid,elevated " +
-            "FROM journal_writers WHERE journal_id=$journal ORDER BY writer_id LIMIT 1025;";
+            "FROM main.journal_writers WHERE journal_id=$journal ORDER BY writer_id LIMIT 1025;";
         var writers = ImmutableArray.CreateBuilder<JournalWriter>();
         using (var rows = command.ExecuteReader())
             while (rows.Read())
@@ -275,7 +273,7 @@ public sealed class JournalRecoveryOwnership(StateDatabase database) : IRecovery
                     DateTime.FromFileTimeUtc(rows.GetInt64(2)), rows.GetString(3), rows.GetString(4), rows.GetString(5), rows.GetBoolean(6))));
             }
         if (writers.Count == 0) throw new IOException("maintenance_recovery_writers_missing");
-        command.CommandText = "SELECT writer_id,job_name,session_id FROM journal_writer_jobs WHERE journal_id=$journal " +
+        command.CommandText = "SELECT writer_id,job_name,session_id FROM main.journal_writer_jobs WHERE journal_id=$journal " +
             "ORDER BY writer_id,job_name LIMIT 1025;";
         var jobs = ImmutableArray.CreateBuilder<MaintenanceWriterJob>();
         using (var rows = command.ExecuteReader())
@@ -309,10 +307,10 @@ public sealed class JournalRecoveryOwnership(StateDatabase database) : IRecovery
             if (!ReferenceEquals(owner.Database, expected) || owner._executing is not { } executor ||
                 expected.InstanceId != instance.InstanceId || expected.RuntimeRoot != instance.RuntimeRoot ||
                 !StringComparer.OrdinalIgnoreCase.Equals(Path.GetFullPath(expected.DatabasePath),
-                    Path.Combine(instance.RuntimeRoot, "state", "nexus.db"))) throw Invalid();
+                    Path.Combine(instance.RuntimeRoot, "state", "runtime.db"))) throw Invalid();
             MaintenanceWriterSet Read()
             {
-                using var connection = DatabaseConnections.Open(expected.DatabasePath, readOnly: true);
+                using var connection = DatabaseConnections.Open(expected.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
                 using var transaction = connection.BeginTransaction(deferred: true);
                 var value = ReadMaintenanceWriters(connection, transaction, journal); transaction.Commit(); return value;
             }
@@ -330,10 +328,10 @@ public sealed class JournalRecoveryOwnership(StateDatabase database) : IRecovery
             failure.Require(instance, expected, lease, failure.JournalId);
             if (!ReferenceEquals(owner.Database, expected) || expected.InstanceId != instance.InstanceId ||
                 expected.RuntimeRoot != instance.RuntimeRoot || !StringComparer.OrdinalIgnoreCase.Equals(
-                    Path.GetFullPath(expected.DatabasePath), Path.Combine(instance.RuntimeRoot, "state", "nexus.db"))) throw Invalid();
+                    Path.GetFullPath(expected.DatabasePath), Path.Combine(instance.RuntimeRoot, "state", "runtime.db"))) throw Invalid();
             MaintenanceWriterSet Read()
             {
-                using var connection = DatabaseConnections.Open(expected.DatabasePath, readOnly: true);
+                using var connection = DatabaseConnections.Open(expected.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
                 using var transaction = connection.BeginTransaction(deferred: true);
                 var value = ReadMaintenanceWriters(connection, transaction, failure.JournalId); transaction.Commit(); return value;
             }
@@ -350,8 +348,7 @@ public sealed class JournalRecoveryOwnership(StateDatabase database) : IRecovery
             _lease.VerifyHeld(_instance);
             _failure?.Require(_instance, _owner.Database, _lease, journal);
             if (journal != _journal || _failure is null && _owner._executing != _executor ||
-                !StringComparer.OrdinalIgnoreCase.Equals(connection.DataSource,
-                    PhysicalPathPolicy.NativePath(Path.Combine(_instance.RuntimeRoot, "state", "nexus.db"))) ||
+                !DatabaseConnections.IsBound(connection, Path.Combine(_instance.RuntimeRoot, "state", "runtime.db")) ||
                 !ReferenceEquals(connection, transaction.Connection) ||
                 !_set.Same(ReadMaintenanceWriters(connection, transaction, journal))) throw Invalid();
         }

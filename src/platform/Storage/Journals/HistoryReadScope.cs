@@ -38,18 +38,19 @@ internal sealed class HistoryReadScope : IDisposable
         catch { Release(); throw; }
     }
 
-    internal static T ReadDatabase<T>(StateDatabase database, Func<SqliteConnection, SqliteTransaction, T> read)
+    internal static T ReadDatabase<T>(StateDatabase database, Func<SqliteConnection, SqliteTransaction, T> read,
+        DatabaseDomain domains = DatabaseDomain.Runtime)
     {
         if (_current is { } current && ReferenceEquals(current._database, database) && !current.Owner._reading)
         {
             var scope = current.Owner;
             _ = DatabaseReadScope.ProtectedPath(database.DatabasePath);
-            scope._sql ??= DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+            RequireSql(scope, domains);
             scope._reading = true;
-            try { return ReadInside(scope._sql, read); }
+            try { return ReadInside(scope._sql!, read); }
             finally { scope._reading = false; }
         }
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: domains);
         return ReadInside(connection, read);
     }
 
@@ -60,15 +61,28 @@ internal sealed class HistoryReadScope : IDisposable
             return ReadDatabase(database, read);
         var scope = current.Owner;
         _ = DatabaseReadScope.ProtectedPath(database.DatabasePath);
-        scope._sql ??= DatabaseConnections.Open(database.DatabasePath, readOnly: true);
-        var version = (long)DatabaseConnections.Scalar(scope._sql, "PRAGMA main.data_version;");
+        RequireSql(scope, DatabaseDomain.Runtime);
+        var version = ReadVersion(scope);
         if (scope._snapshotVersion != version) { scope._snapshots.Clear(); scope._snapshotVersion = version; }
         var key = required ?? Guid.Empty;
         if (scope._snapshots.TryGetValue(key, out var saved)) return saved;
         var value = ReadDatabase(database, read);
-        if (scope._snapshots.Count < 32 && (long)DatabaseConnections.Scalar(scope._sql, "PRAGMA main.data_version;") == version)
+        if (scope._snapshots.Count < 32 && ReadVersion(scope) == version)
             scope._snapshots.Add(key, value);
         return value;
+    }
+
+    private static long ReadVersion(HistoryReadScope scope) => scope._database.RuntimeLease is not null
+        ? scope._database.DomainSequence(DatabaseDomain.Runtime)
+        : (long)DatabaseConnections.Scalar(scope._sql!, "PRAGMA main.data_version;");
+
+    private static void RequireSql(HistoryReadScope scope, DatabaseDomain domains)
+    {
+        var current = scope._sql is null ? 0 : DatabaseConnections.Domains(scope._sql);
+        if (scope._sql is not null && (current & domains) == domains) return;
+        scope._sql?.Dispose();
+        scope._snapshots.Clear(); scope._snapshotVersion = null;
+        scope._sql = DatabaseConnections.Open(scope._database.DatabasePath, readOnly: true, domains: current | domains);
     }
 
     private static T ReadInside<T>(SqliteConnection connection, Func<SqliteConnection, SqliteTransaction, T> read)

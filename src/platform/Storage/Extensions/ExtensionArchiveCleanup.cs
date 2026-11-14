@@ -37,12 +37,12 @@ internal sealed class ExtensionArchiveCleanup(RuntimeInstance instance, StateDat
         cancellation.ThrowIfCancellationRequested();
         if (!recovery.Current.IsReady || DateTimeOffset.UtcNow < _nextScan) return;
         if (_completedRevision == database.CommitSequence) return;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.All))
         using (var command = connection.CreateCommand())
         {
-            command.CommandText = "SELECT EXISTS(SELECT 1 FROM operations WHERE operation_kind='execution.start' AND status='accepted') " +
-                "OR EXISTS(SELECT 1 FROM notification_delivery_pending) " +
-                "OR EXISTS(SELECT 1 FROM notification_receipt_progress WHERE next_ordinal<route_count);";
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operations WHERE operation_kind='execution.start' AND status='accepted') " +
+                "OR EXISTS(SELECT 1 FROM notifications.notification_delivery_pending) " +
+                "OR EXISTS(SELECT 1 FROM notifications.notification_receipt_progress WHERE next_ordinal<route_count);";
             if ((long)command.ExecuteScalar()! != 0) return;
         }
         if (_after.Length == 0 && _producers.Count == 0 && _candidates.Count == 0) _scanRevision = database.CommitSequence;
@@ -110,9 +110,9 @@ internal sealed class ExtensionArchiveCleanup(RuntimeInstance instance, StateDat
 
     private IReadOnlyList<Guid> ReadPage()
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT j.journal_id FROM operation_journals j JOIN operations o " +
+        command.CommandText = "SELECT j.journal_id FROM main.operation_journals j JOIN main.operations o " +
             "ON o.operation_id=j.operation_id AND o.initial_journal_id=j.journal_id " +
             "WHERE j.journal_id>$after AND j.operation_kind='extensionApply' AND j.phase='committed' " +
             "AND o.operation_kind='extension.apply' AND o.status='completed' ORDER BY j.journal_id LIMIT $limit;";
@@ -220,7 +220,7 @@ internal sealed class ExtensionArchiveCleanup(RuntimeInstance instance, StateDat
     private PageReceipt? ReadReceipt(OperationIdentity identity, BlobReference archive)
     {
         OperationAcceptance? acceptance;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System))
         using (var transaction = connection.BeginTransaction(deferred: true))
         {
             acceptance = OperationRows.ReadExisting(connection, transaction, identity);

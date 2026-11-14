@@ -63,7 +63,7 @@ public sealed class ManagedInstallationTests
         Assert.Equal(JournalPhase.Committed, bound.Registered.Phase); Assert.Null(bound.Commit);
         Assert.Equal("committed", bound.Restoration[^1].Record.Stage);
         Assert.NotNull(bound.Restoration[0].Record.Failure);
-        using var connection = DatabaseConnections.Open(fixture.Package.Catalog.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(fixture.Package.Catalog.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         Assert.Null(ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, "fixture-plugin"));
         Assert.False(Directory.Exists(fixture.Target));

@@ -41,7 +41,7 @@ public sealed class UpdateSourceTests
         var changed = fixture.Plan with { MaintenanceSource = sourceCodec.Persist(source) };
         Assert.Throws<IOException>(() => new PayloadApplyAcceptance(fixture.Instance, new(), fixture.Database, fixture.Roots)
             .Accept(new OperationIdentity(changed.OperationId, "fixture", new('a', 64), "fixture.payload"), changed, DateTimeOffset.UtcNow));
-        using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         Assert.Null(OperationRows.ReadOwned(connection, transaction, changed.OperationId, "fixture"));
         transaction.Commit();

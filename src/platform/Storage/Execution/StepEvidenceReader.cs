@@ -77,17 +77,17 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
         if (total.InstanceId != attempt.InstanceId || total.RunId != attempt.RunId || !total.ResourceKeys.SequenceEqual(attempt.ResourceKeys)) throw Invalid();
         var job = WriterIntentCodec.ReadAllJobs(latest.Root, total).SingleOrDefault(item => item.StepId == binding.StepId && item.Role == role && item.JobName == binding.JobName) ?? throw Invalid();
         if (StepResultCodec.Binding(latest.Root, job) != binding) throw Invalid();
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT r.process_id,r.created_file_time,r.image_path,r.image_sha256,r.user_sid,r.elevated " +
-            "FROM journal_writer_job_roots r WHERE r.journal_id=$journal AND r.writer_id=$writer AND r.job_name=$job;";
+            "FROM main.journal_writer_job_roots r WHERE r.journal_id=$journal AND r.writer_id=$writer AND r.job_name=$job;";
         command.Parameters.AddWithValue("$journal", binding.ParentJournalId.ToString("D"));
         command.Parameters.AddWithValue("$writer", binding.WriterId.ToString("D")); command.Parameters.AddWithValue("$job", binding.JobName);
         ProcessIdentity? root;
         using (var row = command.ExecuteReader()) root = row.Read() ? new(row.GetInt32(0), DateTime.FromFileTimeUtc(row.GetInt64(1)),
             row.GetString(2), row.GetString(3), row.GetString(4), row.GetBoolean(5)) : null;
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM journal_writer_jobs b JOIN operation_journals j USING(journal_id) " +
-            "JOIN operations o ON o.operation_id=j.operation_id WHERE b.journal_id=$journal AND b.writer_id=$writer AND b.job_name=$job " +
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.journal_writer_jobs b JOIN main.operation_journals j USING(journal_id) " +
+            "JOIN main.operations o ON o.operation_id=j.operation_id WHERE b.journal_id=$journal AND b.writer_id=$writer AND b.job_name=$job " +
             "AND b.session_id=$session AND o.operation_kind='execution.start' AND o.initial_journal_id=j.journal_id);";
         command.Parameters.AddWithValue("$session", binding.SessionId);
         if ((long)command.ExecuteScalar()! != 1) throw Invalid();
@@ -99,9 +99,9 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
 
     internal BlobReference ClosureReference(StepEvidenceBinding binding)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT plan_path,plan_digest,plan_size FROM journal_writer_job_closures WHERE journal_id=$journal AND writer_id=$writer AND job_name=$job;";
+        command.CommandText = "SELECT plan_path,plan_digest,plan_size FROM main.journal_writer_job_closures WHERE journal_id=$journal AND writer_id=$writer AND job_name=$job;";
         command.Parameters.AddWithValue("$journal", binding.ParentJournalId.ToString("D"));
         command.Parameters.AddWithValue("$writer", binding.WriterId.ToString("D")); command.Parameters.AddWithValue("$job", binding.JobName);
         using var row = command.ExecuteReader();
@@ -113,7 +113,7 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
         _ = Context(binding);
         var parent = new RecoveryJournalRegistry(database).ReadJournal(binding.ParentJournalId);
         var attempt = ReadPlan<RunAttemptPlan>(AttemptPreparedBinding.Reference(instance, parent), "run-attempt-plan.schema.json");
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         var result = ExecutionCancellationRows.Read(connection, transaction, parent, attempt);
         transaction.Commit(); return result;

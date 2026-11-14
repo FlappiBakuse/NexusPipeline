@@ -77,7 +77,7 @@ internal static class RetryHookProjection
         {
             command.Parameters.Clear(); command.Parameters.AddWithValue("$journal", journal.ToString("D"));
             command.Parameters.AddWithValue("$writer", writer.ToString("D")); command.Parameters.AddWithValue("$job", job);
-            command.CommandText = "SELECT EXISTS(SELECT 1 FROM journal_writer_job_closures WHERE journal_id=$journal AND writer_id=$writer AND job_name=$job);";
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.journal_writer_job_closures WHERE journal_id=$journal AND writer_id=$writer AND job_name=$job);";
             if ((long)command.ExecuteScalar()! != 1) throw RetryHookEvidence.Invalid();
         }
     }

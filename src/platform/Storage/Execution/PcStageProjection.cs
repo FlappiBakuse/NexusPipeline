@@ -32,7 +32,7 @@ internal static class PcStageProjection
                 before.Phase != JournalPhase.Applying || next.Phase != JournalPhase.Applying) throw Invalid();
             var main = state.Jobs.Single(job => job.StepId == item.Binding.StepId && job.Role == "process");
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT NOT EXISTS(SELECT 1 FROM journal_writer_job_roots WHERE journal_id=$journal AND job_name=$main);";
+            command.CommandText = "SELECT NOT EXISTS(SELECT 1 FROM main.journal_writer_job_roots WHERE journal_id=$journal AND job_name=$main);";
             command.Parameters.AddWithValue("$journal", item.Binding.ParentJournalId.ToString("D"));
             command.Parameters.AddWithValue("$main", main.JobName);
             if ((long)command.ExecuteScalar()! != 1) throw Invalid();
@@ -52,8 +52,8 @@ internal static class PcStageProjection
         using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
-            command.CommandText = "SELECT s.session_id,o.subject_id FROM configuration_run_sessions s JOIN operations o ON o.operation_id=s.session_id " +
-                "JOIN operations parent ON parent.operation_id=s.owner_operation_id AND parent.subject_id=o.subject_id " +
+            command.CommandText = "SELECT s.session_id,o.subject_id FROM configuration.configuration_run_sessions s JOIN main.operations o ON o.operation_id=s.session_id " +
+                "JOIN main.operations parent ON parent.operation_id=s.owner_operation_id AND parent.subject_id=o.subject_id " +
                 "WHERE s.parent_journal_id=$journal AND s.step_id=$step AND s.invocation_ordinal=$invocation ORDER BY s.session_id LIMIT 2;";
             command.Parameters.AddWithValue("$journal", state.Journal.JournalId.ToString("D")); command.Parameters.AddWithValue("$step", stepId);
             command.Parameters.AddWithValue("$invocation", ExecutionInvocationCodec.Ordinal(state.Latest.Root, stepId));
@@ -71,7 +71,7 @@ internal static class PcStageProjection
         foreach (var resource in session.Resources)
         {
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT EXISTS(SELECT 1 FROM operation_journals WHERE journal_id=$journal AND operation_id=$operation " +
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operation_journals WHERE journal_id=$journal AND operation_id=$operation " +
                 "AND plan_path=$path AND plan_digest=$digest AND phase=$phase);";
             command.Parameters.AddWithValue("$journal", resource.JournalId.ToString("D"));
             command.Parameters.AddWithValue("$operation", resource.OperationId.ToString("D")); command.Parameters.AddWithValue("$path", resource.PlanPath);

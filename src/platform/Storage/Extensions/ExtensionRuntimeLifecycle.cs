@@ -183,7 +183,7 @@ public sealed class ExtensionRuntimeLifecycle : IExtensionRuntimeLifecycle, IAsy
 
     private string[] ReadEnabledInstallations()
     {
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         // Larger installation evidence starts earlier so expensive activation does not occupy the final slot alone.
         var selected = HostSettingsRows.ReadCurrent(connection, transaction).Values.Extensions
@@ -206,9 +206,9 @@ public sealed class ExtensionRuntimeLifecycle : IExtensionRuntimeLifecycle, IAsy
 
     private IReadOnlyList<string> ReadInstallationIds()
     {
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT extension_id FROM extension_installations ORDER BY extension_id LIMIT 257;";
+        command.CommandText = "SELECT extension_id FROM extensions.extension_installations ORDER BY extension_id LIMIT 257;";
         using var row = command.ExecuteReader(); var result = new List<string>();
         while (row.Read()) result.Add(row.GetString(0));
         if (result.Count > 256) throw new IOException("extension_runtime_installation_capacity");

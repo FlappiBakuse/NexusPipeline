@@ -77,7 +77,9 @@ class ControlMcpTests(unittest.TestCase):
         status, listed, _ = self.rpc("tools/list", session=session)
         self.assertEqual(200, status)
         self.assertEqual({"notifications_list", "status", "doctor", "records_list", "record_attempts",
-                          "record_logs", "record_log_tail", "record_images", "execution_preview", "automation_list", "scheduling_list", "configuration_resources", "operation_read", "capabilities"},
+                          "record_logs", "record_log_tail", "record_images", "execution_preview", "automation_list", "scheduling_list", "configuration_resources", "operation_read", "capabilities",
+                          "script_discover", "project_result", "project_discover", "project_preview", "project_page",
+                          "emulator_discover", "project_release", "project_context"},
                          {tool["name"] for tool in listed["result"]["tools"]})
         helper = notification_control.ControlNotificationTests(methodName="runTest")
         task = str(uuid.uuid4())
@@ -93,7 +95,7 @@ class ControlMcpTests(unittest.TestCase):
         self.service(self.address, 1, self.values)
         _, listed, _ = self.rpc("tools/list", session=session)
         names = [tool["name"] for tool in listed["result"]["tools"]]
-        self.assertEqual(21, len(names))
+        self.assertEqual(29, len(names))
         self.assertNotIn("shell", names)
         _, changed, _ = self.rpc("tools/call", dict(name="notifications_save", arguments=command), session)
         self.assertFalse(changed["result"]["isError"])

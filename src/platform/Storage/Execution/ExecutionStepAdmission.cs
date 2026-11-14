@@ -113,7 +113,7 @@ internal static class ExecutionStepAdmission
                 closure.Family.Any(member => WriterStopEvidence.ObserveProcess(member) != WriterState.Stopped))
                 throw new IOException("execution_predecessor_stop_unconfirmed");
         }
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var transaction = connection.BeginTransaction(deferred: true))
         {
             RequirePredecessorsInside(connection, transaction, state, state.Latest, ordinal); transaction.Commit();
@@ -132,7 +132,7 @@ internal static class ExecutionStepAdmission
         var priorSteps = state.Total.Steps.Take(ordinal).Select(step => step.StepId).ToHashSet(StringComparer.Ordinal);
         foreach (var job in jobs.Where(job => priorSteps.Contains(job.StepId)))
         {
-            command.CommandText = "SELECT EXISTS(SELECT 1 FROM journal_writer_job_closures WHERE journal_id=$journal AND writer_id=$writer AND job_name=$job);";
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.journal_writer_job_closures WHERE journal_id=$journal AND writer_id=$writer AND job_name=$job);";
             command.Parameters.Clear(); command.Parameters.AddWithValue("$journal", state.Journal.JournalId.ToString("D"));
             command.Parameters.AddWithValue("$writer", job.WriterId.ToString("D")); command.Parameters.AddWithValue("$job", job.JobName);
             if ((long)command.ExecuteScalar()! != 1) throw new IOException("writer_job_closure_missing");
@@ -150,7 +150,7 @@ internal static class ExecutionStepAdmission
         IReadOnlyList<StepWriterState> jobs)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = $"SELECT writer_id,job_name,session_id FROM journal_writer_jobs WHERE journal_id=$journal LIMIT {JournalCapacityLimits.MaximumWriterJobs + 1};";
+        command.CommandText = $"SELECT writer_id,job_name,session_id FROM main.journal_writer_jobs WHERE journal_id=$journal LIMIT {JournalCapacityLimits.MaximumWriterJobs + 1};";
         command.Parameters.AddWithValue("$journal", journalId.ToString("D"));
         using var row = command.ExecuteReader(); var count = 0;
         while (row.Read())
@@ -177,8 +177,8 @@ internal static class ExecutionStepAdmission
             command.Parameters.Clear(); command.Parameters.AddWithValue("$owner", state.Journal.OperationId.ToString("D"));
             command.Parameters.AddWithValue("$parent", state.Journal.JournalId.ToString("D")); command.Parameters.AddWithValue("$step", stepId);
             command.Parameters.AddWithValue("$invocation", ExecutionInvocationCodec.Ordinal(document.Root, stepId));
-            command.CommandText = "SELECT EXISTS(SELECT 1 FROM configuration_run_sessions s JOIN configuration_run_resources r USING(session_id) " +
-                "JOIN journal_writer_jobs b ON b.journal_id=r.journal_id WHERE (s.owner_operation_id=$owner OR s.parent_journal_id=$parent) AND s.step_id=$step AND s.invocation_ordinal=$invocation);";
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM configuration.configuration_run_sessions s JOIN configuration.configuration_run_resources r USING(session_id) " +
+                "JOIN main.journal_writer_jobs b ON b.journal_id=r.journal_id WHERE (s.owner_operation_id=$owner OR s.parent_journal_id=$parent) AND s.step_id=$step AND s.invocation_ordinal=$invocation);";
             if ((long)command.ExecuteScalar()! != 0) throw new IOException("execution_undispatched_writer_observed");
         }
     }

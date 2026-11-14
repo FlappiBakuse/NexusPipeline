@@ -12,7 +12,7 @@ internal sealed class NotificationDeliveryEvidence(RuntimeInstance instance, Sta
 {
     internal NotificationDeliverySnapshot Read(BlobReference reference)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         var result = ReadFromSnapshot(reference, connection, transaction);
         transaction.Commit();
@@ -40,7 +40,7 @@ internal sealed class NotificationDeliveryEvidence(RuntimeInstance instance, Sta
             throw new IOException("notification_delivery_network_unbound");
         var state = transition.State;
         using (var identity = NotificationDeliveryRows.Command(connection, transaction,
-            "SELECT subject_id,request_digest,operation_kind,status FROM operations WHERE operation_id=$0;",
+            "SELECT subject_id,request_digest,operation_kind,status FROM main.operations WHERE operation_id=$0;",
             document.OperationId.ToString("D")))
         using (var row = identity.ExecuteReader())
             if (!row.Read() || row.GetString(0) != operation.SubjectId || row.GetString(1) != operation.RequestDigest ||
@@ -132,7 +132,7 @@ internal sealed class NotificationDeliveryEvidence(RuntimeInstance instance, Sta
         Microsoft.Data.Sqlite.SqliteTransaction transaction, NotificationDeliveryDocument document)
     {
         using (var command = NotificationDeliveryRows.Command(connection, transaction,
-            "SELECT field,revision,secret_id FROM notification_delivery_secrets WHERE operation_id=$0 ORDER BY field;",
+            "SELECT field,revision,secret_id FROM notifications.notification_delivery_secrets WHERE operation_id=$0 ORDER BY field;",
             document.OperationId.ToString("D")))
         using (var rows = command.ExecuteReader())
         {
@@ -151,7 +151,7 @@ internal sealed class NotificationDeliveryEvidence(RuntimeInstance instance, Sta
             if (seen.Count != document.Secrets.Length) throw new IOException("notification_delivery_reference_unbound");
         }
         using var assets = NotificationDeliveryRows.Command(connection, transaction,
-            "SELECT run_id,digest,kind,size_bytes FROM notification_delivery_assets WHERE operation_id=$0;",
+            "SELECT run_id,digest,kind,size_bytes FROM notifications.notification_delivery_assets WHERE operation_id=$0;",
             document.OperationId.ToString("D"));
         using var row = assets.ExecuteReader();
         if (document.Attachment is { } expected)

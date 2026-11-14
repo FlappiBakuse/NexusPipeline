@@ -61,42 +61,62 @@ internal sealed class PreparedRetryOrigin
     {
         var snapshots = new ConfigurationSnapshotCodec(new(instance, contracts));
         var sources = ImmutableDictionary.CreateBuilder<string, ImmutableDictionary<ConfigurationAddress, ConfigurationRetrySource>>(StringComparer.Ordinal);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
-        using var transaction = connection.BeginTransaction(deferred: true);
-        foreach (var step in total.Steps.Where(step => step.ConfigurationTargets.Count != 0 && (onlyStep is null || step.StepId == onlyStep)))
+        var steps = total.Steps.Where(step => step.ConfigurationTargets.Count != 0 && (onlyStep is null || step.StepId == onlyStep)).ToArray();
+        if (steps.Length == 0) return sources.ToImmutable();
+        var sessions = new List<(string Step, Guid Id, ConfigurationRunStatus Session)>();
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration))
+        using (var transaction = connection.BeginTransaction(deferred: true))
         {
-            using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT session_id FROM configuration_run_sessions WHERE parent_journal_id=$parent AND step_id=$step AND ($ordinal IS NULL OR invocation_ordinal=$ordinal) ORDER BY invocation_ordinal DESC LIMIT 1;";
-            command.Parameters.AddWithValue("$parent", previousJournal.ToString("D"));
-            command.Parameters.AddWithValue("$step", step.StepId); command.Parameters.AddWithValue("$ordinal", (object?)invocation ?? DBNull.Value);
-            Guid sessionId;
-            using (var reader = command.ExecuteReader())
+            foreach (var step in steps)
             {
-                if (!reader.Read()) throw Invalid();
-                sessionId = Guid.ParseExact(reader.GetString(0), "D");
-                if (reader.Read()) throw Invalid();
+                using var command = connection.CreateCommand(); command.Transaction = transaction;
+                command.CommandText = "SELECT session_id FROM configuration.configuration_run_sessions WHERE parent_journal_id=$parent AND step_id=$step AND ($ordinal IS NULL OR invocation_ordinal=$ordinal) ORDER BY invocation_ordinal DESC LIMIT 1;";
+                command.Parameters.AddWithValue("$parent", previousJournal.ToString("D"));
+                command.Parameters.AddWithValue("$step", step.StepId); command.Parameters.AddWithValue("$ordinal", (object?)invocation ?? DBNull.Value);
+                var sessionId = Guid.ParseExact(command.ExecuteScalar() as string ?? throw Invalid(), "D");
+                var session = ConfigurationRunRows.Read(connection, transaction, sessionId, subject) ?? throw Invalid();
+                RequireCompleted(session, previousJournal, step.StepId, previousOperation);
+                sessions.Add((step.StepId, sessionId, session));
             }
-            var session = ConfigurationRunRows.Read(connection, transaction, sessionId, subject) ?? throw Invalid();
-            RequireCompleted(session, previousJournal, step.StepId, previousOperation);
-            var evidence = verifiedParent is null ? null : RunBindingEvidence.Read(instance, database, contracts, session, verifiedParent, total);
-            var bound = ConfigurationRunBinding.Read(instance, database, contracts, session, evidence);
-            ConfigurationRunHistory.Verify(connection, transaction, session, subject,
-                bound.Resources.ToDictionary(item => item.State.Source.Address, item => item.State), snapshots);
+            transaction.Commit();
+        }
+        var bindings = sessions.Select(item =>
+        {
+            var evidence = verifiedParent is null ? null : RunBindingEvidence.Read(instance, database, contracts, item.Session, verifiedParent, total);
+            return (item.Step, item.Id, item.Session, Bound: ConfigurationRunBinding.Read(instance, database, contracts, item.Session, evidence));
+        }).ToArray();
+        var publications = new Dictionary<(Guid Session, ConfigurationAddress Address), StoredConfigurationRevision>();
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Content))
+        using (var transaction = connection.BeginTransaction(deferred: true))
+        {
+            foreach (var item in bindings)
+            {
+                ConfigurationRunHistory.Verify(connection, transaction, item.Session, subject,
+                    item.Bound.Resources.ToDictionary(resource => resource.State.Source.Address, resource => resource.State), snapshots);
+                foreach (var resource in item.Session.Resources)
+                    publications.Add((item.Id, resource.Address), ConfigurationRevisionRows.Read(connection, transaction,
+                        resource.Address, resource.CurrentRevision, snapshots));
+            }
+            transaction.Commit();
+        }
+        foreach (var item in bindings)
+        {
+            var bound = item.Bound;
             if (bound.Evidence.AttemptId != previousAttempt || bound.Evidence.TotalPlan != totalReference) throw Invalid();
             var items = ImmutableDictionary.CreateBuilder<ConfigurationAddress, ConfigurationRetrySource>();
-            foreach (var resource in session.Resources)
+            foreach (var resource in item.Session.Resources)
             {
-                var original = bound.Resources.Single(item => item.State.Source.Address == resource.Address);
-                var publication = ConfigurationRevisionRows.Read(connection, transaction, resource.Address, resource.CurrentRevision, snapshots);
+                var original = bound.Resources.Single(candidate => candidate.State.Source.Address == resource.Address);
+                var publication = publications[(item.Id, resource.Address)];
                 if (publication.Revision.UserId != original.State.Source.UserId || publication.Revision.ScriptId != original.State.Source.ScriptId ||
                     publication.Revision.Contract != original.State.Source.Contract || publication.Revision.Tree.Shape != original.State.Source.Tree.Shape)
                     throw Invalid();
                 var child = new BlobReference(resource.PlanPath, new FileInfo(Path.Combine(instance.RuntimeRoot, resource.PlanPath)).Length, resource.PlanDigest);
                 var input = invocation is null ? null : RetryConfigurationInput.Read(instance, database, contracts, resource, original.State);
-                items.Add(resource.Address, new(original.State, publication, sessionId, child, input));
+                items.Add(resource.Address, new(original.State, publication, item.Id, child, input));
             }
-            if (items.Count != total.ConfigurationSlots.Count(slot => slot.StepId == step.StepId)) throw Invalid();
-            sources.Add(step.StepId, items.ToImmutable());
+            if (items.Count != total.ConfigurationSlots.Count(slot => slot.StepId == item.Step)) throw Invalid();
+            sources.Add(item.Step, items.ToImmutable());
         }
         return sources.ToImmutable();
     }
@@ -170,15 +190,19 @@ internal sealed class PreparedRetryOrigin
             if (states.Values.Any(state => state.InitialPublicationRevision != state.Source.Revision)) throw Invalid();
             return;
         }
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
-        using var transaction = connection.BeginTransaction(deferred: true);
-        var id = ExecutionRetryRows.ForNext(connection, transaction, Guid.Parse(parent.OperationId)) ?? throw Invalid();
-        var intent = ExecutionRetryRows.Read(connection, transaction, id);
-        var source = StartSourceRows.Read(connection, transaction, Guid.Parse(parent.OperationId));
-        if (source.RetrySourceOperationId != intent.PreviousOperationId || intent.InstanceId != instance.InstanceId ||
-            parent.RunId != intent.Frozen.RunId.ToString("D") || parent.AttemptId != intent.Frozen.NextAttemptId.ToString("D") ||
-            parent.JournalId != intent.Frozen.NextJournalId.ToString("D") || parent.AttemptOrdinal != intent.Frozen.NextOrdinal ||
-            AttemptPlanCodec.Reference(parent.ExecutionPlan) != intent.TotalPlan) throw Invalid();
+        ExecutionRetryIntent intent;
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records))
+        using (var transaction = connection.BeginTransaction(deferred: true))
+        {
+            var id = ExecutionRetryRows.ForNext(connection, transaction, Guid.Parse(parent.OperationId)) ?? throw Invalid();
+            intent = ExecutionRetryRows.Read(connection, transaction, id);
+            var source = StartSourceRows.Read(connection, transaction, Guid.Parse(parent.OperationId));
+            if (source.RetrySourceOperationId != intent.PreviousOperationId || intent.InstanceId != instance.InstanceId ||
+                parent.RunId != intent.Frozen.RunId.ToString("D") || parent.AttemptId != intent.Frozen.NextAttemptId.ToString("D") ||
+                parent.JournalId != intent.Frozen.NextJournalId.ToString("D") || parent.AttemptOrdinal != intent.Frozen.NextOrdinal ||
+                AttemptPlanCodec.Reference(parent.ExecutionPlan) != intent.TotalPlan) throw Invalid();
+            transaction.Commit();
+        }
         var original = ReadSources(instance, database, contracts, intent, total, stepId);
         if (!original.TryGetValue(stepId, out var expected) || !expected.Keys.ToHashSet().SetEquals(states.Keys)) throw Invalid();
         foreach (var pair in states)
@@ -192,11 +216,14 @@ internal sealed class PreparedRetryOrigin
     internal static void RequireInvocationSource(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
         RunAttemptPlan parent, ExecutionPlan total, ExecutionInvocation invocation, IReadOnlyDictionary<ConfigurationAddress, FrozenRunState> states)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT subject_id FROM operations WHERE operation_id=$operation;";
-        command.Parameters.AddWithValue("$operation", parent.OperationId);
-        var subject = (string?)command.ExecuteScalar() ?? throw Invalid();
+        string subject;
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime))
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT subject_id FROM main.operations WHERE operation_id=$operation;";
+            command.Parameters.AddWithValue("$operation", parent.OperationId);
+            subject = (string?)command.ExecuteScalar() ?? throw Invalid();
+        }
         var previous = ReadSources(instance, database, contracts, Guid.Parse(parent.JournalId), Guid.Parse(parent.OperationId), subject,
             parent.AttemptId, AttemptPlanCodec.Reference(parent.ExecutionPlan), total, invocation.StepId, invocation.Ordinal - 1, parent)[invocation.StepId];
         if (!previous.Keys.ToHashSet().SetEquals(states.Keys)) throw Invalid();

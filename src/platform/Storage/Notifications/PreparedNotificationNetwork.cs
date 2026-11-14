@@ -35,7 +35,7 @@ internal sealed class PreparedNotificationNetwork : IDisposable
             credential.VerifyHeld(instance.InstanceId, operation);
             var settings = new HostSettingsStore(database).Read();
             SecretPayloadIdentity? payload = null;
-            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System))
             using (var transaction = connection.BeginTransaction(deferred: true))
             {
                 if (credential.Reference.SecretId is { } id) payload = SecretFieldStore.ReadPayload(connection, transaction, id);

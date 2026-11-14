@@ -35,7 +35,7 @@ public sealed class DeliveryReferenceTests
         var read = new NotificationDeliveryEvidence(fixture.Source.Instance, fixture.Source.Database, new()).Read(fixture.Snapshot.Reference);
         Assert.Equal(fixture.Snapshot.Reference, read.Reference);
         Assert.Equal(NotificationCatalogCodec.Encode(fixture.Snapshot.Document), NotificationCatalogCodec.Encode(read.Document));
-        using var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.All);
         var current = SecretFieldRows.ReadField(connection, null,
             SecretFieldKey.NotificationTask(fixture.Source.Instance.InstanceId, fixture.TaskId, NotificationSecretField.WebhookUrl));
         Assert.NotEqual(old.SecretId, current.SecretId);
@@ -62,8 +62,8 @@ public sealed class DeliveryReferenceTests
         var before = fixture.Operations();
         Assert.ThrowsAny<Exception>(() => fixture.Accept(snapshot));
         Assert.Equal(before, fixture.Operations());
-        using var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, readOnly: true);
-        using var command = connection.CreateCommand(); command.CommandText = "SELECT count(*) FROM notification_deliveries;";
+        using var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
+        using var command = connection.CreateCommand(); command.CommandText = "SELECT count(*) FROM notifications.notification_deliveries;";
         Assert.Equal(0L, command.ExecuteScalar());
     }
 
@@ -71,10 +71,10 @@ public sealed class DeliveryReferenceTests
     public async Task RejectsUnknownTransitions()
     {
         using var fixture = new DeliveryReferenceFixture(); await fixture.Prepare(); fixture.Accept();
-        using (var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath))
+        using (var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var command = connection.CreateCommand())
         {
-            command.CommandText = "UPDATE notification_delivery_transitions SET document_json=json_set(document_json,'$.unexpected',true);";
+            command.CommandText = "UPDATE notifications.notification_delivery_transitions SET document_json=json_set(document_json,'$.unexpected',true);";
             Assert.Equal(1, command.ExecuteNonQuery());
         }
         var old = Assert.Single(fixture.Snapshot.Document.Secrets.Where(field => field.Payload is not null)).Payload!;

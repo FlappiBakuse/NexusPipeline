@@ -77,7 +77,7 @@ public sealed class InstallerDataTests
     public void PreservesUnsafeInputs(string fault)
     {
         using var fixture = new InstallerUninstallFixture();
-        if (fault == "database") { fixture.Initialize(); File.WriteAllText(Path.Combine(fixture.Instance.RuntimeRoot, "state/nexus.db"), "Unknown database"); }
+        if (fault == "database") { fixture.Initialize(); File.WriteAllText(Path.Combine(fixture.Instance.RuntimeRoot, "state/runtime.db"), "Unknown database"); }
         if (fault == "payload") File.WriteAllText(Path.Combine(fixture.Product.Application, "README.md"), "Unknown payload bytes");
         if (fault == "manager") File.WriteAllText(Path.Combine(fixture.Product.Paths.ManagerRoot, "foreign.txt"), "Unknown manager bytes");
         if (fault == "native") fixture.Save(fixture.Identity with { NativeEngine = fixture.Identity.NativeEngine with { Sha256 = new('b', 64) } });

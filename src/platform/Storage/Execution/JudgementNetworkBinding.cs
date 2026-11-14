@@ -10,7 +10,7 @@ internal static class JudgementNetworkBinding
 {
     internal static ExecutionPlanJudgementNetwork Capture(StateDatabase database, ProxyPreferences proxy)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         var reference = SecretFieldRows.ReadField(connection, null, SecretFieldKey.HostProxyPassword(database.InstanceId));
         return new() { ProxyMode = proxy.Mode.ToString().ToLowerInvariant(), ProxyUrl = proxy.Url,
             ProxyUserName = proxy.UserName, PasswordRevision = reference.Revision, PasswordSecretId = reference.SecretId?.ToString("D") };

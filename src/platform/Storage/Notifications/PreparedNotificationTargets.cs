@@ -22,7 +22,7 @@ internal sealed class PreparedNotificationTargets : IDisposable
         var result = new PreparedNotificationTargets();
         try
         {
-            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications | DatabaseDomain.System))
             using (var transaction = connection.BeginTransaction(deferred: true))
             {
                 var cursor = NotificationCatalogRows.ReadCurrent(connection, transaction);

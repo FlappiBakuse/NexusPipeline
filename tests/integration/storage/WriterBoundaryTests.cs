@@ -30,7 +30,7 @@ public sealed class WriterBoundaryTests
     public async Task FreezesFailedStart()
     {
         await using var fixture = new RunWriterFixture(); await fixture.StartAsync();
-        fixture.Base.Execute("CREATE TRIGGER fixture_fail_run_gate BEFORE UPDATE OF writer_gate ON configuration_run_sessions " +
+        fixture.Base.Execute("CREATE TRIGGER configuration.fixture_fail_run_gate BEFORE UPDATE OF writer_gate ON configuration_run_sessions " +
             "WHEN NEW.writer_gate=1 BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
         TimeSpan frozen;
         try
@@ -43,7 +43,7 @@ public sealed class WriterBoundaryTests
             await Task.Delay(TimeSpan.FromSeconds(15));
             Assert.Equal(frozen, fixture.Writer.ElapsedSinceStart);
         }
-        finally { fixture.Base.Execute("DROP TRIGGER fixture_fail_run_gate;"); }
+        finally { fixture.Base.Execute("DROP TRIGGER configuration.fixture_fail_run_gate;"); }
         var stopped = await fixture.StopAsync();
         Assert.Equal(frozen.Ticks / TimeSpan.TicksPerMillisecond, Current(fixture).ClosedElapsedMilliseconds);
         fixture.Seal(stopped);
@@ -61,7 +61,7 @@ public sealed class WriterBoundaryTests
         await using var fixture = new RunWriterFixture(); await fixture.StartAsync();
         var stopped = await fixture.StopAsync(); fixture.Seal(stopped); fixture.Restore();
         var frozen = Current(fixture).ClosedElapsedMilliseconds!.Value;
-        fixture.Base.Execute("UPDATE configuration_run_sessions SET closed_elapsed_milliseconds=closed_elapsed_milliseconds+1;");
+        fixture.Base.Execute("UPDATE configuration.configuration_run_sessions SET closed_elapsed_milliseconds=closed_elapsed_milliseconds+1;");
         var path = fixture.Base.Source.Database.DatabasePath;
         var suffixes = new[] { "", "-wal", "-shm", "-journal" };
         var before = suffixes.Where(suffix => File.Exists(path + suffix)).ToDictionary(suffix => suffix, suffix => File.ReadAllBytes(path + suffix));
@@ -72,7 +72,7 @@ public sealed class WriterBoundaryTests
             Assert.Equal(before.Keys.Order(), suffixes.Where(suffix => File.Exists(path + suffix)).Order());
             foreach (var pair in before) Assert.Equal(pair.Value, File.ReadAllBytes(path + pair.Key));
         }
-        finally { fixture.Base.Execute($"UPDATE configuration_run_sessions SET closed_elapsed_milliseconds={frozen};"); }
+        finally { fixture.Base.Execute($"UPDATE configuration.configuration_run_sessions SET closed_elapsed_milliseconds={frozen};"); }
         fixture.Base.VerifyOriginal();
     }
 

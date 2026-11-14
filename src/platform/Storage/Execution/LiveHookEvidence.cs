@@ -20,10 +20,10 @@ internal static class LiveHookEvidence
         foreach (var configuration in accepted.Prepared.Configurations.Values)
             foreach (var resource in configuration.Request.Resources)
             { journals.Add(resource.JournalId); operations.Add(resource.OperationId); }
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration))
         using (var command = connection.CreateCommand())
         {
-            command.CommandText = "SELECT r.journal_id,r.operation_id FROM configuration_run_resources r JOIN configuration_run_sessions s USING(session_id) WHERE s.parent_journal_id=$parent;";
+            command.CommandText = "SELECT r.journal_id,r.operation_id FROM configuration.configuration_run_resources r JOIN configuration.configuration_run_sessions s USING(session_id) WHERE s.parent_journal_id=$parent;";
             command.Parameters.AddWithValue("$parent", state.Journal.JournalId.ToString("D"));
             using var rows = command.ExecuteReader();
             while (rows.Read()) { journals.Add(Guid.Parse(rows.GetString(0))); operations.Add(Guid.Parse(rows.GetString(1))); }

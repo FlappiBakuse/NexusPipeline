@@ -122,7 +122,7 @@ internal sealed class WorkEvidenceScope : IDisposable
     {
         var expected = FileCleanupItems.Claims(item.Bound.Plan);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT resource_key,mode FROM journal_resource_claims WHERE journal_id=$journal ORDER BY resource_key LIMIT 4097;";
+        command.CommandText = "SELECT resource_key,mode FROM main.journal_resource_claims WHERE journal_id=$journal ORDER BY resource_key LIMIT 4097;";
         command.Parameters.AddWithValue("$journal", item.Registered.JournalId.ToString("D"));
         using var rows = command.ExecuteReader(); var index = 0;
         while (rows.Read())

@@ -210,7 +210,7 @@ internal sealed class ConfigurationRunFixture : IDisposable
     }
     private SqliteConnection Connect()
     {
-        var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Source.Database.DatabasePath, Pooling = false }.ToString());
+        var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open(new SqliteConnectionStringBuilder { DataSource = Source.Database.DatabasePath, Pooling = false }.ToString());
         connection.Open(); return connection;
     }
     private static NexusPipeline.Extensibility.Protocol.FileTreePhysicalIdentity Wire(PhysicalObjectIdentity identity) =>

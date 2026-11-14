@@ -43,7 +43,7 @@ public sealed class ManualNotificationTests
         var directory = installed.ActivationDirectory;
         File.WriteAllBytes(Path.Combine(directory, "manual-task.json"), JsonSerializer.SerializeToUtf8Bytes(new
         { TaskId = taskId, Revision = 7, Hold = false, NotificationIds = new[] { target, missing }, RetryNotification = failFanout }));
-        if (failFanout) execution.Execute("CREATE TRIGGER fail_manual_notification BEFORE INSERT ON notification_manual_deliveries BEGIN SELECT RAISE(ABORT,'fixture'); END;");
+        if (failFanout) execution.Execute("CREATE TRIGGER notifications.fail_manual_notification BEFORE INSERT ON notification_manual_deliveries BEGIN SELECT RAISE(ABORT,'fixture'); END;");
         var frontend = await FrontendInstalledTests.OpenAsync(installed); var operation = Guid.NewGuid();
         try
         {
@@ -56,7 +56,7 @@ public sealed class ManualNotificationTests
                 await WaitFile("manual-notification-failed");
                 Assert.Equal(0, execution.Count("notification_manual_sources")); Assert.Equal(0, execution.Count("notification_manual_deliveries"));
                 Assert.Equal(0, execution.Count("notification_deliveries")); Assert.Empty(sink.Requests);
-                execution.Execute("DROP TRIGGER fail_manual_notification;");
+                execution.Execute("DROP TRIGGER notifications.fail_manual_notification;");
                 File.WriteAllText(Path.Combine(directory, "manual-notification-retry"), "retry");
             }
             await WaitFile("manual-notification.json");

@@ -82,12 +82,12 @@ internal sealed class MaintenanceCommitStore(RuntimeInstance instance, StateData
             new RecoveryJournalRegistry(database).AdvanceInside(connection, transaction,
                 bound.Registered with { Phase = JournalPhase.Committed, Revision = bound.Latest.Revision }, bound.Registered.Revision);
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "UPDATE maintenance_operations SET state=2,terminal_code='candidate_started' " +
+            command.CommandText = "UPDATE system.maintenance_operations SET state=2,terminal_code='candidate_started' " +
                 "WHERE operation_id=$operation AND state=1 AND handoff_id=$handoff AND terminal_code IS NULL;";
             command.Parameters.AddWithValue("$operation", bound.Plan.OperationId.ToString("D"));
             command.Parameters.AddWithValue("$handoff", commit.HandoffId.ToString("D"));
             if (command.ExecuteNonQuery() != 1) throw Invalid();
-            command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$operation AND status='accepted' AND initial_journal_id=$journal;";
+            command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$operation AND status='accepted' AND initial_journal_id=$journal;";
             command.Parameters.AddWithValue("$journal", bound.Plan.JournalId.ToString("D"));
             if (command.ExecuteNonQuery() != 1) throw Invalid();
             return true;

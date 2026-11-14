@@ -45,7 +45,7 @@ public sealed class ConfigurationEditStore
 
     public ConfigurationEditStatus? Read(Guid sessionId, string subject)
     {
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration);
         using var transaction = connection.BeginTransaction(deferred: true);
         return ConfigurationEditRows.Read(connection, transaction, sessionId, subject);
     }
@@ -53,12 +53,12 @@ public sealed class ConfigurationEditStore
     public ConfigurationEditStatus? ReadAcceptedSource(Guid sessionId, string subject, string sourceDigest)
     {
         if (!FileTreePolicy.Digest(sourceDigest)) throw new ConfigurationException("configuration_source_request_invalid");
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         var status = ConfigurationEditRows.Read(connection, transaction, sessionId, subject);
         if (status is null) return null;
         using var command = ConfigurationEditRows.Command(connection, transaction, sessionId);
-        command.CommandText = "SELECT source_request_digest FROM configuration_edit_sessions WHERE session_id=$session;";
+        command.CommandText = "SELECT source_request_digest FROM configuration.configuration_edit_sessions WHERE session_id=$session;";
         if (command.ExecuteScalar() is not string saved || saved != sourceDigest) throw new OperationConflictException();
         var journals = new JournalStore(_instance, _contracts);
         ConfigurationEditorCommand? editor = null;
@@ -85,7 +85,7 @@ public sealed class ConfigurationEditStore
     public ConfigurationEditStatus? LookupBegin(OperationIdentity operation, ConfigurationEditRequest request)
     {
         Require(operation, BeginIdentity(operation.OperationId, operation.SubjectId, request));
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration);
         using var transaction = connection.BeginTransaction(deferred: true);
         return OperationRows.ReadExisting(connection, transaction, operation) is null ? null : Required(connection, transaction, operation.OperationId, operation.SubjectId);
     }
@@ -104,7 +104,7 @@ public sealed class ConfigurationEditStore
                 if (binding.Revision != request.ExpectedBindingRevision) throw new ConfigurationException("configuration_binding_revision_conflict");
                 using (var pending = ConfigurationRevisionRows.KeyCommand(connection, transaction, resources[0].Address))
                 {
-                    pending.CommandText = "SELECT EXISTS(SELECT 1 FROM configuration_edit_sessions WHERE binding_id=$binding AND phase IN (0,1));";
+                    pending.CommandText = "SELECT EXISTS(SELECT 1 FROM configuration.configuration_edit_sessions WHERE binding_id=$binding AND phase IN (0,1));";
                     if ((long)pending.ExecuteScalar()! != 0) throw new ConfigurationException("configuration_edit_already_open");
                 }
                 foreach (var resource in resources)
@@ -148,7 +148,7 @@ public sealed class ConfigurationEditStore
     {
         completion = ConfigurationEditPolicy.Freeze(completion);
         Require(operation, SaveIdentity(operation.OperationId, operation.SubjectId, completion));
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         if (OperationRows.ReadExisting(connection, transaction, operation) is null) return null;
         RequireTerminal(Required(connection, transaction, completion.SessionId, operation.SubjectId), operation.OperationId, ConfigurationEditPhase.Saved);
@@ -183,7 +183,7 @@ public sealed class ConfigurationEditStore
     public ConfigurationEditStatus? LookupCancel(OperationIdentity operation, ConfigurationEditCancel cancel)
     {
         Require(operation, CancelIdentity(operation.OperationId, operation.SubjectId, cancel));
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration);
         using var transaction = connection.BeginTransaction(deferred: true);
         if (OperationRows.ReadExisting(connection, transaction, operation) is null) return null;
         var session = Required(connection, transaction, cancel.SessionId, operation.SubjectId);
@@ -245,7 +245,7 @@ public sealed class ConfigurationEditStore
     private static void CompleteOperation(SqliteConnection connection, SqliteTransaction transaction, Guid operationId)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$operation;";
+        command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$operation;";
         command.Parameters.AddWithValue("$operation", operationId.ToString("D")); command.ExecuteNonQuery();
     }
 }

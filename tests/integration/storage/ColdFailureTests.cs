@@ -65,7 +65,7 @@ public sealed class ColdFailureTests
         Assert.Equal(after.Plan.Before.Snapshot.Entries, actual.Entries);
         Assert.Equal(after.Plan.Before.OriginalObjects, PhysicalTreeIdentity.Capture(after.Plan.TargetPath, actual));
         Assert.Equal(settings.Revision, new HostSettingsStore(database).Read().Revision);
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.All))
         using (var transaction = connection.BeginTransaction(deferred: true))
             Assert.Equal(1, ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, "fixture-plugin")!.Revision);
         for (var i = 0; i < bytes.Length; i++) Assert.Equal(bytes[i], after.History[i].Export());

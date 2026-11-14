@@ -10,11 +10,11 @@ public static class ConfigurationEditInventory
     {
         try
         {
-            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration);
             using var transaction = connection.BeginTransaction(deferred: true);
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT s.session_id,o.subject_id,o.operation_kind,o.status FROM configuration_edit_sessions s " +
-                "JOIN operations o ON o.operation_id=s.session_id LIMIT 4097;";
+            command.CommandText = "SELECT s.session_id,o.subject_id,o.operation_kind,o.status FROM configuration.configuration_edit_sessions s " +
+                "JOIN main.operations o ON o.operation_id=s.session_id LIMIT 4097;";
             var sessions = new List<(Guid Id, string Subject, string Kind, string Status)>();
             using (var row = command.ExecuteReader()) while (row.Read()) sessions.Add((Guid.Parse(row.GetString(0)), row.GetString(1), row.GetString(2), row.GetString(3)));
             if (sessions.Count > 4096) throw new IOException("configuration_edit_inventory_limit");
@@ -38,8 +38,8 @@ public static class ConfigurationEditInventory
         if (!FileTreePolicy.Digest(resource.PlanDigest) || resource.PlanPath != $"blobs/plans/{resource.PlanDigest}.json")
             throw new IOException("configuration_edit_plan_unrecognized");
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT operation_id,operation_kind,phase,plan_path,plan_digest FROM operation_journals WHERE journal_id=$journal " +
-            "AND EXISTS(SELECT 1 FROM journal_resources WHERE journal_id=$journal AND resource_key=$resource);";
+        command.CommandText = "SELECT operation_id,operation_kind,phase,plan_path,plan_digest FROM main.operation_journals WHERE journal_id=$journal " +
+            "AND EXISTS(SELECT 1 FROM main.journal_resources WHERE journal_id=$journal AND resource_key=$resource);";
         command.Parameters.AddWithValue("$journal", resource.JournalId.ToString("D"));
         command.Parameters.AddWithValue("$resource", ConfigurationRevisionService.ResourceKey(resource.Address));
         using (var row = command.ExecuteReader())
@@ -47,7 +47,7 @@ public static class ConfigurationEditInventory
                 row.GetString(3) != resource.PlanPath || row.GetString(4) != resource.PlanDigest ||
                 session.CompletionOperationId.HasValue && row.GetString(2) != "committed") throw new IOException("configuration_edit_journal_unbound");
         if (resource.ExpectedRevision == 0) return;
-        command.CommandText = "SELECT contract_revision,contract_digest,instance_key,requires_instance FROM configuration_revisions " +
+        command.CommandText = "SELECT contract_revision,contract_digest,instance_key,requires_instance FROM configuration.configuration_revisions " +
             "WHERE binding_id=$binding AND resource_id=$id AND revision=$revision;";
         command.Parameters.AddWithValue("$binding", resource.Address.BindingId.ToString("D"));
         command.Parameters.AddWithValue("$id", resource.Address.ResourceId); command.Parameters.AddWithValue("$revision", resource.ExpectedRevision);
@@ -60,13 +60,13 @@ public static class ConfigurationEditInventory
         ConfigurationEditStatus session, Guid operationId, string subject)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT subject_id,operation_kind,status FROM operations WHERE operation_id=$operation;";
+        command.CommandText = "SELECT subject_id,operation_kind,status FROM main.operations WHERE operation_id=$operation;";
         command.Parameters.AddWithValue("$operation", operationId.ToString("D"));
         using (var row = command.ExecuteReader())
             if (!row.Read() || row.GetString(0) != subject || row.GetString(2) != "completed" ||
                 row.GetString(1) != (session.Phase == ConfigurationEditPhase.Saved ? "configuration.edit.save" : "configuration.edit.cancel"))
                 throw new IOException("configuration_edit_completion_unbound");
-        command.CommandText = "SELECT binding_id,resource_id,revision FROM configuration_batch_items WHERE operation_id=$operation;";
+        command.CommandText = "SELECT binding_id,resource_id,revision FROM configuration.configuration_batch_items WHERE operation_id=$operation;";
         var actual = new List<(Guid Binding, string Resource, long Revision)>();
         using (var row = command.ExecuteReader()) while (row.Read()) actual.Add((Guid.Parse(row.GetString(0)), row.GetString(1), row.GetInt64(2)));
         var expected = session.Phase == ConfigurationEditPhase.Saved ? session.Resources.Select(resource =>

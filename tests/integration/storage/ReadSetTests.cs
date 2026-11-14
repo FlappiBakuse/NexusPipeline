@@ -107,13 +107,17 @@ public sealed class ReadSetTests
         fixture.Base.Save(new([new(fixture.Extra, 1, 1, current.Contract, current.Tree, ConfigurationUpdateKind.Manual)]));
         using var prepared = fixture.Service.Preview("fixture", fixture.Request(Guid.NewGuid())[..2], [Stamp(fixture)]);
         var before = ReadSnapshots(fixture);
-        fixture.Base.Execute("CREATE TRIGGER fixture_read_race AFTER INSERT ON operations WHEN NEW.operation_kind='configuration.patch-batch' " +
-            "BEGIN UPDATE configuration_current SET revision=1 WHERE resource_id='extra'; END;");
+        using var writes = new NexusPipeline.Platform.Storage.Sqlite.DatabaseWriteScope(fixture.Base.Database.DatabasePath);
+        var connection = NexusPipeline.Platform.Storage.Sqlite.DatabaseWriteScope.Borrow(fixture.Base.Database.DatabasePath)!;
+        using var command = connection.CreateCommand();
+        command.CommandText = "CREATE TEMP TRIGGER fixture_read_race AFTER INSERT ON main.operations WHEN NEW.operation_kind='configuration.patch-batch' " +
+            "BEGIN UPDATE configuration_current SET revision=1 WHERE resource_id='extra'; END;";
+        command.ExecuteNonQuery();
         try
         {
             Assert.Equal("configuration_read_set_changed", Assert.Throws<ConfigurationException>(() => fixture.Service.Commit(prepared, DateTimeOffset.UtcNow)).Message);
         }
-        finally { fixture.Base.Execute("DROP TRIGGER fixture_read_race;"); }
+        finally { command.CommandText = "DROP TRIGGER temp.fixture_read_race;"; command.ExecuteNonQuery(); }
         AssertUnpublished(fixture, prepared, before);
         var result = fixture.Service.Commit(prepared, DateTimeOffset.UtcNow);
         Assert.True(result.IsNew); Assert.Equal(prepared.OperationId, result.OperationId);

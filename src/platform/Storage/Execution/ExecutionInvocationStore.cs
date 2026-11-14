@@ -43,7 +43,7 @@ internal sealed class ExecutionInvocationStore(RuntimeInstance instance, StateDa
         AttemptTerminalEvidence.RequireArtifacts(instance, database, contracts, state);
         StepWritersEvidence.RequireStopped(instance, database, contracts, journalId, state.AllJobs.Where(job => job.StepId == stepId));
         using var restored = RunBindingEvidence.HoldRestored(instance, database, contracts, state, [stepId]);
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var transaction = connection.BeginTransaction(deferred: true))
         {
             AttemptTerminalEvidence.RequireRestoredInside(connection, transaction, state, stepId: stepId);
@@ -123,7 +123,7 @@ internal sealed class ExecutionInvocationStore(RuntimeInstance instance, StateDa
             {
                 command.Parameters.Clear(); command.Parameters.AddWithValue("$parent", state.Journal.JournalId.ToString("D"));
                 command.Parameters.AddWithValue("$job", job.JobName); command.Parameters.AddWithValue("$writer", job.WriterId.ToString("D"));
-                command.CommandText = "SELECT EXISTS(SELECT 1 FROM journal_writer_job_closures WHERE journal_id=$parent AND job_name=$job AND writer_id=$writer);";
+                command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.journal_writer_job_closures WHERE journal_id=$parent AND job_name=$job AND writer_id=$writer);";
                 if ((long)command.ExecuteScalar()! != 1) throw ExecutionInvocationCodec.Invalid();
             }
         }

@@ -49,7 +49,7 @@ public sealed class NotificationScheduledTests
         var invocation = Assert.Single(fixture.States()).Source.Document.Invocation;
         var source = fixture.Base.Source;
         BlobReference reference;
-        using (var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.All))
         using (var transaction = connection.BeginTransaction(deferred: true))
             reference = Assert.IsType<BlobReference>(NotificationScheduledRows.Lookup(connection, transaction, invocation.NotificationOperationId));
         Assert.Throws<IOException>(() => NotificationScheduledSource.VerifyCommitted(source.Instance, source.Database, new(), reference, Guid.NewGuid()));
@@ -120,7 +120,7 @@ public sealed class NotificationScheduledTests
         await using var sink = new NotificationHttpSink((_, _) => Task.FromResult(new NotificationSinkReply(200, "")));
         await using var fixture = new NotificationScheduledFixture { RetrySubmissionAfterSqlFailure = true };
         await fixture.SaveNotification(sink.Address); await fixture.Activate();
-        fixture.Base.Execute("CREATE TRIGGER fail_scheduled_notification BEFORE INSERT ON notification_scheduled_deliveries BEGIN SELECT RAISE(ABORT,'fixture'); END;");
+        fixture.Base.Execute("CREATE TRIGGER notifications.fail_scheduled_notification BEFORE INSERT ON notification_scheduled_deliveries BEGIN SELECT RAISE(ABORT,'fixture'); END;");
         try
         {
             await fixture.Tick.TickAsync();
@@ -130,7 +130,7 @@ public sealed class NotificationScheduledTests
             Assert.Equal(0, fixture.Base.Count("notification_deliveries"));
             Assert.Equal(0, fixture.Base.Count("notification_delivery_secrets")); Assert.Empty(sink.Requests);
         }
-        finally { fixture.Base.Execute("DROP TRIGGER fail_scheduled_notification;"); fixture.RetrySubmission.TrySetResult(); }
+        finally { fixture.Base.Execute("DROP TRIGGER notifications.fail_scheduled_notification;"); fixture.RetrySubmission.TrySetResult(); }
         await fixture.PumpUntilResult();
         Assert.Equal("returned", Assert.Single(fixture.States()).Result!.Completion);
         Assert.Equal(1, fixture.Effects); Assert.Equal(1, fixture.Base.Count("notification_scheduled_sources"));

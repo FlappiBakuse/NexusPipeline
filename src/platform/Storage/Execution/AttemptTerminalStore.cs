@@ -98,7 +98,7 @@ internal sealed class AttemptTerminalStore(RuntimeInstance instance, StateDataba
             StepResultCodec.UndispatchedParticipant(item, state.Total.Steps[dispatchedCount].ScriptId)),
             preflight: next =>
             {
-                using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+                using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
                 using var transaction = connection.BeginTransaction(deferred: true);
                 ExecutionStepAdmission.RequireUndispatchedInside(connection, transaction, state, next); transaction.Commit();
             });
@@ -328,7 +328,7 @@ internal sealed class AttemptTerminalStore(RuntimeInstance instance, StateDataba
 
     private IDisposable HoldRestored(AttemptWriterState state, bool requireCompletedGroups, bool allowUnregistered = false)
     {
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var transaction = connection.BeginTransaction(deferred: true))
         {
             AttemptTerminalEvidence.RequireRestoredInside(connection, transaction, state, requireCompletedGroups, allowUnregistered); transaction.Commit();

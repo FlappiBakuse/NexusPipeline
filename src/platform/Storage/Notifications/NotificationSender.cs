@@ -39,7 +39,7 @@ internal sealed class NotificationSender : IAsyncDisposable
     {
         lease.VerifyHeld(instance);
         if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot ||
-            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "nexus.db")))
+            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "runtime.db")))
             throw new IOException("notification_sender_instance_unbound");
         _instance = instance; _database = database; _contracts = contracts; _lease = lease;
         _secrets = secrets; _smtpClientFactory = smtpClientFactory; _endpoints = endpoints ?? NotificationWebhookEndpoints.Production;
@@ -64,7 +64,7 @@ internal sealed class NotificationSender : IAsyncDisposable
             var task = catalog.Catalog.Tasks.Single(item => item.Id == snapshot.Document.Task.TaskId);
             timeout.CancelAfter(TimeSpan.FromSeconds(task.Configuration.TimeoutSeconds));
             NotificationDeliveryNetwork network;
-            using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
             using (var transaction = connection.BeginTransaction(deferred: true))
             {
                 var state = NotificationDeliveryRows.ReadState(connection, transaction, id);
@@ -152,13 +152,13 @@ internal sealed class NotificationSender : IAsyncDisposable
     private IReadOnlyList<BlobReference> ReadForSource(BlobReference source, string requiredState, Guid? after, int maximum)
     {
         if (maximum is < 1 or > 4) throw new ArgumentOutOfRangeException(nameof(maximum));
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         var sourceOperation = NotificationDeliveryOrigins.ReadOperation(_instance, _database, _contracts, source, connection, transaction);
         var result = new List<BlobReference>();
         using (var command = NotificationDeliveryRows.Command(connection, transaction,
-            "SELECT d.relative_path,d.size_bytes,d.sha256 FROM notification_delivery_pending p " +
-            "JOIN notification_deliveries d ON d.operation_id=p.operation_id " +
+            "SELECT d.relative_path,d.size_bytes,d.sha256 FROM notifications.notification_delivery_pending p " +
+            "JOIN notifications.notification_deliveries d ON d.operation_id=p.operation_id " +
             "WHERE p.state=$3 AND p.operation_id>$0 AND p.source_operation_id=$1 ORDER BY p.operation_id LIMIT $2;",
             after?.ToString("D") ?? "", sourceOperation.ToString("D"), maximum, requiredState))
         using (var rows = command.ExecuteReader())

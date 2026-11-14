@@ -9,11 +9,11 @@ internal static class ExecutionBindingSuccesses
 {
     internal static IReadOnlyDictionary<Guid, int> Today(StateDatabase database, DateTimeOffset now)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         var (start, end) = Day(now);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT binding_id,count(*) FROM execution_binding_successes WHERE started_at_utc_ticks>=$start AND started_at_utc_ticks<$end AND started_at_utc_ticks<=$now GROUP BY binding_id;";
+        command.CommandText = "SELECT binding_id,count(*) FROM main.execution_binding_successes WHERE started_at_utc_ticks>=$start AND started_at_utc_ticks<$end AND started_at_utc_ticks<=$now GROUP BY binding_id;";
         command.Parameters.AddWithValue("$start", start.UtcTicks); command.Parameters.AddWithValue("$end", end.UtcTicks); command.Parameters.AddWithValue("$now", now.UtcTicks);
         using var rows = command.ExecuteReader(); var result = new Dictionary<Guid, int>();
         while (rows.Read()) result.Add(Guid.ParseExact(rows.GetString(0), "D"), rows.GetInt32(1));
@@ -38,7 +38,7 @@ internal static class ExecutionBindingSuccesses
             var step = state.Total.Steps.Single(step => step.StepId == fact.StepId);
             if (step.Purpose == "initialization") continue;
             using var exists = connection.CreateCommand(); exists.Transaction = transaction;
-            exists.CommandText = "SELECT EXISTS(SELECT 1 FROM execution_binding_successes WHERE run_id=$run AND binding_id=$binding);";
+            exists.CommandText = "SELECT EXISTS(SELECT 1 FROM main.execution_binding_successes WHERE run_id=$run AND binding_id=$binding);";
             exists.Parameters.AddWithValue("$run", state.Attempt.RunId); exists.Parameters.AddWithValue("$binding", (object?)step.BindingId ?? DBNull.Value);
             if ((long)exists.ExecuteScalar()! == 1) continue;
             if (step.BindingId is null || !AttemptTerminalEvidence.IsRestoredInside(connection, transaction,
@@ -46,7 +46,7 @@ internal static class ExecutionBindingSuccesses
             var started = history.First(revision => revision.Revision <= document.Revision &&
                 WriterIntentCodec.ReadJobs(revision.Root, state.Total).Any(job => job.StepId == step.StepId));
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "INSERT INTO execution_binding_successes(run_id,binding_id,journal_id,started_at_utc_ticks) " +
+            command.CommandText = "INSERT INTO main.execution_binding_successes(run_id,binding_id,journal_id,started_at_utc_ticks) " +
                 "VALUES($run,$binding,$journal,$started) ON CONFLICT(run_id,binding_id) DO NOTHING;";
             command.Parameters.AddWithValue("$run", state.Attempt.RunId); command.Parameters.AddWithValue("$binding", step.BindingId);
             command.Parameters.AddWithValue("$journal", state.Journal.JournalId.ToString("D"));

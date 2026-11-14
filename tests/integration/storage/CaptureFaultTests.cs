@@ -72,7 +72,7 @@ public sealed class CaptureFaultTests
         }));
     }
 
-    [Theory(DisplayName = "A Captured Append With Changed Prior Bytes Or Failed Sql Projection Cannot Open Before Reconciliation")]
+    [Theory(DisplayName = "A Captured Append Protects Prior Bytes And A Failed Sql Projection Cannot Open Before Reconciliation")]
     [InlineData(false)]
     [InlineData(true)]
     public async Task ReconcilesCapturedBytes(bool replacePriorBytes)
@@ -96,9 +96,9 @@ public sealed class CaptureFaultTests
             if (replacePriorBytes)
             {
                 originalRevision = File.ReadAllBytes(revisionPath);
-                File.WriteAllBytes(revisionPath, [.. originalRevision, (byte)'\n']);
+                Assert.Throws<IOException>(() => File.WriteAllBytes(revisionPath, [.. originalRevision, (byte)'\n']));
             }
-            else fixture.Base.Execute("CREATE TRIGGER fixture_capture_advance_failure BEFORE UPDATE OF revision ON operation_journals " +
+            fixture.Base.Execute("CREATE TRIGGER main.fixture_capture_advance_failure BEFORE UPDATE OF revision ON operation_journals " +
                 $"WHEN OLD.journal_id='{fixture.Accepted.JournalId:D}' BEGIN SELECT RAISE(ABORT,'fixture_capture_advance_failure'); END;");
             installed = true;
         });
@@ -109,12 +109,7 @@ public sealed class CaptureFaultTests
                 session.PrepareConfigurationGroups();
                 var step = Assert.Single(session.StepIds);
                 session.PrepareNextStep(step); session.EnterEffect(step);
-                if (replacePriorBytes)
-                {
-                    var changed = await Assert.ThrowsAsync<IOException>(() => session.ExecuteStepAsync(step, CancellationToken.None));
-                    Assert.Equal("execution_capture_original_prefix_unbound", changed.Message);
-                }
-                else await Assert.ThrowsAsync<SqliteException>(() => session.ExecuteStepAsync(step, CancellationToken.None));
+                await Assert.ThrowsAsync<SqliteException>(() => session.ExecuteStepAsync(step, CancellationToken.None));
                 Assert.True(installed); Assert.NotNull(artifact); Assert.NotNull(png);
                 var ahead = fixture.State;
                 Assert.Equal(ahead.Journal.Revision + 1, ahead.Latest.Revision);
@@ -129,8 +124,8 @@ public sealed class CaptureFaultTests
             {
                 if (installed)
                 {
-                    if (replacePriorBytes) File.WriteAllBytes(revisionPath, originalRevision!);
-                    else fixture.Base.Execute("DROP TRIGGER fixture_capture_advance_failure;");
+                    if (replacePriorBytes) Assert.Equal(originalRevision, File.ReadAllBytes(revisionPath));
+                    fixture.Base.Execute("DROP TRIGGER main.fixture_capture_advance_failure;");
                     installed = false;
                 }
             }

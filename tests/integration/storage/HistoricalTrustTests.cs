@@ -74,12 +74,12 @@ public sealed class HistoricalTrustTests
         {
             var changed = originalBytes.ToArray(); changed[^2] ^= 1; File.WriteAllBytes(path, changed);
         }
-        else fixture.Catalog.Sql("UPDATE extension_catalog_heads SET sequence=1,catalog_sha='" + original.Identity.Sha256 + "' WHERE channel='stable';");
+        else fixture.Catalog.Sql("UPDATE extensions.extension_catalog_heads SET sequence=1,catalog_sha='" + original.Identity.Sha256 + "' WHERE channel='stable';");
         try { Assert.Throws<IOException>(() => { using var history = fixture.Catalog.Store.ProtectInstalledHistory(root, original, entry); }); }
         finally
         {
             if (bytes) File.WriteAllBytes(path, originalBytes);
-            else fixture.Catalog.Sql("UPDATE extension_catalog_heads SET sequence=2,catalog_sha='" + current.Identity.Sha256 + "' WHERE channel='stable';");
+            else fixture.Catalog.Sql("UPDATE extensions.extension_catalog_heads SET sequence=2,catalog_sha='" + current.Identity.Sha256 + "' WHERE channel='stable';");
         }
         using var history = fixture.Catalog.Store.ProtectInstalledHistory(root, original, entry);
         Assert.Equal(originalBytes, File.ReadAllBytes(path));
@@ -98,7 +98,7 @@ public sealed class HistoricalTrustTests
 
     private static ExtensionCatalogSaved Saved(BoundPackageFixture fixture)
     {
-        using var connection = DatabaseConnections.Open(fixture.Catalog.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(fixture.Catalog.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions);
         using var transaction = connection.BeginTransaction(deferred: true);
         return ExtensionCatalogRows.ReadHead(connection, transaction, ExtensionStoreChannel.Stable)!;
     }

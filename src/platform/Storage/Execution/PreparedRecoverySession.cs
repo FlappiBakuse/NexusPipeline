@@ -129,7 +129,7 @@ public sealed class PreparedRecoverySession : IPreparedRecoverySession, IPrepare
     private NoEffectLease HoldNoEffects() => NoEffectLease.Acquire(_instance, _contracts, _database, _plan, _reference);
     private void RequireNoCancellation()
     {
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         ExecutionCancellationRows.RequireDispatchOpen(connection, transaction, _journalId);
         transaction.Commit();

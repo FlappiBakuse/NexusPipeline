@@ -53,10 +53,10 @@ public sealed class CatalogStoreTests
     {
         using var fixture = new ExtensionCatalogFixture(); var operation = Guid.NewGuid();
         var original = fixture.Verify(fixture.Signed());
-        fixture.Sql("CREATE TRIGGER fixture_catalog_fail BEFORE INSERT ON extension_catalog_heads " +
+        fixture.Sql("CREATE TRIGGER extensions.fixture_catalog_fail BEFORE INSERT ON extension_catalog_heads " +
             "BEGIN SELECT RAISE(ABORT,'fixture'); END;");
         try { Assert.Throws<SqliteException>(() => fixture.Store.Accept(operation, "fixture", original)); }
-        finally { fixture.Sql("DROP TRIGGER fixture_catalog_fail;"); }
+        finally { fixture.Sql("DROP TRIGGER extensions.fixture_catalog_fail;"); }
         Assert.Equal(0, fixture.Count("extension_catalog_acceptances")); Assert.Equal(0, fixture.Count("extension_catalog_heads"));
         Assert.Equal(0, fixture.Count("operations")); Assert.Null(fixture.Store.ReadCached(ExtensionStoreChannel.Stable));
         fixture.Store.Accept(operation, "fixture", original);
@@ -106,9 +106,9 @@ public sealed class CatalogStoreTests
     {
         using var fixture = new ExtensionCatalogFixture(); var original = fixture.Verify(fixture.Signed());
         fixture.Store.Accept(Guid.NewGuid(), "fixture", original);
-        using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath);
+        using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions);
         using var command = connection.CreateCommand();
-        command.CommandText = "PRAGMA foreign_keys=OFF; DELETE FROM extension_catalog_acceptances;";
+        command.CommandText = "PRAGMA foreign_keys=OFF; DELETE FROM extensions.extension_catalog_acceptances;";
         command.ExecuteNonQuery();
         Assert.Throws<IOException>(() => fixture.Store.ReadCached(ExtensionStoreChannel.Stable));
         Assert.Equal(1, fixture.Count("extension_catalog_heads"));

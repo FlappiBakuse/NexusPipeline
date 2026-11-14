@@ -77,7 +77,7 @@ public sealed class DocumentCrashTests
     private static readonly string[] Fields = ["cn", "os", "skland", "skport", "kuro", "tajiduo"];
     private static Extensibility.State.ExtensionDocument ReadDocument(StateDatabase database)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions);
         return ExtensionDocumentRows.Read(connection, null, "fixture-plugin", "tasks")!;
     }
     private static string[] Fingerprints(string root, bool includeDatabase = true) => Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
@@ -87,7 +87,7 @@ public sealed class DocumentCrashTests
 
     private static string[] BusinessRows(StateDatabase database)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         var result = new List<string>();
         foreach (var table in new[] { "operations", "secret_fields", "secret_payloads", "secret_mutations", "extension_documents", "secret_document_publications", "secret_document_fields" })
         {

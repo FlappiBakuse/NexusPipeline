@@ -12,10 +12,10 @@ internal static class EffectRotationInventory
     internal static void Verify(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
         IReadOnlyDictionary<Guid, WorkEffectOrigin> origins)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT claim_id,operation_id,source_operation_id,run_id,attempt_id,before_secret_id,before_revision,after_secret_id,after_revision FROM work_effect_rotations;";
+        command.CommandText = "SELECT claim_id,operation_id,source_operation_id,run_id,attempt_id,before_secret_id,before_revision,after_secret_id,after_revision FROM main.work_effect_rotations;";
         using var rows = command.ExecuteReader(); var count = 0;
         while (rows.Read())
         {

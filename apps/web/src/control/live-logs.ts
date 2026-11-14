@@ -18,6 +18,7 @@ interface LogOwner {
   controller: AbortController;
   timer: ReturnType<typeof setTimeout> | undefined;
   rotation: ReturnType<typeof setTimeout> | undefined;
+  completed: boolean;
 }
 export class LiveLogs {
   private readonly owners = new Map<string, LogOwner>();
@@ -33,7 +34,8 @@ export class LiveLogs {
         listeners: new Set(),
         controller: new AbortController(),
         timer: undefined,
-        rotation: undefined
+        rotation: undefined,
+        completed: false
       };
       this.owners.set(id, owner);
     }
@@ -56,10 +58,10 @@ export class LiveLogs {
     };
   }
   private startWaiting(): void {
-    if (this.owners.size > this.active.size) for (const owner of this.active) this.rotate(owner);
+    if (this.hasWaiting()) for (const owner of this.active) this.rotate(owner);
     for (const owner of this.owners.values()) {
       if (this.active.size >= 4) return;
-      if (this.active.has(owner) || owner.timer) continue;
+      if (owner.completed || this.active.has(owner) || owner.timer) continue;
       owner.controller = new AbortController();
       this.active.add(owner);
       this.start(owner);
@@ -71,9 +73,10 @@ export class LiveLogs {
     void this.read(owner, controller.signal)
       .catch(async (error) => {
         if (controller.signal.aborted) return;
-        if (error instanceof ControlFailure && error.code === 'resource_unavailable') {
+        if ((error instanceof ControlFailure && error.code === 'resource_unavailable') ||
+            (error instanceof Error && error.message === 'log_stream_ended')) {
           try {
-            await this.durableTail(owner, controller.signal);
+            if (await this.durableTail(owner, controller.signal)) { owner.completed = true; return; }
           } catch {
             /* A hook may not have started or committed evidence yet. */
           }
@@ -103,7 +106,7 @@ export class LiveLogs {
     if (owner.rotation) return;
     owner.rotation = setTimeout(() => {
       owner.rotation = undefined;
-      if (this.owners.size > this.active.size) owner.controller.abort();
+      if (this.hasWaiting()) owner.controller.abort();
     }, 2000);
   }
   private async read(owner: LogOwner, signal: AbortSignal): Promise<void> {
@@ -162,7 +165,12 @@ export class LiveLogs {
       reader.releaseLock();
     }
   }
-  private async durableTail(owner: LogOwner, signal: AbortSignal): Promise<void> {
+  private hasWaiting(): boolean {
+    for (const owner of this.owners.values())
+      if (!owner.completed && !this.active.has(owner) && !owner.timer) return true;
+    return false;
+  }
+  private async durableTail(owner: LogOwner, signal: AbortSignal): Promise<boolean> {
     const key = owner.key;
     const path =
       '/control/v1/records/' +
@@ -186,6 +194,7 @@ export class LiveLogs {
       this.append(owner, { ...slice, sequence: index + 1 }, decoder, false);
     owner.value = { ...owner.value, connected: false };
     this.publish(owner);
+    return description.isComplete === true;
   }
   private append(
     owner: LogOwner,

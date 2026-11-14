@@ -25,11 +25,11 @@ internal static class RecordPageQuery
             command.Parameters.AddWithValue("$run", after.RunId.ToString("D"));
         }
         command.Parameters.AddWithValue("$limit", query.Limit + 1);
-        var run = Select(false) + " FROM run_records r WHERE " + Where(false);
+        var run = Select(false) + " FROM records.run_records r WHERE " + Where(false);
         // The compound query can merge two ordered indexes without materializing the summary view.
         command.CommandText = (query.UserId.HasValue ? Select(true) +
-            " FROM account_run_records a JOIN run_records r ON a.run_id=r.run_id WHERE " + Where(true) +
-            " UNION ALL " + run + " AND NOT EXISTS(SELECT 1 FROM account_run_records a WHERE a.run_id=r.run_id)" : run) +
+            " FROM records.account_run_records a JOIN records.run_records r ON a.run_id=r.run_id WHERE " + Where(true) +
+            " UNION ALL " + run + " AND NOT EXISTS(SELECT 1 FROM records.account_run_records a WHERE a.run_id=r.run_id)" : run) +
             " ORDER BY ended_at_utc_ticks,run_id LIMIT $limit;";
         return command;
 

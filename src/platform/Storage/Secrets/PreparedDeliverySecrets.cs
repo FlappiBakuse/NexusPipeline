@@ -35,7 +35,7 @@ internal sealed class PreparedDeliverySecrets : IDisposable
     {
         lease.VerifyHeld(instance);
         if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot ||
-            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "nexus.db")))
+            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "runtime.db")))
             throw new IOException("notification_delivery_instance_unbound");
         var snapshot = new NotificationDeliveryEvidence(instance, database, contracts).Read(reference);
         if (NotificationDeliveryOrigins.Reference(snapshot.Document) is null) throw new IOException("notification_delivery_registration_required");
@@ -80,7 +80,7 @@ internal sealed class PreparedDeliverySecrets : IDisposable
         _lease.VerifyHeld(_instance);
         _borrow.VerifyHeld();
         _ = new NotificationDeliveryEvidence(_instance, _database, _contracts).Read(_snapshot.Reference);
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System);
         var state = NotificationDeliveryRows.ReadState(connection, null, _snapshot.Document.OperationId);
         if (state.State != NotificationDeliveryState.Sending || state.OwnerGeneration != _generation ||
             state.Sender != NotificationDeliveryOwner.Capture(JournalWriterStore.CurrentWriter))

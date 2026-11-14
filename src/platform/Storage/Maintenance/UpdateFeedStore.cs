@@ -44,7 +44,7 @@ internal sealed class UpdateFeedStore
                 var prior = OperationRows.ReadExisting(connection, transaction, identity);
                 _ = OperationRows.Accept(connection, transaction, identity, DateTimeOffset.UtcNow);
                 using var command = connection.CreateCommand(); command.Transaction = transaction;
-                command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$operation;";
+                command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$operation;";
                 command.Parameters.AddWithValue("$operation", operationId.ToString("D"));
                 if (command.ExecuteNonQuery() != 1 || prior is { Status: not "completed" }) throw Invalid();
                 UpdateFeedRows.Accept(connection, transaction, saved, _verifier.Floor(saved.Identity.Channel), operationId);
@@ -62,13 +62,13 @@ internal sealed class UpdateFeedStore
         return borrow.Use(() =>
         {
             SavedUpdateFeed? saved;
-            using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System))
             using (var transaction = connection.BeginTransaction(deferred: true))
             { saved = UpdateFeedRows.ReadHead(connection, transaction, channel); transaction.Commit(); }
             if (saved is null) return null;
             var verified = _verifier.Verify(Read(saved.Feed), Read(saved.Signature), channel);
             if (verified.Feed.Identity != saved.Identity || verified.KeyId != saved.KeyId) throw Invalid();
-            using var fresh = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+            using var fresh = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
             using var tx = fresh.BeginTransaction(deferred: true);
             if (UpdateFeedRows.ReadHead(fresh, tx, channel) != saved) throw Invalid();
             tx.Commit(); return verified;
@@ -85,7 +85,7 @@ internal sealed class UpdateFeedStore
             if (current.Feed.Identity != expected) throw Invalid();
             var release = current.Feed.Releases.SingleOrDefault(item => item.HostVersion == hostVersion) ?? throw Invalid();
             if (!Version.TryParse(release.MinReaderVersion.Split('-')[0], out var minimum) || minimum > _verifier.ReaderVersion) throw Invalid();
-            using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
             using var transaction = connection.BeginTransaction(deferred: true);
             var saved = UpdateFeedRows.ReadHead(connection, transaction, expected.Channel) ?? throw Invalid();
             if (saved.Identity != expected || saved.KeyId != current.KeyId) throw Invalid();

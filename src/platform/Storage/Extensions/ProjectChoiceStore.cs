@@ -21,7 +21,7 @@ internal sealed class ProjectChoiceStore(RuntimeInstance instance, StateDatabase
         long expectedRevision, string extensionId, JsonElement choice, IReadOnlyList<ProjectInputIntent>? intents = null, string? providerId = null)
     {
         var digest = RequestDigest(bindingId, bindingRevision, expectedRevision, extensionId, choice, intents);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         var reference = SecretDocumentRows.Find(connection, null, operationId);
         if (reference is null) return new ConfigurationRevisionStore(instance, database, contracts)
             .LookupSource(operationId, subject, Address(bindingId), digest);
@@ -55,7 +55,7 @@ internal sealed class ProjectChoiceStore(RuntimeInstance instance, StateDatabase
     internal async ValueTask VerifyReplayAsync(SecretDocumentService service, Guid operationId, IReadOnlyList<ProjectProtectedEdit> edits,
         Action requireCurrent, CancellationToken cancellation)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.All);
         var reference = SecretDocumentRows.Find(connection, null, operationId);
         if (reference is null) throw new Core.Operations.OperationConflictException();
         var source = new SecretDocumentFormat(instance, contracts).Read(reference);
@@ -93,7 +93,7 @@ internal sealed class ProjectChoiceStore(RuntimeInstance instance, StateDatabase
         using var prepared = new ConfigurationRevisionStore(instance, database, contracts).Prepare(change);
         var publication = prepared.Use((frozen, manifest) => new ProjectChoicePublication(frozen, manifest, acceptedAt));
         long revision;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.All))
             revision = ExtensionDocumentRows.Read(connection, null, extension, ProjectChoicePublication.Name(project.BindingId))?.Revision ?? 0;
         await service.WriteAsync(operationId, subject, extension, ProjectChoicePublication.Name(project.BindingId), revision, bytes,
             changes, requireCurrent, cancellation, projectChoice: publication).ConfigureAwait(false);

@@ -50,7 +50,7 @@ internal sealed class ExtensionCommittedReconciliation(RuntimeInstance instance,
                 new RecoveryJournalRegistry(database).AdvanceInside(connection, transaction,
                     actual with { Phase = JournalPhase.Committed, Revision = fresh.Latest.Revision }, actual.Revision);
                 using var command = connection.CreateCommand(); command.Transaction = transaction;
-                command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$operation " +
+                command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$operation " +
                     "AND status='accepted' AND initial_journal_id=$journal;";
                 command.Parameters.AddWithValue("$operation", actual.OperationId.ToString("D"));
                 command.Parameters.AddWithValue("$journal", journalId.ToString("D"));

@@ -15,6 +15,7 @@ internal sealed class AttemptReadSession : IDisposable
 {
     private readonly object _gate = new();
     private readonly RuntimeInstance _instance;
+    private readonly StateDatabase _database;
     private readonly ImmutableBlobStore _blobs;
     private readonly ContractReader _contracts;
     private readonly JournalStore _journals;
@@ -23,7 +24,6 @@ internal sealed class AttemptReadSession : IDisposable
     private readonly BlobReference _planReference;
     private readonly ExecutionPlan _total;
     internal AttemptReadMemo ParsedHistory { get; }
-    private readonly DatabaseValidationLease _sql;
     private readonly DatabaseValidationLease _cancellationSql;
     private ExecutionCancellationIntent? _close;
     private readonly Action _released;
@@ -36,6 +36,7 @@ internal sealed class AttemptReadSession : IDisposable
     private AutomationBundle? _definitions;
     private FileStream? _definitionFile;
     private BoundPreparedAttempt? _bound;
+    private AttemptHistoryCursor? _prefix;
     private long _revision;
     private long _rawBytes;
     private bool _disposed;
@@ -44,7 +45,7 @@ internal sealed class AttemptReadSession : IDisposable
 
     internal AttemptReadSession(RuntimeInstance instance, StateDatabase database, ContractReader contracts, Guid journal, Action released)
     {
-        _instance = instance; _contracts = contracts; JournalId = journal; _released = released;
+        _instance = instance; _database = database; _contracts = contracts; JournalId = journal; _released = released;
         _blobs = new(instance, contracts); _journals = new(instance, contracts);
         var registered = new RecoveryJournalRegistry(database).ReadJournal(journal);
         _planReference = AttemptPreparedBinding.Reference(instance, registered);
@@ -59,9 +60,7 @@ internal sealed class AttemptReadSession : IDisposable
                 _history = _journals.ProtectReadHistory(journal);
                 try
                 {
-                    _sql = new(database.DatabasePath, "attempt.sql.validate");
-                    try { _cancellationSql = new(database.DatabasePath, "attempt.cancel.validate"); }
-                    catch { _sql.Dispose(); throw; }
+                    _cancellationSql = new(database, "attempt.cancel.validate", DatabaseDomain.Runtime);
                 }
                 catch { _history.Dispose(); throw; }
             }
@@ -101,9 +100,35 @@ internal sealed class AttemptReadSession : IDisposable
             var history = _journals.ReadAllRevisions(JournalId);
             if (!_cacheable || _journals.ProtectedJournalId != JournalId) return read(_journals, _inputs);
             if (_revision != history[^1].Revision)
-            { _bound = null; _sql.Invalidate(); _revision = history[^1].Revision; }
-            _sql.RequireCurrent((_, _) => _bound = read(_journals, _inputs));
+            { _bound = null; _revision = history[^1].Revision; }
+            if (_bound is not null) RequireBinding(new RecoveryJournalRegistry(_database).ReadJournal(JournalId));
+            _bound ??= read(_journals, _inputs);
             return _bound ?? throw new IOException("attempt_read_binding_missing");
+        }
+    }
+
+    private void RequireBinding(RegisteredJournal journal)
+    {
+        if (journal.PlanPath != _planReference.RelativePath || journal.PlanDigest != _planReference.Sha256)
+            throw new IOException("attempt_read_binding_changed");
+        AttemptPreparedBinding.RequireRegistration(journal, _inputs.Plan);
+    }
+
+    internal AttemptHistoryCursor? ReadHistoryPrefix(IReadOnlyList<JournalDocument> history, EffectGateState gate)
+    {
+        lock (_gate)
+        {
+            if (_disposed || !_cacheable || _journals.ProtectedJournalId != JournalId) return null;
+            return _prefix?.Fork(history, gate);
+        }
+    }
+
+    internal void RememberHistory(AttemptHistoryCursor cursor, IReadOnlyList<JournalDocument> history, EffectGateState gate)
+    {
+        lock (_gate)
+        {
+            if (_disposed || !_cacheable || _journals.ProtectedJournalId != JournalId) { _prefix = null; return; }
+            cursor.Complete(history, gate); _prefix = cursor;
         }
     }
 
@@ -195,11 +220,11 @@ internal sealed class AttemptReadSession : IDisposable
             {
                 _definitionFile?.Dispose();
                 foreach (var file in _rawFiles.Values) file.Dispose();
-                _rawFiles.Clear(); _replays.Clear(); _bound = null; _definitions = null;
+                _rawFiles.Clear(); _replays.Clear(); _bound = null; _prefix = null; _definitions = null;
                 foreach (var held in _verified.Values) held.Dispose();
                 _verified.Clear();
                 ParsedHistory.Dispose();
-                _cancellationSql.Dispose(); _sql.Dispose(); _history.Dispose(); _inputs.Dispose(); _paths.Dispose();
+                _cancellationSql.Dispose(); _history.Dispose(); _inputs.Dispose(); _paths.Dispose();
             }
             finally { _released(); }
         }

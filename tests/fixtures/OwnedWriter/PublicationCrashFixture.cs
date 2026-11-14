@@ -27,9 +27,9 @@ internal static class PublicationCrashFixture
             var service = new NotificationCatalogService(instance, database, lease, resources, index, new(), observer);
             if (mode == "final-sql")
             {
-                using var connection = DatabaseConnections.Open(database.DatabasePath);
+                using var connection = DatabaseConnections.Open(database.DatabasePath, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
                 using var command = connection.CreateCommand();
-                command.CommandText = "CREATE TRIGGER notification_final_fault BEFORE INSERT ON notification_publication_outcomes BEGIN SELECT RAISE(ABORT,'notification_final_fault'); END;";
+                command.CommandText = "CREATE TRIGGER notifications.notification_final_fault BEFORE INSERT ON notification_publication_outcomes BEGIN SELECT RAISE(ABORT,'notification_final_fault'); END;";
                 command.ExecuteNonQuery();
             }
             using var url = new SecretValue("https://notification-fixture.invalid/owner");
@@ -63,10 +63,10 @@ internal static class PublicationCrashFixture
         internal void Pause()
         {
             BlobReference parent;
-            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications))
             using (var command = connection.CreateCommand())
             {
-                command.CommandText = "SELECT relative_path,size_bytes,sha256 FROM notification_publications WHERE operation_id=$id;";
+                command.CommandText = "SELECT relative_path,size_bytes,sha256 FROM notifications.notification_publications WHERE operation_id=$id;";
                 command.Parameters.AddWithValue("$id", operationId.ToString("D"));
                 using var row = command.ExecuteReader();
                 if (!row.Read()) throw new IOException("notification_fixture_parent_missing");

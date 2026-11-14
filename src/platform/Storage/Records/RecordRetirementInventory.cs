@@ -11,9 +11,9 @@ internal static class RecordRetirementInventory
         while (true)
         {
             var page = new List<(Guid RunId, BlobReference Reference, Guid OperationId)>();
-            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
             using (var command = RecordRetirementRows.Command(connection, null,
-                "SELECT operation_id,run_id,relative_path,size_bytes,sha256 FROM record_content_retirements " +
+                "SELECT operation_id,run_id,relative_path,size_bytes,sha256 FROM records.record_content_retirements " +
                 "WHERE operation_id>$0 ORDER BY operation_id LIMIT 64;", after))
             using (var rows = command.ExecuteReader())
                 while (rows.Read()) page.Add((Guid.ParseExact(rows.GetString(1), "D"),
@@ -27,11 +27,11 @@ internal static class RecordRetirementInventory
             }
             after = page[^1].OperationId.ToString("D");
         }
-        using var check = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var check = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var query = RecordRetirementRows.Command(check, null,
-            "SELECT EXISTS(SELECT 1 FROM operations o LEFT JOIN record_content_retirements r USING(operation_id) " +
+            "SELECT EXISTS(SELECT 1 FROM main.operations o LEFT JOIN records.record_content_retirements r USING(operation_id) " +
             "WHERE o.operation_kind='records.content.retire' AND r.operation_id IS NULL) " +
-            "OR EXISTS(SELECT 1 FROM record_retired_contents c LEFT JOIN record_content_retirements r USING(operation_id) WHERE r.operation_id IS NULL);");
+            "OR EXISTS(SELECT 1 FROM records.record_retired_contents c LEFT JOIN records.record_content_retirements r USING(operation_id) WHERE r.operation_id IS NULL);");
         if ((long)query.ExecuteScalar()! != 0) throw RecordRetirementCodec.Invalid();
     }
 }

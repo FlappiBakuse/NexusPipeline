@@ -14,13 +14,13 @@ internal static class CommittedAttemptJournal
     {
         if (registered is not { Kind: JournalKind.RunAttempt, Phase: JournalPhase.Committed } ||
             registered.Revision is < 1 or > JournalCapacityLimits.MaximumRevisions) throw Invalid();
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
         using var transaction = connection.BeginTransaction(deferred: true);
         var current = RecoveryJournalRegistry.ReadInside(connection, transaction, registered.JournalId);
         AttemptPreparedBinding.RequireRegistration(current, attempt);
         var receipt = AttemptReceiptStore.ReadInside(connection, transaction, Guid.Parse(attempt.AttemptId)) ?? throw Invalid();
         using var operation = DatabaseConnections.Command(connection, transaction,
-            "SELECT EXISTS(SELECT 1 FROM operations WHERE operation_id=$0 AND initial_journal_id=$1 AND status='completed');",
+            "SELECT EXISTS(SELECT 1 FROM main.operations WHERE operation_id=$0 AND initial_journal_id=$1 AND status='completed');",
             current.OperationId.ToString("D"), current.JournalId.ToString("D"));
         if (current.Phase != registered.Phase || current.Revision != registered.Revision ||
             current.PlanPath != registered.PlanPath || current.PlanDigest != registered.PlanDigest ||

@@ -5,14 +5,14 @@ namespace NexusPipeline.Platform.Storage.Sqlite;
 
 internal static class RecoveryCapacityStore
 {
-    internal const string ActiveOwners = "SELECT owner_journal_id FROM recovery_capacity_reservations INDEXED BY recovery_capacity_open_read WHERE released=0 " +
-        "UNION SELECT cm.owner_journal_id FROM file_effects f INDEXED BY file_effects_pending_read " +
-        "JOIN recovery_capacity_members cm USING(journal_id) WHERE f.state='pending'";
+    internal const string ActiveOwners = "SELECT owner_journal_id FROM main.recovery_capacity_reservations INDEXED BY recovery_capacity_open_read WHERE released=0 " +
+        "UNION SELECT cm.owner_journal_id FROM main.file_effects f INDEXED BY file_effects_pending_read " +
+        "JOIN main.recovery_capacity_members cm USING(journal_id) WHERE f.state='pending'";
     internal const string ActiveReservation = "(r.owner_journal_id IN (" + ActiveOwners + "))";
-    private const string Usage = "SELECT COALESCE(sum((SELECT count(*) FROM recovery_capacity_members m WHERE m.owner_journal_id=r.owner_journal_id)+remaining_journals),0)," +
-        "COALESCE(sum((SELECT count(*) FROM file_effects f JOIN recovery_capacity_members m USING(journal_id) WHERE m.owner_journal_id=r.owner_journal_id)+remaining_effects),0)," +
-        "COALESCE(sum((SELECT count(*) FROM journal_writer_jobs j JOIN recovery_capacity_members m USING(journal_id) WHERE m.owner_journal_id=r.owner_journal_id)+remaining_jobs),0) " +
-        "FROM recovery_capacity_reservations r WHERE " + ActiveReservation + ";";
+    private const string Usage = "SELECT COALESCE(sum((SELECT count(*) FROM main.recovery_capacity_members m WHERE m.owner_journal_id=r.owner_journal_id)+remaining_journals),0)," +
+        "COALESCE(sum((SELECT count(*) FROM main.file_effects f JOIN main.recovery_capacity_members m USING(journal_id) WHERE m.owner_journal_id=r.owner_journal_id)+remaining_effects),0)," +
+        "COALESCE(sum((SELECT count(*) FROM main.journal_writer_jobs j JOIN main.recovery_capacity_members m USING(journal_id) WHERE m.owner_journal_id=r.owner_journal_id)+remaining_jobs),0) " +
+        "FROM main.recovery_capacity_reservations r WHERE " + ActiveReservation + ";";
     internal static void Register(SqliteConnection connection, SqliteTransaction transaction, Guid journalId,
         RecoveryCapacityBudget budget, Guid? parentJournalId)
     {
@@ -22,8 +22,8 @@ internal static class RecoveryCapacityStore
         if (parentJournalId is { } parent)
         {
             command.Parameters.AddWithValue("$parent", parent.ToString("D"));
-            command.CommandText = "INSERT INTO recovery_capacity_members SELECT $journal,m.owner_journal_id FROM recovery_capacity_members m " +
-                "JOIN operation_journals j ON j.journal_id=m.journal_id WHERE m.journal_id=$parent AND j.operation_kind='runAttempt' " +
+            command.CommandText = "INSERT INTO main.recovery_capacity_members SELECT $journal,m.owner_journal_id FROM main.recovery_capacity_members m " +
+                "JOIN main.operation_journals j ON j.journal_id=m.journal_id WHERE m.journal_id=$parent AND j.operation_kind='runAttempt' " +
                 "AND j.phase IN ('prepared','applying');";
             if (command.ExecuteNonQuery() != 1) throw new IOException("recovery_capacity_parent_unbound");
             return;
@@ -39,8 +39,8 @@ internal static class RecoveryCapacityStore
         command.Parameters.AddWithValue("$journals", budget.Journals);
         command.Parameters.AddWithValue("$effects", budget.FileEffects);
         command.Parameters.AddWithValue("$jobs", budget.Jobs);
-        command.CommandText = "INSERT INTO recovery_capacity_reservations VALUES($journal,$journals,$effects,$jobs,$journals,$effects,$jobs,0);" +
-            "INSERT INTO recovery_capacity_members VALUES($journal,$journal);";
+        command.CommandText = "INSERT INTO main.recovery_capacity_reservations VALUES($journal,$journals,$effects,$jobs,$journals,$effects,$jobs,0);" +
+            "INSERT INTO main.recovery_capacity_members VALUES($journal,$journal);";
         command.ExecuteNonQuery();
     }
 
@@ -48,22 +48,22 @@ internal static class RecoveryCapacityStore
     {
         VerifyGlobal(connection, transaction);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM operation_journals j LEFT JOIN recovery_capacity_members m USING(journal_id) " +
-            "WHERE m.journal_id IS NULL) OR EXISTS(SELECT 1 FROM recovery_capacity_members m JOIN operation_journals j USING(journal_id) " +
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operation_journals j LEFT JOIN main.recovery_capacity_members m USING(journal_id) " +
+            "WHERE m.journal_id IS NULL) OR EXISTS(SELECT 1 FROM main.recovery_capacity_members m JOIN main.operation_journals j USING(journal_id) " +
             "WHERE m.journal_id<>m.owner_journal_id AND (j.operation_kind<>'configExchange' OR NOT EXISTS " +
-            "(SELECT 1 FROM configuration_run_resources r JOIN configuration_run_sessions s USING(session_id) " +
+            "(SELECT 1 FROM configuration.configuration_run_resources r JOIN configuration.configuration_run_sessions s USING(session_id) " +
             "WHERE r.journal_id=m.journal_id AND s.parent_journal_id=m.owner_journal_id))) OR " +
-            "EXISTS(SELECT 1 FROM recovery_capacity_reservations r WHERE NOT EXISTS " +
-            "(SELECT 1 FROM recovery_capacity_members m WHERE m.journal_id=r.owner_journal_id AND m.owner_journal_id=r.owner_journal_id));";
+            "EXISTS(SELECT 1 FROM main.recovery_capacity_reservations r WHERE NOT EXISTS " +
+            "(SELECT 1 FROM main.recovery_capacity_members m WHERE m.journal_id=r.owner_journal_id AND m.owner_journal_id=r.owner_journal_id));";
         if ((long)command.ExecuteScalar()! != 0) throw Invalid();
         foreach (var item in ReadReservations(connection, transaction))
         {
             item.Limit.RequireValid();
             command.Parameters.Clear(); command.Parameters.AddWithValue("$owner", item.Owner.ToString("D"));
-            command.CommandText = "SELECT (SELECT count(*) FROM recovery_capacity_members WHERE owner_journal_id=$owner)," +
-                "(SELECT count(*) FROM file_effects f JOIN recovery_capacity_members m USING(journal_id) WHERE owner_journal_id=$owner)," +
-                "(SELECT count(*) FROM journal_writer_jobs j JOIN recovery_capacity_members m USING(journal_id) WHERE owner_journal_id=$owner)," +
-                "EXISTS(SELECT 1 FROM recovery_capacity_members m JOIN operation_journals j USING(journal_id) WHERE owner_journal_id=$owner AND phase<>'committed');";
+            command.CommandText = "SELECT (SELECT count(*) FROM main.recovery_capacity_members WHERE owner_journal_id=$owner)," +
+                "(SELECT count(*) FROM main.file_effects f JOIN main.recovery_capacity_members m USING(journal_id) WHERE owner_journal_id=$owner)," +
+                "(SELECT count(*) FROM main.journal_writer_jobs j JOIN main.recovery_capacity_members m USING(journal_id) WHERE owner_journal_id=$owner)," +
+                "EXISTS(SELECT 1 FROM main.recovery_capacity_members m JOIN main.operation_journals j USING(journal_id) WHERE owner_journal_id=$owner AND phase<>'committed');";
             using var row = command.ExecuteReader();
             if (!row.Read() || row.GetInt64(0) + item.Remaining.Journals != item.Limit.Journals && !item.Released ||
                 row.GetInt64(1) + item.Remaining.FileEffects != item.Limit.FileEffects && !item.Released ||
@@ -81,7 +81,7 @@ internal static class RecoveryCapacityStore
         {
             using var command = connection.CreateCommand(); command.Transaction = transaction;
             command.CommandText = "SELECT owner_journal_id,journal_limit,effect_limit,job_limit,remaining_journals,remaining_effects,remaining_jobs,released " +
-                "FROM recovery_capacity_reservations WHERE owner_journal_id>$after ORDER BY owner_journal_id LIMIT 128;";
+                "FROM main.recovery_capacity_reservations WHERE owner_journal_id>$after ORDER BY owner_journal_id LIMIT 128;";
             command.Parameters.AddWithValue("$after", after);
             var page = new List<(Guid Owner, RecoveryCapacityBudget Limit, RecoveryCapacityBudget Remaining, bool Released)>();
             using (var rows = command.ExecuteReader())

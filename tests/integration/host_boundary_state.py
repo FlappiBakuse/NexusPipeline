@@ -6,6 +6,8 @@ import json
 import sqlite3
 import uuid
 
+DOMAINS = ("runtime", "automation", "configuration", "records", "notifications", "extensions", "system", "content")
+
 
 def strict_object(pairs):
     result = {}
@@ -17,28 +19,34 @@ def strict_object(pairs):
 
 
 def database_snapshot(runtime):
-    with contextlib.closing(sqlite3.connect((runtime / "state/nexus.db").as_uri() + "?mode=ro", uri=True)) as database:
+    with contextlib.closing(sqlite3.connect((runtime / "state/runtime.db").as_uri() + "?mode=ro", uri=True)) as database:
+        for domain in DOMAINS[1:]:
+            database.execute("ATTACH DATABASE ? AS " + domain, ((runtime / f"state/{domain}.db").as_uri() + "?mode=ro",))
         database.execute("BEGIN")
         identity = json.loads((runtime / "instance.json").read_bytes())["instanceId"]
-        schema = database.execute("SELECT format,schema_version,instance_id FROM schema_info;").fetchall()
-        if schema != [("nexus.state.database", 1, identity)]:
-            raise ValueError("live_fixture_schema_unknown")
-        if any(database.execute("SELECT count(*) FROM " + table).fetchone()[0] for table in ("queues", "schedules")):
+        for domain in DOMAINS:
+            alias = "main" if domain == "runtime" else domain
+            schema = database.execute(f"SELECT format,schema_version,instance_id,domain_name FROM {alias}.schema_info;").fetchall()
+            if schema != [("nexus.state.domain", 2, identity, domain)]:
+                raise ValueError("live_fixture_schema_unknown")
+        if any(database.execute("SELECT count(*) FROM automation." + table).fetchone()[0] for table in ("queues", "schedules")):
             raise ValueError("live_fixture_requires_no_scheduled_work")
         excluded = verified_empty_minutes(database, identity)
-        definitions = database.execute("SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name;").fetchall()
-        tables = [row[0] for row in database.execute("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name;")]
-        contents = {}
-        for table in tables:
-            if table in ("schedule_minute_claims", "scheduling_watermark"):
-                continue
-            rows = database.execute('SELECT * FROM "' + table.replace('"', '""') + '" LIMIT 4097;').fetchall()
-            if len(rows) > 4096:
-                raise ValueError("fixture_snapshot_row_limit")
-            if table == "operations":
-                rows = [row for row in rows if row[0] not in excluded]
-            encoded = [json.dumps(row, ensure_ascii=False, default=lambda value: {"blobHex": value.hex()}) for row in rows]
-            contents[table] = sorted(encoded)
+        definitions, contents = {}, {}
+        for domain in DOMAINS:
+            alias = "main" if domain == "runtime" else domain
+            definitions[domain] = database.execute(f"SELECT type,name,tbl_name,sql FROM {alias}.sqlite_schema ORDER BY type,name;").fetchall()
+            tables = [row[0] for row in database.execute(f"SELECT name FROM {alias}.sqlite_schema WHERE type='table' ORDER BY name;")]
+            for table in tables:
+                if domain == "runtime" and table in ("schedule_minute_claims", "scheduling_watermark"):
+                    continue
+                rows = database.execute(f'SELECT * FROM {alias}."' + table.replace('"', '""') + '" LIMIT 4097;').fetchall()
+                if len(rows) > 4096:
+                    raise ValueError("fixture_snapshot_row_limit")
+                if domain == "runtime" and table == "operations":
+                    rows = [row for row in rows if row[0] not in excluded]
+                encoded = [json.dumps(row, ensure_ascii=False, default=lambda value: {"blobHex": value.hex()}) for row in rows]
+                contents[domain + "." + table] = sorted(encoded)
         encoded = json.dumps({"schema": definitions, "tables": contents}, ensure_ascii=False, sort_keys=True).encode()
         return hashlib.sha256(encoded).hexdigest()
 
@@ -49,7 +57,7 @@ def verified_empty_minutes(database, instance_id):
         "JOIN operations o ON o.operation_id=m.operation_id ORDER BY m.watermark_revision;").fetchall()
     excluded = set()
     highest = None
-    catalog_revision = database.execute("SELECT revision FROM automation_catalog_state;").fetchone()[0]
+    catalog_revision = database.execute("SELECT revision FROM automation.automation_catalog_state;").fetchone()[0]
     previous_catalog_revision = 0
     for index, row in enumerate(rows):
         operation, text, count, revision, minute, subject, digest, kind, status, journal, created = row

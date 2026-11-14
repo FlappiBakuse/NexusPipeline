@@ -74,16 +74,16 @@ public sealed class SettingsCrashTests
         using var fixture = await Start(StartupEffectBoundary.NativeReturned, true);
         Assert.True((await fixture.Owner.StopAsync()).CompleteJobStopped);
         _ = await fixture.Owner.AwaitExitAsync();
-        var databasePath = Path.Combine(fixture.Instance.RuntimeRoot, "state/nexus.db");
-        using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString()))
+        var databasePath = Path.Combine(fixture.Instance.RuntimeRoot, "state/runtime.db");
+        using (var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open(new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString()))
         {
             connection.Open();
             using var command = connection.CreateCommand();
-            command.CommandText = "SELECT document FROM startup_registration_intents WHERE operation_id=$id;";
+            command.CommandText = "SELECT document FROM system.startup_registration_intents WHERE operation_id=$id;";
             command.Parameters.AddWithValue("$id", fixture.OperationId.ToString("D"));
             var source = (byte[])command.ExecuteScalar()!;
             var bytes = FaultedIntent(source, fault);
-            command.CommandText = "UPDATE startup_registration_intents SET document=$document,document_digest=$digest WHERE operation_id=$id;";
+            command.CommandText = "UPDATE system.startup_registration_intents SET document=$document,document_digest=$digest WHERE operation_id=$id;";
             command.Parameters.AddWithValue("$document", bytes);
             command.Parameters.AddWithValue("$digest", Convert.ToHexStringLower(SHA256.HashData(bytes)));
             command.ExecuteNonQuery();

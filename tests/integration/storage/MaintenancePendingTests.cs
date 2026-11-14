@@ -67,7 +67,7 @@ public sealed class MaintenancePendingTests
         Assert.Throws<IOException>(() => store.Cancel(row.Identity.OperationId, row.Identity.SubjectId));
         var actual = store.Read(row.Identity.OperationId, row.Identity.SubjectId)!;
         Assert.Equal(HostUpdateState.Starting, actual.State); Assert.Equal(fixture.Plan.JournalId, actual.JournalId);
-        using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         Assert.Equal(handoff, MaintenanceOperationRows.ReadOwned(connection, transaction, row.Identity.OperationId, row.Identity.SubjectId)!.HandoffId);
         transaction.Commit();
@@ -86,7 +86,7 @@ public sealed class MaintenancePendingTests
             MaintenanceOperationRows.InsertPending(connection, transaction, identity, frozen.Reference, fixture.Plan.MaintenanceSource!);
             throw new IOException("controlled-pending-failure");
         }));
-        using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         Assert.Null(OperationRows.ReadOwned(connection, transaction, identity.OperationId, identity.SubjectId));
         Assert.Empty(MaintenanceOperationRows.ReadAll(connection, transaction)); transaction.Commit();

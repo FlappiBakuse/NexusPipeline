@@ -30,7 +30,7 @@ internal sealed class PreparedPublicationCommit : IDisposable
         var proof = new PreparedPublicationCommit(publication);
         try
         {
-            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System))
             using (var transaction = connection.BeginTransaction(deferred: true))
                 NotificationCatalogRows.RequirePendingInside(connection, transaction, publication);
             var children = ImmutableArray.CreateBuilder<NotificationCommittedChild>();

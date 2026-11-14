@@ -64,9 +64,9 @@ public sealed class AndroidScopeTests
             ((IList<NexusPipeline.Extensibility.Protocol.ExecutionPlanRuntimeFile>)foreign.Tool.RuntimeFiles).Clear();
             Assert.NotEqual(originalDigest, reader.Digest(foreign));
             var where = " WHERE operation_id='" + state.Journal.OperationId.ToString("D") + "';";
-            fixture.Base.Execute("UPDATE operations SET subject_id='changed-current-subject'" + where);
+            fixture.Base.Execute("UPDATE main.operations SET subject_id='changed-current-subject'" + where);
             try { Assert.Throws<IOException>(() => reader.Request(state.Total, registration)); }
-            finally { fixture.Base.Execute("UPDATE operations SET subject_id='" + AndroidRuntimeFixture.Subject + "'" + where); }
+            finally { fixture.Base.Execute("UPDATE main.operations SET subject_id='" + AndroidRuntimeFixture.Subject + "'" + where); }
             Assert.Equal(before, reader.Request(state.Total, registration)); fixture.VerifyOriginal();
         });
     }

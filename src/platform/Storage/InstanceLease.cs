@@ -17,6 +17,7 @@ public sealed class InstanceLease : IDisposable
     private Sqlite.DatabaseConnectionPool? _databaseReads;
     private DirectoryAttributeProtection? _directories;
     public RuntimeInstance Instance { get; }
+    internal Sqlite.StateDatabase? Database { get; private set; }
     internal Guid StartupGeneration { get; } = Guid.NewGuid();
     internal Execution.RunBudgetOwner RunBudgets { get; }
     internal Execution.LiveLogHub LiveLogs { get; }
@@ -75,12 +76,16 @@ public sealed class InstanceLease : IDisposable
         });
     }
 
-    internal void BindDatabase()
+    internal void BindDatabase(Sqlite.StateDatabase database)
     {
         lock (_databaseGate)
         {
             VerifyHeld(Instance);
-            _databaseReads ??= new(Path.Combine(Instance.RuntimeRoot, "state", "nexus.db"));
+            Sqlite.DatabaseLayout.RequireInstance(database, Instance);
+            if (Database is not null && !ReferenceEquals(Database, database))
+                throw new IOException("database_instance_already_bound");
+            _databaseReads ??= new(Path.Combine(Instance.RuntimeRoot, "state", "runtime.db"));
+            Database = database;
         }
     }
 
@@ -151,9 +156,9 @@ public sealed class InstanceLease : IDisposable
                 ? DirectoryAttributeScope.Enter(_directories ??= DirectoryAttributeProtection.Acquire(Instance)) : null;
             using var instance = OperatingSystem.IsWindows() ? InstanceReadScope.Hold(Instance, new()) : null;
             using var identity = OperatingSystem.IsWindows() ? new Processes.ProcessIdentityScope(ExecutorIdentity) : null;
-            using var reads = OperatingSystem.IsWindows() ? Sqlite.DatabaseReadScope.Hold(Path.Combine(Instance.RuntimeRoot, "state", "nexus.db")) : null;
+            using var reads = OperatingSystem.IsWindows() ? Sqlite.DatabaseReadScope.Hold(Path.Combine(Instance.RuntimeRoot, "state", "runtime.db")) : null;
             using var journals = OperatingSystem.IsWindows() ? Journals.JournalReadScope.HoldParents(Instance, new(), _attemptReads) : null;
-            using var writes = OperatingSystem.IsWindows() ? new Sqlite.DatabaseWriteScope(Path.Combine(Instance.RuntimeRoot, "state", "nexus.db")) : null;
+            using var writes = OperatingSystem.IsWindows() ? new Sqlite.DatabaseWriteScope(Path.Combine(Instance.RuntimeRoot, "state", "runtime.db")) : null;
             return callback();
         });
     }

@@ -90,9 +90,9 @@ internal static class RunCrashFixture
         }
         else
         {
-            Execute(database, point == "intent-ahead" ? "CREATE TRIGGER fixture_intent_failure BEFORE UPDATE ON operation_journals " +
+            Execute(database, point == "intent-ahead" ? "CREATE TRIGGER main.fixture_intent_failure BEFORE UPDATE ON operation_journals " +
                 $"WHEN OLD.journal_id='{session.ParentJournalId:D}' BEGIN SELECT RAISE(ABORT,'fixture_intent_failure'); END;" :
-                "CREATE TRIGGER fixture_intent_failure BEFORE INSERT ON configuration_run_sync_items BEGIN SELECT RAISE(ABORT,'fixture_intent_failure'); END;");
+                "CREATE TRIGGER configuration.fixture_intent_failure BEFORE INSERT ON configuration_run_sync_items BEGIN SELECT RAISE(ABORT,'fixture_intent_failure'); END;");
             try
             {
                 try
@@ -102,7 +102,7 @@ internal static class RunCrashFixture
                 }
                 catch (SqliteException error) when (error.Message.Contains("fixture_intent_failure", StringComparison.Ordinal)) { }
             }
-            finally { Execute(database, "DROP TRIGGER fixture_intent_failure;"); }
+            finally { Execute(database, "DROP TRIGGER " + (point == "intent-ahead" ? "main" : "configuration") + ".fixture_intent_failure;"); }
         }
         var physical = new JournalStore(instance, new()).Read(session.ParentJournalId);
         var sqlParent = registry.ReadSnapshot().Journals.Single(item => item.JournalId == session.ParentJournalId);
@@ -118,7 +118,7 @@ internal static class RunCrashFixture
 
     private static void Execute(StateDatabase database, string sql)
     {
-        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = database.DatabasePath, Pooling = false }.ToString());
+        using var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open(new SqliteConnectionStringBuilder { DataSource = database.DatabasePath, Pooling = false }.ToString());
         connection.Open(); using var command = connection.CreateCommand(); command.CommandText = sql; command.ExecuteNonQuery();
     }
 

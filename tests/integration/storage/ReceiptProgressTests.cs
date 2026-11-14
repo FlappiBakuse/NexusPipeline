@@ -16,9 +16,9 @@ public sealed class ReceiptProgressTests
         using var fixture = new NotificationReceiptFixture(); await fixture.Execute(); await fixture.Replace();
         fixture.Sql(fault switch
         {
-            "missing" => "DELETE FROM notification_receipt_progress;",
-            "unearned" => "UPDATE notification_receipt_progress SET next_ordinal=1;",
-            _ => "UPDATE notification_receipt_progress SET route_count=2;"
+            "missing" => "DELETE FROM notifications.notification_receipt_progress;",
+            "unearned" => "UPDATE notifications.notification_receipt_progress SET next_ordinal=1;",
+            _ => "UPDATE notifications.notification_receipt_progress SET route_count=2;"
         });
         var original = Assert.Single(Assert.Single(fixture.Snapshot.Document.Tasks).Secrets, secret => secret.Payload is not null).Payload!;
         var operations = fixture.Count("operations");

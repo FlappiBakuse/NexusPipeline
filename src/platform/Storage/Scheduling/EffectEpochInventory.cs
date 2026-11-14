@@ -11,7 +11,7 @@ internal static class EffectEpochInventory
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT e.ordinal,e.operation_id,e.provider_id,e.task_id,e.run_id,e.attempt_id,e.secret_id,e.secret_revision,r.operation_id,r.run_id,r.attempt_id " +
-            "FROM work_effect_epochs e LEFT JOIN work_effect_epoch_results r ON r.claim_id=e.claim_id AND r.ordinal=e.ordinal WHERE e.claim_id=$id ORDER BY e.ordinal;";
+            "FROM main.work_effect_epochs e LEFT JOIN main.work_effect_epoch_results r ON r.claim_id=e.claim_id AND r.ordinal=e.ordinal WHERE e.claim_id=$id ORDER BY e.ordinal;";
         command.Parameters.AddWithValue("$id", claim.Id.ToString("D"));
         using var rows = command.ExecuteReader(); long ordinal = 0; var closed = true;
         while (rows.Read())

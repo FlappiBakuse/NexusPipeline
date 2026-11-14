@@ -15,7 +15,7 @@ internal static class HostSettingsRows
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT revision FROM settings_current WHERE singleton=1;";
+        command.CommandText = "SELECT revision FROM system.settings_current WHERE singleton=1;";
         var value = command.ExecuteScalar() ?? throw new IOException("settings_current_missing");
         return Read(connection, transaction, Convert.ToInt64(value, CultureInfo.InvariantCulture));
     }
@@ -26,7 +26,7 @@ internal static class HostSettingsRows
         using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
-            command.CommandText = $"SELECT {Columns} FROM settings_snapshots WHERE revision=$revision;";
+            command.CommandText = $"SELECT {Columns} FROM system.settings_snapshots WHERE revision=$revision;";
             command.Parameters.AddWithValue("$revision", revision);
             using var row = command.ExecuteReader();
             if (!row.Read()) throw new IOException("settings_snapshot_missing");
@@ -42,7 +42,7 @@ internal static class HostSettingsRows
         using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
-            command.CommandText = "SELECT extension_id,enabled FROM settings_extensions WHERE revision=$revision ORDER BY extension_id LIMIT 257;";
+            command.CommandText = "SELECT extension_id,enabled FROM system.settings_extensions WHERE revision=$revision ORDER BY extension_id LIMIT 257;";
             command.Parameters.AddWithValue("$revision", revision);
             using var rows = command.ExecuteReader();
             while (rows.Read()) extensions.Add(new(rows.GetString(0), rows.GetBoolean(1)));
@@ -61,10 +61,10 @@ internal static class HostSettingsRows
             v.AllowConfigRepair, v.HistoryRetentionDays, v.LogLevel, v.Locale, v.Proxy.Mode, v.Proxy.Url, v.Proxy.UserName,
             v.Updates.CheckEnabled, v.Updates.AutoApplyEnabled, v.Updates.PluginAutoUpdateEnabled, v.Updates.Channel,
             v.Updates.SourceUrl, v.Updates.PluginSource, v.AutomaticRetry.Enabled, v.AutomaticRetry.BackoffSeconds];
-        Execute(connection, transaction, $"INSERT INTO settings_snapshots({Columns}) VALUES(" +
+        Execute(connection, transaction, $"INSERT INTO system.settings_snapshots({Columns}) VALUES(" +
             string.Join(',', Enumerable.Range(0, values.Length).Select(index => "$" + index)) + ");", values);
         foreach (var item in v.Extensions)
-            Execute(connection, transaction, "INSERT INTO settings_extensions VALUES($0,$1,$2);", snapshot.Revision, item.ExtensionId, item.Enabled);
+            Execute(connection, transaction, "INSERT INTO system.settings_extensions VALUES($0,$1,$2);", snapshot.Revision, item.ExtensionId, item.Enabled);
     }
 
     internal static void Execute(SqliteConnection connection, SqliteTransaction transaction, string sql, params object?[] values)

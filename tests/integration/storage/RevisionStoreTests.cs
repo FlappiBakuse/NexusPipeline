@@ -167,7 +167,7 @@ public sealed class RevisionStoreTests
         var change = Capture(fixture, "main", "second") with { ExpectedRevision = 1 };
         using var prepared = fixture.Store.Prepare(change);
         var identity = Identity(change);
-        Execute(fixture, "CREATE TRIGGER fixture_fail_configuration BEFORE INSERT ON configuration_mutations BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
+        Execute(fixture, "CREATE TRIGGER configuration.fixture_fail_configuration BEFORE INSERT ON configuration_mutations BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
         Assert.Throws<SqliteException>(() => fixture.Store.Commit(identity, prepared, DateTimeOffset.UtcNow));
         var current = fixture.Store.Read(first.Address)!;
         Assert.Equal(1, current.Revision); Assert.Equal(first.Tree.Entries, current.Tree.Entries);
@@ -175,7 +175,7 @@ public sealed class RevisionStoreTests
         Assert.True(references.IsReferenced(ContentReference(Assert.Single(first.Tree.Entries))));
         Assert.False(references.IsReferenced(ContentReference(Assert.Single(change.Tree.Entries))));
         Assert.Null(fixture.Store.Lookup(identity, change));
-        Execute(fixture, "DROP TRIGGER fixture_fail_configuration;");
+        Execute(fixture, "DROP TRIGGER configuration.fixture_fail_configuration;");
         Assert.True(fixture.Store.Commit(identity, prepared, DateTimeOffset.UtcNow).IsNew);
         var next = fixture.Store.Read(change.Address)!;
         Assert.Equal(2, next.Revision); Assert.Equal(change.Tree.Entries, next.Tree.Entries);
@@ -218,7 +218,7 @@ public sealed class RevisionStoreTests
     {
         var fixture = Create();
         Save(fixture, Capture(fixture, "main", "saved"));
-        if (missingPointer) Execute(fixture, "DELETE FROM configuration_current;");
+        if (missingPointer) Execute(fixture, "DELETE FROM configuration.configuration_current;");
         else
         {
             var bytes = Encoding.UTF8.GetBytes("{\"format\":\"nexus.configuration.snapshot\",\"version\":2,\"tree\":{}}");
@@ -227,7 +227,7 @@ public sealed class RevisionStoreTests
             File.WriteAllBytes(Path.Combine(fixture.Instance.RuntimeRoot, relative), bytes);
             using var connection = Connection(fixture);
             using var command = connection.CreateCommand();
-            command.CommandText = "UPDATE configuration_revisions SET manifest_path=$path,manifest_digest=$digest,manifest_size=$size;";
+            command.CommandText = "UPDATE configuration.configuration_revisions SET manifest_path=$path,manifest_digest=$digest,manifest_size=$size;";
             command.Parameters.AddWithValue("$path", relative);
             command.Parameters.AddWithValue("$digest", digest);
             command.Parameters.AddWithValue("$size", bytes.Length);
@@ -268,7 +268,7 @@ public sealed class RevisionStoreTests
     }
     private static SqliteConnection Connection(Fixture fixture)
     {
-        var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = fixture.Database.DatabasePath, Pooling = false }.ToString());
+        var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open(new SqliteConnectionStringBuilder { DataSource = fixture.Database.DatabasePath, Pooling = false }.ToString());
         connection.Open();
         return connection;
     }

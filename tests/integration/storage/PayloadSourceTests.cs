@@ -30,7 +30,7 @@ public sealed class PayloadSourceTests
         Assert.Contains(fixture.Source.Package!.Archive,
             NexusPipeline.Platform.Storage.Extensions.PayloadSourceCodec.References(source));
         Assert.False(Directory.Exists(fixture.Plan.TargetPath));
-        using var connection = DatabaseConnections.Open(fixture.Package.Catalog.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(fixture.Package.Catalog.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions);
         using var transaction = connection.BeginTransaction(deferred: true);
         Assert.Null(ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, "fixture-plugin"));
     }

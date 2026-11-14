@@ -43,7 +43,7 @@ public sealed class AndroidNotificationTests
             new ExecutionRecordProjection(source.Instance, source.Database, new(), source.Lease, finality).OnCommitted(receipt);
             new ExecutionNotificationRegistration(source.Instance, source.Database, new(), source.Lease, finality).OnCommitted(receipt);
             BlobReference sourceReference;
-            using (var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.All))
             using (var transaction = connection.BeginTransaction(deferred: true))
             {
                 sourceReference = Assert.IsType<BlobReference>(NotificationReceiptRows.Find(connection, transaction, receipt.Facts.AttemptId));

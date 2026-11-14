@@ -24,9 +24,9 @@ public sealed class ImageFreshnessTests
             var command = AndroidControlCodec.Read(state.Latest.Root, state.Total, state.Attempt.ExecutionPlan.Sha256)[0];
             var root = TargetRootFacts.ReadCommand(source.Database, command)!;
             var where = " WHERE journal_id='" + receipt.JournalId.ToString("D") + "' AND target_id='" + command.Binding.TargetId.ToString("D") + "';";
-            fixture.Base.Execute("UPDATE execution_target_job_roots SET image_sha256='" + new string('0', 64) + "'" + where);
+            fixture.Base.Execute("UPDATE main.execution_target_job_roots SET image_sha256='" + new string('0', 64) + "'" + where);
             try { Assert.ThrowsAny<IOException>(() => reader.ReadPage(query)); }
-            finally { fixture.Base.Execute("UPDATE execution_target_job_roots SET image_sha256='" + root.ImageSha256 + "'" + where); }
+            finally { fixture.Base.Execute("UPDATE main.execution_target_job_roots SET image_sha256='" + root.ImageSha256 + "'" + where); }
             Assert.Equal(original, Assert.Single(reader.ReadPage(query).Items)); fixture.VerifyOriginal();
         });
     }

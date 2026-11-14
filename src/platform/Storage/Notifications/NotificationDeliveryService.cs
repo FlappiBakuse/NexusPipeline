@@ -8,8 +8,8 @@ namespace NexusPipeline.Platform.Storage.Notifications;
 public sealed class NotificationDeliveryService
 {
     internal const string PendingRoutesSql = "SELECT s.relative_path,s.size_bytes,s.sha256,p.next_ordinal,p.route_count " +
-        "FROM notification_receipt_progress p INDEXED BY ix_notification_receipt_pending " +
-        "JOIN notification_receipt_sources s ON s.operation_id=p.operation_id " +
+        "FROM notifications.notification_receipt_progress p INDEXED BY ix_notification_receipt_pending " +
+        "JOIN notifications.notification_receipt_sources s ON s.operation_id=p.operation_id " +
         "WHERE p.next_ordinal<p.route_count ORDER BY p.operation_id LIMIT $0;";
     private readonly RuntimeInstance _instance;
     private readonly StateDatabase _database;
@@ -20,7 +20,7 @@ public sealed class NotificationDeliveryService
     {
         lease.VerifyHeld(instance);
         if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot ||
-            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "nexus.db")))
+            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "runtime.db")))
             throw NotificationReceiptCodec.Invalid();
         _instance = instance; _database = database; _contracts = contracts; _lease = lease;
     }
@@ -36,7 +36,7 @@ public sealed class NotificationDeliveryService
         _lease.VerifyHeld(_instance);
         if (maximumRoutes is < 1 or > 200) throw new ArgumentOutOfRangeException(nameof(maximumRoutes));
         var pending = new List<(BlobReference Source, int Ordinal)>();
-        using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System | DatabaseDomain.Content))
         using (var command = NotificationDeliveryRows.Command(connection, null,
             PendingRoutesSql, maximumRoutes))
         using (var rows = command.ExecuteReader())
@@ -59,11 +59,11 @@ public sealed class NotificationDeliveryService
     public RunDeliveryStatus ReadPendingForRun(Guid runId)
     {
         if (runId == Guid.Empty) throw new ArgumentException("notification_run_invalid", nameof(runId));
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         BlobReference reference;
         using (var command = NotificationDeliveryRows.Command(connection, transaction,
-            "SELECT relative_path,size_bytes,sha256 FROM notification_receipt_sources WHERE run_id=$0;", runId.ToString("D")))
+            "SELECT relative_path,size_bytes,sha256 FROM notifications.notification_receipt_sources WHERE run_id=$0;", runId.ToString("D")))
         using (var row = command.ExecuteReader())
         {
             if (!row.Read()) return new(false, false, 0, 0, 0, 0, 0, 0);
@@ -95,7 +95,7 @@ public sealed class NotificationDeliveryService
     {
         _lease.VerifyHeld(_instance);
         ReceiptReadContext source;
-        using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System | DatabaseDomain.Content))
         using (var transaction = connection.BeginTransaction(deferred: true))
         {
             source = new NotificationReceiptCodec(_instance, _database, _contracts).ReadContext(reference, connection, transaction);

@@ -52,14 +52,14 @@ public sealed class QueueRuntimeTests
         Assert.True(imported.Definitions.Queues.Single().RunOnStartup);
         var store = new StartupQueueStore(fixture.Source.Instance, fixture.Source.Database, fixture.Source.Lease, fixture.Base.Resources, TimeProvider.System);
         var before = fixture.Base.Counts();
-        fixture.Sql("CREATE TRIGGER fail_startup_occurrence BEFORE INSERT ON startup_queue_occurrences BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
+        fixture.Sql("CREATE TRIGGER main.fail_startup_occurrence BEFORE INSERT ON startup_queue_occurrences BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
         try
         {
             Assert.Throws<SqliteException>(() => store.Commit());
             Assert.Equal(before, fixture.Base.Counts()); Assert.Equal(0, fixture.Count("startup_queue_batches"));
             Assert.Equal(0, fixture.Base.Inbox.PendingCount); Assert.Equal(0, fixture.Count("journal_writer_job_roots"));
         }
-        finally { fixture.Sql("DROP TRIGGER fail_startup_occurrence;"); }
+        finally { fixture.Sql("DROP TRIGGER main.fail_startup_occurrence;"); }
         Assert.Single(store.Commit().Occurrences);
     }
 

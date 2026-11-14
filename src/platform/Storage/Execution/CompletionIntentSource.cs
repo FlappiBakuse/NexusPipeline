@@ -46,9 +46,9 @@ internal sealed class CompletionIntentSource(RuntimeInstance instance, StateData
         var intent = new FrozenCompletionIntent(receipt.Facts.RunId, receipt.Facts.AttemptId, Guid.Parse(queueId), queue.Revision,
             action, receipt.PlanDigest, receipt.SourceReceiptDigest);
         if (!CompletionActionPolicy.Evaluate(intent, receipt).IsEligible) return null;
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT subject_id FROM operations WHERE operation_id=$operation AND operation_kind='execution.start' AND status='completed' AND initial_journal_id=$journal;";
+        command.CommandText = "SELECT subject_id FROM main.operations WHERE operation_id=$operation AND operation_kind='execution.start' AND status='completed' AND initial_journal_id=$journal;";
         command.Parameters.AddWithValue("$operation", receipt.OperationId.ToString("D"));
         command.Parameters.AddWithValue("$journal", receipt.JournalId.ToString("D"));
         var subject = command.ExecuteScalar() as string ?? throw CompletionActionCodec.Invalid();

@@ -50,7 +50,7 @@ internal sealed class MaintenanceHandoffInputs : IDisposable
     internal void RequireCurrent()
     {
         if (_held.Count == 0 || Read(Database, Plan.OperationId, Operation.HandoffId!.Value) != Operation) throw Invalid();
-        using var connection = DatabaseConnections.Open(Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         RequireInside(connection, transaction); transaction.Commit();
     }
@@ -72,7 +72,7 @@ internal sealed class MaintenanceHandoffInputs : IDisposable
     private static MaintenanceOperationRow Read(StateDatabase database, Guid operationId, Guid handoffId)
     {
         if (operationId == Guid.Empty || handoffId == Guid.Empty) throw Invalid();
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         var row = MaintenanceOperationRows.ReadAll(connection, transaction).SingleOrDefault(item => item.Identity.OperationId == operationId) ?? throw Invalid();
         if (row.State != HostUpdateState.Starting &&

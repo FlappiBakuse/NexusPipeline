@@ -16,8 +16,8 @@ internal static class PreviewDomainEvidence
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT w.process_id,w.created_file_time,w.image_path,w.image_sha256,w.user_sid,w.elevated," +
             "r.process_id,r.created_file_time,r.image_path,r.image_sha256,r.user_sid,r.elevated " +
-            "FROM journal_writer_jobs b JOIN journal_writers w USING(journal_id,writer_id) " +
-            "JOIN journal_writer_job_roots r USING(journal_id,writer_id,job_name) " +
+            "FROM main.journal_writer_jobs b JOIN main.journal_writers w USING(journal_id,writer_id) " +
+            "JOIN main.journal_writer_job_roots r USING(journal_id,writer_id,job_name) " +
             "WHERE b.journal_id=$journal AND b.writer_id=$writer AND b.job_name=$job AND b.session_id=$session;";
         command.Parameters.AddWithValue("$journal", source.Primary.ParentJournalId.ToString("D"));
         command.Parameters.AddWithValue("$writer", source.Primary.WriterId.ToString("D"));
@@ -36,7 +36,7 @@ internal static class PreviewDomainEvidence
     internal static void RequireStopped(StateDatabase database, AttemptWriterState state, string? stepId = null)
     {
         PreviewDomainCodec.RequireHistory(state.RequireValidatedRead().History, state.Total, state.Attempt.ExecutionPlan.Sha256);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         foreach (var item in PreviewDomainCodec.Read(state.Latest.Root, state.Total, state.Attempt.ExecutionPlan.Sha256)
             .Where(item => stepId is null || item.Source.Primary.StepId == stepId))

@@ -45,7 +45,7 @@ public sealed class CatalogCapacityTests(ITestOutputHelper output)
             {
                 var plan = records.ExplainPage(item.Query);
                 var count = CatalogCapacityData.Scan(records, item.Query);
-                using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+                using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
                 using var sql = RecordPageQuery.Create(connection, item.Query);
                 queries.Add(new { item.Name, count, item.Query.Limit, sql = sql.CommandText,
                     parameters = sql.Parameters.Cast<Microsoft.Data.Sqlite.SqliteParameter>()

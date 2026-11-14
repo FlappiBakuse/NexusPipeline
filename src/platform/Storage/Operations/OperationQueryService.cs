@@ -22,7 +22,7 @@ public sealed class OperationQueryService : IOperationQueries
         _lease.VerifyHeld(_instance);
         if (operationId == Guid.Empty || subject is not { Length: >= 1 and <= 256 } || subject.Any(char.IsControl))
             throw new ArgumentException("operation_query_identity_invalid");
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         var result = OperationRows.ReadOwned(connection, transaction, operationId, subject);
         transaction.Commit(); return result;

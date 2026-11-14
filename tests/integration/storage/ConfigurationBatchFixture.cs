@@ -54,7 +54,7 @@ internal sealed class ConfigurationBatchFixture
 
     internal SqliteConnection Connect()
     {
-        var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Database.DatabasePath, Pooling = false }.ToString());
+        var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open(new SqliteConnectionStringBuilder { DataSource = Database.DatabasePath, Pooling = false }.ToString());
         connection.Open(); return connection;
     }
 

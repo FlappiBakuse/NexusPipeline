@@ -90,7 +90,7 @@ public sealed class ExecutionCancellationTests
     public async Task ReplaysFailedProjection()
     {
         using var fixture = new StepWriterFixture(); var identity = Identity(fixture);
-        fixture.Base.Execute("CREATE TRIGGER fail_cancel_projection BEFORE UPDATE OF revision ON operation_journals WHEN NEW.journal_id='" +
+        fixture.Base.Execute("CREATE TRIGGER main.fail_cancel_projection BEFORE UPDATE OF revision ON operation_journals WHEN NEW.journal_id='" +
             fixture.JournalId.ToString("D") + "' BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
         long latest;
         try
@@ -100,7 +100,7 @@ public sealed class ExecutionCancellationTests
             Assert.True(latest > pending.Journal.Revision); Assert.Equal("accepted", pending.Cancellation!.Status);
             Assert.Throws<IOException>(() => fixture.Scope.RequirePrepared());
         }
-        finally { fixture.Base.Execute("DROP TRIGGER fail_cancel_projection;"); }
+        finally { fixture.Base.Execute("DROP TRIGGER main.fail_cancel_projection;"); }
         Store(fixture).Cancel(identity, fixture.JournalId, PlanBuilderFixture.CreatedAt);
         Assert.Equal(latest, fixture.Scope.VerifyReadOnly().Journal.Revision);
         fixture.AssertClosed(await fixture.Writer.StopAsync(TimeSpan.FromSeconds(10)), executed: false);
@@ -131,7 +131,7 @@ public sealed class ExecutionCancellationTests
     public async Task RevertsFailedIntent()
     {
         using var fixture = new StepWriterFixture(); var identity = Identity(fixture);
-        fixture.Base.Execute("CREATE TRIGGER fail_cancel_accept BEFORE UPDATE OF initial_journal_id ON operations WHEN NEW.operation_kind='execution.cancel' " +
+        fixture.Base.Execute("CREATE TRIGGER main.fail_cancel_accept BEFORE UPDATE OF initial_journal_id ON operations WHEN NEW.operation_kind='execution.cancel' " +
             "BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
         var before = fixture.Base.Source.Snapshot();
         try
@@ -139,7 +139,7 @@ public sealed class ExecutionCancellationTests
             Assert.Throws<SqliteException>(() => Store(fixture).Cancel(identity, fixture.JournalId, PlanBuilderFixture.CreatedAt));
             AssertSame(before, fixture); Assert.False(fixture.Scope.VerifyReadOnly().IsDispatchClosed); fixture.Scope.RequirePrepared();
         }
-        finally { fixture.Base.Execute("DROP TRIGGER fail_cancel_accept;"); }
+        finally { fixture.Base.Execute("DROP TRIGGER main.fail_cancel_accept;"); }
         await fixture.StartAsync(); fixture.AssertClosed(await fixture.Writer.StopAsync(TimeSpan.FromSeconds(10)), executed: true);
     }
 
@@ -271,7 +271,7 @@ public sealed class ExecutionCancellationTests
             .Cancel(identity, fixture.JournalId, PlanBuilderFixture.CreatedAt));
         var assignment = field switch { "subject" => "subject_id='another-subject'", "digest" => "request_digest='" + new string('a', 64) + "'",
             "kind" => "operation_kind='unrecognized.cancel'", _ => "initial_journal_id=NULL" };
-        fixture.Base.Execute("UPDATE operations SET " + assignment + " WHERE operation_id='" + identity.OperationId.ToString("D") + "';");
+        fixture.Base.Execute("UPDATE main.operations SET " + assignment + " WHERE operation_id='" + identity.OperationId.ToString("D") + "';");
         var before = fixture.Base.Source.Snapshot();
         Assert.Throws<IOException>(() => ExecutionCancellationStore.VerifyInventory(source.Instance, source.Database, new()));
         Assert.Throws<IOException>(() => fixture.Scope.RequireStart());

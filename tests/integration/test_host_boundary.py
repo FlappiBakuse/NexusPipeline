@@ -16,7 +16,7 @@ import http.client
 import sqlite3
 import contextlib
 import time
-from host_boundary_state import database_snapshot
+from host_boundary_state import database_snapshot, DOMAINS
 
 
 class HostBoundaryTests(unittest.TestCase):
@@ -72,13 +72,14 @@ class HostBoundaryTests(unittest.TestCase):
         result = {}
         active = any(path == root.resolve() and process.poll() is None for path, process in self.ready_processes)
         if active:
-            result["state/nexus.db"] = {"committedDataSha256": database_snapshot(root)}
+            result["state/databases"] = {"committedDataSha256": database_snapshot(root)}
         native = self.native_path(root)
         for path in native.rglob("*"):
             if not path.is_file():
                 continue
             relative = path.relative_to(native).as_posix()
-            if active and relative in ("state/nexus.db", "state/nexus.db-shm", "state/nexus.db-wal"):
+            if active and relative.startswith("state/") and (path.name in {domain + suffix for domain in DOMAINS
+                for suffix in (".db", ".db-journal")} or path.name.startswith("runtime.db-mj")):
                 continue
             if path.name == "instance.lock":
                 stat = path.stat()
@@ -126,23 +127,19 @@ class HostBoundaryTests(unittest.TestCase):
         self.assertEqual(405, self.request(identity["address"], "/control/v1/capabilities", method="POST")[0])
         self.assertEqual(200, self.request(identity["address"], "/control/v1/capabilities", identity["address"])[0])
         self.assertEqual(before, self.files(runtime))
-        deadline = time.monotonic() + 10
-        while True:
-            with contextlib.closing(sqlite3.connect((runtime / "state/nexus.db").as_uri() + "?mode=ro", uri=True)) as database:
-                if database.execute("SELECT count(*) FROM schedule_minute_claims;").fetchone()[0]:
-                    break
-            self.assertLess(time.monotonic(), deadline)
-            time.sleep(0.01)
+        with contextlib.closing(sqlite3.connect((runtime / "state/runtime.db").as_uri() + "?mode=ro", uri=True)) as database:
+            self.assertEqual(0, database.execute("SELECT count(*) FROM schedule_minute_claims;").fetchone()[0])
         process.terminate()
         process.wait(timeout=15)
         verified = database_snapshot(runtime)
-        with sqlite3.connect(runtime / "state/nexus.db") as database:
+        with sqlite3.connect(runtime / "state/runtime.db") as database:
             created = database.execute("SELECT created_at FROM schema_info;").fetchone()[0]
             database.execute("UPDATE schema_info SET created_at=?;", (created + "-changed",))
         self.assertNotEqual(verified, database_snapshot(runtime))
-        with sqlite3.connect(runtime / "state/nexus.db") as database:
+        with sqlite3.connect(runtime / "state/runtime.db") as database:
             database.execute("UPDATE schema_info SET created_at=?;", (created,))
-            database.execute("UPDATE operations SET request_digest=? WHERE operation_kind='schedule.minute';", ("a" * 64,))
+            database.execute("INSERT INTO operations(operation_id,subject_id,request_digest,operation_kind,status,created_at) "
+                "VALUES(?,?,?,'schedule.minute','completed',?);", (str(uuid.uuid4()), "host:scheduler", "a" * 64, "2026-11-13T00:00:00Z"))
         with self.assertRaises(ValueError):
             database_snapshot(runtime)
 
@@ -210,7 +207,7 @@ class HostBoundaryTests(unittest.TestCase):
         first, _ = self.start(runtime)
         first.terminate()
         first.wait(timeout=15)
-        database = runtime / "state/nexus.db"
+        database = runtime / "state/configuration.db"
         self.assertTrue((runtime / "state-initialization.guard").is_file())
         database.unlink()
         before = self.files(runtime)
@@ -221,21 +218,19 @@ class HostBoundaryTests(unittest.TestCase):
         self.assertEqual(before, self.files(runtime))
 
     def test_preserves_database(self):
-        """unknown database bytes are preserved and only an isolated diagnostic copy is written."""
+        """unknown database bytes are preserved before native recovery or serving."""
         runtime = self.scope / "runtime"
         first, _ = self.start(runtime)
         first.terminate()
         first.wait(timeout=15)
-        (runtime / "state/nexus.db").write_bytes(b"Unknown storage generation; preserve exact bytes\x00\xff")
+        (runtime / "state/runtime.db").write_bytes(b"Unknown storage generation; preserve exact bytes\x00\xff")
         before = self.files(runtime)
         rejected = self.spawn(runtime)
         rejected.communicate(timeout=30)
         self.assertEqual(1, rejected.returncode)
         after = {path: value for path, value in self.files(runtime).items() if not path.startswith("diagnostics/")}
         self.assertEqual(before, after)
-        copies = list(self.native_path(runtime / "diagnostics/state-inspection").glob("*/nexus.db"))
-        self.assertEqual(1, len(copies))
-        self.assertEqual((runtime / "state/nexus.db").read_bytes(), copies[0].read_bytes())
+        self.assertFalse((runtime / "diagnostics/state-inspection").exists())
 
     @staticmethod
     def secret_request(address, route, body=None, headers=None, method="POST"):

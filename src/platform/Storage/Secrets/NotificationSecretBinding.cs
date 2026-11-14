@@ -33,9 +33,9 @@ internal static class NotificationSecretBinding
     {
         if (plan.NotificationPublication is not { } binding) return;
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT o.request_digest,o.operation_kind,o.status,f.field FROM operations o " +
-            "JOIN notification_publications p ON p.operation_id=o.operation_id " +
-            "JOIN notification_publication_fields f ON f.parent_operation_id=p.operation_id " +
+        command.CommandText = "SELECT o.request_digest,o.operation_kind,o.status,f.field FROM main.operations o " +
+            "JOIN notifications.notification_publications p ON p.operation_id=o.operation_id " +
+            "JOIN notifications.notification_publication_fields f ON f.parent_operation_id=p.operation_id " +
             "WHERE o.operation_id=$parent AND f.child_operation_id=$child;";
         command.Parameters.AddWithValue("$parent", binding.ParentOperationId);
         command.Parameters.AddWithValue("$child", plan.OperationId);
@@ -52,12 +52,12 @@ internal static class NotificationSecretBinding
         RequireStructure(plan);
         if (plan.NotificationPublication is not { } binding) return null;
         BlobReference parent;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications))
         using (var command = connection.CreateCommand())
         {
             command.CommandText = "SELECT p.relative_path,p.size_bytes,p.sha256,o.request_digest,o.operation_kind,f.field " +
-                "FROM notification_publications p JOIN operations o ON o.operation_id=p.operation_id " +
-                "JOIN notification_publication_fields f ON f.parent_operation_id=p.operation_id " +
+                "FROM notifications.notification_publications p JOIN main.operations o ON o.operation_id=p.operation_id " +
+                "JOIN notifications.notification_publication_fields f ON f.parent_operation_id=p.operation_id " +
                 "WHERE p.operation_id=$parent AND f.child_operation_id=$child;";
             command.Parameters.AddWithValue("$parent", binding.ParentOperationId);
             command.Parameters.AddWithValue("$child", plan.OperationId);

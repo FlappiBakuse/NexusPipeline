@@ -15,7 +15,7 @@ internal static class MaintenanceOperationRows
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT o.subject_id,o.request_digest,o.operation_kind,o.status,o.initial_journal_id," +
             "m.plan_sha256,m.plan_size,m.source_sha256,m.source_size,m.state,m.handoff_id,m.terminal_code " +
-            "FROM maintenance_operations m JOIN operations o ON o.operation_id=m.operation_id " +
+            "FROM system.maintenance_operations m JOIN main.operations o ON o.operation_id=m.operation_id " +
             "WHERE m.operation_id=$operation AND o.subject_id=$subject;";
         command.Parameters.AddWithValue("$operation", operationId.ToString("D")); command.Parameters.AddWithValue("$subject", subject);
         using var row = command.ExecuteReader();
@@ -27,7 +27,7 @@ internal static class MaintenanceOperationRows
     {
         RequirePlan(plan); RequirePlan(source);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "INSERT INTO maintenance_operations(operation_id,plan_sha256,plan_size,source_sha256,source_size,state) " +
+        command.CommandText = "INSERT INTO system.maintenance_operations(operation_id,plan_sha256,plan_size,source_sha256,source_size,state) " +
             "VALUES($operation,$plan,$planSize,$source,$sourceSize,0);";
         command.Parameters.AddWithValue("$operation", identity.OperationId.ToString("D"));
         command.Parameters.AddWithValue("$plan", plan.Sha256); command.Parameters.AddWithValue("$planSize", plan.SizeBytes);
@@ -39,13 +39,13 @@ internal static class MaintenanceOperationRows
     {
         if (expected.State != HostUpdateState.Pending || expected.HandoffId is not null || expected.InitialJournalId is not null) throw Invalid();
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "UPDATE maintenance_operations SET state=3,terminal_code='cancelled-before-handoff' " +
+        command.CommandText = "UPDATE system.maintenance_operations SET state=3,terminal_code='cancelled-before-handoff' " +
             "WHERE operation_id=$operation AND state=0 AND handoff_id IS NULL AND terminal_code IS NULL " +
-            "AND NOT EXISTS(SELECT 1 FROM operation_journals WHERE operation_id=$operation) " +
-            "AND EXISTS(SELECT 1 FROM operations WHERE operation_id=$operation AND initial_journal_id IS NULL AND status='accepted');";
+            "AND NOT EXISTS(SELECT 1 FROM main.operation_journals WHERE operation_id=$operation) " +
+            "AND EXISTS(SELECT 1 FROM main.operations WHERE operation_id=$operation AND initial_journal_id IS NULL AND status='accepted');";
         command.Parameters.AddWithValue("$operation", expected.Identity.OperationId.ToString("D"));
         if (command.ExecuteNonQuery() != 1) throw Invalid();
-        command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$operation AND status='accepted' AND initial_journal_id IS NULL;";
+        command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$operation AND status='accepted' AND initial_journal_id IS NULL;";
         if (command.ExecuteNonQuery() != 1) throw Invalid();
     }
 
@@ -53,9 +53,9 @@ internal static class MaintenanceOperationRows
     {
         if (expected.State != HostUpdateState.Pending || expected.HandoffId is not null || expected.InitialJournalId is not null || handoffId == Guid.Empty) throw Invalid();
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "UPDATE maintenance_operations SET state=1,handoff_id=$handoff WHERE operation_id=$operation AND state=0 " +
-            "AND handoff_id IS NULL AND terminal_code IS NULL AND NOT EXISTS(SELECT 1 FROM operation_journals WHERE operation_id=$operation) " +
-            "AND EXISTS(SELECT 1 FROM operations WHERE operation_id=$operation AND status='accepted' AND initial_journal_id IS NULL);";
+        command.CommandText = "UPDATE system.maintenance_operations SET state=1,handoff_id=$handoff WHERE operation_id=$operation AND state=0 " +
+            "AND handoff_id IS NULL AND terminal_code IS NULL AND NOT EXISTS(SELECT 1 FROM main.operation_journals WHERE operation_id=$operation) " +
+            "AND EXISTS(SELECT 1 FROM main.operations WHERE operation_id=$operation AND status='accepted' AND initial_journal_id IS NULL);";
         command.Parameters.AddWithValue("$operation", expected.Identity.OperationId.ToString("D"));
         command.Parameters.AddWithValue("$handoff", handoffId.ToString("D"));
         if (command.ExecuteNonQuery() != 1) throw Invalid();
@@ -69,7 +69,7 @@ internal static class MaintenanceOperationRows
             var identities = new List<(Guid Id, string Subject)>();
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
-            command.CommandText = "SELECT m.operation_id,o.subject_id FROM maintenance_operations m LEFT JOIN operations o ON o.operation_id=m.operation_id " +
+            command.CommandText = "SELECT m.operation_id,o.subject_id FROM system.maintenance_operations m LEFT JOIN main.operations o ON o.operation_id=m.operation_id " +
                 "WHERE m.operation_id>$after ORDER BY m.operation_id LIMIT 128;";
             command.Parameters.AddWithValue("$after", after);
             using (var rows = command.ExecuteReader()) while (rows.Read())

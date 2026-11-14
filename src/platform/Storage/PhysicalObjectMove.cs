@@ -14,6 +14,7 @@ internal static class PhysicalObjectMove
 {
     internal static void MoveVerified(FileObjectMove intent, SafeFileHandle? owned = null)
     {
+        DirectoryAttributeScope.Refresh();
         if (intent.Kind is not (FileObjectKind.File or FileObjectKind.Directory)) throw new ArgumentException("physical_move_kind_invalid");
         var source = PhysicalPathPolicy.NormalizeWithoutLinks(intent.Source);
         var destination = PhysicalPathPolicy.NormalizeWithoutLinks(intent.Destination);

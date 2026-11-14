@@ -45,7 +45,7 @@ public sealed class ExecutionSequentialTests
         var first = fixture.Create(0); first.Start(); await first.Exit(); await first.Stop(); await first.Collect();
         Assert.Throws<IOException>(() => fixture.Scope(1));
         var sessionId = fixture.Sessions[fixture.Steps[0].StepId]; var completion = Guid.NewGuid();
-        fixture.Base.Execute("CREATE TRIGGER fixture_predecessor_failure BEFORE UPDATE OF phase ON configuration_run_sessions " +
+        fixture.Base.Execute("CREATE TRIGGER configuration.fixture_predecessor_failure BEFORE UPDATE OF phase ON configuration_run_sessions " +
             $"WHEN NEW.session_id='{sessionId:D}' AND NEW.phase=2 BEGIN SELECT RAISE(ABORT,'fixture_predecessor_failure'); END;");
         try
         {
@@ -55,7 +55,7 @@ public sealed class ExecutionSequentialTests
             Assert.Equal(ConfigurationRunPhase.Running, runs.Read(sessionId, ExecutionSequentialFixture.Subject)!.Phase);
             Assert.Throws<IOException>(() => fixture.Scope(1)); Assert.Equal(2, fixture.Base.Count("journal_writer_jobs"));
         }
-        finally { fixture.Base.Execute("DROP TRIGGER fixture_predecessor_failure;"); }
+        finally { fixture.Base.Execute("DROP TRIGGER configuration.fixture_predecessor_failure;"); }
         await first.FinishConfiguration(completion);
         await fixture.Create(1).Complete(); await fixture.Create(2).Complete();
         Assert.Equal(original, PhysicalObjectIdentity.Read(fixture.Source.Configuration)); Assert.Equal(originalBytes, File.ReadAllBytes(fixture.Source.Configuration));

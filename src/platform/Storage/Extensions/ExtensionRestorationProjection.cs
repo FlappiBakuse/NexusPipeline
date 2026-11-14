@@ -85,7 +85,7 @@ internal static class ExtensionRestorationProjection
                 using (var command = connection.CreateCommand())
                 {
                     command.Transaction = transaction;
-                    command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$op AND status='accepted' AND initial_journal_id=$journal;";
+                    command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$op AND status='accepted' AND initial_journal_id=$journal;";
                     command.Parameters.AddWithValue("$op", actual.OperationId.ToString("D"));
                     command.Parameters.AddWithValue("$journal", actual.JournalId.ToString("D"));
                     if (command.ExecuteNonQuery() != 1) throw Invalid();
@@ -96,8 +96,8 @@ internal static class ExtensionRestorationProjection
         void Move(string step, FileEffectState previous, FileEffectState next)
         {
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "UPDATE file_effects SET state=$next,receipt_digest=$digest WHERE journal_id=$journal " +
-                "AND step_id=$step AND state=$previous AND EXISTS(SELECT 1 FROM operation_journals WHERE journal_id=$journal " +
+            command.CommandText = "UPDATE main.file_effects SET state=$next,receipt_digest=$digest WHERE journal_id=$journal " +
+                "AND step_id=$step AND state=$previous AND EXISTS(SELECT 1 FROM main.operation_journals WHERE journal_id=$journal " +
                 "AND operation_kind='extensionApply' AND revision=$revision AND phase=$phase);";
             command.Parameters.AddWithValue("$next", FileEffectRows.Wire(next));
             command.Parameters.AddWithValue("$digest", digest);

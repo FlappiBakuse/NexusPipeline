@@ -29,7 +29,7 @@ public sealed class InspectionCleanupTests(ITestOutputHelper output)
         var root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "large-inspection-" + Guid.NewGuid().ToString("N"));
         var instance = new InstanceRoot(new()).OpenOrCreate(Path.Combine(root, "runtime"));
         var database = StateDatabase.CreateFresh(instance);
-        using (var connection = DatabaseConnections.Open(database.DatabasePath))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, domains: DatabaseDomain.Runtime))
         using (var command = connection.CreateCommand())
         {
             command.CommandText = "PRAGMA journal_mode=DELETE; CREATE TABLE inspection_fixture(value BLOB);";

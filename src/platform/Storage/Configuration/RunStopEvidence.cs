@@ -24,7 +24,8 @@ internal sealed class RunStopEvidence(RuntimeInstance instance, StateDatabase da
             throw new IOException("configuration_run_stop_duration_missing");
         if (ConfigurationRunBinding.Read(instance, database, contracts, session).Evidence.HasHooks)
             return ReadGroup(session, requireRestored);
-        var groupJobs = session.Resources.Select(resource => (Resource: resource, Jobs: Jobs(resource.JournalId))).ToArray();
+        var allJobs = Jobs(session);
+        var groupJobs = session.Resources.Select(resource => (Resource: resource, Jobs: allJobs[resource.JournalId])).ToArray();
         var noJobs = groupJobs.All(item => item.Jobs.Count == 0);
         if (noJobs && (session.EnteredRunning || elapsed != 0 || session.SyncOrdinal != 0)) throw new IOException("configuration_run_unstarted_evidence_unbound");
         FrozenJobClosure? common = null;
@@ -62,7 +63,7 @@ internal sealed class RunStopEvidence(RuntimeInstance instance, StateDatabase da
     internal static bool HasExecutedWriter(SqliteConnection connection, SqliteTransaction transaction, ConfigurationRunStatus session)
     {
         using var command = ConfigurationRunRows.Command(connection, transaction, session.SessionId);
-        command.CommandText = "SELECT count(*) FROM configuration_run_resources r JOIN journal_writer_job_roots w ON w.journal_id=r.journal_id WHERE r.session_id=$session AND w.job_name=$primary;";
+        command.CommandText = "SELECT count(*) FROM configuration.configuration_run_resources r JOIN main.journal_writer_job_roots w ON w.journal_id=r.journal_id WHERE r.session_id=$session AND w.job_name=$primary;";
         command.Parameters.AddWithValue("$primary", (object?)session.PrimaryJobName ?? DBNull.Value);
         var count = (long)command.ExecuteScalar()!;
         if (count != 0 && (count != session.Resources.Length || !session.EnteredRunning))
@@ -70,16 +71,27 @@ internal sealed class RunStopEvidence(RuntimeInstance instance, StateDatabase da
         return count != 0;
     }
 
-    internal bool HasNoJobs(ConfigurationRunStatus session) => session.Resources.All(resource => Jobs(resource.JournalId).Count == 0);
+    internal bool HasNoJobs(ConfigurationRunStatus session) => Jobs(session).Values.All(jobs => jobs.Count == 0);
 
-    private IReadOnlyList<(Guid Writer, string Name, int Session)> Jobs(Guid journal)
+    private Dictionary<Guid, List<(Guid Writer, string Name, int Session)>> Jobs(ConfigurationRunStatus session)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT writer_id,job_name,session_id FROM journal_writer_jobs WHERE journal_id=$journal LIMIT 5;";
-        command.Parameters.AddWithValue("$journal", journal.ToString("D"));
-        var result = new List<(Guid, string, int)>(); using var rows = command.ExecuteReader();
-        while (rows.Read()) result.Add((Guid.Parse(rows.GetString(0)), rows.GetString(1), rows.GetInt32(2)));
+        var parameters = session.Resources.Select((resource, index) =>
+        {
+            var name = "$journal" + index; command.Parameters.AddWithValue(name, resource.JournalId.ToString("D")); return name;
+        }).ToArray();
+        command.CommandText = "SELECT journal_id,writer_id,job_name,session_id FROM main.journal_writer_jobs WHERE journal_id IN (" +
+            (parameters.Length == 0 ? "NULL" : string.Join(',', parameters)) + ") ORDER BY journal_id,job_name LIMIT $limit;";
+        command.Parameters.AddWithValue("$limit", checked(session.Resources.Length * 5 + 1));
+        var result = session.Resources.ToDictionary(resource => resource.JournalId, _ => new List<(Guid Writer, string Name, int Session)>());
+        using var rows = command.ExecuteReader();
+        while (rows.Read())
+        {
+            if (!result.TryGetValue(Guid.Parse(rows.GetString(0)), out var jobs) || jobs.Count == 4)
+                throw new IOException("configuration_run_writer_membership_unbound");
+            jobs.Add((Guid.Parse(rows.GetString(1)), rows.GetString(2), rows.GetInt32(3)));
+        }
         return result;
     }
 
@@ -104,13 +116,14 @@ internal sealed class RunStopEvidence(RuntimeInstance instance, StateDatabase da
     {
         var jobs = StepWritersEvidence.ReadStoppedGroup(instance, database, contracts, session.ParentJournalId, session.StepId);
         var closures = new JobClosureStore(instance, database, contracts);
+        var allJobs = Jobs(session);
         var parent = jobs.ToDictionary(job => job.JobName, job => closures.ReadForExecutionEvidence(session.ParentJournalId,
             job.WriterId, job.JobName, job.SessionId) ?? throw new IOException("writer_job_closure_missing"), StringComparer.Ordinal);
         var childJobs = new HashSet<string>(StringComparer.Ordinal);
         var executed = false;
         foreach (var resource in session.Resources)
         {
-            var actual = Jobs(resource.JournalId);
+            var actual = allJobs[resource.JournalId];
             var names = actual.Select(job => job.Name).ToHashSet(StringComparer.Ordinal);
             if (resource == session.Resources[0]) childJobs = names;
             else if (!childJobs.SetEquals(names)) throw new IOException("configuration_group_job_unbound");

@@ -37,7 +37,7 @@ internal sealed class PayloadPreparedProjection(JournalStore store, RecoveryJour
                 {
                     if (plan.ExtensionSource is null) throw new IOException("extension_no_effect_source_unbound");
                     using var command = connection.CreateCommand(); command.Transaction = transaction;
-                    command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$operation " +
+                    command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$operation " +
                         "AND operation_kind='extension.apply' AND status='accepted' AND initial_journal_id=$journal;";
                     command.Parameters.AddWithValue("$operation", plan.OperationId.ToString("D"));
                     command.Parameters.AddWithValue("$journal", plan.JournalId.ToString("D"));

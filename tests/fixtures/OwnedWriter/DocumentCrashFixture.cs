@@ -49,7 +49,7 @@ internal static class DocumentCrashFixture
         {
             if (point != target) return;
             BlobReference parent;
-            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System))
                 parent = SecretDocumentRows.Find(connection, null, operationId) ?? throw new IOException("fixture_parent_missing");
             OwnedFixtureEvidence.WriteReport(report, new { status = "faultReady", instance, operationId, subjectId, journalId, parent,
                 point = point.ToString(), processId = Environment.ProcessId });

@@ -22,7 +22,7 @@ internal sealed class NotificationAttemptReads(
 
     internal void HoldReceipt(BlobReference reference)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications);
         using var transaction = connection.BeginTransaction(deferred: true);
         var receipt = new NotificationReceiptCodec(instance, database, contracts).ReadMetadata(reference, connection, transaction);
         HoldJournal(receipt.Document.Receipt.JournalId);
@@ -31,10 +31,10 @@ internal sealed class NotificationAttemptReads(
 
     internal void HoldDelivery(Guid operation)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT a.journal_id FROM notification_deliveries d " +
-            "JOIN attempt_receipts a ON a.attempt_id=d.source_attempt_id WHERE d.operation_id=$operation;";
+        command.CommandText = "SELECT a.journal_id FROM notifications.notification_deliveries d " +
+            "JOIN records.attempt_receipts a ON a.attempt_id=d.source_attempt_id WHERE d.operation_id=$operation;";
         command.Parameters.AddWithValue("$operation", operation.ToString("D"));
         if (command.ExecuteScalar() is string journal) HoldJournal(Guid.Parse(journal));
     }

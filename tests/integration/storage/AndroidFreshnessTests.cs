@@ -25,9 +25,9 @@ public sealed class AndroidFreshnessTests
                 var original = reader.Observation(state.Total, registration, reference, verifyContent: false);
                 Assert.NotNull(original.Root);
                 var where = " WHERE journal_id='" + state.Journal.JournalId.ToString("D") + "' AND target_id='" + registration.Binding.TargetId.ToString("D") + "';";
-                fixture.Base.Execute("UPDATE execution_target_job_roots SET image_sha256='" + new string('0', 64) + "'" + where);
+                fixture.Base.Execute("UPDATE main.execution_target_job_roots SET image_sha256='" + new string('0', 64) + "'" + where);
                 try { Assert.Throws<IOException>(() => reader.Observation(state.Total, registration, reference, verifyContent: false)); }
-                finally { fixture.Base.Execute("UPDATE execution_target_job_roots SET image_sha256='" + original.Root!.ImageSha256 + "'" + where); }
+                finally { fixture.Base.Execute("UPDATE main.execution_target_job_roots SET image_sha256='" + original.Root!.ImageSha256 + "'" + where); }
                 Assert.Equal(original, reader.Observation(state.Total, registration, reference, verifyContent: false));
                 scope.Dispose();
                 Assert.Throws<ObjectDisposedException>(() => reader.Request(state.Total, registration));

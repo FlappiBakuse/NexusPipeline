@@ -89,7 +89,7 @@ public sealed class AssetRetirementTests
         var path = ContentPath(fixture);
         var identity = PhysicalObjectIdentity.Read(path);
         var bytes = File.ReadAllBytes(path);
-        Sql(fixture.Database, "CREATE TRIGGER fixture_fail_delete BEFORE DELETE ON automations BEGIN SELECT RAISE(ABORT,'fixture_delete_failure'); END;");
+        Sql(fixture.Database, "CREATE TRIGGER automation.fixture_fail_delete BEFORE DELETE ON automations BEGIN SELECT RAISE(ABORT,'fixture_delete_failure'); END;");
         Assert.Contains("fixture_delete_failure", Assert.Throws<SqliteException>(() =>
             store.Commit(operation, changes, DateTimeOffset.UtcNow)).Message);
         var after = store.Read();
@@ -101,7 +101,7 @@ public sealed class AssetRetirementTests
         Assert.DoesNotContain(registry.ReadSnapshot().Journals, item => item.OperationId == operation.OperationId);
         Assert.Equal(identity, PhysicalObjectIdentity.Read(path));
         Assert.Equal(bytes, File.ReadAllBytes(path));
-        Sql(fixture.Database, "DROP TRIGGER fixture_fail_delete;");
+        Sql(fixture.Database, "DROP TRIGGER automation.fixture_fail_delete;");
         var retried = store.Commit(operation, changes, DateTimeOffset.UtcNow);
         Assert.True(retried.IsNew);
         Assert.Single(retried.CleanupJournalIds);
@@ -151,7 +151,7 @@ public sealed class AssetRetirementTests
     private static BlobReferenceIndex References(AssetPreparationFixture fixture) => new(fixture.Instance, new(), fixture.Database, new(fixture.Instance, new()));
     private static void Sql(StateDatabase database, string sql)
     {
-        using var connection = new SqliteConnection($"Data Source={database.DatabasePath};Pooling=False");
+        using var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open($"Data Source={database.DatabasePath};Pooling=False");
         connection.Open();
         using var command = connection.CreateCommand();
         command.CommandText = sql;

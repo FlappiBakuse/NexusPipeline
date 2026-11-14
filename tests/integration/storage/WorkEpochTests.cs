@@ -61,13 +61,13 @@ public sealed class WorkEpochTests
             Assert.Equal("Confirmed", saved.RootElement.GetProperty("after").GetString());
             await Completed(repeat);
             WorkEffectInventory.Verify(catalog.Instance, catalog.Database, new());
-            using var connection = DatabaseConnections.Open(catalog.Database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(catalog.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.All);
             using var command = connection.CreateCommand();
-            command.CommandText = "SELECT COUNT(*) FROM work_effect_claims;"; Assert.Equal(3L, command.ExecuteScalar());
-            command.CommandText = "SELECT COUNT(*) FROM work_effect_events WHERE kind='submitted';"; Assert.Equal(2L, command.ExecuteScalar());
-            command.CommandText = "SELECT COUNT(*) FROM work_effect_epochs;"; Assert.Equal(3L, command.ExecuteScalar());
-            command.CommandText = "SELECT COUNT(*) FROM work_effect_epoch_results;"; Assert.Equal(3L, command.ExecuteScalar());
-            command.CommandText = "SELECT COUNT(*) FROM work_effect_events WHERE kind='confirmed';"; Assert.Equal(3L, command.ExecuteScalar());
+            command.CommandText = "SELECT COUNT(*) FROM main.work_effect_claims;"; Assert.Equal(3L, command.ExecuteScalar());
+            command.CommandText = "SELECT COUNT(*) FROM main.work_effect_events WHERE kind='submitted';"; Assert.Equal(2L, command.ExecuteScalar());
+            command.CommandText = "SELECT COUNT(*) FROM main.work_effect_epochs;"; Assert.Equal(3L, command.ExecuteScalar());
+            command.CommandText = "SELECT COUNT(*) FROM main.work_effect_epoch_results;"; Assert.Equal(3L, command.ExecuteScalar());
+            command.CommandText = "SELECT COUNT(*) FROM main.work_effect_events WHERE kind='confirmed';"; Assert.Equal(3L, command.ExecuteScalar());
         }
         finally { await schedules.StopAsync(); await installed.Activator.StopAllAsync(TimeSpan.FromSeconds(10)); }
 

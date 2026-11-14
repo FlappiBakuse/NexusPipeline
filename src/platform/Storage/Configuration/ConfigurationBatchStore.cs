@@ -44,10 +44,10 @@ public sealed class ConfigurationBatchStore
     internal ConfigurationBatchResult? LookupImported(Guid operationId, string subject, long bindingRevision,
         IReadOnlyList<(ConfigurationAddress Address, long ExpectedRevision, string Digest)> sources)
     {
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT subject_id,operation_kind,status,request_digest FROM operations WHERE operation_id=$operation;";
+        command.CommandText = "SELECT subject_id,operation_kind,status,request_digest FROM main.operations WHERE operation_id=$operation;";
         command.Parameters.AddWithValue("$operation", operationId.ToString("D"));
         string operationDigest;
         using (var row = command.ExecuteReader())
@@ -77,7 +77,7 @@ public sealed class ConfigurationBatchStore
     {
         batch = RevisionBatchPolicy.Freeze(batch);
         RequireIdentity(operation, batch);
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         return OperationRows.ReadExisting(connection, transaction, operation) is null ? null : ReadResult(connection, transaction, operation.OperationId, batch);
     }
@@ -85,10 +85,10 @@ public sealed class ConfigurationBatchStore
     internal ConfigurationBatchResult? LookupSource(Guid operationId, string subject,
         IReadOnlyList<BatchSourceRequest> sources)
     {
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT subject_id,operation_kind,status,request_digest FROM operations WHERE operation_id=$operation;";
+        command.CommandText = "SELECT subject_id,operation_kind,status,request_digest FROM main.operations WHERE operation_id=$operation;";
         command.Parameters.AddWithValue("$operation", operationId.ToString("D"));
         string operationDigest;
         using (var row = command.ExecuteReader())
@@ -135,7 +135,7 @@ public sealed class ConfigurationBatchStore
                 requireCurrent?.Invoke();
                 using var complete = connection.CreateCommand();
                 complete.Transaction = transaction;
-                complete.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$operation;";
+                complete.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$operation;";
                 complete.Parameters.AddWithValue("$operation", operation.OperationId.ToString("D"));
                 complete.ExecuteNonQuery();
                 return published;
@@ -150,7 +150,7 @@ public sealed class ConfigurationBatchStore
         using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
-            command.CommandText = "INSERT INTO configuration_batch_results(operation_id,resource_count,source_request_digest) VALUES($operation,$count,$source);";
+            command.CommandText = "INSERT INTO configuration.configuration_batch_results(operation_id,resource_count,source_request_digest) VALUES($operation,$count,$source);";
             command.Parameters.AddWithValue("$operation", operationId.ToString("D"));
             command.Parameters.AddWithValue("$count", batch.Changes.Length);
             command.Parameters.AddWithValue("$source", (object?)SourceDigest(batch) ?? DBNull.Value);
@@ -160,7 +160,7 @@ public sealed class ConfigurationBatchStore
         {
             var (saved, changed) = _revisions.Publish(connection, transaction, batch.Changes[index], manifests[index]);
             using var command = ConfigurationRevisionRows.KeyCommand(connection, transaction, saved.Address);
-            command.CommandText = "INSERT INTO configuration_batch_items(operation_id,ordinal,binding_id,resource_id,revision,has_changes) " +
+            command.CommandText = "INSERT INTO configuration.configuration_batch_items(operation_id,ordinal,binding_id,resource_id,revision,has_changes) " +
                 "VALUES($operation,$ordinal,$binding,$resource,$revision,$changed);";
             command.Parameters.AddWithValue("$operation", operationId.ToString("D"));
             command.Parameters.AddWithValue("$ordinal", index);

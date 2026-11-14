@@ -44,7 +44,8 @@ public sealed class BatchStoreTests
         ConfigurationRevisionBatch next = new([fixture.Capture("a-extra", "new-extra", 1), fixture.Capture("z-main", "new-main", 1)]);
         var identity = ConfigurationBatchStore.Identity(Guid.NewGuid(), "fixture", next);
         using var prepared = fixture.Batches.Prepare(next);
-        fixture.Execute($"CREATE TRIGGER fixture_fail BEFORE INSERT ON {table} WHEN {when} BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
+        var triggerName = NexusPipeline.Platform.Storage.Sqlite.DatabaseTables.Name(table).Split('.')[0] + ".fixture_fail";
+        fixture.Execute($"CREATE TRIGGER {triggerName} BEFORE INSERT ON {table} WHEN {when} BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
         Assert.Throws<SqliteException>(() => fixture.Batches.Commit(identity, prepared, DateTimeOffset.UtcNow));
         AssertCurrentBatch(fixture, initial, 1);
         var previous = initial.Changes.Select(ContentReference).ToArray();
@@ -52,7 +53,7 @@ public sealed class BatchStoreTests
         var references = new BlobReferenceIndex(fixture.Instance, new(), fixture.Database, new(fixture.Instance, new()));
         Assert.Equal(previous.OrderBy(item => item.RelativePath), references.ReadReferenced(candidates).OrderBy(item => item.RelativePath));
         Assert.Null(fixture.Batches.Lookup(identity, next));
-        fixture.Execute("DROP TRIGGER fixture_fail;");
+        fixture.Execute("DROP TRIGGER " + triggerName + ";");
         Assert.True(fixture.Batches.Commit(identity, prepared, DateTimeOffset.UtcNow).IsNew);
         AssertCurrentBatch(fixture, next, 2);
     }
@@ -192,7 +193,7 @@ public sealed class BatchStoreTests
         ConfigurationRevisionBatch batch = new([fixture.Capture("main", "main"), fixture.Capture("extra", "extra")]);
         var operation = ConfigurationBatchStore.Identity(Guid.NewGuid(), "fixture", batch);
         fixture.Save(operation, batch);
-        fixture.Execute("DELETE FROM configuration_batch_items WHERE ordinal=1;");
+        fixture.Execute("DELETE FROM configuration.configuration_batch_items WHERE ordinal=1;");
         Assert.Equal("configuration_batch_result_unrecognized", Assert.Throws<IOException>(() => fixture.Batches.Lookup(operation, batch)).Message);
         Assert.All(batch.Changes, change => Assert.Equal(1, fixture.Revisions.Read(change.Address)!.Revision));
     }

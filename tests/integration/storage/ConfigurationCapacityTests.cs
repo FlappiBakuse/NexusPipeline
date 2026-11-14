@@ -25,24 +25,25 @@ public sealed class ConfigurationCapacityTests
     {
         using var connection = Open(8193);
         using var command = connection.CreateCommand();
-        command.CommandText = "DELETE FROM operations WHERE operation_id='10000000-0000-0000-0000-000000002001';";
+        command.CommandText = "DELETE FROM main.operations WHERE operation_id='10000000-0000-0000-0000-000000002001';";
         Assert.Equal(1, command.ExecuteNonQuery());
         using var transaction = connection.BeginTransaction();
         Assert.Equal("configuration_run_operation_unbound", Assert.Throws<IOException>(() =>
             ConfigurationRunInventory.ReadSessions(connection, transaction).ToArray()).Message);
-        command.Transaction = transaction; command.CommandText = "SELECT count(*) FROM configuration_run_sessions;";
+        command.Transaction = transaction; command.CommandText = "SELECT count(*) FROM configuration.configuration_run_sessions;";
         Assert.Equal(8193L, (long)command.ExecuteScalar()!);
     }
 
     private static SqliteConnection Open(int count)
     {
-        var connection = new SqliteConnection("Data Source=:memory:"); connection.Open();
+        var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open("Data Source=:memory:"); connection.Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "CREATE TABLE operations(operation_id TEXT PRIMARY KEY,subject_id TEXT,operation_kind TEXT,status TEXT);" +
-            "CREATE TABLE configuration_run_sessions(session_id TEXT PRIMARY KEY);" +
+        command.CommandText = "ATTACH DATABASE ':memory:' AS configuration;" +
+            "CREATE TABLE main.operations(operation_id TEXT PRIMARY KEY,subject_id TEXT,operation_kind TEXT,status TEXT);" +
+            "CREATE TABLE configuration.configuration_run_sessions(session_id TEXT PRIMARY KEY);" +
             "WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<$count) " +
-            "INSERT INTO operations SELECT printf('10000000-0000-0000-0000-%012x',x),'capacity','configuration.run.begin','completed' FROM n;" +
-            "INSERT INTO configuration_run_sessions SELECT operation_id FROM operations;";
+            "INSERT INTO main.operations SELECT printf('10000000-0000-0000-0000-%012x',x),'capacity','configuration.run.begin','completed' FROM n;" +
+            "INSERT INTO configuration.configuration_run_sessions SELECT operation_id FROM main.operations;";
         command.Parameters.AddWithValue("$count", count); command.ExecuteNonQuery();
         return connection;
     }

@@ -43,7 +43,7 @@ internal sealed class DatabaseCopy
             if (actual.Any(path => !Known(path)) || _files.Any(file => !actual.Contains(file.Path)))
                 throw new IOException("inspection_copy_unknown_entry");
             // Capture verifies the whole group once; compare the original members before deleting any file.
-            // SQLite may have created reserved WAL/SHM members while inspecting this owned copy.
+            // Native recovery may remove a hot super-journal or leave an inactive rollback file.
             var final = Capture(_root, _identity);
             var current = final._files.ToDictionary(file => file.Path, StringComparer.OrdinalIgnoreCase);
             foreach (var file in _files)
@@ -56,5 +56,5 @@ internal sealed class DatabaseCopy
         PhysicalObjectDeletion.DeleteVerified(new(_root, _parent, _identity, FileObjectKind.Directory, 0, null));
     }
 
-    private static bool Known(string path) => Path.GetFileName(path) is "nexus.db" or "nexus.db-wal" or "nexus.db-shm" or "nexus.db-journal";
+    private static bool Known(string path) => DatabaseJournals.Known(Path.GetFileName(path));
 }

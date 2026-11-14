@@ -32,6 +32,8 @@ public sealed class NotificationRuntime : IAttemptTerminalObserver, IAsyncDispos
     private readonly QueueActivityOwner _activity;
     private readonly NotificationRuntimeQueue _queue;
     private readonly CancellationTokenSource _stopping = new();
+    private readonly object _wakeGate = new();
+    private readonly SemaphoreSlim _wake = new(0, 1);
     private Task _worker = Task.CompletedTask;
     private Guid? _sendingAfter;
     private bool _registrationPending;
@@ -55,7 +57,7 @@ public sealed class NotificationRuntime : IAttemptTerminalObserver, IAsyncDispos
         _delivery = new(instance, database, contracts, lease);
         _sender = new(instance, database, contracts, lease, secrets, endpoints);
         _tests = new(instance, database, contracts, lease);
-        _activity = new(resources); _queue = new(instance, database, contracts);
+        _activity = new(resources, Signal); _queue = new(instance, database, contracts);
     }
 
     public void BindSchedules(PersistentScheduleService schedules)
@@ -239,9 +241,19 @@ public sealed class NotificationRuntime : IAttemptTerminalObserver, IAsyncDispos
             catch (SqliteException) { FailureCode = "notification_result_publication_pending"; }
             catch (Exception error) when (error is not (OutOfMemoryException or StackOverflowException))
             { BlockIntegrity(); return; }
-            try { await Task.Delay(TimeSpan.FromSeconds(1), _stopping.Token).ConfigureAwait(false); }
+            try
+            {
+                if (_activity.IsActive) await Task.Delay(TimeSpan.FromSeconds(1), _stopping.Token).ConfigureAwait(false);
+                else await _wake.WaitAsync(_stopping.Token).ConfigureAwait(false);
+            }
             catch (OperationCanceledException) when (_stopping.IsCancellationRequested) { return; }
         }
+    }
+
+    private void Signal()
+    {
+        lock (_wakeGate)
+            if (Volatile.Read(ref _disposed) == 0 && _wake.CurrentCount == 0) _wake.Release();
     }
 
     private void BlockIntegrity()
@@ -258,7 +270,11 @@ public sealed class NotificationRuntime : IAttemptTerminalObserver, IAsyncDispos
         finally
         {
             try { await _sender.DisposeAsync().ConfigureAwait(false); }
-            finally { _activity.Dispose(); _stopping.Dispose(); }
+            finally
+            {
+                _activity.Dispose(); _stopping.Dispose();
+                lock (_wakeGate) _wake.Dispose();
+            }
         }
     }
 }

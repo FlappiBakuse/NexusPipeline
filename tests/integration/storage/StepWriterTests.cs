@@ -74,7 +74,7 @@ public sealed class StepWriterTests
     public async Task ReplaysCloseProjection()
     {
         using var fixture = new StepWriterFixture(); await fixture.StartAsync();
-        fixture.Base.Execute("CREATE TRIGGER fail_step_close BEFORE UPDATE OF revision ON operation_journals WHEN NEW.journal_id='" + fixture.JournalId.ToString("D") +
+        fixture.Base.Execute("CREATE TRIGGER main.fail_step_close BEFORE UPDATE OF revision ON operation_journals WHEN NEW.journal_id='" + fixture.JournalId.ToString("D") +
             "' BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
         long elapsed;
         try
@@ -84,7 +84,7 @@ public sealed class StepWriterTests
             Assert.True(pending.Latest.Revision > pending.Journal.Revision); Assert.Throws<IOException>(() => fixture.Writer.Start());
             await Task.Delay(100); Assert.Equal(elapsed, Assert.Single(fixture.Scope.VerifyReadOnly().Steps).ClosedElapsedMilliseconds);
         }
-        finally { fixture.Base.Execute("DROP TRIGGER fail_step_close;"); }
+        finally { fixture.Base.Execute("DROP TRIGGER main.fail_step_close;"); }
         var stopped = await fixture.Writer.StopAsync(TimeSpan.FromSeconds(10)); fixture.AssertClosed(stopped, executed: true);
         Assert.Equal(elapsed, stopped.Closure.RunElapsedMilliseconds); var state = fixture.Scope.VerifyReadOnly(); Assert.Equal(state.Latest.Revision, state.Journal.Revision);
     }
@@ -93,7 +93,7 @@ public sealed class StepWriterTests
     public async Task ReusesStoppedFacts()
     {
         using var fixture = new StepWriterFixture(); var root = await fixture.StartAsync();
-        fixture.Base.Execute("CREATE TRIGGER fail_step_closure BEFORE INSERT ON journal_writer_job_closures " +
+        fixture.Base.Execute("CREATE TRIGGER main.fail_step_closure BEFORE INSERT ON journal_writer_job_closures " +
             "BEGIN SELECT RAISE(ABORT,'fixture_step_digest:' || NEW.plan_digest); END;");
         long revision; long? elapsed;
         SqliteException failure;
@@ -106,7 +106,7 @@ public sealed class StepWriterTests
             Assert.Null(new JobClosureStore(source.Instance, source.Database, new())
                 .Read(fixture.JournalId, step.WriterId, step.JobName, step.SessionId));
         }
-        finally { fixture.Base.Execute("DROP TRIGGER fail_step_closure;"); }
+        finally { fixture.Base.Execute("DROP TRIGGER main.fail_step_closure;"); }
         var stopped = await fixture.Writer.StopAsync(TimeSpan.FromSeconds(10)); fixture.AssertClosed(stopped, executed: true);
         Assert.Contains("fixture_step_digest:" + stopped.Reference.Sha256, failure.Message, StringComparison.Ordinal);
         Assert.Equal(root.ProcessId, stopped.Closure.Root!.ProcessId); Assert.Equal(root.CreatedAtUtc, stopped.Closure.Root.CreatedAtUtc);

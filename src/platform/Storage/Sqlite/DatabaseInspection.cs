@@ -5,12 +5,15 @@ using NexusPipeline.Platform.Storage.Journals;
 
 namespace NexusPipeline.Platform.Storage.Sqlite;
 
-public sealed record DatabaseFileEvidence(string Suffix, long SizeBytes, string Sha256);
-public sealed record DatabaseWalEvidence(uint PageSize, long CurrentGenerationFrames, long CurrentGenerationCommits,
-    long InvalidatedTailFrames, long InvalidatedTailGenerations);
-public sealed record DatabaseInspection(Guid InstanceId, string SchemaDigest, string NativeVersion,
-    string DiagnosticCopyRoot, IReadOnlyList<DatabaseFileEvidence> SourceFiles, DatabaseWalEvidence? Wal = null)
+public sealed record DatabaseFileEvidence(string Suffix, long SizeBytes, string Sha256)
 {
+    public string Name { get; init; } = "runtime.db" + Suffix;
+}
+public sealed record DatabaseDomainInspection(string Name, string SchemaDigest, long SizeBytes);
+public sealed record DatabaseInspection(Guid InstanceId, string SchemaDigest, string NativeVersion,
+    string DiagnosticCopyRoot, IReadOnlyList<DatabaseFileEvidence> SourceFiles)
+{
+    public IReadOnlyList<DatabaseDomainInspection> Databases { get; init; } = [];
     internal DatabaseCopy? OwnedCopy { get; init; }
 }
 
@@ -19,116 +22,123 @@ public static class DatabaseInspector
     public static DatabaseInspection Inspect(string databasePath, Guid instanceId, string diagnosticRoot)
     {
         using var timing = StartupProfile.Measure("database.inspect");
-        var database = Path.GetFullPath(databasePath);
-        var destination = Path.GetFullPath(diagnosticRoot);
-        var sourceDirectory = Path.GetDirectoryName(database)!;
-        if (destination == sourceDirectory || Path.GetRelativePath(sourceDirectory, destination) is var relative &&
-            !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) && relative != ".." && !Path.IsPathRooted(relative))
+        var database = PhysicalPathPolicy.NormalizeWithoutLinks(Path.GetFullPath(databasePath));
+        var sourceRoot = Path.GetDirectoryName(database)!;
+        var destination = PhysicalPathPolicy.NormalizeWithoutLinks(Path.GetFullPath(diagnosticRoot));
+        var relative = Path.GetRelativePath(sourceRoot, destination);
+        if (destination == sourceRoot || !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) &&
+            relative != ".." && !Path.IsPathRooted(relative))
             throw new IOException("Diagnostic copy must be outside database input directory");
-        DatabaseConnections.RejectLinks(database);
-        DatabaseConnections.RejectLinks(destination);
-        var sources = new List<(string Suffix, FileStream Stream)>();
+        var names = DatabaseJournals.Inventory(database);
+        DatabaseJournals.VerifyPaths(database);
+        var sources = new List<(string Name, FileStream Stream)>();
         try
         {
-            foreach (var suffix in new[] { "", "-wal", "-shm", "-journal" })
-            {
-                if (suffix.Length > 0 && !File.Exists(database + suffix)) continue;
-                DatabaseConnections.RejectLinks(database + suffix);
-                sources.Add((suffix, new FileStream(database + suffix, FileMode.Open, FileAccess.Read, FileShare.Read)));
-            }
-            DatabaseWalEvidence? walEvidence = null;
-            if (sources.SingleOrDefault(item => item.Suffix == "-wal").Stream is { } wal)
-                walEvidence = WalEvidence.Verify(sources.Single(item => item.Suffix.Length == 0).Stream, wal);
-            if (sources.SingleOrDefault(item => item.Suffix == "-journal").Stream is { Length: > 0 })
-                throw new IOException("database_rollback_journal_requires_readonly_diagnosis");
+            foreach (var name in names)
+                sources.Add((name, new FileStream(PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(sourceRoot, name)),
+                    FileMode.Open, FileAccess.Read, FileShare.Read)));
             Directory.CreateDirectory(destination);
             var copyRoot = Path.Combine(destination, Guid.NewGuid().ToString("N"));
             ExclusiveDirectory.Create(copyRoot);
             var identity = PhysicalObjectIdentity.Read(copyRoot);
             var evidence = CopyFrozenGroup(sources, copyRoot);
-            Console.Error.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { kind = "startup.database-copy",
-                groupBytes = evidence.Sum(file => file.SizeBytes), digestReadBytes = evidence.Sum(file => file.SizeBytes) }));
-            // SQLite readers can update WAL shared memory; inspect only the isolated file group.
-            string version, digest;
-            using (var connection = DatabaseConnections.Open(Path.Combine(copyRoot, "nexus.db")))
+            DatabaseJournals.RebindCopy(sourceRoot, copyRoot);
+            string version;
+            IReadOnlyList<DatabaseDomainInspection> domains;
+            using (var connection = DatabaseConnections.Open(Path.Combine(copyRoot, "runtime.db")))
             {
-                digest = DatabaseSchema.VerifyCatalog(connection);
-                VerifyIdentity(connection, instanceId, digest);
-                VerifyIntegrity(connection);
-                DatabaseReadIndexes.Ensure(connection);
+                using var transaction = connection.BeginTransaction(deferred: false);
+                DatabaseSchema.VerifyCatalog(connection, transaction);
+                VerifyIdentity(connection, instanceId, transaction: transaction);
+                VerifyIntegrity(connection, transaction);
+                DatabaseReadIndexes.Ensure(connection, transaction);
+                domains = DatabaseLayout.Domains.Select(domain => new DatabaseDomainInspection(DatabaseLayout.Name(domain),
+                    DatabaseSchema.DomainDigest(domain), new FileInfo(DatabaseLayout.PathFor(database, domain)).Length)).ToArray();
+                transaction.Commit();
                 version = Convert.ToString(DatabaseConnections.Scalar(connection, "SELECT sqlite_version();"), CultureInfo.InvariantCulture)!;
             }
-            return new(instanceId, digest, version, copyRoot, evidence, walEvidence)
-                { OwnedCopy = DatabaseCopy.Capture(copyRoot, identity) };
+            return new(instanceId, DatabaseSchema.Digest, version, copyRoot, evidence)
+                { Databases = domains, OwnedCopy = DatabaseCopy.Capture(copyRoot, identity) };
         }
-        catch (SqliteException exception)
-        {
-            throw new IOException("unrecognized_or_corrupt_database", exception);
-        }
-        finally
-        {
-            foreach (var (_, stream) in sources) stream.Dispose();
-        }
+        catch (SqliteException error) { throw new IOException("unrecognized_or_corrupt_database", error); }
+        finally { foreach (var (_, input) in sources) input.Dispose(); }
     }
 
-    private static IReadOnlyList<DatabaseFileEvidence> CopyFrozenGroup(IReadOnlyList<(string Suffix, FileStream Stream)> sources, string destination)
+    private static IReadOnlyList<DatabaseFileEvidence> CopyFrozenGroup(IReadOnlyList<(string Name, FileStream Stream)> sources, string destination)
     {
         using var timing = StartupProfile.Measure("database.copy");
         var evidence = new List<DatabaseFileEvidence>();
-        foreach (var (suffix, source) in sources)
+        foreach (var (name, input) in sources)
         {
-            var length = source.Length;
-            source.Position = 0;
+            var length = input.Length;
+            input.Position = 0;
             using var digest = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             long copied = 0;
-            using (var target = new FileStream(Path.Combine(destination, "nexus.db" + suffix), FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            using (var target = new FileStream(Path.Combine(destination, name), FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
-                var buffer = new byte[65536];
-                int count;
-                while ((count = source.Read(buffer)) != 0)
-                {
-                    target.Write(buffer.AsSpan(0, count));
-                    digest.AppendData(buffer.AsSpan(0, count)); copied += count;
-                }
+                var buffer = new byte[65536]; int count;
+                while ((count = input.Read(buffer)) != 0)
+                { target.Write(buffer.AsSpan(0, count)); digest.AppendData(buffer.AsSpan(0, count)); copied += count; }
                 target.Flush(flushToDisk: true);
             }
-            var sha = Convert.ToHexStringLower(digest.GetHashAndReset());
-            if (source.Length != length || copied != length) throw new IOException("Database file group changed while copying");
-            evidence.Add(new(suffix, length, sha));
+            if (input.Length != length || copied != length) throw new IOException("database_group_changed_while_copying");
+            evidence.Add(new(name.EndsWith("-journal", StringComparison.Ordinal) ? "-journal" : "", length,
+                Convert.ToHexStringLower(digest.GetHashAndReset())) { Name = name });
         }
-        return evidence;
+        return evidence.AsReadOnly();
     }
 
-    internal static void VerifyIdentity(SqliteConnection connection, Guid expectedInstance, string? expectedDigest = null,
+    internal static void RecheckSource(string coordinator, IReadOnlyList<DatabaseFileEvidence> evidence)
+    {
+        var names = DatabaseJournals.Inventory(coordinator);
+        if (!names.SequenceEqual(evidence.Select(item => item.Name).Order(StringComparer.Ordinal)))
+            throw new IOException("database_group_changed_after_inspection");
+        foreach (var expected in evidence)
+        {
+            using var input = File.OpenRead(Path.Combine(Path.GetDirectoryName(coordinator)!, expected.Name));
+            if (input.Length != expected.SizeBytes || Convert.ToHexStringLower(SHA256.HashData(input)) != expected.Sha256)
+                throw new IOException("database_group_changed_after_inspection");
+        }
+    }
+
+    internal static void VerifyIdentity(SqliteConnection connection, Guid instanceId, string? expectedDigest = null,
         SqliteTransaction? transaction = null)
     {
-        long Scalar(string sql)
-        {
-            using var query = connection.CreateCommand(); query.Transaction = transaction; query.CommandText = sql;
-            return Convert.ToInt64(query.ExecuteScalar(), CultureInfo.InvariantCulture);
-        }
-        if (Scalar("PRAGMA application_id;") != 1314411313 || Scalar("PRAGMA user_version;") != 1)
-            throw new IOException("unsupported_database_generation");
-        using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "SELECT format,schema_version,instance_id,contract_digest FROM schema_info WHERE singleton=1;";
-        using var row = command.ExecuteReader();
-        if (!row.Read() || row.GetString(0) != "nexus.state.database" || row.GetInt64(1) != 1 ||
-            !Guid.TryParse(row.GetString(2), out var instance) || instance != expectedInstance ||
-            row.GetString(3) != (expectedDigest ?? DatabaseSchema.Digest) || row.Read())
-            throw new IOException("unsupported_database_identity");
+        if (expectedDigest is not null && expectedDigest != DatabaseSchema.Digest) throw new IOException("unsupported_database_identity");
+        foreach (var domain in DatabaseLayout.Domains.Where(domain => (DatabaseConnections.Domains(connection) & domain) != 0))
+            VerifyDomainIdentity(connection, instanceId, domain, transaction);
+    }
+
+    internal static void VerifyDomainIdentity(SqliteConnection connection, Guid instanceId, DatabaseDomain domain,
+        SqliteTransaction? transaction = null, bool standalone = false)
+    {
+        var alias = standalone ? "main" : DatabaseLayout.Alias(domain);
+        using var query = connection.CreateCommand(); query.Transaction = transaction;
+        query.CommandText = $"PRAGMA {alias}.application_id;";
+        if (Convert.ToInt64(query.ExecuteScalar(), CultureInfo.InvariantCulture) != 1314411313) throw new IOException("unsupported_database_generation");
+        query.CommandText = $"PRAGMA {alias}.user_version;";
+        if (Convert.ToInt64(query.ExecuteScalar(), CultureInfo.InvariantCulture) != 2) throw new IOException("unsupported_database_generation");
+        query.CommandText = $"SELECT format,schema_version,instance_id,domain_name,contract_digest FROM {alias}.schema_info WHERE singleton=1;";
+        using var row = query.ExecuteReader();
+        if (!row.Read() || row.GetString(0) != "nexus.state.domain" || row.GetInt64(1) != 2 ||
+            !Guid.TryParse(row.GetString(2), out var actual) || actual != instanceId || row.GetString(3) != DatabaseLayout.Name(domain) ||
+            row.GetString(4) != DatabaseSchema.DomainDigest(domain) || row.Read()) throw new IOException("unsupported_database_identity");
     }
 
     internal static void VerifyIntegrity(SqliteConnection connection, SqliteTransaction? transaction = null)
     {
         using var timing = StartupProfile.Measure("database.integrity");
-        using var check = connection.CreateCommand(); check.Transaction = transaction; check.CommandText = "PRAGMA quick_check;";
-        if (!string.Equals(Convert.ToString(check.ExecuteScalar(), CultureInfo.InvariantCulture), "ok", StringComparison.Ordinal))
-            throw new IOException("database_integrity_failure");
-        using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "PRAGMA foreign_key_check;";
-        using var row = command.ExecuteReader();
-        if (row.Read()) throw new IOException("database_foreign_key_failure");
+        foreach (var domain in DatabaseLayout.Domains.Where(domain => (DatabaseConnections.Domains(connection) & domain) != 0))
+        {
+            var alias = DatabaseLayout.Alias(domain);
+            using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = $"PRAGMA {alias}.quick_check;";
+            if (!string.Equals(Convert.ToString(command.ExecuteScalar(), CultureInfo.InvariantCulture), "ok", StringComparison.Ordinal))
+                throw new IOException("database_integrity_failure");
+            command.CommandText = $"PRAGMA {alias}.foreign_key_check;";
+            using var rows = command.ExecuteReader();
+            if (rows.Read()) throw new IOException("database_foreign_key_failure");
+        }
+        if (DatabaseConnections.Domains(connection) == DatabaseDomain.All) DatabaseRelations.VerifyAll(connection, transaction);
     }
 }

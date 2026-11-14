@@ -23,12 +23,12 @@ public sealed class CatalogPublicationTests
         var publication = PrepareClear(runtime);
         var last = publication.Document.Secrets[^1].OperationId.ToString("D");
         var sql = fault == "last-field"
-            ? $"CREATE TRIGGER notification_fault BEFORE INSERT ON secret_mutations WHEN NEW.operation_id='{last}' BEGIN SELECT RAISE(ABORT,'notification_fault'); END;"
-            : "CREATE TRIGGER notification_fault BEFORE INSERT ON notification_publication_outcomes BEGIN SELECT RAISE(ABORT,'notification_fault'); END;";
-        using (var connection = DatabaseConnections.Open(runtime.Database.DatabasePath))
+            ? $"CREATE TRIGGER system.notification_fault BEFORE INSERT ON secret_mutations WHEN NEW.operation_id='{last}' BEGIN SELECT RAISE(ABORT,'notification_fault'); END;"
+            : "CREATE TRIGGER notifications.notification_fault BEFORE INSERT ON notification_publication_outcomes BEGIN SELECT RAISE(ABORT,'notification_fault'); END;";
+        using (var connection = DatabaseConnections.Open(runtime.Database.DatabasePath, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var command = connection.CreateCommand()) { command.CommandText = sql; command.ExecuteNonQuery(); }
         Assert.Throws<SqliteException>(() => Commit(runtime, publication));
-        using (var connection = DatabaseConnections.Open(runtime.Database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(runtime.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         {
             Assert.Null(NotificationCatalogRows.ReadCurrent(connection, null));
             foreach (var table in new[] { "notification_publications", "notification_publication_fields",
@@ -39,10 +39,10 @@ public sealed class CatalogPublicationTests
                 Assert.Equal(0L, (long)command.ExecuteScalar()!);
             }
         }
-        using (var connection = DatabaseConnections.Open(runtime.Database.DatabasePath))
-        using (var command = connection.CreateCommand()) { command.CommandText = "DROP TRIGGER notification_fault;"; command.ExecuteNonQuery(); }
+        using (var connection = DatabaseConnections.Open(runtime.Database.DatabasePath, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
+        using (var command = connection.CreateCommand()) { command.CommandText = "DROP TRIGGER " + (fault == "last-field" ? "system" : "notifications") + ".notification_fault;"; command.ExecuteNonQuery(); }
         Commit(runtime, publication);
-        using (var connection = DatabaseConnections.Open(runtime.Database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(runtime.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         {
             var replay = NotificationCatalogRows.Lookup(connection, null, NotificationPublicationCodec.Identity(publication.Document))
                 ?? throw new IOException("notification_replay_missing");

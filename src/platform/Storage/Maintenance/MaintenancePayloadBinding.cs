@@ -78,7 +78,7 @@ internal sealed class MaintenancePayloadBinding(RuntimeInstance instance, StateD
                 document.Root.GetProperty("participants").GetArrayLength() != MaintenancePhysicalCodec.ReadReferences(document.Root, plan).Length)
                 throw Invalid();
         }
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         var operation = RequireOperationInside(connection, transaction, registered, source);
         var result = new BoundMaintenancePayload(plan, reference, source, registered, operation, history, physical, restoration, commit);

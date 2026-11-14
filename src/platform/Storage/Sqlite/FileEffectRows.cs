@@ -11,7 +11,7 @@ internal static class FileEffectRows
             throw new ArgumentException("File effects must be bounded and uniquely identified");
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "INSERT INTO file_effects VALUES($journal,$step,$action,'pending',$intent,NULL);";
+        command.CommandText = "INSERT INTO main.file_effects VALUES($journal,$step,$action,'pending',$intent,NULL);";
         command.Parameters.AddWithValue("$journal", journalId.ToString("D"));
         var step = command.Parameters.Add("$step", SqliteType.Text);
         var action = command.Parameters.Add("$action", SqliteType.Text);
@@ -33,7 +33,7 @@ internal static class FileEffectRows
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT journal_id,step_id,action,state,intent_digest,receipt_digest FROM file_effects " +
+        command.CommandText = "SELECT journal_id,step_id,action,state,intent_digest,receipt_digest FROM main.file_effects " +
             (journalId is null ? "ORDER BY journal_id,step_id LIMIT 65537;" : "WHERE journal_id=$journal ORDER BY step_id LIMIT 4097;");
         if (journalId is not null) command.Parameters.AddWithValue("$journal", journalId.Value.ToString("D"));
         using var reader = command.ExecuteReader();

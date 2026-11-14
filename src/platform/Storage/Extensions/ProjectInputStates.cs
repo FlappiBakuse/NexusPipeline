@@ -11,9 +11,9 @@ internal static class ProjectInputStates
 {
     internal static ProjectInputState[] Read(RuntimeInstance instance, StateDatabase database, ContractReader contracts, string provider, Guid binding)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT operation_id FROM extension_documents WHERE extension_id=$provider AND name=$name;";
+        command.CommandText = "SELECT operation_id FROM extensions.extension_documents WHERE extension_id=$provider AND name=$name;";
         command.Parameters.AddWithValue("$provider", provider);
         command.Parameters.AddWithValue("$name", ProjectChoicePublication.Name(binding));
         if (command.ExecuteScalar() is not string operation) return [];

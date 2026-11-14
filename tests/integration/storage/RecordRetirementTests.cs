@@ -56,7 +56,7 @@ public sealed class RecordRetirementTests
         var original = new JournalStore(fixture.Source.Instance, new()).Read(fixture.Receipt.JournalId).Export();
         var before = fixture.Items; var commits = fixture.Source.Database.CommitSequence;
         var operation = Guid.NewGuid();
-        fixture.Hooks.Base.Execute("CREATE TRIGGER fail_retirement BEFORE INSERT ON record_retired_contents BEGIN SELECT RAISE(ABORT,'fixture'); END;");
+        fixture.Hooks.Base.Execute("CREATE TRIGGER records.fail_retirement BEFORE INSERT ON record_retired_contents BEGIN SELECT RAISE(ABORT,'fixture'); END;");
         try
         {
             Assert.Throws<SqliteException>(() => fixture.Retirement.RetireLogsPage(operation, "retirement-fixture", fixture.Receipt.Facts.RunId));
@@ -66,7 +66,7 @@ public sealed class RecordRetirementTests
                 using (var originalBytes = fixture.Logs.OpenOriginal(item.Key, item.SnapshotSha256))
                     Assert.Equal(item.RecordedBytes, originalBytes.Length);
         }
-        finally { fixture.Hooks.Base.Execute("DROP TRIGGER fail_retirement;"); }
+        finally { fixture.Hooks.Base.Execute("DROP TRIGGER records.fail_retirement;"); }
         Assert.NotNull(fixture.Retirement.RetireLogsPage(operation, "retirement-fixture", fixture.Receipt.Facts.RunId));
         fixture.RequireOriginalMetadata(original);
     }
@@ -156,9 +156,9 @@ public sealed class RecordRetirementTests
         var id = page.OperationId.ToString("D");
         fixture.Hooks.Base.Execute(fault switch
         {
-            "family" => "UPDATE record_content_retirements SET family_digest='" + new string('0', 64) + "' WHERE operation_id='" + id + "';",
-            "membership" => "DELETE FROM record_retired_contents WHERE operation_id='" + id + "' AND digest=(SELECT min(digest) FROM record_retired_contents WHERE operation_id='" + id + "');",
-            _ => "UPDATE operations SET subject_id='foreign-subject' WHERE operation_id='" + id + "';"
+            "family" => "UPDATE records.record_content_retirements SET family_digest='" + new string('0', 64) + "' WHERE operation_id='" + id + "';",
+            "membership" => "DELETE FROM records.record_retired_contents WHERE operation_id='" + id + "' AND digest=(SELECT min(digest) FROM records.record_retired_contents WHERE operation_id='" + id + "');",
+            _ => "UPDATE main.operations SET subject_id='foreign-subject' WHERE operation_id='" + id + "';"
         });
         Assert.ThrowsAny<IOException>(() => RecordRetirementInventory.VerifyReadOnly(fixture.Source.Instance, fixture.Source.Database, new()));
         fixture.RequireOriginalMetadata(original);

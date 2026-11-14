@@ -11,6 +11,14 @@ internal sealed class HistoricalTargetEvidence(RuntimeInstance instance, StateDa
     private readonly Dictionary<TargetJobState, JsonElement> _targets = [];
     private readonly Dictionary<PcStageIntent, JsonElement> _stages = [];
 
+    internal HistoricalTargetEvidence Fork()
+    {
+        var copy = new HistoricalTargetEvidence(instance, database, contracts, total, totalSha256);
+        foreach (var item in _targets) copy._targets.Add(item.Key, item.Value);
+        foreach (var item in _stages) copy._stages.Add(item.Key, item.Value);
+        return copy;
+    }
+
     internal void Observe(JsonElement journal)
     {
         foreach (var view in ExecutionInvocationCodec.Views(journal).Select(ExecutionInvocationCodec.Current))

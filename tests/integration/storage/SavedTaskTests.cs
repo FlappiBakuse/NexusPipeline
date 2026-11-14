@@ -49,9 +49,9 @@ public sealed class SavedTaskTests
         await using var fixture = new SavedTaskFixture();
         await fixture.Save(new(sink.Address, "saved"));
         var operation = Guid.NewGuid(); var operations = fixture.Base.Count("operations");
-        fixture.Base.Execute("CREATE TRIGGER fail_saved_delivery BEFORE INSERT ON notification_deliveries BEGIN SELECT RAISE(ABORT,'fixture'); END;");
+        fixture.Base.Execute("CREATE TRIGGER notifications.fail_saved_delivery BEFORE INSERT ON notification_deliveries BEGIN SELECT RAISE(ABORT,'fixture'); END;");
         try { Assert.Throws<SqliteException>(() => fixture.Enqueue(operation)); }
-        finally { fixture.Base.Execute("DROP TRIGGER fail_saved_delivery;"); }
+        finally { fixture.Base.Execute("DROP TRIGGER notifications.fail_saved_delivery;"); }
         Assert.Equal(operations, fixture.Base.Count("operations"));
         Assert.Equal(0, fixture.Base.Count("notification_saved_tests"));
         Assert.Equal(0, fixture.Base.Count("notification_deliveries"));
@@ -78,7 +78,7 @@ public sealed class SavedTaskTests
         }
         else
         {
-            fixture.Base.Execute("UPDATE notification_saved_tests SET sha256='" + new string('0', 64) + "';");
+            fixture.Base.Execute("UPDATE notifications.notification_saved_tests SET sha256='" + new string('0', 64) + "';");
             Assert.ThrowsAny<Exception>(() => new NotificationDeliveryEvidence(fixture.Base.Source.Instance, fixture.Base.Source.Database, new())
                 .Read(accepted.Delivery));
         }

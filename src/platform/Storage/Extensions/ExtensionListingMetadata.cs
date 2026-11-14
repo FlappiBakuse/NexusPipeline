@@ -10,11 +10,11 @@ internal static class ExtensionListingMetadata
         ExtensionMetadata? metadata)
     {
         if (metadata is null) return null;
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions);
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT MIN(o.created_at),MAX(o.created_at),MAX(r.revision) " +
-            "FROM extension_installation_revisions r JOIN operation_journals j ON j.journal_id=r.journal_id " +
-            "JOIN operations o ON o.operation_id=j.operation_id " +
+            "FROM extensions.extension_installation_revisions r JOIN main.operation_journals j ON j.journal_id=r.journal_id " +
+            "JOIN main.operations o ON o.operation_id=j.operation_id " +
             "WHERE r.extension_id=$id AND r.revision<=$revision AND r.is_installed=1 " +
             "AND j.operation_kind='extensionApply' AND j.phase='committed' " +
             "AND o.operation_kind='extension.apply' AND o.status='completed' AND o.initial_journal_id=j.journal_id;";

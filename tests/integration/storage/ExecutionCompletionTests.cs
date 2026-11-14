@@ -22,10 +22,10 @@ public sealed class ExecutionCompletionTests
             judgement: new(AutomationJudgementLanguage.Keywords, [], [], null));
         var running = fixture.Consumer.RunNextAsync();
         await fixture.Ready(".child");
-        using (var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var command = connection.CreateCommand())
         {
-            command.CommandText = "SELECT process_id FROM journal_writer_job_roots WHERE journal_id=$journal LIMIT 1;";
+            command.CommandText = "SELECT process_id FROM main.journal_writer_job_roots WHERE journal_id=$journal LIMIT 1;";
             command.Parameters.AddWithValue("$journal", fixture.Accepted.JournalId.ToString("D"));
             var pid = checked((int)(long)command.ExecuteScalar()!);
             try { using var root = Process.GetProcessById(pid); await root.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)); }

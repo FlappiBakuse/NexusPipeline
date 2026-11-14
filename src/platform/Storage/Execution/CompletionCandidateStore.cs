@@ -18,7 +18,7 @@ internal sealed class CompletionCandidateStore(StateDatabase database, InstanceL
         return lease.PublishExecution(() => database.Write((connection, transaction) =>
         {
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT intent_json,total_plan_path,total_plan_size,total_plan_sha256,subject_id FROM completion_candidates WHERE run_id=$run;";
+            command.CommandText = "SELECT intent_json,total_plan_path,total_plan_size,total_plan_sha256,subject_id FROM main.completion_candidates WHERE run_id=$run;";
             command.Parameters.AddWithValue("$run", bound.Intent.RunId.ToString("D"));
             using (var prior = command.ExecuteReader())
             {
@@ -30,10 +30,10 @@ internal sealed class CompletionCandidateStore(StateDatabase database, InstanceL
                     return bound;
                 }
             }
-            command.CommandText = "SELECT COUNT(*) FROM completion_candidates c WHERE NOT EXISTS(SELECT 1 FROM completion_candidate_outcomes o WHERE o.run_id=c.run_id) AND NOT EXISTS(SELECT 1 FROM completion_action_members m WHERE m.run_id=c.run_id);";
+            command.CommandText = "SELECT COUNT(*) FROM main.completion_candidates c WHERE NOT EXISTS(SELECT 1 FROM main.completion_candidate_outcomes o WHERE o.run_id=c.run_id) AND NOT EXISTS(SELECT 1 FROM main.completion_action_members m WHERE m.run_id=c.run_id);";
             if ((long)command.ExecuteScalar()! >= 4096) throw new IOException("completion_candidate_capacity");
             if (!OperationRows.Accept(connection, transaction, identity, clock.GetUtcNow()).IsNew) throw CompletionActionCodec.Invalid();
-            command.CommandText = "INSERT INTO completion_candidates VALUES($run,$operation,$attempt,$subject,$intent,$path,$size,$digest,$generation);";
+            command.CommandText = "INSERT INTO main.completion_candidates VALUES($run,$operation,$attempt,$subject,$intent,$path,$size,$digest,$generation);";
             command.Parameters.AddWithValue("$operation", operationId.ToString("D"));
             command.Parameters.AddWithValue("$attempt", bound.Intent.AttemptId.ToString("D"));
             command.Parameters.AddWithValue("$subject", bound.SubjectId);
@@ -42,7 +42,7 @@ internal sealed class CompletionCandidateStore(StateDatabase database, InstanceL
             command.Parameters.AddWithValue("$size", bound.TotalPlan.SizeBytes);
             command.Parameters.AddWithValue("$digest", bound.TotalPlan.Sha256);
             command.Parameters.AddWithValue("$generation", generation.ToString("D")); command.ExecuteNonQuery();
-            command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$operation AND status='accepted';";
+            command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$operation AND status='accepted';";
             if (command.ExecuteNonQuery() != 1) throw CompletionActionCodec.Invalid();
             return bound;
         }));
@@ -58,9 +58,9 @@ internal sealed class CompletionCandidateStore(StateDatabase database, InstanceL
     internal IReadOnlyList<BoundCompletionIntent> ReadPending()
     {
         lease.VerifyHeld(lease.Instance);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT c.intent_json,c.total_plan_path,c.total_plan_size,c.total_plan_sha256,c.subject_id FROM completion_candidates c WHERE c.owner_generation=$generation AND NOT EXISTS(SELECT 1 FROM completion_candidate_outcomes o WHERE o.run_id=c.run_id) AND NOT EXISTS(SELECT 1 FROM completion_action_members m WHERE m.run_id=c.run_id) ORDER BY c.run_id LIMIT 4097;";
+        command.CommandText = "SELECT c.intent_json,c.total_plan_path,c.total_plan_size,c.total_plan_sha256,c.subject_id FROM main.completion_candidates c WHERE c.owner_generation=$generation AND NOT EXISTS(SELECT 1 FROM main.completion_candidate_outcomes o WHERE o.run_id=c.run_id) AND NOT EXISTS(SELECT 1 FROM main.completion_action_members m WHERE m.run_id=c.run_id) ORDER BY c.run_id LIMIT 4097;";
         command.Parameters.AddWithValue("$generation", generation.ToString("D"));
         var values = new List<BoundCompletionIntent>();
         using (var reader = command.ExecuteReader())
@@ -79,9 +79,9 @@ internal sealed class CompletionCandidateStore(StateDatabase database, InstanceL
     internal bool HasPending()
     {
         lease.VerifyHeld(lease.Instance);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM completion_candidates c WHERE c.owner_generation=$generation AND NOT EXISTS(SELECT 1 FROM completion_candidate_outcomes o WHERE o.run_id=c.run_id) AND NOT EXISTS(SELECT 1 FROM completion_action_members m WHERE m.run_id=c.run_id));";
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.completion_candidates c WHERE c.owner_generation=$generation AND NOT EXISTS(SELECT 1 FROM main.completion_candidate_outcomes o WHERE o.run_id=c.run_id) AND NOT EXISTS(SELECT 1 FROM main.completion_action_members m WHERE m.run_id=c.run_id));";
         command.Parameters.AddWithValue("$generation", generation.ToString("D")); return (long)command.ExecuteScalar()! == 1;
     }
 
@@ -93,7 +93,7 @@ internal sealed class CompletionCandidateStore(StateDatabase database, InstanceL
         lease.PublishExecution(() => database.Write((connection, transaction) =>
         {
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "INSERT INTO completion_candidate_outcomes SELECT run_id,$reason FROM completion_candidates WHERE run_id=$run AND owner_generation=$generation AND NOT EXISTS(SELECT 1 FROM completion_action_members m WHERE m.run_id=completion_candidates.run_id);";
+            command.CommandText = "INSERT INTO main.completion_candidate_outcomes SELECT run_id,$reason FROM main.completion_candidates WHERE run_id=$run AND owner_generation=$generation AND NOT EXISTS(SELECT 1 FROM main.completion_action_members m WHERE m.run_id=completion_candidates.run_id);";
             command.Parameters.AddWithValue("$reason", reason); command.Parameters.AddWithValue("$generation", generation.ToString("D"));
             foreach (var item in candidates)
             {
@@ -110,7 +110,7 @@ internal sealed class CompletionCandidateStore(StateDatabase database, InstanceL
         lease.PublishExecution(() => database.Write((connection, transaction) =>
         {
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "INSERT INTO completion_candidate_outcomes SELECT run_id,'completion_owner_restarted' FROM completion_candidates c WHERE c.owner_generation!=$generation AND NOT EXISTS(SELECT 1 FROM completion_candidate_outcomes o WHERE o.run_id=c.run_id) AND NOT EXISTS(SELECT 1 FROM completion_action_members m WHERE m.run_id=c.run_id);";
+            command.CommandText = "INSERT INTO main.completion_candidate_outcomes SELECT run_id,'completion_owner_restarted' FROM main.completion_candidates c WHERE c.owner_generation!=$generation AND NOT EXISTS(SELECT 1 FROM main.completion_candidate_outcomes o WHERE o.run_id=c.run_id) AND NOT EXISTS(SELECT 1 FROM main.completion_action_members m WHERE m.run_id=c.run_id);";
             command.Parameters.AddWithValue("$generation", generation.ToString("D")); return command.ExecuteNonQuery();
         }));
     }

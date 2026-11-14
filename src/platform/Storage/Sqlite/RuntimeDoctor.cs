@@ -18,7 +18,7 @@ public sealed class RuntimeDoctor : IRuntimeDoctor
         var actual = new InstanceRoot(new()).OpenExisting(instance.RuntimeRoot);
         if (actual.InstanceId != instance.InstanceId || database.InstanceId != instance.InstanceId ||
             !StringComparer.OrdinalIgnoreCase.Equals(database.RuntimeRoot, actual.RuntimeRoot) ||
-            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(actual.RuntimeRoot, "state", "nexus.db")))
+            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(actual.RuntimeRoot, "state", "runtime.db")))
             throw new IOException("diagnostic_instance_unbound");
         _instance = actual; _database = database; _recovery = recovery; _clock = clock ?? TimeProvider.System;
     }
@@ -30,7 +30,7 @@ public sealed class RuntimeDoctor : IRuntimeDoctor
     {
         cancellationToken.ThrowIfCancellationRequested();
         var recovery = _recovery.Current;
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         RequireIdentity(connection, transaction);
         var counts = ReadCounts(connection, transaction);
@@ -38,9 +38,9 @@ public sealed class RuntimeDoctor : IRuntimeDoctor
         RuntimeDiagnosticDetails? details = null;
         if (support)
         {
-            var queues = Count(connection, transaction, "SELECT COUNT(*) FROM queues;");
-            var waiting = Count(connection, transaction, "SELECT COUNT(*) FROM scheduled_occurrences o WHERE NOT EXISTS(SELECT 1 FROM execution_start_sources s WHERE s.operation_id=o.start_operation_id) AND NOT EXISTS(SELECT 1 FROM schedule_occurrence_outcomes f WHERE f.occurrence_id=o.occurrence_id);");
-            var installed = " FROM extension_installations i JOIN extension_installation_revisions r ON r.extension_id=i.extension_id AND r.revision=i.revision WHERE r.is_installed=1";
+            var queues = Count(connection, transaction, "SELECT COUNT(*) FROM automation.queues;");
+            var waiting = Count(connection, transaction, "SELECT COUNT(*) FROM main.scheduled_occurrences o WHERE NOT EXISTS(SELECT 1 FROM main.execution_start_sources s WHERE s.operation_id=o.start_operation_id) AND NOT EXISTS(SELECT 1 FROM main.schedule_occurrence_outcomes f WHERE f.occurrence_id=o.occurrence_id);");
+            var installed = " FROM extensions.extension_installations i JOIN extensions.extension_installation_revisions r ON r.extension_id=i.extension_id AND r.revision=i.revision WHERE r.is_installed=1";
             var extensionCount = Count(connection, transaction, "SELECT COUNT(*)" + installed + ";");
             var managed = Count(connection, transaction, "SELECT COUNT(*)" + installed + " AND r.package_kind='managed-code';");
             var data = Count(connection, transaction, "SELECT COUNT(*)" + installed + " AND r.package_kind='data-specialized';");
@@ -49,9 +49,9 @@ public sealed class RuntimeDoctor : IRuntimeDoctor
                 !recovery.IsReady ? "unverified" : recovery.Isolations.Count != 0 ? "isolated" :
                 recovery.ResourceHolds.Count != 0 ? "pending" : "ready", queues, waiting, extensionCount, managed, data, tail)
             {
-                OpenConfigurationCount = Count(connection, transaction, "SELECT COUNT(*) FROM configuration_edit_sessions WHERE phase IN (0,1);"),
-                PendingExtensionCount = Count(connection, transaction, "SELECT COUNT(*) FROM operation_journals WHERE operation_kind='extensionApply' AND phase<>'committed';"),
-                PendingUpdateCount = Count(connection, transaction, "SELECT COUNT(*) FROM maintenance_operations WHERE state IN (0,1,4);"),
+                OpenConfigurationCount = Count(connection, transaction, "SELECT COUNT(*) FROM configuration.configuration_edit_sessions WHERE phase IN (0,1);"),
+                PendingExtensionCount = Count(connection, transaction, "SELECT COUNT(*) FROM main.operation_journals WHERE operation_kind='extensionApply' AND phase<>'committed';"),
+                PendingUpdateCount = Count(connection, transaction, "SELECT COUNT(*) FROM system.maintenance_operations WHERE state IN (0,1,4);"),
                 Extensions = ReadExtensions(connection, transaction, installed)
             };
         }
@@ -68,7 +68,7 @@ public sealed class RuntimeDoctor : IRuntimeDoctor
 
     public RuntimeRecordCounts ReadCounts()
     {
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
         using var transaction = connection.BeginTransaction(deferred: true);
         RequireIdentity(connection, transaction);
         return ReadCounts(connection, transaction);
@@ -79,17 +79,17 @@ public sealed class RuntimeDoctor : IRuntimeDoctor
         using (var identity = connection.CreateCommand())
         {
             identity.Transaction = transaction;
-            identity.CommandText = "SELECT format,schema_version,instance_id FROM schema_info WHERE singleton=1;";
+            identity.CommandText = "SELECT format,schema_version,instance_id FROM main.schema_info WHERE singleton=1;";
             using var row = identity.ExecuteReader();
-            if (!row.Read() || row.GetString(0) != "nexus.state.database" || row.GetInt64(1) != 1 ||
+            if (!row.Read() || row.GetString(0) != "nexus.state.domain" || row.GetInt64(1) != 2 ||
                 row.GetString(2) != _instance.InstanceId.ToString("D")) throw new IOException("diagnostic_state_unbound");
         }
     }
 
     private static RuntimeRecordCounts ReadCounts(SqliteConnection connection, SqliteTransaction transaction) => new(
-        Count(connection, transaction, "SELECT COUNT(*) FROM operations WHERE status='accepted';"),
-        Count(connection, transaction, "SELECT COUNT(*) FROM attempt_receipts;"),
-        Count(connection, transaction, "SELECT COUNT(*) FROM run_records;"));
+        Count(connection, transaction, "SELECT COUNT(*) FROM main.operations WHERE status='accepted';"),
+        Count(connection, transaction, "SELECT COUNT(*) FROM records.attempt_receipts;"),
+        Count(connection, transaction, "SELECT COUNT(*) FROM records.run_records;"));
 
     private static IReadOnlyList<DiagnosticExtension> ReadExtensions(SqliteConnection connection,
         SqliteTransaction transaction, string installed)
@@ -112,7 +112,7 @@ public sealed class RuntimeDoctor : IRuntimeDoctor
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         // Only typed completion facts are safe for support export; worker text and private reason codes are never read.
-        command.CommandText = "SELECT ended_at_utc_ticks,engine_outcome,business_outcome,lifecycle_outcome,recovery_outcome FROM run_records ORDER BY ended_at_utc_ticks DESC,run_id DESC LIMIT 64;";
+        command.CommandText = "SELECT ended_at_utc_ticks,engine_outcome,business_outcome,lifecycle_outcome,recovery_outcome FROM records.run_records ORDER BY ended_at_utc_ticks DESC,run_id DESC LIMIT 64;";
         using var rows = command.ExecuteReader(); var result = new List<DiagnosticRunEvent>();
         while (rows.Read())
         {

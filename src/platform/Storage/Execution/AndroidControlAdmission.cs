@@ -30,7 +30,7 @@ internal static class AndroidControlAdmission
             ExecutionStepAdmission.RequireOpenRoles(state.Total, state.Jobs, request.Binding.StepId, "process", state.Latest.Root);
             var process = state.Jobs.Single(job => job.StepId == request.Binding.StepId && job.Role == "process");
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT NOT EXISTS(SELECT 1 FROM journal_writer_job_roots WHERE journal_id=$journal AND job_name=$job);";
+            command.CommandText = "SELECT NOT EXISTS(SELECT 1 FROM main.journal_writer_job_roots WHERE journal_id=$journal AND job_name=$job);";
             command.Parameters.AddWithValue("$journal", state.Journal.JournalId.ToString("D"));
             command.Parameters.AddWithValue("$job", process.JobName);
             if ((long)command.ExecuteScalar()! != 1 || state.Coverage.Any(item =>
@@ -62,7 +62,7 @@ internal static class AndroidControlAdmission
     internal static string SubjectInside(SqliteConnection connection, SqliteTransaction transaction, AttemptWriterState state)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT subject_id FROM operations WHERE operation_id=$operation AND operation_kind='execution.start' AND initial_journal_id=$journal;";
+        command.CommandText = "SELECT subject_id FROM main.operations WHERE operation_id=$operation AND operation_kind='execution.start' AND initial_journal_id=$journal;";
         command.Parameters.AddWithValue("$operation", state.Journal.OperationId.ToString("D"));
         command.Parameters.AddWithValue("$journal", state.Journal.JournalId.ToString("D"));
         return command.ExecuteScalar() as string ?? throw Invalid();

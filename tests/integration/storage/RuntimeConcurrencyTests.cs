@@ -86,16 +86,16 @@ public sealed class RuntimeConcurrencyTests
             var original = source.Database.Write((connection, transaction) =>
             {
                 using var command = connection.CreateCommand(); command.Transaction = transaction;
-                command.CommandText = "SELECT request_digest FROM operations WHERE operation_kind='execution.cancel' ORDER BY initial_journal_id DESC LIMIT 1;";
+                command.CommandText = "SELECT request_digest FROM main.operations WHERE operation_kind='execution.cancel' ORDER BY initial_journal_id DESC LIMIT 1;";
                 var digest = (string)command.ExecuteScalar()!;
-                command.CommandText = "UPDATE operations SET request_digest=$digest WHERE operation_id=(SELECT operation_id FROM operations WHERE operation_kind='execution.cancel' ORDER BY initial_journal_id DESC LIMIT 1);";
+                command.CommandText = "UPDATE main.operations SET request_digest=$digest WHERE operation_id=(SELECT operation_id FROM main.operations WHERE operation_kind='execution.cancel' ORDER BY initial_journal_id DESC LIMIT 1);";
                 command.Parameters.AddWithValue("$digest", new string('0', 64)); command.ExecuteNonQuery(); return digest;
             });
             Assert.ThrowsAny<Exception>(() => ExecutionCancellationStore.VerifyInventory(source.Instance, source.Database, new(), pageSize: 1));
             source.Database.Write((connection, transaction) =>
             {
                 using var command = connection.CreateCommand(); command.Transaction = transaction;
-                command.CommandText = "UPDATE operations SET request_digest=$digest WHERE operation_id=(SELECT operation_id FROM operations WHERE operation_kind='execution.cancel' ORDER BY initial_journal_id DESC LIMIT 1);";
+                command.CommandText = "UPDATE main.operations SET request_digest=$digest WHERE operation_id=(SELECT operation_id FROM main.operations WHERE operation_kind='execution.cancel' ORDER BY initial_journal_id DESC LIMIT 1);";
                 command.Parameters.AddWithValue("$digest", original); return command.ExecuteNonQuery();
             });
             ExecutionCancellationStore.VerifyInventory(source.Instance, source.Database, new(), pageSize: 1);
@@ -117,16 +117,16 @@ public sealed class RuntimeConcurrencyTests
         var original = database.Write((connection, transaction) =>
         {
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT plan_digest FROM journal_writer_job_closures ORDER BY journal_id DESC,writer_id DESC,job_name DESC LIMIT 1;";
+            command.CommandText = "SELECT plan_digest FROM main.journal_writer_job_closures ORDER BY journal_id DESC,writer_id DESC,job_name DESC LIMIT 1;";
             var digest = (string)command.ExecuteScalar()!;
-            command.CommandText = "UPDATE journal_writer_job_closures SET plan_digest=$digest WHERE (journal_id,writer_id,job_name)=(SELECT journal_id,writer_id,job_name FROM journal_writer_job_closures ORDER BY journal_id DESC,writer_id DESC,job_name DESC LIMIT 1);";
+            command.CommandText = "UPDATE main.journal_writer_job_closures SET plan_digest=$digest WHERE (journal_id,writer_id,job_name)=(SELECT journal_id,writer_id,job_name FROM main.journal_writer_job_closures ORDER BY journal_id DESC,writer_id DESC,job_name DESC LIMIT 1);";
             command.Parameters.AddWithValue("$digest", new string('0', 64)); command.ExecuteNonQuery(); return digest;
         });
         Assert.ThrowsAny<Exception>(() => JobClosureStore.VerifyInventory(instance, database, new(), pageSize: 1));
         database.Write((connection, transaction) =>
         {
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "UPDATE journal_writer_job_closures SET plan_digest=$digest WHERE (journal_id,writer_id,job_name)=(SELECT journal_id,writer_id,job_name FROM journal_writer_job_closures ORDER BY journal_id DESC,writer_id DESC,job_name DESC LIMIT 1);";
+            command.CommandText = "UPDATE main.journal_writer_job_closures SET plan_digest=$digest WHERE (journal_id,writer_id,job_name)=(SELECT journal_id,writer_id,job_name FROM main.journal_writer_job_closures ORDER BY journal_id DESC,writer_id DESC,job_name DESC LIMIT 1);";
             command.Parameters.AddWithValue("$digest", original); return command.ExecuteNonQuery();
         });
         JobClosureStore.VerifyInventory(instance, database, new(), pageSize: 1);

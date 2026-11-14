@@ -65,14 +65,14 @@ internal static class TerminalCrashFixture
             }
             if (point == "terminal-ahead")
             {
-                Execute(database, "CREATE TRIGGER fixture_terminal_failure BEFORE INSERT ON attempt_receipts BEGIN SELECT RAISE(ABORT,'fixture_terminal_failure'); END;");
+                Execute(database, "CREATE TRIGGER records.fixture_terminal_failure BEFORE INSERT ON attempt_receipts BEGIN SELECT RAISE(ABORT,'fixture_terminal_failure'); END;");
                 try
                 {
                     terminal.Commit(journalId, LifecycleOutcome.Completed, "execution_completed");
                     throw new IOException("fixture_terminal_failure_not_observed");
                 }
                 catch (SqliteException) { }
-                finally { Execute(database, "DROP TRIGGER fixture_terminal_failure;"); }
+                finally { Execute(database, "DROP TRIGGER records.fixture_terminal_failure;"); }
             }
             state = scope.VerifyReadOnly();
             OwnedFixtureEvidence.WriteReport(report, new { status = "faultReady", point, journalId, root, closure = stopped.Closure,
@@ -89,7 +89,7 @@ internal static class TerminalCrashFixture
 
     private static void Execute(StateDatabase database, string sql)
     {
-        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = database.DatabasePath, Pooling = false }.ToString());
+        using var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open(new SqliteConnectionStringBuilder { DataSource = database.DatabasePath, Pooling = false }.ToString());
         connection.Open(); using var command = connection.CreateCommand(); command.CommandText = sql; command.ExecuteNonQuery();
     }
 }

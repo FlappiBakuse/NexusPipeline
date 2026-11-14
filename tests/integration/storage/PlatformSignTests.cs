@@ -21,7 +21,7 @@ public sealed class PlatformSignTests
         var state = await fixture.Call("read-state", new { }, read: true);
         var first = await Save("first"); var second = await Save("second");
         var running = first;
-        http.BeforeSubmission = () => Assert.True(Count("SELECT COUNT(*) FROM work_effect_events WHERE kind='submitted';") > http.Submissions);
+        http.BeforeSubmission = () => Assert.True(Count("SELECT COUNT(*) FROM main.work_effect_events WHERE kind='submitted';") > http.Submissions);
         http.AfterRotation = () => Assert.Equal(running == first || !lostResponse ? 2 : 1,
             fixture.Secrets.GetStateAsync(new("game-checkin", running, "tajiduo"), default).AsTask().GetAwaiter().GetResult().Revision);
         _ = await fixture.Call("run-task", new { taskId = first }); _ = await fixture.Completed(first, TimeSpan.FromMinutes(2));
@@ -30,7 +30,7 @@ public sealed class PlatformSignTests
         Assert.Equal(14, results.Length);
         Assert.All(results, result => Assert.Equal(lostResponse ? "success_unconfirmed" : "success", result.GetProperty("code").GetString()));
         Assert.Equal(14, http.Submissions); Assert.Equal(1, http.Rotations);
-        Assert.Equal(14, Count("SELECT COUNT(*) FROM work_effect_events WHERE kind='submitted';"));
+        Assert.Equal(14, Count("SELECT COUNT(*) FROM main.work_effect_events WHERE kind='submitted';"));
         running = second;
         _ = await fixture.Call("run-task", new { taskId = second }); _ = await fixture.Completed(second, TimeSpan.FromMinutes(2));
         state = await fixture.Call("read-state", new { }, read: true);
@@ -55,7 +55,7 @@ public sealed class PlatformSignTests
         }
         long Count(string sql)
         {
-            using var connection = DatabaseConnections.Open(fixture.Catalog.Database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(fixture.Catalog.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
             using var query = connection.CreateCommand(); query.CommandText = sql; return (long)query.ExecuteScalar()!;
         }
     }

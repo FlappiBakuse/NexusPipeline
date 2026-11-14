@@ -54,7 +54,7 @@ public sealed class ActionStartupTests
         var (_, countdown) = await fixture.RunToCountdown();
         await fixture.Completion.CancelAsync(countdown.OperationId, CompletionActionStore.HostSubject, default);
         await fixture.Completion.StopAsync();
-        fixture.Base.Execute("UPDATE completion_actions SET frozen_json='{\"future\":true}';");
+        fixture.Base.Execute("UPDATE main.completion_actions SET frozen_json='{\"future\":true}';");
         var before = fixture.Source.Snapshot();
         Assert.Throws<JsonException>(() => CompletionActionStartup.VerifyReadOnly(fixture.Source.Instance, fixture.Source.Database, new()));
         var after = fixture.Source.Snapshot();

@@ -15,7 +15,7 @@ internal static class SecretPreparationRows
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT state,replay_proof FROM secret_preparations WHERE operation_id=$id;";
+        command.CommandText = "SELECT state,replay_proof FROM system.secret_preparations WHERE operation_id=$id;";
         command.Parameters.AddWithValue("$id", operationId.ToString("D"));
         using var reader = command.ExecuteReader();
         if (!reader.Read() || !Enum.IsDefined((SecretPreparationState)reader.GetInt32(0))) throw new IOException("secret_preparation_state_missing");
@@ -33,17 +33,17 @@ internal static class SecretPreparationRows
     internal static void Insert(SqliteConnection connection, SqliteTransaction transaction, SecretPreparationPlan plan)
     {
         var c = plan.Candidate;
-        Execute(connection, transaction, "INSERT INTO secret_payloads VALUES($0,$1,$2,$3,$4,$5,'prepared');",
+        Execute(connection, transaction, "INSERT INTO system.secret_payloads VALUES($0,$1,$2,$3,$4,$5,'prepared');",
             c.SecretId, plan.OperationId, c.ProtectionScheme, c.OwnerSid, c.Sha256, c.SizeBytes);
-        Execute(connection, transaction, "INSERT INTO secret_preparations VALUES($0,$1,$2,0,$3);",
+        Execute(connection, transaction, "INSERT INTO system.secret_preparations VALUES($0,$1,$2,0,$3);",
             plan.OperationId, plan.JournalId, c.SecretId, plan.ReplayProof);
     }
 
     internal static void SetState(SqliteConnection connection, SqliteTransaction transaction, SecretPreparationPlan plan, SecretPreparationState state)
     {
-        Execute(connection, transaction, "UPDATE secret_preparations SET state=$0 WHERE operation_id=$1;", (int)state, plan.OperationId);
+        Execute(connection, transaction, "UPDATE system.secret_preparations SET state=$0 WHERE operation_id=$1;", (int)state, plan.OperationId);
         if (state is SecretPreparationState.Published or SecretPreparationState.Cancelled)
-            Execute(connection, transaction, "UPDATE operations SET status='completed' WHERE operation_id=$0;", plan.OperationId);
+            Execute(connection, transaction, "UPDATE main.operations SET status='completed' WHERE operation_id=$0;", plan.OperationId);
     }
 
     internal static SecretFieldKey Key(SecretPreparationPlan plan) => new(plan.OwnerKind switch
@@ -59,7 +59,7 @@ internal static class SecretPreparationRows
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT s.journal_id,s.candidate_id,s.replay_proof,p.protection_scheme,p.owner_sid,p.digest,p.size_bytes,p.preparation_operation_id,s.state,p.state " +
-            "FROM secret_preparations s JOIN secret_payloads p ON p.secret_id=s.candidate_id WHERE s.operation_id=$id;";
+            "FROM system.secret_preparations s JOIN system.secret_payloads p ON p.secret_id=s.candidate_id WHERE s.operation_id=$id;";
         command.Parameters.AddWithValue("$id", plan.OperationId);
         using var row = command.ExecuteReader(); var c = plan.Candidate;
         if (!row.Read() || row.GetString(0) != plan.JournalId || row.GetString(1) != c.SecretId || row.GetString(2) != plan.ReplayProof ||

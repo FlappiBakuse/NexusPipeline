@@ -35,7 +35,7 @@ public sealed class RetirementOwnerTests
         Assert.Equal(JournalPhase.Prepared, registered.Phase);
         Assert.Equal(materialized, Directory.Exists(Path.Combine(source.Instance.RuntimeRoot, "journals", registered.JournalId.ToString("D"))));
         BlobReference proof;
-        using (var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.All))
             proof = Assert.IsType<BlobReference>(RecordRetirementRows.Find(connection, null, registered.OperationId));
         var blobs = new ImmutableBlobStore(source.Instance, new());
         var document = RecordRetirementCodec.Read<RecordRetirementDocument>(blobs, proof);

@@ -26,7 +26,7 @@ public sealed class MinuteStoreTests
         var bad = valid with { Id = Guid.NewGuid(), Revision = 0 };
         var changes = new AutomationChanges(catalog.Revision, [], [], [], [], [], [bad], []);
         fixture.Source.Definitions.Commit(AutomationDefinitionStore.Identity(Guid.NewGuid(), "fixture", changes), changes, DateTimeOffset.UtcNow);
-        fixture.Sql($"UPDATE schedules SET time_zone_id='nexus/no-such-zone' WHERE schedule_id='{bad.Id:D}';");
+        fixture.Sql($"UPDATE automation.schedules SET time_zone_id='nexus/no-such-zone' WHERE schedule_id='{bad.Id:D}';");
         var occurrence = fixture.CommitOnly();
         Assert.Equal(valid.Id, occurrence.Frozen.ScheduleId);
         Assert.Equal(bad.Id, Assert.Single(fixture.Store.Diagnostics).ScheduleId);
@@ -38,12 +38,12 @@ public sealed class MinuteStoreTests
     {
         using var fixture = new ScheduleNativeFixture(new ScheduleNativeFixture.FrozenScheduleClock(DateTimeOffset.UtcNow));
         var before = fixture.Base.Counts();
-        fixture.Sql("CREATE TRIGGER fail_schedule_claim BEFORE INSERT ON schedule_minute_occurrences BEGIN SELECT RAISE(ABORT,'schedule-fixture-fault'); END;");
+        fixture.Sql("CREATE TRIGGER main.fail_schedule_claim BEFORE INSERT ON schedule_minute_occurrences BEGIN SELECT RAISE(ABORT,'schedule-fixture-fault'); END;");
         Assert.Throws<SqliteException>(() => fixture.CommitOnly());
         Assert.Equal(before, fixture.Base.Counts());
         Assert.Equal(0, fixture.Store.ReadCheckpoint().Watermark.Revision);
         Assert.Empty(fixture.Store.ReadWaiting(64)); Assert.Equal(0, fixture.Count("schedule_minute_claims"));
-        fixture.Sql("DROP TRIGGER fail_schedule_claim;");
+        fixture.Sql("DROP TRIGGER main.fail_schedule_claim;");
         var saved = fixture.CommitOnly();
         Assert.Equal(1, fixture.Store.ReadCheckpoint().Watermark.Revision);
         Assert.Equal(saved, fixture.CommitOnly()); Assert.Equal(1, fixture.Count("scheduled_occurrences"));
@@ -146,7 +146,7 @@ public sealed class MinuteStoreTests
         await session.CollectRemainingAsync(); session.CloseUndispatched(); session.MarkApplied();
         await session.RestoreRemainingAsync(ExecutionStopReason.Completed);
         var before = Assert.IsType<RunBudgetObservation>(fixture.Budget(occurrence.Frozen.RunId));
-        fixture.Sql("CREATE TRIGGER fail_budget_receipt BEFORE INSERT ON attempt_receipts BEGIN SELECT RAISE(ABORT,'budget-receipt-fault'); END;");
+        fixture.Sql("CREATE TRIGGER records.fail_budget_receipt BEFORE INSERT ON attempt_receipts BEGIN SELECT RAISE(ABORT,'budget-receipt-fault'); END;");
         AttemptReceipt physical;
         try
         {
@@ -159,7 +159,7 @@ public sealed class MinuteStoreTests
             var rejected = Assert.Throws<IOException>(() => fixture.Source.Lease.RunBudgets.ReadForRetry(fixture.Source.Database, physical, TimeProvider.System));
             Assert.Equal("execution_run_budget_unbound", rejected.Message);
         }
-        finally { fixture.Sql("DROP TRIGGER fail_budget_receipt;"); }
+        finally { fixture.Sql("DROP TRIGGER records.fail_budget_receipt;"); }
         var receipt = session.Commit(ExecutionStopReason.Completed);
         Assert.Equal(physical, receipt);
         var terminal = Assert.IsType<RunBudgetObservation>(fixture.Budget(occurrence.Frozen.RunId));
@@ -196,10 +196,10 @@ public sealed class MinuteStoreTests
         _ = fixture.CommitOnly();
         fixture.Sql(damage switch
         {
-            "tail" => "UPDATE schedule_minute_occurrences SET position=position+1;",
-            "all-items" => "DELETE FROM schedule_minute_occurrences;",
-            "header" => "PRAGMA foreign_keys=OFF; DELETE FROM schedule_minute_claims;",
-            _ => "UPDATE scheduling_watermark SET highest_utc_minute=highest_utc_minute-1 WHERE singleton=1;"
+            "tail" => "UPDATE main.schedule_minute_occurrences SET position=position+1;",
+            "all-items" => "DELETE FROM main.schedule_minute_occurrences;",
+            "header" => "PRAGMA foreign_keys=OFF; DELETE FROM main.schedule_minute_claims;",
+            _ => "UPDATE main.scheduling_watermark SET highest_utc_minute=highest_utc_minute-1 WHERE singleton=1;"
         });
         var before = fixture.Fingerprints();
         Assert.ThrowsAny<Exception>(() => StateDatabase.OpenExisting(fixture.Source.Instance,
@@ -219,10 +219,10 @@ public sealed class MinuteStoreTests
         await fixture.Scheduler.TickAsync();
         var receipt = Assert.IsType<AttemptReceipt>(await fixture.Consumer.RunNextAsync());
         Assert.Equal(LifecycleOutcome.Completed, receipt.Facts.Lifecycle);
-        using var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT occurrence_id FROM scheduled_occurrences;";
+        command.CommandText = "SELECT occurrence_id FROM main.scheduled_occurrences;";
         var id = Guid.ParseExact((string)command.ExecuteScalar()!, "D");
         var occurrence = ScheduleMinuteRows.ReadOccurrence(connection, transaction, id, fixture.Source.Instance.InstanceId);
         Assert.Equal(target.ToUnixTimeSeconds() / 60, occurrence.Frozen.TriggerUtcMinute);

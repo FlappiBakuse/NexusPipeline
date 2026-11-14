@@ -17,7 +17,7 @@ public sealed class StateDatabaseTests
     {
         var (_, _, database) = NewDatabase();
         var identity = new OperationIdentity(Guid.NewGuid(), "fixture", new string('c', 64), "fixture.command");
-        using (var writer = new SqliteConnection($"Data Source={database.DatabasePath};Pooling=False"))
+        using (var writer = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open($"Data Source={database.DatabasePath};Pooling=False"))
         {
             writer.Open();
             using var transaction = writer.BeginTransaction(deferred: false);
@@ -31,12 +31,12 @@ public sealed class StateDatabaseTests
         Assert.False(database.Accept(identity, DateTimeOffset.UtcNow).IsNew);
     }
 
-    [Fact(DisplayName = "Fresh Database Uses Wal Full And Foreign Keys And Cannot Overwrite Existing State")]
+    [Fact(DisplayName = "Fresh Databases Use Persistent Rollback Full And Foreign Keys And Cannot Overwrite Existing State")]
     public void UsesDurableDefaults()
     {
         var (_, instance, database) = NewDatabase();
         var settings = database.ReadSettings();
-        Assert.Equal("wal", settings.JournalMode);
+        Assert.Equal("persist", settings.JournalMode);
         Assert.Equal(2, settings.Synchronous);
         Assert.Equal(1, settings.ForeignKeys);
         Assert.False(string.IsNullOrWhiteSpace(settings.NativeVersion));
@@ -83,14 +83,14 @@ public sealed class StateDatabaseTests
         if (fault == "corrupt") File.WriteAllBytes(database.DatabasePath, [1, 2, 3, 4]);
         else
         {
-            using var connection = new SqliteConnection($"Data Source={database.DatabasePath};Pooling=False");
+            using var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open($"Data Source={database.DatabasePath};Pooling=False");
             connection.Open();
             using var command = connection.CreateCommand();
             command.CommandText = fault switch
             {
                 "generation" => "PRAGMA user_version=17;",
                 "catalog" => "CREATE TABLE unexpected(value TEXT);",
-                "identity" => "UPDATE schema_info SET instance_id='00000000-0000-4000-8000-000000000001';",
+                "identity" => "UPDATE main.schema_info SET instance_id='00000000-0000-4000-8000-000000000001';",
                 _ => throw new InvalidOperationException()
             };
             command.ExecuteNonQuery();
@@ -104,12 +104,12 @@ public sealed class StateDatabaseTests
     public void RejectsActiveWriters()
     {
         var (root, instance, database) = NewDatabase();
-        using var connection = new SqliteConnection($"Data Source={database.DatabasePath};Pooling=False");
+        using var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open($"Data Source={database.DatabasePath};Pooling=False");
         connection.Open();
         using var transaction = connection.BeginTransaction();
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT COUNT(*) FROM schema_info;";
+        command.CommandText = "SELECT COUNT(*) FROM main.schema_info;";
         Assert.Equal(1L, command.ExecuteScalar());
         var diagnostics = Path.Combine(root, "diagnostics");
         Assert.Throws<IOException>(() => DatabaseInspector.Inspect(database.DatabasePath, instance.InstanceId, diagnostics));
@@ -124,16 +124,16 @@ public sealed class StateDatabaseTests
         database.Accept(new(original, "subject", new string('a', 64), "fixture.command"), DateTimeOffset.UtcNow);
         var backupDirectory = Path.Combine(root, "backup-files");
         Directory.CreateDirectory(backupDirectory);
-        var path = Path.Combine(backupDirectory, "backup.db");
+        var path = Path.Combine(backupDirectory, "runtime.db");
         var backup = database.BackupTo(path);
         Assert.Equal(instance.InstanceId, backup.InstanceId);
         Assert.True(backup.SizeBytes > 0);
         database.Accept(new(Guid.NewGuid(), "subject", new string('b', 64), "fixture.command"), DateTimeOffset.UtcNow);
-        using (var connection = new SqliteConnection($"Data Source={path};Mode=ReadOnly;Pooling=False"))
+        using (var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open($"Data Source={path};Mode=ReadOnly;Pooling=False"))
         {
             connection.Open();
             using var query = connection.CreateCommand();
-            query.CommandText = "SELECT operation_id FROM operations;";
+            query.CommandText = "SELECT operation_id FROM main.operations;";
             using var reader = query.ExecuteReader();
             Assert.True(reader.Read()); Assert.Equal(original, Guid.Parse(reader.GetString(0)));
             Assert.False(reader.Read());
@@ -177,8 +177,7 @@ public sealed class StateDatabaseTests
             var (_, created, database) = NewDatabase();
             instance = created;
             var state = Path.GetDirectoryName(database.DatabasePath)!;
-            Assert.Equal([database.DatabasePath], Directory.GetFiles(state));
-            File.Delete(database.DatabasePath);
+            foreach (var path in Directory.GetFiles(state)) File.Delete(path);
             Directory.Delete(state);
         }
         else

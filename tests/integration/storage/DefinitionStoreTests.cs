@@ -170,13 +170,13 @@ public sealed class DefinitionStoreTests
             Queues = [current.Queues[0] with { Name = "Failing queue update" }] };
         var operation = Identity(request);
         var before = BoundedJson.Serialize(current);
-        Sql(fixture.Database, "CREATE TRIGGER fixture_fail_queue BEFORE UPDATE ON queues BEGIN SELECT RAISE(ABORT,'fixture_write_failure'); END;");
+        Sql(fixture.Database, "CREATE TRIGGER automation.fixture_fail_queue BEFORE UPDATE ON queues BEGIN SELECT RAISE(ABORT,'fixture_write_failure'); END;");
         try
         {
             Assert.Throws<SqliteException>(() => fixture.Store.Commit(operation, request, DateTimeOffset.UtcNow));
             Assert.Equal(before, BoundedJson.Serialize(fixture.Store.Read()));
         }
-        finally { Sql(fixture.Database, "DROP TRIGGER fixture_fail_queue;"); }
+        finally { Sql(fixture.Database, "DROP TRIGGER automation.fixture_fail_queue;"); }
         Assert.True(fixture.Store.Commit(operation, request, DateTimeOffset.UtcNow).IsNew);
         Assert.Equal(2, fixture.Store.Read().Revision);
     }
@@ -211,7 +211,7 @@ public sealed class DefinitionStoreTests
         var fixture = Create();
         var initial = Definitions(fixture.Root);
         fixture.Store.Commit(Identity(initial), initial, DateTimeOffset.UtcNow);
-        Sql(fixture.Database, "UPDATE queue_items SET ordinal=99 WHERE ordinal=0;");
+        Sql(fixture.Database, "UPDATE automation.queue_items SET ordinal=99 WHERE ordinal=0;");
         var before = Group(fixture.Database);
         Assert.Throws<IOException>(() => StateDatabase.OpenExisting(fixture.Instance, Path.Combine(fixture.Root, "unknown-inspection"),
             new JournalStartupAdmission(fixture.Instance, new())));
@@ -267,7 +267,7 @@ public sealed class DefinitionStoreTests
 
     private static void Sql(StateDatabase database, string sql)
     {
-        using var connection = new SqliteConnection($"Data Source={database.DatabasePath};Pooling=False");
+        using var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open($"Data Source={database.DatabasePath};Pooling=False");
         connection.Open();
         using var command = connection.CreateCommand();
         command.CommandText = sql;

@@ -27,8 +27,8 @@ internal static class SecretDocumentBinding
         Structure(plan);
         using var command = SecretDocumentRows.Command(connection, transaction,
             "SELECT o.request_digest,o.operation_kind,o.status,p.extension_id,f.subject_id,f.field " +
-            "FROM operations o JOIN secret_document_publications p ON p.operation_id=o.operation_id " +
-            "JOIN secret_document_fields f ON f.parent_operation_id=p.operation_id WHERE o.operation_id=$0 AND f.child_operation_id=$1;",
+            "FROM main.operations o JOIN system.secret_document_publications p ON p.operation_id=o.operation_id " +
+            "JOIN system.secret_document_fields f ON f.parent_operation_id=p.operation_id WHERE o.operation_id=$0 AND f.child_operation_id=$1;",
             binding.ParentOperationId, plan.OperationId);
         using var row = command.ExecuteReader();
         if (!row.Read() || row.GetString(0) != binding.ParentRequestDigest || row.GetString(1) != "extension.document.write" ||
@@ -41,7 +41,7 @@ internal static class SecretDocumentBinding
     {
         var plan = frozen.ReadWire(); Structure(plan);
         if (plan.DocumentPublication is not { } binding) return null;
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         var parentReference = SecretDocumentRows.Find(connection, transaction, Guid.Parse(binding.ParentOperationId)) ?? throw SecretDocumentFormat.Invalid();
         var parent = new SecretDocumentFormat(instance, contracts).Read(parentReference);

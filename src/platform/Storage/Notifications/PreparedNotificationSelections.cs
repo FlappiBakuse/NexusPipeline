@@ -23,7 +23,7 @@ internal sealed class PreparedNotificationSelections : IDisposable
     internal static PreparedNotificationSelections Capture(StateDatabase database)
     {
         NotificationCatalogCursor? cursor;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications))
             cursor = NotificationCatalogRows.ReadCurrent(connection, null);
         var held = new List<IDisposable>();
         try
@@ -47,7 +47,7 @@ internal sealed class PreparedNotificationSelections : IDisposable
 
     internal void RequireChanges(AutomationCatalog before, AutomationChanges changes)
     {
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications);
         using var transaction = connection.BeginTransaction(deferred: true);
         RequireChangesInside(connection, transaction, before, changes);
         transaction.Commit();

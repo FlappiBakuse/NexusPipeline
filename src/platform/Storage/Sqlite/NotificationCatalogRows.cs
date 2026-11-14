@@ -11,7 +11,7 @@ internal static class NotificationCatalogRows
     internal static NotificationCatalogCursor? ReadCurrent(SqliteConnection connection, SqliteTransaction? transaction)
     {
         using var command = Command(connection, transaction,
-            "SELECT revision,relative_path,size_bytes,sha256 FROM notification_catalog_current WHERE singleton=1;");
+            "SELECT revision,relative_path,size_bytes,sha256 FROM notifications.notification_catalog_current WHERE singleton=1;");
         using var row = command.ExecuteReader();
         if (!row.Read()) return null;
         if (row.GetInt64(0) < 1) throw new IOException("notification_catalog_cursor_invalid");
@@ -23,7 +23,7 @@ internal static class NotificationCatalogRows
     {
         using var command = Command(connection, transaction,
             "SELECT o.subject_id,o.request_digest,o.operation_kind,o.status,p.relative_path,p.size_bytes,p.sha256 " +
-            "FROM operations o LEFT JOIN notification_publications p ON p.operation_id=o.operation_id WHERE o.operation_id=$0;",
+            "FROM main.operations o LEFT JOIN notifications.notification_publications p ON p.operation_id=o.operation_id WHERE o.operation_id=$0;",
             operation.OperationId.ToString("D"));
         using var row = command.ExecuteReader();
         if (!row.Read()) return null;
@@ -41,17 +41,17 @@ internal static class NotificationCatalogRows
         var operation = NotificationPublicationCodec.Identity(document);
         if (Lookup(connection, transaction, operation) is not null) return false;
         using (var pending = Command(connection, transaction,
-            "SELECT 1 FROM notification_publications p JOIN operations o ON o.operation_id=p.operation_id WHERE o.status='accepted' LIMIT 1;"))
+            "SELECT 1 FROM notifications.notification_publications p JOIN main.operations o ON o.operation_id=p.operation_id WHERE o.status='accepted' LIMIT 1;"))
             if (pending.ExecuteScalar() is not null) throw new IOException("notification_publication_pending");
         RequireBefore(connection, transaction, publication);
         RejectReusedId(connection, transaction, publication);
         _ = OperationRows.Accept(connection, transaction, operation, acceptedAt);
         var reference = publication.Reference;
-        Execute(connection, transaction, "INSERT INTO notification_publications VALUES($0,$1,$2,$3,$4,$5);",
+        Execute(connection, transaction, "INSERT INTO notifications.notification_publications VALUES($0,$1,$2,$3,$4,$5);",
             document.OperationId.ToString("D"), reference.RelativePath, reference.SizeBytes, reference.Sha256,
             publication.Before.Catalog.Revision, publication.After.Catalog.Revision);
         foreach (var change in document.Secrets)
-            Execute(connection, transaction, "INSERT INTO notification_publication_fields VALUES($0,$1,$2);",
+            Execute(connection, transaction, "INSERT INTO notifications.notification_publication_fields VALUES($0,$1,$2);",
                 document.OperationId.ToString("D"), NotificationSecretFields.Name(change.Field), change.OperationId.ToString("D"));
         return true;
     }
@@ -92,20 +92,20 @@ internal static class NotificationCatalogRows
         foreach (var change in document.Secrets) RequireChildResult(connection, transaction, document, change);
         RejectReusedId(connection, transaction, publication);
         if (document.Request.Change == NotificationCatalogChange.Save && document.Request.ExpectedTaskRevision == 0)
-            Execute(connection, transaction, "INSERT INTO notification_task_ids VALUES($0,$1);",
+            Execute(connection, transaction, "INSERT INTO notifications.notification_task_ids VALUES($0,$1);",
                 document.Request.TaskId!.Value.ToString("D"), document.OperationId.ToString("D"));
-        Execute(connection, transaction, "DELETE FROM notification_catalog_tasks;");
+        Execute(connection, transaction, "DELETE FROM notifications.notification_catalog_tasks;");
         foreach (var task in publication.After.Document.Tasks)
-            Execute(connection, transaction, "INSERT INTO notification_catalog_tasks VALUES($0,$1,$2,$3,$4);",
+            Execute(connection, transaction, "INSERT INTO notifications.notification_catalog_tasks VALUES($0,$1,$2,$3,$4);",
                 task.TaskId.ToString("D"), task.Revision, task.Definition.RelativePath, task.Definition.SizeBytes, task.Definition.Sha256);
         var reference = publication.After.Reference;
         Execute(connection, transaction,
-            "INSERT INTO notification_catalog_current VALUES(1,$0,$1,$2,$3) ON CONFLICT(singleton) DO UPDATE SET " +
+            "INSERT INTO notifications.notification_catalog_current VALUES(1,$0,$1,$2,$3) ON CONFLICT(singleton) DO UPDATE SET " +
             "revision=excluded.revision,relative_path=excluded.relative_path,size_bytes=excluded.size_bytes,sha256=excluded.sha256;",
             publication.After.Catalog.Revision, reference.RelativePath, reference.SizeBytes, reference.Sha256);
-        Execute(connection, transaction, "INSERT INTO notification_publication_outcomes VALUES($0,'published',$1);",
+        Execute(connection, transaction, "INSERT INTO notifications.notification_publication_outcomes VALUES($0,'published',$1);",
             document.OperationId.ToString("D"), publication.After.Catalog.Revision);
-        Execute(connection, transaction, "UPDATE operations SET status='completed' WHERE operation_id=$0 AND status='accepted';",
+        Execute(connection, transaction, "UPDATE main.operations SET status='completed' WHERE operation_id=$0 AND status='accepted';",
             document.OperationId.ToString("D"));
     }
 
@@ -113,7 +113,7 @@ internal static class NotificationCatalogRows
         SqliteTransaction? transaction)
     {
         using var command = Command(connection, transaction,
-            "SELECT task_id,revision,relative_path,size_bytes,sha256 FROM notification_catalog_tasks ORDER BY task_id LIMIT 100;");
+            "SELECT task_id,revision,relative_path,size_bytes,sha256 FROM notifications.notification_catalog_tasks ORDER BY task_id LIMIT 100;");
         using var row = command.ExecuteReader();
         var entries = ImmutableArray.CreateBuilder<NotificationCatalogEntry>();
         while (row.Read())
@@ -140,9 +140,9 @@ internal static class NotificationCatalogRows
     internal static BlobReference ReadPublishedReference(SqliteConnection connection, SqliteTransaction transaction, long revision)
     {
         using var command = Command(connection, transaction,
-            "SELECT p.relative_path,p.size_bytes,p.sha256 FROM notification_publications p " +
-            "JOIN notification_publication_outcomes r ON r.operation_id=p.operation_id " +
-            "JOIN operations o ON o.operation_id=p.operation_id " +
+            "SELECT p.relative_path,p.size_bytes,p.sha256 FROM notifications.notification_publications p " +
+            "JOIN notifications.notification_publication_outcomes r ON r.operation_id=p.operation_id " +
+            "JOIN main.operations o ON o.operation_id=p.operation_id " +
             "WHERE p.after_revision=$0 AND r.outcome='published' AND r.catalog_revision=$0 AND o.status='completed';", revision);
         using var row = command.ExecuteReader();
         if (!row.Read()) throw new IOException("notification_catalog_publication_unbound");
@@ -156,12 +156,12 @@ internal static class NotificationCatalogRows
         var key = SecretFieldKey.NotificationTask(instanceId, taskId, NotificationSecretFields.Parse(field));
         SecretFieldRows.RequireDatabaseKey(connection, transaction, key);
         using var command = Command(connection, transaction,
-            "SELECT m.result_revision,m.result_secret_id FROM notification_publication_fields f " +
-            "JOIN notification_publications p ON p.operation_id=f.parent_operation_id " +
-            "JOIN notification_publication_outcomes r ON r.operation_id=p.operation_id AND r.outcome='published' " +
-            "JOIN operations o ON o.operation_id=p.operation_id " +
-            "JOIN operations c ON c.operation_id=f.child_operation_id " +
-            "JOIN secret_mutations m ON m.operation_id=c.operation_id " +
+            "SELECT m.result_revision,m.result_secret_id FROM notifications.notification_publication_fields f " +
+            "JOIN notifications.notification_publications p ON p.operation_id=f.parent_operation_id " +
+            "JOIN notifications.notification_publication_outcomes r ON r.operation_id=p.operation_id AND r.outcome='published' " +
+            "JOIN main.operations o ON o.operation_id=p.operation_id " +
+            "JOIN main.operations c ON c.operation_id=f.child_operation_id " +
+            "JOIN system.secret_mutations m ON m.operation_id=c.operation_id " +
             "WHERE f.field=$0 AND c.subject_id=$1 AND o.status='completed' AND c.status='completed' AND p.after_revision<=$2 " +
             "ORDER BY p.after_revision DESC LIMIT 1;",
             field, $"notificationTask/{instanceId:D}/{taskId:D}/{field}", maximumCatalogRevision);
@@ -187,7 +187,7 @@ internal static class NotificationCatalogRows
         var operation = SecretFieldStore.Identity(change.OperationId, key, change.Before.Revision, change.Disposition);
         using var command = Command(connection, transaction,
             "SELECT o.subject_id,o.request_digest,o.operation_kind,o.status,m.result_revision,m.result_secret_id,m.result_readable,m.replay_proof " +
-            "FROM operations o JOIN secret_mutations m ON m.operation_id=o.operation_id WHERE o.operation_id=$0;",
+            "FROM main.operations o JOIN system.secret_mutations m ON m.operation_id=o.operation_id WHERE o.operation_id=$0;",
             change.OperationId.ToString("D"));
         using var row = command.ExecuteReader();
         if (!row.Read() || row.GetString(0) != operation.SubjectId || row.GetString(1) != operation.RequestDigest ||
@@ -200,14 +200,14 @@ internal static class NotificationCatalogRows
     private static void RequirePublishedRevision(SqliteConnection connection, SqliteTransaction transaction, long revision)
     {
         using var command = Command(connection, transaction,
-            "SELECT coalesce(max(catalog_revision),0) FROM notification_publication_outcomes WHERE outcome='published';");
+            "SELECT coalesce(max(catalog_revision),0) FROM notifications.notification_publication_outcomes WHERE outcome='published';");
         if ((long)command.ExecuteScalar()! != revision) throw new IOException("notification_catalog_history_cursor_changed");
     }
 
     private static void RejectReusedId(SqliteConnection connection, SqliteTransaction transaction, NotificationPublicationSnapshot publication)
     {
         if (publication.Document.Request.Change != NotificationCatalogChange.Save || publication.Document.Request.ExpectedTaskRevision != 0) return;
-        using var command = Command(connection, transaction, "SELECT 1 FROM notification_task_ids WHERE task_id=$0;",
+        using var command = Command(connection, transaction, "SELECT 1 FROM notifications.notification_task_ids WHERE task_id=$0;",
             publication.Document.Request.TaskId!.Value.ToString("D"));
         if (command.ExecuteScalar() is not null) throw new IOException("notification_task_id_retired");
     }

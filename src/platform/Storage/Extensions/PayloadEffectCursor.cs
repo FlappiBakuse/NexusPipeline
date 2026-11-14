@@ -30,7 +30,7 @@ internal static class PayloadEffectCursor
             ExtensionCatalogRows.ReadHead(connection, transaction, package.Catalog.Identity.Channel) != package.Catalog)
             throw Invalid();
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT resource_key,mode FROM journal_resource_claims WHERE journal_id=$id ORDER BY resource_key LIMIT 4097;";
+        command.CommandText = "SELECT resource_key,mode FROM main.journal_resource_claims WHERE journal_id=$id ORDER BY resource_key LIMIT 4097;";
         command.Parameters.AddWithValue("$id", expected.JournalId.ToString("D"));
         using (var row = command.ExecuteReader())
         {
@@ -44,9 +44,9 @@ internal static class PayloadEffectCursor
             if (index != source.Claims.Length) throw Invalid();
         }
         var writer = JournalWriterStore.CurrentWriter;
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM journal_writers WHERE journal_id=$id AND writer_id=$writer " +
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.journal_writers WHERE journal_id=$id AND writer_id=$writer " +
             "AND process_id=$pid AND created_file_time=$created AND image_path=$path AND image_sha256=$sha " +
-            "AND user_sid=$sid AND elevated=$elevated) AND NOT EXISTS(SELECT 1 FROM journal_writer_jobs WHERE journal_id=$id);";
+            "AND user_sid=$sid AND elevated=$elevated) AND NOT EXISTS(SELECT 1 FROM main.journal_writer_jobs WHERE journal_id=$id);";
         command.Parameters.AddWithValue("$writer", writer.WriterId.ToString("D"));
         command.Parameters.AddWithValue("$pid", writer.Process.ProcessId);
         command.Parameters.AddWithValue("$created", writer.Process.CreatedAtUtc.ToFileTimeUtc());
@@ -55,7 +55,7 @@ internal static class PayloadEffectCursor
         command.Parameters.AddWithValue("$sid", writer.Process.UserSid);
         command.Parameters.AddWithValue("$elevated", writer.Process.IsElevated ? 1 : 0);
         if ((long)command.ExecuteScalar()! != 1) throw Invalid();
-        command.CommandText = "SELECT initial_journal_id FROM operations WHERE operation_id=$op;";
+        command.CommandText = "SELECT initial_journal_id FROM main.operations WHERE operation_id=$op;";
         command.Parameters.AddWithValue("$op", source.OperationId.ToString("D"));
         if (command.ExecuteScalar() is not string journal || journal != expected.JournalId.ToString("D")) throw Invalid();
     }

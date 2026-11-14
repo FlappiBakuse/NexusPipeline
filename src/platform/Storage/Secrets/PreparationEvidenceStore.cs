@@ -87,7 +87,7 @@ internal sealed class PreparationEvidenceStore(RuntimeInstance instance, Contrac
             stream.Position = 0; var bytes = new byte[checked((int)stream.Length)]; stream.ReadExactly(bytes);
             using var value = new UserSecretProtector().Unprotect(instance.InstanceId, Guid.Parse(candidate.SecretId),
                 new(candidate.ProtectionScheme, candidate.OwnerSid, candidate.Sha256, bytes));
-            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
             var operation = SecretFieldStore.Identity(Guid.Parse(plan.OperationId), SecretPreparationRows.Key(plan), plan.ExpectedRevision, SecretDisposition.Set);
             return SecretReplayProof.Matches(plan.ReplayProof, SecretReplayProof.Compute(instance, connection, operation, value));
         }

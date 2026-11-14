@@ -9,11 +9,11 @@ internal static class RunRecoveryBinding
     internal static ConfigurationRunStatus? Read(RuntimeInstance instance, StateDatabase database, ContractReader contracts, Guid journalId)
     {
         Guid sessionId; string subject;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var command = connection.CreateCommand())
         {
-            command.CommandText = "SELECT s.session_id,o.subject_id FROM configuration_run_resources r " +
-                "JOIN configuration_run_sessions s ON s.session_id=r.session_id JOIN operations o ON o.operation_id=s.session_id " +
+            command.CommandText = "SELECT s.session_id,o.subject_id FROM configuration.configuration_run_resources r " +
+                "JOIN configuration.configuration_run_sessions s ON s.session_id=r.session_id JOIN main.operations o ON o.operation_id=s.session_id " +
                 "WHERE r.journal_id=$journal AND o.operation_kind='configuration.run.begin';";
             command.Parameters.AddWithValue("$journal", journalId.ToString("D"));
             using var row = command.ExecuteReader();

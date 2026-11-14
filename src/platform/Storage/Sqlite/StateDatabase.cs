@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Operations;
 using NexusPipeline.Platform.Serialization;
@@ -7,12 +6,17 @@ using NexusPipeline.Platform.Serialization;
 namespace NexusPipeline.Platform.Storage.Sqlite;
 
 public sealed record DatabaseSettings(string JournalMode, long Synchronous, long ForeignKeys, string NativeVersion);
-public sealed record DatabaseBackup(string Path, Guid InstanceId, long SizeBytes, string Sha256);
+public sealed record DatabaseBackupFile(string Name, long SizeBytes, string Sha256);
+public sealed record DatabaseBackup(string Path, Guid InstanceId, long SizeBytes, string Sha256)
+{
+    public IReadOnlyList<DatabaseBackupFile> Files { get; init; } = [];
+}
 
 public sealed class StateDatabase
 {
     private readonly DatabaseWriteGate _writer = new(64, TimeSpan.FromSeconds(2));
     private readonly bool _readOnly;
+    private readonly long[] _domainSequences = new long[8];
     public string DatabasePath { get; }
     public string RuntimeRoot { get; }
     public Guid InstanceId { get; }
@@ -25,103 +29,113 @@ public sealed class StateDatabase
     internal BlobReferenceFacts ReferenceFacts { get; } = new();
 
     private StateDatabase(string path, Guid instanceId, string runtimeRoot, bool readOnly = false)
-    {
-        DatabasePath = path; InstanceId = instanceId; RuntimeRoot = runtimeRoot;
-        _readOnly = readOnly;
-    }
+    { DatabasePath = path; InstanceId = instanceId; RuntimeRoot = runtimeRoot; _readOnly = readOnly; }
 
     internal static StateDatabase ObserveMaintenancePeer(RuntimeInstance instance)
     {
         var actual = new InstanceRoot(new()).OpenExisting(instance.RuntimeRoot);
         if (actual != instance) throw new IOException("runtime_identity_mismatch");
-        var path = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(instance.RuntimeRoot, "state", "nexus.db"));
-        var inspected = DatabaseInspector.Inspect(path, instance.InstanceId,
+        var inspected = DatabaseInspector.Inspect(DatabaseLayout.RuntimePath(instance), instance.InstanceId,
             Path.Combine(instance.RuntimeRoot, "diagnostics", "maintenance-peer-inspection"));
         try
         {
-            if (inspected.SchemaDigest != DatabaseSchema.Digest) throw new IOException("unsupported_database_identity");
+            if (inspected.SchemaDigest != SchemaDigest) throw new IOException("unsupported_database_identity");
         }
         finally { inspected.OwnedCopy?.Discard(); }
-        return new(path, instance.InstanceId, instance.RuntimeRoot, readOnly: true);
+        return new(DatabaseLayout.RuntimePath(instance), instance.InstanceId, instance.RuntimeRoot, readOnly: true);
     }
 
     internal static StateDatabase Inspected(DatabaseInspection inspection, RuntimeInstance instance)
     {
-        if (inspection.InstanceId != instance.InstanceId) throw new IOException("database_inspection_instance_unbound");
-        if (inspection.SchemaDigest != DatabaseSchema.Digest) throw new IOException("unsupported_database_catalog");
-        return new(Path.Combine(inspection.DiagnosticCopyRoot, "nexus.db"), inspection.InstanceId, instance.RuntimeRoot, readOnly: true);
+        if (inspection.InstanceId != instance.InstanceId || inspection.SchemaDigest != SchemaDigest)
+            throw new IOException("database_inspection_instance_unbound");
+        return new(Path.Combine(inspection.DiagnosticCopyRoot, "runtime.db"), inspection.InstanceId, instance.RuntimeRoot, readOnly: true);
     }
 
     public static StateDatabase OpenExisting(RuntimeInstance instance, string diagnosticRoot,
         IDatabaseStartupAdmission? admission = null, InstanceLease? startupLease = null)
     {
         using var profile = StartupProfile.Begin("database.admission");
-        var actual = new InstanceRoot(new ContractReader()).OpenExisting(instance.RuntimeRoot);
-        if (actual.InstanceId != instance.InstanceId) throw new IOException("runtime_identity_mismatch");
-        var guard = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(actual.RuntimeRoot, "state-initialization.guard"));
-        using (var input = new FileStream(guard, FileMode.Open, FileAccess.Read, FileShare.Read))
-            if (input.Length != 0) throw new IOException("unrecognized_state_initialization_guard");
-        var databasePath = Path.Combine(actual.RuntimeRoot, "state", "nexus.db");
-        var inspected = DatabaseInspector.Inspect(databasePath, actual.InstanceId, diagnosticRoot);
+        var actual = RequireExisting(instance, startupLease);
+        var path = DatabaseLayout.RuntimePath(actual);
+        var inspected = DatabaseInspector.Inspect(path, actual.InstanceId, diagnosticRoot);
         if (admission is not null)
         {
-            using var reads = DatabaseReadScope.Hold(Path.Combine(inspected.DiagnosticCopyRoot, "nexus.db"));
+            using var reads = DatabaseReadScope.Hold(Path.Combine(inspected.DiagnosticCopyRoot, "runtime.db"));
             admission.Verify(inspected);
         }
-        var evidence = inspected.SourceFiles.ToDictionary(item => item.Suffix, StringComparer.Ordinal);
-        foreach (var suffix in new[] { "", "-wal", "-shm", "-journal" })
+        DatabaseInspector.RecheckSource(path, inspected.SourceFiles);
+        DatabaseJournals.VerifyPaths(path);
+        using (var connection = DatabaseConnections.Open(path))
+        using (var transaction = connection.BeginTransaction(deferred: false))
         {
-            var path = PhysicalPathPolicy.NormalizeWithoutLinks(databasePath + suffix);
-            if (File.Exists(path) != evidence.ContainsKey(suffix)) throw new IOException("database_group_changed_after_inspection");
-            if (!evidence.TryGetValue(suffix, out var expected)) continue;
-            using var source = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-            if (source.Length != expected.SizeBytes || Convert.ToHexStringLower(SHA256.HashData(source)) != expected.Sha256)
-                throw new IOException("database_group_changed_after_inspection");
-        }
-        Console.Error.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { kind = "startup.database-source-recheck",
-            digestReadBytes = evidence.Values.Sum(file => file.SizeBytes) }));
-        if (startupLease is not null)
-        {
-            startupLease.VerifyHeld(actual);
-            using var connection = DatabaseConnections.Open(databasePath);
-            using var transaction = connection.BeginTransaction(deferred: false);
-            if (DatabaseSchema.VerifyCatalog(connection, transaction) != DatabaseSchema.Digest)
-                throw new IOException("database_group_changed_after_inspection");
+            DatabaseSchema.VerifyCatalog(connection, transaction);
+            DatabaseInspector.VerifyIdentity(connection, actual.InstanceId, transaction: transaction);
             DatabaseReadIndexes.Ensure(connection, transaction);
-            startupLease.VerifyHeld(actual);
+            startupLease?.VerifyHeld(actual);
             transaction.Commit();
         }
         inspected.OwnedCopy?.Discard();
-        startupLease?.BindDatabase();
-        return new(databasePath, actual.InstanceId, actual.RuntimeRoot) { RuntimeLease = startupLease };
+        return Attach(path, actual, startupLease);
     }
 
     public static StateDatabase OpenCurrent(RuntimeInstance instance, InstanceLease startupLease)
     {
         using var profile = StartupProfile.Begin("database.admission");
         startupLease.VerifyHeld(instance);
-        var actual = new InstanceRoot(new()).OpenExisting(instance.RuntimeRoot);
+        if (startupLease.Database is { } current) return current;
+        var actual = RequireExisting(instance, startupLease);
+        var path = DatabaseLayout.RuntimePath(actual);
+        DatabaseLayout.RequireFiles(path);
+        try
+        {
+            foreach (var domain in DatabaseLayout.Domains)
+            {
+                using var frozen = DatabaseConnections.OpenFrozen(DatabaseLayout.PathFor(path, domain));
+                DatabaseSchema.VerifyDomain(frozen, domain, standalone: true);
+                DatabaseInspector.VerifyDomainIdentity(frozen, actual.InstanceId, domain, standalone: true);
+            }
+            DatabaseJournals.VerifyPaths(path);
+            using (var connection = DatabaseConnections.Open(path))
+            using (var transaction = connection.BeginTransaction(deferred: false))
+            {
+                DatabaseSchema.VerifyCatalog(connection, transaction);
+                DatabaseInspector.VerifyIdentity(connection, actual.InstanceId, transaction: transaction);
+                DatabaseReadIndexes.Ensure(connection, transaction);
+                startupLease.VerifyHeld(actual);
+                transaction.Commit();
+            }
+            return Attach(path, actual, startupLease);
+        }
+        catch (SqliteException error) { throw new IOException("unrecognized_or_corrupt_database", error); }
+    }
+
+    private static StateDatabase Attach(string path, RuntimeInstance instance, InstanceLease? lease)
+    {
+        if (lease?.Database is { } current)
+        {
+            DatabaseLayout.RequireInstance(current, instance);
+            return current;
+        }
+        var database = new StateDatabase(path, instance.InstanceId, instance.RuntimeRoot) { RuntimeLease = lease };
+        lease?.BindDatabase(database);
+        return database;
+    }
+
+    private static RuntimeInstance RequireExisting(RuntimeInstance instance, InstanceLease? lease)
+    {
+        lease?.VerifyHeld(instance);
+        var actual = new InstanceRoot(new ContractReader()).OpenExisting(instance.RuntimeRoot);
         if (actual != instance) throw new IOException("runtime_identity_mismatch");
         var guard = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(actual.RuntimeRoot, "state-initialization.guard"));
-        using (var input = new FileStream(guard, FileMode.Open, FileAccess.Read, FileShare.Read))
-            if (input.Length != 0) throw new IOException("unrecognized_state_initialization_guard");
-        var path = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(actual.RuntimeRoot, "state", "nexus.db"));
-        using (var connection = DatabaseConnections.Open(path, readOnly: true))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        try
         {
-            var digest = DatabaseSchema.VerifyCatalog(connection, transaction);
-            DatabaseInspector.VerifyIdentity(connection, actual.InstanceId, digest, transaction);
-            transaction.Commit();
+            using var input = new FileStream(guard, FileMode.Open, FileAccess.Read, FileShare.Read);
+            if (input.Length != 0) throw new IOException("state_initialization_incomplete");
         }
-        using (var connection = DatabaseConnections.Open(path))
-        using (var transaction = connection.BeginTransaction(deferred: false))
-        {
-            DatabaseReadIndexes.Ensure(connection, transaction);
-            startupLease.VerifyHeld(actual);
-            transaction.Commit();
-        }
-        startupLease.BindDatabase();
-        return new(path, actual.InstanceId, actual.RuntimeRoot) { RuntimeLease = startupLease };
+        catch (FileNotFoundException) when (File.Exists(Path.Combine(actual.RuntimeRoot, "state", "nexus.db")))
+        { throw new IOException("legacy_database_layout_requires_new_instance"); }
+        return actual;
     }
 
     internal T Write<T>(Func<SqliteConnection, SqliteTransaction, T> operation)
@@ -132,66 +146,71 @@ public sealed class StateDatabase
         using var opened = borrowed is null ? DatabaseConnections.Open(DatabasePath) : null;
         var connection = borrowed ?? opened!;
         using var transaction = connection.BeginTransaction(deferred: false);
-        var changes = SQLitePCL.raw.sqlite3_total_changes(connection.Handle!);
-        var schema = (long)DatabaseConnections.Scalar(connection, "PRAGMA main.schema_version;");
+        using var changes = new DatabaseChanges(connection);
         var result = operation(connection, transaction);
+        DatabaseRelations.VerifyChanges(connection, transaction, changes);
         transaction.Commit();
-        // Read-only and idempotent transactions do not invalidate background inventories.
-        if (SQLitePCL.raw.sqlite3_total_changes(connection.Handle!) != changes ||
-            (long)DatabaseConnections.Scalar(connection, "PRAGMA main.schema_version;") != schema)
+        if (changes.Domains != 0)
+        {
+            for (var index = 0; index < DatabaseLayout.Domains.Length; index++)
+                if ((changes.Domains & DatabaseLayout.Domains[index]) != 0) Interlocked.Increment(ref _domainSequences[index]);
             Interlocked.Increment(ref _commitSequence);
+        }
         return result;
     }
+
+    internal long DomainSequence(DatabaseDomain domain) => Interlocked.Read(ref _domainSequences[Array.IndexOf(DatabaseLayout.Domains, domain)]);
 
     public static StateDatabase CreateFresh(RuntimeInstance instance, InstanceLease? startupLease = null)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Windows runtime required");
         var verified = new InstanceRoot(new ContractReader()).OpenExisting(instance.RuntimeRoot);
-        if (verified.InstanceId != instance.InstanceId)
-            throw new IOException("runtime_identity_mismatch");
+        if (verified != instance) throw new IOException("runtime_identity_mismatch");
         startupLease?.VerifyHeld(verified);
         var directory = Path.Combine(instance.RuntimeRoot, "state");
-        var path = Path.Combine(directory, "nexus.db");
-        DatabaseConnections.RejectLinks(path);
+        DatabaseConnections.RejectLinks(directory);
+        if (File.Exists(Path.Combine(directory, "nexus.db"))) throw new IOException("legacy_database_layout_requires_new_instance");
         var initialEntries = new HashSet<string>(["instance.json", "instance.lock", "state"], StringComparer.OrdinalIgnoreCase);
-        if (Directory.EnumerateFileSystemEntries(instance.RuntimeRoot).Any(entry => !initialEntries.Contains(Path.GetFileName(entry))))
+        if (Directory.EnumerateFileSystemEntries(instance.RuntimeRoot).Any(entry => !initialEntries.Contains(Path.GetFileName(entry))) ||
+            Directory.Exists(directory) && Directory.EnumerateFileSystemEntries(directory).Any())
             throw new IOException("Runtime is not an uninitialized instance");
-        if (Directory.Exists(directory) && Directory.EnumerateFileSystemEntries(directory).Any())
-            throw new IOException("State directory is not empty");
-        // This guard outlives the database, so lost state cannot look like a fresh installation.
-        using (var guard = new FileStream(Path.Combine(instance.RuntimeRoot, "state-initialization.guard"), FileMode.CreateNew,
-                   FileAccess.Write, FileShare.None, 1, FileOptions.WriteThrough))
-            guard.Flush(flushToDisk: true);
+        using var guard = new FileStream(Path.Combine(instance.RuntimeRoot, "state-initialization.guard"), FileMode.CreateNew,
+            FileAccess.Write, FileShare.Read, 1, FileOptions.WriteThrough);
+        guard.WriteByte(1); guard.Flush(flushToDisk: true);
         Directory.CreateDirectory(directory);
-        using (new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { }
-        using var connection = DatabaseConnections.Open(path);
-        if (!string.Equals(Convert.ToString(DatabaseConnections.Scalar(connection, "PRAGMA journal_mode=WAL;"), CultureInfo.InvariantCulture), "wal", StringComparison.Ordinal))
-            throw new IOException("Required WAL mode is unavailable");
-        using var transaction = connection.BeginTransaction();
-        using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = DatabaseSchema.Sql;
-        command.ExecuteNonQuery();
-        DatabaseReadIndexes.Ensure(connection, transaction);
-        command.CommandText = "INSERT INTO schema_info VALUES(1,'nexus.state.database',1,$instance,$digest,$created);";
-        command.Parameters.AddWithValue("$instance", instance.InstanceId.ToString("D"));
-        command.Parameters.AddWithValue("$digest", SchemaDigest);
-        command.Parameters.AddWithValue("$created", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
-        command.ExecuteNonQuery();
-        HostSettingsRows.Insert(connection, transaction, new(0, NexusPipeline.Core.Settings.HostSettings.Default));
-        HostSettingsRows.Execute(connection, transaction, "INSERT INTO settings_current VALUES(1,0);");
-        HostSettingsRows.Execute(connection, transaction, "INSERT INTO startup_registration_current VALUES(1,NULL);");
-        NexusPipeline.Platform.Storage.Secrets.SecretReplayProof.Initialize(instance, connection, transaction);
-        transaction.Commit();
-        startupLease?.BindDatabase();
-        return new(path, instance.InstanceId, instance.RuntimeRoot) { RuntimeLease = startupLease };
+        var path = DatabaseLayout.RuntimePath(instance);
+        foreach (var domain in DatabaseLayout.Domains)
+            using (new FileStream(DatabaseLayout.PathFor(path, domain), FileMode.CreateNew, FileAccess.Write, FileShare.None)) { }
+        using (var connection = DatabaseConnections.Open(path, creating: true))
+        using (var transaction = connection.BeginTransaction(deferred: false))
+        {
+            foreach (var domain in DatabaseLayout.Domains)
+            {
+                DatabaseSchema.CreateInside(connection, transaction, domain);
+                using var command = connection.CreateCommand(); command.Transaction = transaction;
+                command.CommandText = $"INSERT INTO {DatabaseLayout.Alias(domain)}.schema_info VALUES(1,'nexus.state.domain',2,$instance,$domain,$digest,$created);";
+                command.Parameters.AddWithValue("$instance", instance.InstanceId.ToString("D"));
+                command.Parameters.AddWithValue("$domain", DatabaseLayout.Name(domain));
+                command.Parameters.AddWithValue("$digest", DatabaseSchema.DomainDigest(domain));
+                command.Parameters.AddWithValue("$created", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+                command.ExecuteNonQuery();
+            }
+            DatabaseReadIndexes.Ensure(connection, transaction);
+            HostSettingsRows.Insert(connection, transaction, new(0, NexusPipeline.Core.Settings.HostSettings.Default));
+            HostSettingsRows.Execute(connection, transaction, "INSERT INTO system.settings_current VALUES(1,0);");
+            HostSettingsRows.Execute(connection, transaction, "INSERT INTO system.startup_registration_current VALUES(1,NULL);");
+            Secrets.SecretReplayProof.Initialize(instance, connection, transaction);
+            transaction.Commit();
+        }
+        guard.SetLength(0); guard.Flush(flushToDisk: true);
+        return Attach(path, instance, startupLease);
     }
 
     public DatabaseSettings ReadSettings()
     {
-        using var connection = DatabaseConnections.Open(DatabasePath);
-        return new(Convert.ToString(DatabaseConnections.Scalar(connection, "PRAGMA journal_mode;"), CultureInfo.InvariantCulture)!,
-            Convert.ToInt64(DatabaseConnections.Scalar(connection, "PRAGMA synchronous;"), CultureInfo.InvariantCulture),
+        using var connection = DatabaseConnections.Open(DatabasePath, domains: DatabaseDomain.All);
+        return new(Convert.ToString(DatabaseConnections.Scalar(connection, "PRAGMA main.journal_mode;"), CultureInfo.InvariantCulture)!,
+            Convert.ToInt64(DatabaseConnections.Scalar(connection, "PRAGMA main.synchronous;"), CultureInfo.InvariantCulture),
             Convert.ToInt64(DatabaseConnections.Scalar(connection, "PRAGMA foreign_keys;"), CultureInfo.InvariantCulture),
             Convert.ToString(DatabaseConnections.Scalar(connection, "SELECT sqlite_version();"), CultureInfo.InvariantCulture)!);
     }
@@ -199,27 +218,9 @@ public sealed class StateDatabase
     public OperationAcceptance Accept(OperationIdentity identity, DateTimeOffset acceptedAt)
         => Write((connection, transaction) => OperationRows.Accept(connection, transaction, identity, acceptedAt));
 
-    public DatabaseCheckpoint Checkpoint(CheckpointMode mode = CheckpointMode.Passive)
-    {
-        using var lease = _writer.Enter();
-        using var connection = DatabaseConnections.Open(DatabasePath);
-        return DatabaseCheckpointReader.Execute(connection, mode);
-    }
-
     public DatabaseBackup BackupTo(string destinationPath)
     {
-        var destination = Path.GetFullPath(destinationPath);
-        DatabaseConnections.RejectLinks(destination);
-        if (string.Equals(destination, DatabasePath, StringComparison.OrdinalIgnoreCase))
-            throw new IOException("Backup destination cannot be the live database");
         using var lease = _writer.Enter();
-        {
-            using (new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { }
-            using (var source = DatabaseConnections.Open(DatabasePath))
-            using (var backup = DatabaseConnections.Open(destination))
-                source.BackupDatabase(backup);
-            using var file = File.OpenRead(destination);
-            return new(destination, InstanceId, file.Length, Convert.ToHexStringLower(SHA256.HashData(file)));
-        }
+        return DatabaseBackupStore.Create(this, destinationPath);
     }
 }

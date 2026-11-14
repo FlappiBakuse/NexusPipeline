@@ -37,7 +37,7 @@ internal sealed class PreparedSecretCommit(SecretPreparationPlan wire, Registere
             if (effect.State != FileEffectState.Completed || effect.ReceiptDigest != evidence.Completed.Digest ||
                 effect.IntentDigest != reference.Sha256 || effect.StepId != "secret-payload" || effect.Action != FileEffectAction.InstallCandidate)
                 throw new IOException("secret_child_receipt_unbound");
-            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System);
             using var transaction = connection.BeginTransaction(deferred: true);
             SecretPreparationRows.VerifyPlan(connection, transaction, plan);
             if (SecretPreparationRows.Read(connection, transaction, Guid.Parse(plan.OperationId), plan.ReplayProof) != SecretPreparationState.Pending)

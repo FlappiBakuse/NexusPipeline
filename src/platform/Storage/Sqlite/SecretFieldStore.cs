@@ -24,7 +24,7 @@ public sealed class SecretFieldStore : ISecretFieldStore
     public SecretFieldStore(RuntimeInstance instance, StateDatabase database, ISecretPreparationObserver? observer = null)
     {
         if (instance.InstanceId != database.InstanceId || !string.Equals(database.DatabasePath,
-            Path.Combine(instance.RuntimeRoot, "state", "nexus.db"), StringComparison.OrdinalIgnoreCase))
+            Path.Combine(instance.RuntimeRoot, "state", "runtime.db"), StringComparison.OrdinalIgnoreCase))
             throw new IOException("secret_store_instance_unbound");
         _instance = instance;
         _database = database;
@@ -36,7 +36,7 @@ public sealed class SecretFieldStore : ISecretFieldStore
     {
         RequireInstanceKey(key);
         cancellationToken.ThrowIfCancellationRequested();
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         return ValueTask.FromResult(Status(SecretFieldRows.ReadField(connection, null, key)));
     }
 
@@ -45,7 +45,7 @@ public sealed class SecretFieldStore : ISecretFieldStore
         RequireInstanceKey(key);
         key.RequireGenericRead();
         cancellationToken.ThrowIfCancellationRequested();
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         var state = SecretFieldRows.ReadField(connection, null, key);
         if (state.SecretId is not { } id) throw new IOException("secret_not_configured");
         var value = _files.Read(ReadPayload(connection, null, id));
@@ -57,7 +57,7 @@ public sealed class SecretFieldStore : ISecretFieldStore
     {
         ArgumentNullException.ThrowIfNull(expected);
         var key = SecretFieldKey.HostProxyPassword(_instance.InstanceId);
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         SecretFieldRows.RequireReference(connection, null, key, expected);
         if (expected.SecretId is not { } id) throw new IOException("secret_not_configured");
         return _files.Read(ReadPayload(connection, null, id));
@@ -66,7 +66,7 @@ public sealed class SecretFieldStore : ISecretFieldStore
     internal SecretValue ReadProjectInput(SecretFieldKey key, SecretFieldReference expected)
     {
         RequireInstanceKey(key); key.RequireExtensionOwner(key.ExtensionId!);
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         SecretFieldRows.RequireReference(connection, null, key, expected);
         if (expected.SecretId is not { } id) throw new IOException("secret_not_configured");
         return _files.Read(ReadPayload(connection, null, id));
@@ -76,7 +76,7 @@ public sealed class SecretFieldStore : ISecretFieldStore
     {
         ArgumentNullException.ThrowIfNull(expected);
         var key = SecretFieldKey.HostControlBearer(_instance.InstanceId);
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         SecretFieldRows.RequireReference(connection, null, key, expected);
         if (expected.SecretId is not { } id) throw new IOException("secret_not_configured");
         return _files.Read(ReadPayload(connection, null, id));
@@ -85,7 +85,7 @@ public sealed class SecretFieldStore : ISecretFieldStore
     internal SecretPayloadLease HoldControlBearer(SecretFieldReference expected)
     {
         var key = SecretFieldKey.HostControlBearer(_instance.InstanceId);
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         SecretFieldRows.RequireReference(connection, null, key, expected);
         if (expected.SecretId is not { } id) throw new IOException("secret_not_configured");
         return _files.HoldVerified(ReadPayload(connection, null, id), trackPath: true);
@@ -121,7 +121,7 @@ public sealed class SecretFieldStore : ISecretFieldStore
         cancellationToken.ThrowIfCancellationRequested();
         var identity = Identity(operationId, key, expectedRevision, disposition);
         string? proof;
-        using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System))
         {
             proof = value is null ? null : SecretReplayProof.Compute(_instance, connection, identity, value);
             var replay = ReadReplay(connection, null, identity, proof);
@@ -164,7 +164,7 @@ public sealed class SecretFieldStore : ISecretFieldStore
             || (disposition == SecretDisposition.Set) != (value is not null)) throw new ArgumentException("secret_mutation_invalid");
         cancellationToken.ThrowIfCancellationRequested();
         var identity = Identity(operationId, key, expectedRevision, disposition);
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         var proof = value is null ? null : SecretReplayProof.Compute(_instance, connection, identity, value);
         return ReadReplay(connection, null, identity, proof);
     }
@@ -174,7 +174,7 @@ public sealed class SecretFieldStore : ISecretFieldStore
         if (state.SecretId is not { } id) return new(state.Revision, null, false, false);
         try
         {
-            using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
             using var material = _files.Read(ReadPayload(connection, null, id));
             return new(state.Revision, id, true, true);
         }
@@ -190,7 +190,7 @@ public sealed class SecretFieldStore : ISecretFieldStore
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = "SELECT o.subject_id,o.request_digest,o.operation_kind,m.result_revision,m.result_secret_id,m.result_readable,m.replay_proof " +
-            "FROM operations o LEFT JOIN secret_mutations m ON m.operation_id=o.operation_id WHERE o.operation_id=$id;";
+            "FROM main.operations o LEFT JOIN system.secret_mutations m ON m.operation_id=o.operation_id WHERE o.operation_id=$id;";
         command.Parameters.AddWithValue("$id", identity.OperationId.ToString("D"));
         using var reader = command.ExecuteReader();
         if (!reader.Read()) return null;
@@ -210,7 +210,7 @@ public sealed class SecretFieldStore : ISecretFieldStore
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT protection_scheme,owner_sid,digest,size_bytes,state FROM secret_payloads WHERE secret_id=$id;";
+        command.CommandText = "SELECT protection_scheme,owner_sid,digest,size_bytes,state FROM system.secret_payloads WHERE secret_id=$id;";
         command.Parameters.AddWithValue("$id", id.ToString("D"));
         using var reader = command.ExecuteReader();
         if (!reader.Read() || reader.GetString(4) != "committed" && !(allowRetired && reader.GetString(4) == "retired")) throw new IOException("secret_payload_reference_unverified");
@@ -224,20 +224,20 @@ public sealed class SecretFieldStore : ISecretFieldStore
         command.Transaction = transaction;
         if (candidate is not null)
         {
-            command.CommandText = "UPDATE secret_payloads SET state='committed' WHERE secret_id=$secret AND state='prepared';";
+            command.CommandText = "UPDATE system.secret_payloads SET state='committed' WHERE secret_id=$secret AND state='prepared';";
             command.Parameters.AddWithValue("$secret", candidate.SecretId.ToString("D"));
             if (command.ExecuteNonQuery() != 1) throw new IOException("secret_candidate_state_changed");
             command.Parameters.Clear();
         }
         SecretFieldRows.RequireDatabaseKey(connection, transaction, key);
-        command.CommandText = "INSERT INTO secret_fields(owner_kind,owner_id,subject_id,field,revision,secret_id) VALUES($kind,$owner,$subject,$field,$revision,$secret) " +
+        command.CommandText = "INSERT INTO system.secret_fields(owner_kind,owner_id,subject_id,field,revision,secret_id) VALUES($kind,$owner,$subject,$field,$revision,$secret) " +
             "ON CONFLICT(owner_kind,owner_id,subject_id,field) DO UPDATE SET revision=excluded.revision,secret_id=excluded.secret_id;";
         SecretFieldRows.BindKey(command, key);
         command.Parameters.AddWithValue("$revision", next.Revision);
         command.Parameters.AddWithValue("$secret", next.SecretId is { } secret ? secret.ToString("D") : DBNull.Value);
         command.ExecuteNonQuery();
         command.Parameters.Clear();
-        command.CommandText = "INSERT INTO secret_mutations(operation_id,result_revision,result_secret_id,result_readable,replay_proof) " +
+        command.CommandText = "INSERT INTO system.secret_mutations(operation_id,result_revision,result_secret_id,result_readable,replay_proof) " +
             "VALUES($operation,$revision,$secret,$readable,$proof);";
         command.Parameters.AddWithValue("$revision", next.Revision);
         command.Parameters.AddWithValue("$secret", next.SecretId is { } resultSecret ? resultSecret.ToString("D") : DBNull.Value);
@@ -245,15 +245,15 @@ public sealed class SecretFieldStore : ISecretFieldStore
         command.Parameters.AddWithValue("$readable", readable);
         command.Parameters.AddWithValue("$proof", (object?)proof ?? DBNull.Value);
         command.ExecuteNonQuery();
-        command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$operation;";
+        command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$operation;";
         command.ExecuteNonQuery();
     }
 
     public static void VerifyInventory(StateDatabase database)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications | DatabaseDomain.System);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT owner_kind,owner_id,subject_id,field,revision,secret_id FROM secret_fields;";
+        command.CommandText = "SELECT owner_kind,owner_id,subject_id,field,revision,secret_id FROM system.secret_fields;";
         using var rows = command.ExecuteReader();
         while (rows.Read())
         {

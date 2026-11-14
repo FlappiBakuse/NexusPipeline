@@ -186,9 +186,9 @@ public sealed class EffectOutboxTests
         var fixture = Create();
         var journal = fixture.Journal with { Kind = kind };
         fixture.Registry.AcceptPrepared(fixture.Operation, journal, [fixture.Effect], DateTimeOffset.UtcNow);
-        using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath);
+        using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, domains: DatabaseDomain.Runtime);
         using var command = connection.CreateCommand();
-        command.CommandText = "UPDATE file_effects SET state='reverted',receipt_digest=$digest WHERE journal_id=$id;";
+        command.CommandText = "UPDATE main.file_effects SET state='reverted',receipt_digest=$digest WHERE journal_id=$id;";
         command.Parameters.AddWithValue("$id", journal.JournalId.ToString("D"));
         command.Parameters.AddWithValue("$digest", new string('c', 64));
         var rejected = Assert.Throws<Microsoft.Data.Sqlite.SqliteException>(() => command.ExecuteNonQuery());
@@ -216,7 +216,7 @@ public sealed class EffectOutboxTests
         Assert.Null(fixture.Registry.FindJournal(fixture.Journal.JournalId));
         Assert.Empty(fixture.Outbox.Read(fixture.Journal.JournalId));
         Assert.DoesNotContain(fixture.Registry.ReadSnapshot().Isolations, item => item.JournalId == fixture.Journal.JournalId);
-        using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         Assert.Null(OperationRows.ReadExisting(connection, transaction, fixture.Operation));
     }

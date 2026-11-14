@@ -121,7 +121,7 @@ public sealed class SecretDocumentTests
 
     internal static ExtensionDocument? ReadDocument(ExtensionCatalogFixture fixture, string name)
     {
-        using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions);
         return ExtensionDocumentRows.Read(connection, null, Extension, name);
     }
 
@@ -135,7 +135,7 @@ public sealed class SecretDocumentTests
 
     internal static BoundSecretDocument? ReadPublication(ExtensionCatalogFixture fixture, Guid operation)
     {
-        using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         var reference = SecretDocumentRows.Find(connection, null, operation);
         return reference is null ? null : new SecretDocumentFormat(fixture.Instance, fixture.Contracts).Read(reference);
     }

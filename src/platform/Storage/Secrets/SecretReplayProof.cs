@@ -40,7 +40,7 @@ internal static class SecretReplayProof
         }
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "INSERT INTO secret_replay_key VALUES(1,$id,$owner,$digest,$size);";
+        command.CommandText = "INSERT INTO system.secret_replay_key VALUES(1,$id,$owner,$digest,$size);";
         command.Parameters.AddWithValue("$id", id.ToString("D"));
         command.Parameters.AddWithValue("$owner", sid);
         command.Parameters.AddWithValue("$digest", digest);
@@ -55,7 +55,7 @@ internal static class SecretReplayProof
         long size;
         using (var command = connection.CreateCommand())
         {
-            command.CommandText = "SELECT key_id,owner_sid,digest,size_bytes FROM secret_replay_key WHERE singleton=1;";
+            command.CommandText = "SELECT key_id,owner_sid,digest,size_bytes FROM system.secret_replay_key WHERE singleton=1;";
             using var row = command.ExecuteReader();
             if (!row.Read() || !Guid.TryParseExact(row.GetString(0), "D", out id) || id == Guid.Empty)
                 throw new IOException("secret_replay_key_missing");

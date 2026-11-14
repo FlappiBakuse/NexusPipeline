@@ -23,7 +23,7 @@ internal sealed class PreparedManualSource : IDisposable
         try
         {
             WorkStartEvidence begin;
-            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications | DatabaseDomain.System))
             using (var transaction = connection.BeginTransaction(deferred: true))
             {
                 var invocation = WorkInvocationEvidence.ReadManual(instance, contracts, actual.Reference, connection, transaction);

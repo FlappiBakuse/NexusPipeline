@@ -150,7 +150,7 @@ public sealed class ControllerCrashTests(ITestOutputHelper output)
         Assert.Equal(before, Fingerprints(fixture.Instance.RuntimeRoot));
         var inspection = DatabaseInspector.Inspect(fixture.Database.DatabasePath, fixture.Instance.InstanceId, Path.Combine(fixture.Root, "readonly-copy"));
         var snapshot = RecoveryJournalRegistry.ReadInspectedSnapshot(inspection);
-        using var connection = DatabaseConnections.Open(Path.Combine(inspection.DiagnosticCopyRoot, "nexus.db"), readOnly: true);
+        using var connection = DatabaseConnections.Open(Path.Combine(inspection.DiagnosticCopyRoot, "runtime.db"), readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         var session = ConfigurationEditRows.Read(connection, transaction, sessionId, "fixture");
         Assert.NotNull(session);

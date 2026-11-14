@@ -27,7 +27,7 @@ public sealed class StartSourceTests
         var change = new HostSettingsChange(before.Revision, before.Values with { AutomaticRetry = new(approved, 7) });
         var result = source.Settings.Commit(HostSettingsStore.Identity(Guid.NewGuid(), "retry-settings", change), change, DateTimeOffset.UtcNow);
         Assert.Equal(new AutomaticRetryPreferences(approved, 7), result.Saved.Values.AutomaticRetry);
-        using var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         Assert.Equal(HostSettings.Default.AutomaticRetry, HostSettingsRows.Read(connection, transaction, before.Revision).Values.AutomaticRetry);
     }
@@ -50,7 +50,7 @@ public sealed class StartSourceTests
         };
         var request = source.Request(target); var operation = Guid.NewGuid(); const string subject = "start-source-fixture";
         var accepted = fixture.Service.Start(operation, subject, request, DateTimeOffset.UtcNow);
-        using var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         var frozen = StartSourceRows.Read(connection, transaction, operation);
         Assert.Equal(request, frozen.Request); Assert.Equal(subject, frozen.Identity.SubjectId);
@@ -69,7 +69,7 @@ public sealed class StartSourceTests
     {
         using var fixture = new ExecutionAdmissionFixture(); var source = fixture.Source;
         var operation = Guid.NewGuid(); var before = fixture.Counts();
-        fixture.Execute("CREATE TRIGGER fail_start_source BEFORE INSERT ON execution_start_sources BEGIN SELECT RAISE(ABORT,'source-fixture'); END;");
+        fixture.Execute("CREATE TRIGGER main.fail_start_source BEFORE INSERT ON execution_start_sources BEGIN SELECT RAISE(ABORT,'source-fixture'); END;");
         try
         {
             Assert.Throws<SqliteException>(() => fixture.Service.Start(operation, "source-rollback",
@@ -77,7 +77,7 @@ public sealed class StartSourceTests
             Assert.Equal(before, fixture.Counts()); Assert.Equal(0, fixture.Count("execution_start_sources"));
             Assert.Equal(0, fixture.Count("journal_writer_job_roots"));
         }
-        finally { fixture.Execute("DROP TRIGGER fail_start_source;"); }
+        finally { fixture.Execute("DROP TRIGGER main.fail_start_source;"); }
         var actual = fixture.Service.Start(operation, "source-rollback", source.Request(new BindingTarget(source.OtherBinding)), DateTimeOffset.UtcNow);
         Assert.True(actual.Acceptance.IsNew); Assert.Equal(1, fixture.Count("execution_start_sources"));
     }
@@ -92,9 +92,9 @@ public sealed class StartSourceTests
         _ = fixture.Service.Start(Guid.NewGuid(), "source-diagnostic", source.Request(new BindingTarget(source.OtherBinding)), DateTimeOffset.UtcNow);
         fixture.Execute(field switch
         {
-            "source" => "DELETE FROM execution_start_sources;",
-            "subject" => "UPDATE execution_start_sources SET subject_id='another-subject';",
-            _ => "UPDATE operations SET request_digest='" + new string('a', 64) + "' WHERE operation_kind='execution.start';"
+            "source" => "DELETE FROM main.execution_start_sources;",
+            "subject" => "UPDATE main.execution_start_sources SET subject_id='another-subject';",
+            _ => "UPDATE main.operations SET request_digest='" + new string('a', 64) + "' WHERE operation_kind='execution.start';"
         });
         var before = File.ReadAllBytes(source.Database.DatabasePath);
         var wal = source.Database.DatabasePath + "-wal"; var walBefore = File.Exists(wal) ? File.ReadAllBytes(wal) : null;

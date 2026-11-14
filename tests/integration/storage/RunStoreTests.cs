@@ -71,12 +71,13 @@ public sealed class RunStoreTests
         var condition = boundary == "journal" ? $"NEW.journal_id='{second.Plan.JournalId:D}'"
             : boundary == "resource" ? $"NEW.resource_id='{second.Address.ResourceId}'" : "1";
         var table = boundary == "journal" ? "operation_journals" : boundary == "resource" ? "configuration_run_resources" : "configuration_run_sessions";
-        fixture.Execute($"CREATE TRIGGER fixture_fail_run BEFORE INSERT ON {table} WHEN {condition} BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
+        var triggerName = NexusPipeline.Platform.Storage.Sqlite.DatabaseTables.Name(table).Split('.')[0] + ".fixture_fail_run";
+        fixture.Execute($"CREATE TRIGGER {triggerName} BEFORE INSERT ON {table} WHEN {condition} BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
         var before = Counts(fixture); var sessionId = Guid.NewGuid(); var operation = Identity(sessionId, parent, prepared); var store = Store(fixture);
         Assert.Throws<SqliteException>(() => store.Begin(operation, Guid.Parse(parent.JournalId), fixture.StepId, prepared, DateTimeOffset.UtcNow));
         Assert.Null(store.Read(sessionId, ConfigurationRunFixture.Subject));
         Assert.Equal(before, Counts(fixture)); fixture.VerifyOriginal();
-        fixture.Execute("DROP TRIGGER fixture_fail_run;");
+        fixture.Execute("DROP TRIGGER " + triggerName + ";");
         Assert.True(store.Begin(operation, Guid.Parse(parent.JournalId), fixture.StepId, prepared, DateTimeOffset.UtcNow).IsNew);
         Assert.Equal(2, store.Read(sessionId, ConfigurationRunFixture.Subject)!.Resources.Length);
     }
@@ -129,7 +130,7 @@ public sealed class RunStoreTests
         if (fault == "partial-children")
         {
             var invalid = fixture.Source.Blobs.PersistPlan(JsonSerializer.SerializeToUtf8Bytes(parent with { ConfigurationPlans = parent.ConfigurationPlans.Take(1).ToArray() }));
-            fixture.Execute($"UPDATE operation_journals SET plan_path='{invalid.RelativePath}',plan_digest='{invalid.Sha256}' WHERE journal_id='{parentId:D}';");
+            fixture.Execute($"UPDATE main.operation_journals SET plan_path='{invalid.RelativePath}',plan_digest='{invalid.Sha256}' WHERE journal_id='{parentId:D}';");
         }
         var input = alternate ?? prepared; var sessionId = Guid.NewGuid();
         var operation = ConfigurationRunStore.BeginIdentity(sessionId, ConfigurationRunFixture.Subject, parentId, fixture.StepId, input);
@@ -187,7 +188,7 @@ public sealed class RunStoreTests
         foreach (var resource in session.Resources.Take(fault == "not-installed" ? 0 : fault == "partial" ? 1 : 2)) fixture.Install(resource.JournalId);
         if (fault == "binding") fixture.ChangeDefinition("binding-revision");
         if (fault == "configuration") fixture.SaveAgain();
-        if (fault == "closed-gate") fixture.Execute($"UPDATE configuration_run_sessions SET writer_gate=1 WHERE session_id='{sessionId:D}';");
+        if (fault == "closed-gate") fixture.Execute($"UPDATE configuration.configuration_run_sessions SET writer_gate=1 WHERE session_id='{sessionId:D}';");
         var before = PersistentFingerprints(fixture.Source.Root);
         Assert.ThrowsAny<Exception>(() => store.MarkRunning(sessionId, ConfigurationRunFixture.Subject, fault == "revision" ? 2 : 1));
         Assert.Equal(before, PersistentFingerprints(fixture.Source.Root));

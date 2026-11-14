@@ -120,7 +120,7 @@ public sealed class ProxyClaimsTests
         using var prepared = new ExecutionAdmissionPreparation(owner, source.Instance, source.Database, new(), source.Lease,
             fixture.Resources, fixture.Index, builder,
             new(PhysicalPathPolicy.RuntimeApplicationDirectory(), Path.Combine(source.Instance.RuntimeRoot, "extensions"))).Freeze(identity, draft, root);
-        fixture.Execute("INSERT INTO secret_fields(owner_kind,owner_id,subject_id,field,revision,secret_id) " +
+        fixture.Execute("INSERT INTO system.secret_fields(owner_kind,owner_id,subject_id,field,revision,secret_id) " +
             $"VALUES('host','{source.Instance.InstanceId:D}','{source.Instance.InstanceId:D}','proxy-password',1,NULL);");
         var before = source.Snapshot();
         var acceptance = new RunAttemptAcceptance(source.Instance, new(), source.Database);

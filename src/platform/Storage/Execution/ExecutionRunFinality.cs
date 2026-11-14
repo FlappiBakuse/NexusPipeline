@@ -19,7 +19,7 @@ public sealed class ExecutionRunFinality(RuntimeInstance instance, StateDatabase
     public RunFinalityDecision ReadDecision(AttemptReceipt receipt)
     {
         ArgumentNullException.ThrowIfNull(receipt);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         if (AttemptReceiptStore.ReadInside(connection, transaction, receipt.Facts.AttemptId) != receipt)
             throw new IOException("execution_retry_receipt_unbound");
@@ -42,7 +42,7 @@ public sealed class ExecutionRunFinality(RuntimeInstance instance, StateDatabase
             .Read(AttemptPlanCodec.Reference(attempt.ExecutionPlan)).ReadWire();
         _ = new RetryHookEvidence(instance, database, contracts).RequireAll(attempt, total, physical.Root, verifyContents: false);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM execution_start_sources WHERE run_id=$run AND attempt_ordinal>$ordinal);";
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.execution_start_sources WHERE run_id=$run AND attempt_ordinal>$ordinal);";
         command.Parameters.AddWithValue("$run", receipt.Facts.RunId.ToString("D"));
         command.Parameters.AddWithValue("$ordinal", receipt.Facts.Ordinal);
         if ((long)command.ExecuteScalar()! != 0) return new(false, null);

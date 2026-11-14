@@ -13,24 +13,24 @@ internal static class WorkEffectRows
     internal static void Pin(SqliteConnection connection, SqliteTransaction transaction, string extensionId, string field, string version)
     {
         using var insert = Command(connection, transaction,
-            "INSERT INTO work_identity_versions VALUES($0,$1,$2) ON CONFLICT(extension_id,field) DO NOTHING;", extensionId, field, version);
+            "INSERT INTO main.work_identity_versions VALUES($0,$1,$2) ON CONFLICT(extension_id,field) DO NOTHING;", extensionId, field, version);
         insert.ExecuteNonQuery();
         using var read = Command(connection, transaction,
-            "SELECT identity_version FROM work_identity_versions WHERE extension_id=$0 AND field=$1;", extensionId, field);
+            "SELECT identity_version FROM main.work_identity_versions WHERE extension_id=$0 AND field=$1;", extensionId, field);
         if (!Equals(read.ExecuteScalar(), version)) throw new IOException("work_identity_migration_required");
     }
 
     internal static WorkEffectClaim? Find(SqliteConnection connection, SqliteTransaction? transaction, WorkEffectKey key, string roleId, string serverId)
     {
         using var command = Command(connection, transaction,
-            "SELECT * FROM work_effect_claims WHERE extension_id=$0 AND field=$1 AND activity_id=$2 AND local_date=$3 AND family_sha256=$4 AND role_id=$5 AND server_id=$6;",
+            "SELECT * FROM main.work_effect_claims WHERE extension_id=$0 AND field=$1 AND activity_id=$2 AND local_date=$3 AND family_sha256=$4 AND role_id=$5 AND server_id=$6;",
             key.ExtensionId, key.Field, key.ActivityId, key.LocalDate, key.Family, roleId, serverId);
         using var row = command.ExecuteReader(); return row.Read() ? Read(row) : null;
     }
 
     internal static WorkEffectClaim Require(SqliteConnection connection, SqliteTransaction? transaction, Guid id)
     {
-        using var command = Command(connection, transaction, "SELECT * FROM work_effect_claims WHERE claim_id=$0;", id.ToString("D"));
+        using var command = Command(connection, transaction, "SELECT * FROM main.work_effect_claims WHERE claim_id=$0;", id.ToString("D"));
         using var row = command.ExecuteReader(); return row.Read() ? Read(row) : throw Invalid();
     }
 
@@ -38,7 +38,7 @@ internal static class WorkEffectRows
     {
         var owner = claim.Owner; var key = claim.Key;
         using var command = Command(connection, transaction,
-            "INSERT INTO work_effect_claims VALUES($0,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15);",
+            "INSERT INTO main.work_effect_claims VALUES($0,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15);",
             claim.Id.ToString("D"), key.ExtensionId, key.Field, key.ActivityId, key.LocalDate, key.Family,
             claim.ParentId?.ToString("D"), claim.RoleId, claim.ServerId, owner.OperationId.ToString("D"), owner.ProviderId,
             owner.TaskId.ToString("D"), owner.RunId.ToString("D"), owner.AttemptId.ToString("D"), owner.SecretId.ToString("D"), owner.SecretRevision);
@@ -48,7 +48,7 @@ internal static class WorkEffectRows
     internal static WorkEffectEvent State(SqliteConnection connection, SqliteTransaction? transaction, Guid id)
     {
         using var command = Command(connection, transaction,
-            "SELECT sequence,kind,evidence_code FROM work_effect_events WHERE claim_id=$0 ORDER BY sequence;", id.ToString("D"));
+            "SELECT sequence,kind,evidence_code FROM main.work_effect_events WHERE claim_id=$0 ORDER BY sequence;", id.ToString("D"));
         using var rows = command.ExecuteReader(); long sequence = 0; string? kind = null;
         while (rows.Read())
         {
@@ -65,14 +65,14 @@ internal static class WorkEffectRows
     internal static void Append(SqliteConnection connection, SqliteTransaction transaction, Guid id, WorkEffectOwner owner, string kind, string? evidence)
     {
         using var command = Command(connection, transaction,
-            "INSERT INTO work_effect_events SELECT $0,COALESCE(MAX(sequence),0)+1,$1,$2,$3,$4,$5 FROM work_effect_events WHERE claim_id=$0;",
+            "INSERT INTO main.work_effect_events SELECT $0,COALESCE(MAX(sequence),0)+1,$1,$2,$3,$4,$5 FROM main.work_effect_events WHERE claim_id=$0;",
             id.ToString("D"), owner.OperationId.ToString("D"), owner.RunId.ToString("D"), owner.AttemptId.ToString("D"), kind, evidence);
         command.ExecuteNonQuery();
     }
 
     internal static IReadOnlyList<Guid> Children(SqliteConnection connection, SqliteTransaction? transaction, Guid id)
     {
-        using var command = Command(connection, transaction, "SELECT claim_id FROM work_effect_claims WHERE parent_id=$0 ORDER BY claim_id;", id.ToString("D"));
+        using var command = Command(connection, transaction, "SELECT claim_id FROM main.work_effect_claims WHERE parent_id=$0 ORDER BY claim_id;", id.ToString("D"));
         using var rows = command.ExecuteReader(); var result = new List<Guid>();
         while (rows.Read()) { if (result.Count >= 1024) throw Invalid(); result.Add(Id(rows.GetString(0))); }
         return result;

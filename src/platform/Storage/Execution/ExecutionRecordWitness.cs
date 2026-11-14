@@ -13,7 +13,7 @@ internal sealed class ExecutionRecordWitness(RuntimeInstance instance, StateData
 {
     internal CompletedRunRecord Read(AttemptReceipt receipt, RecoveredRecordTiming? recovery = null)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
         using var transaction = connection.BeginTransaction(deferred: true);
         RequireFinalInside(connection, transaction, receipt);
         var source = StartSourceRows.Read(connection, transaction, receipt.OperationId);
@@ -47,7 +47,7 @@ internal sealed class ExecutionRecordWitness(RuntimeInstance instance, StateData
         if (retry is not null)
         {
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT o.created_at FROM execution_retry_outcomes d JOIN operations o ON o.operation_id=d.operation_id WHERE d.retry_operation_id=$retry;";
+            command.CommandText = "SELECT o.created_at FROM main.execution_retry_outcomes d JOIN main.operations o ON o.operation_id=d.operation_id WHERE d.retry_operation_id=$retry;";
             command.Parameters.AddWithValue("$retry", RetryIntentCodec.Identity(retry).OperationId.ToString("D"));
             var closed = DateTimeOffset.ParseExact(command.ExecuteScalar() as string ?? throw Invalid(), "O",
                 System.Globalization.CultureInfo.InvariantCulture);
@@ -74,7 +74,7 @@ internal sealed class ExecutionRecordWitness(RuntimeInstance instance, StateData
     {
         if (AttemptReceiptStore.ReadInside(connection, transaction, receipt.Facts.AttemptId) != receipt) throw Invalid();
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM execution_start_sources WHERE run_id=$run AND attempt_ordinal>$ordinal);";
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.execution_start_sources WHERE run_id=$run AND attempt_ordinal>$ordinal);";
         command.Parameters.AddWithValue("$run", receipt.Facts.RunId.ToString("D"));
         command.Parameters.AddWithValue("$ordinal", receipt.Facts.Ordinal);
         if ((long)command.ExecuteScalar()! != 0) throw Invalid();

@@ -31,9 +31,9 @@ internal sealed class ConfigurationSceneEvidence(RuntimeInstance instance, State
                     scenes.Add(new(child.OperationId, child.JournalId, child.Kind, run.Source.Address, reference.RelativePath, reference.Sha256));
                     continue;
                 }
-                using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+                using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
                 using var command = connection.CreateCommand();
-                command.CommandText = "SELECT EXISTS(SELECT 1 FROM configuration_run_sessions WHERE parent_journal_id=$parent AND step_id=$step AND invocation_ordinal=$invocation);";
+                command.CommandText = "SELECT EXISTS(SELECT 1 FROM configuration.configuration_run_sessions WHERE parent_journal_id=$parent AND step_id=$step AND invocation_ordinal=$invocation);";
                 command.Parameters.AddWithValue("$parent", parentJournalId.ToString("D")); command.Parameters.AddWithValue("$step", stepId);
                 command.Parameters.AddWithValue("$invocation", readOrdinal(stepId, reference));
                 if ((long)command.ExecuteScalar()! != 0 || scanner.Capture(Path.Combine(instance.RuntimeRoot, "journals", child.JournalId.ToString("D")), default).Shape != FileObjectKind.Missing ||

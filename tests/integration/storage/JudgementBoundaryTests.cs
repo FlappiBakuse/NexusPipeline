@@ -40,13 +40,13 @@ public sealed class JudgementBoundaryTests
     {
         using var fixture = new JudgementIntegrationFixture(AutomationJudgementLanguage.JavaScript, FinalOnly);
         await using var step = new JudgementOwnedStep(fixture);
-        fixture.Base.Execute($"CREATE TRIGGER fail_judgement_registration BEFORE INSERT ON journal_writer_jobs " +
-            $"WHEN NEW.journal_id='{fixture.Accepted.JournalId:D}' AND EXISTS(SELECT 1 FROM journal_writer_jobs WHERE journal_id=NEW.journal_id) " +
+        fixture.Base.Execute($"CREATE TRIGGER main.fail_judgement_registration BEFORE INSERT ON journal_writer_jobs " +
+            $"WHEN NEW.journal_id='{fixture.Accepted.JournalId:D}' AND EXISTS(SELECT 1 FROM main.journal_writer_jobs WHERE journal_id=NEW.journal_id) " +
             "BEGIN SELECT RAISE(ABORT,'actual_worker_registration_failure'); END;");
         Assert.Throws<SqliteException>(step.Prepare);
         Assert.NotNull(step.Worker); Assert.Equal(1, fixture.Base.Count("journal_writer_jobs"));
         Assert.Equal(2, fixture.State.Jobs.Length); Assert.Equal(0, fixture.Base.Count("journal_writer_job_roots"));
-        fixture.Base.Execute("DROP TRIGGER fail_judgement_registration;");
+        fixture.Base.Execute("DROP TRIGGER main.fail_judgement_registration;");
         await step.CompletePreparedCancellation();
         var state = fixture.State; Assert.Equal(JournalPhase.Committed, state.Journal.Phase);
         Assert.Equal(2, fixture.Base.Count("journal_writer_jobs")); Assert.Equal(2, fixture.Base.Count("journal_writer_job_closures"));

@@ -73,9 +73,9 @@ public sealed class InstalledMetadataTests
         using var reservation = await Inventory(fixture).ReserveForApplyAsync(fixture.Package.OperationId, "fixture-plugin", default);
         _ = Physical(fixture).Apply(fixture.Prepared!, reservation, default);
         var bytes = File.ReadAllBytes(Path.Combine(fixture.Target, "manifest.json"));
-        fixture.Package.Catalog.Sql("UPDATE operation_journals SET phase='committed' WHERE journal_id='" + accepted.JournalId + "';");
+        fixture.Package.Catalog.Sql("UPDATE main.operation_journals SET phase='committed' WHERE journal_id='" + accepted.JournalId + "';");
         try { Assert.Throws<IOException>(() => Binding(fixture).Read(accepted.JournalId, accepted.Plan)); }
-        finally { fixture.Package.Catalog.Sql("UPDATE operation_journals SET phase='applied' WHERE journal_id='" + accepted.JournalId + "';"); }
+        finally { fixture.Package.Catalog.Sql("UPDATE main.operation_journals SET phase='applied' WHERE journal_id='" + accepted.JournalId + "';"); }
         Assert.Equal(bytes, File.ReadAllBytes(Path.Combine(fixture.Target, "manifest.json")));
         Assert.Null(new ExtensionInstalledEvidence(fixture.Package.Catalog.Instance, fixture.Package.Catalog.Database,
             fixture.Package.Catalog.Contracts, fixture.Roots).ReadCurrent("fixture-plugin"));

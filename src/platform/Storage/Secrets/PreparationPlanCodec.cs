@@ -62,7 +62,7 @@ public sealed class PreparationPlanCodec(RuntimeInstance instance, ContractReade
             RequireAbsent(Path.Combine(instance.RuntimeRoot, relative));
             foreach (var stage in new[] { "started", "completed" }) RequireAbsent(Path.Combine(receiptParent, $"{journalId:D}.{stage}.json"));
             string proof;
-            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System))
             {
                 held.Add(SecretReplayProof.Hold(instance, connection));
                 proof = SecretReplayProof.Compute(instance, connection, operation, value);

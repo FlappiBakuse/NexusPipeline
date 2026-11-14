@@ -91,14 +91,14 @@ public sealed class RetryConfigurationTests
         using var pending = Assert.IsType<PreparedExecutionRetry>(retries.Prepare(first.Facts.RunId, first.Facts.AttemptId, DateTimeOffset.UtcNow));
         var operations = fixture.Base.Count("operations"); var journals = fixture.Base.Count("operation_journals");
         var scene = File.ReadAllBytes(fixture.Source.Configuration);
-        fixture.Base.Execute("CREATE TRIGGER reject_retry_source BEFORE INSERT ON execution_start_sources WHEN NEW.attempt_ordinal=2 " +
+        fixture.Base.Execute("CREATE TRIGGER main.reject_retry_source BEFORE INSERT ON execution_start_sources WHEN NEW.attempt_ordinal=2 " +
             "BEGIN SELECT RAISE(ABORT,'retry_source_fault'); END;");
         Assert.ThrowsAny<Exception>(() => retries.Start(pending, DateTimeOffset.UtcNow));
         Assert.Equal(operations, fixture.Base.Count("operations")); Assert.Equal(journals, fixture.Base.Count("operation_journals"));
         Assert.Single(File.ReadAllLines(fixture.Marker + ".attempts"));
         Assert.Equal(2, new ConfigurationRevisionStore(fixture.Source.Instance, fixture.Source.Database, new()).Read(fixture.Address!)!.Revision);
         Assert.Equal(scene, File.ReadAllBytes(fixture.Source.Configuration));
-        fixture.Base.Execute("DROP TRIGGER reject_retry_source;");
+        fixture.Base.Execute("DROP TRIGGER main.reject_retry_source;");
         Assert.IsType<AttemptAcceptanceResult>(retries.Start(pending, DateTimeOffset.UtcNow));
         Assert.Equal(2, Assert.IsType<AttemptReceipt>(await fixture.Consumer.RunNextAsync()).Facts.Ordinal);
     }
@@ -131,8 +131,8 @@ public sealed class RetryConfigurationTests
         var accepted = Assert.IsType<AttemptAcceptanceResult>(retries.Start(pending, DateTimeOffset.UtcNow));
         _ = await fixture.Consumer.RunNextAsync();
         fixture.Base.Execute(damage == "previous-publication"
-            ? "UPDATE configuration_run_resources SET current_revision=1 WHERE session_id IN (SELECT session_id FROM configuration_run_sessions WHERE parent_journal_id='" + first.JournalId.ToString("D") + "');"
-            : "UPDATE configuration_run_resources SET expected_revision=1 WHERE session_id IN (SELECT session_id FROM configuration_run_sessions WHERE parent_journal_id='" + accepted.JournalId.ToString("D") + "');");
+            ? "UPDATE configuration.configuration_run_resources SET current_revision=1 WHERE session_id IN (SELECT session_id FROM configuration.configuration_run_sessions WHERE parent_journal_id='" + first.JournalId.ToString("D") + "');"
+            : "UPDATE configuration.configuration_run_resources SET expected_revision=1 WHERE session_id IN (SELECT session_id FROM configuration.configuration_run_sessions WHERE parent_journal_id='" + accepted.JournalId.ToString("D") + "');");
         var path = fixture.Source.Database.DatabasePath; var bytes = File.ReadAllBytes(path);
         var wal = File.Exists(path + "-wal") ? File.ReadAllBytes(path + "-wal") : null;
         Assert.ThrowsAny<Exception>(() => StateDatabase.OpenExisting(fixture.Source.Instance,

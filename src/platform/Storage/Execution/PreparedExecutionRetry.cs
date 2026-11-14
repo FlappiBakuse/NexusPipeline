@@ -49,14 +49,14 @@ internal sealed class PreparedExecutionRetry : IPreparedExecutionRetry
     {
         lease.VerifyHeld(instance);
         ExecutionRetryIntent intent; FrozenStartSource previous; HostSettingsSnapshot settings; bool replay;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var transaction = connection.BeginTransaction(deferred: true))
         {
             intent = ExecutionRetryRows.Read(connection, transaction, retryOperationId);
             previous = StartSourceRows.Read(connection, transaction, intent.PreviousOperationId);
             settings = HostSettingsRows.Read(connection, transaction, previous.Request.ExpectedSettingsRevision);
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT EXISTS(SELECT 1 FROM execution_start_sources WHERE operation_id=$next);";
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.execution_start_sources WHERE operation_id=$next);";
             command.Parameters.AddWithValue("$next", intent.Frozen.NextOperationId.ToString("D"));
             replay = (long)command.ExecuteScalar()! == 1;
             if (!replay) ExecutionRetryOutcomes.RequireWaiting(connection, transaction, intent);
@@ -108,7 +108,7 @@ internal sealed class PreparedExecutionRetry : IPreparedExecutionRetry
         ExecutionSelectionRequest request, RunAttemptPlan attempt, ExecutionPlan total)
     {
         RequireRequest(operation.OperationId, operation.SubjectId, request, true);
-        if (!StringComparer.OrdinalIgnoreCase.Equals(connection.DataSource, PhysicalPathPolicy.NativePath(_database.DatabasePath)) ||
+        if (!DatabaseConnections.IsBound(connection, _database.DatabasePath) ||
             ExecutionRetryRows.Read(connection, transaction, RetryIntentCodec.Identity(Intent).OperationId) != Intent ||
             attempt.JournalId != Frozen.NextJournalId.ToString("D") || attempt.AttemptId != Frozen.NextAttemptId.ToString("D") ||
             attempt.AttemptOrdinal != Frozen.NextOrdinal || attempt.RunId != Frozen.RunId.ToString("D") ||

@@ -23,7 +23,7 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class StartupAdmissionTests(ITestOutputHelper output)
 {
-    [Theory(DisplayName = "Actual Host Rejects Unrecognized Or Unrecovered Plans Before Changing Original Database Or Wal")]
+    [Theory(DisplayName = "Actual Host Rejects Unrecognized Or Unrecovered Plans Before Changing The Database Set")]
     [InlineData("unknown-plan-version", false)]
     [InlineData("unknown-plan-version", true)]
     [InlineData("unbound-plan", false)]
@@ -172,11 +172,11 @@ public sealed class StartupAdmissionTests(ITestOutputHelper output)
         fixture.Database.Write((connection, transaction) =>
         {
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "INSERT INTO journal_resource_claims VALUES($journal,'configuration:startup-fixture',1);";
+            command.CommandText = "INSERT INTO main.journal_resource_claims VALUES($journal,'configuration:startup-fixture',1);";
             command.Parameters.AddWithValue("$journal", fixture.JournalId.ToString("D"));
             return command.ExecuteNonQuery();
         });
-        using (var connection = DatabaseConnections.Open(fixture.Database.DatabasePath))
+        using (var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System))
             _ = DatabaseConnections.Scalar(connection, "PRAGMA journal_mode=DELETE;");
         var before = Fingerprints(fixture.Instance.RuntimeRoot);
         Assert.Equal("journal_resource_claims_unbound", Assert.Throws<IOException>(() =>
@@ -230,19 +230,20 @@ public sealed class StartupAdmissionTests(ITestOutputHelper output)
         var registered = new RegisteredJournal(plan.JournalId, operation.OperationId, kind, JournalPhase.Prepared, 1,
             reference.RelativePath, reference.Sha256, ["configuration:startup-fixture"]);
         Dictionary<string, byte[]>? group = null;
-        using (var anchor = new SqliteConnection($"Data Source={database.DatabasePath};Pooling=False"))
+        using (var anchor = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open($"Data Source={database.DatabasePath};Pooling=False"))
         {
             anchor.Open();
             using var read = anchor.CreateCommand();
-            read.CommandText = "SELECT count(*) FROM operations;";
+            read.CommandText = "SELECT count(*) FROM main.operations;";
             read.ExecuteScalar();
             var effect = new FileEffect(plan.JournalId, kind == JournalKind.FileCleanup ? "remove-owned" : "install-candidate",
                 kind == JournalKind.FileCleanup ? FileEffectAction.RemoveOwned : FileEffectAction.InstallCandidate, FileEffectState.Pending, reference.Sha256, null);
             new RecoveryJournalRegistry(database).AcceptPrepared(operation, registered, [effect], DateTimeOffset.UtcNow);
             WriteJournal(instance, contracts, registered, fault);
-            if (retainWal) group = new[] { "", "-wal", "-shm" }.ToDictionary(suffix => suffix, suffix => Quiescent(database.DatabasePath + suffix));
+            if (retainWal) group = Directory.GetFiles(Path.GetDirectoryName(database.DatabasePath)!)
+                .ToDictionary(path => Path.GetFileName(path), Quiescent);
         }
-        if (group is not null) foreach (var (suffix, bytes) in group) File.WriteAllBytes(database.DatabasePath + suffix, bytes);
+        if (group is not null) foreach (var (name, bytes) in group) File.WriteAllBytes(Path.Combine(Path.GetDirectoryName(database.DatabasePath)!, name), bytes);
         return new(root, instance, contracts, database, target, registered);
     }
 

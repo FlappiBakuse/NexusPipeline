@@ -16,10 +16,10 @@ internal static class ExtensionInstalledRows
 
     private static HashSet<string> ReadDigests(StateDatabase database, bool includeManifest)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT extension_id FROM extension_installations UNION SELECT extension_id FROM extension_installation_revisions;";
+        command.CommandText = "SELECT extension_id FROM extensions.extension_installations UNION SELECT extension_id FROM extensions.extension_installation_revisions;";
         var extensions = new List<string>();
         using (var rows = command.ExecuteReader())
             while (rows.Read()) extensions.Add(rows.GetString(0));
@@ -38,13 +38,13 @@ internal static class ExtensionInstalledRows
         SqliteTransaction transaction, string extensionId)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = Select + " FROM extension_installations h LEFT JOIN extension_installation_revisions r " +
+        command.CommandText = Select + " FROM extensions.extension_installations h LEFT JOIN extensions.extension_installation_revisions r " +
             "ON r.extension_id=h.extension_id AND r.revision=h.revision " + Joins +
             " WHERE h.extension_id=$id;";
         command.Parameters.AddWithValue("$id", extensionId);
         ExtensionInstalledMetadata? result;
         using (var row = command.ExecuteReader()) result = row.Read() ? Read(row, extensionId) : null;
-        command.CommandText = "SELECT revision FROM extension_installation_revisions WHERE extension_id=$id ORDER BY revision DESC LIMIT 1;";
+        command.CommandText = "SELECT revision FROM extensions.extension_installation_revisions WHERE extension_id=$id ORDER BY revision DESC LIMIT 1;";
         using var latest = command.ExecuteReader();
         if (latest.Read())
         {
@@ -58,7 +58,7 @@ internal static class ExtensionInstalledRows
         string extensionId, long revision)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = Select + " FROM extension_installation_revisions r " + Joins +
+        command.CommandText = Select + " FROM extensions.extension_installation_revisions r " + Joins +
             " WHERE r.extension_id=$id AND r.revision=$revision;";
         command.Parameters.AddWithValue("$id", extensionId); command.Parameters.AddWithValue("$revision", revision);
         using var row = command.ExecuteReader();
@@ -97,7 +97,7 @@ internal static class ExtensionInstalledRows
                 (installed.Package.ArchiveSha256 != footprint.Package.ArchiveSha256 ||
                     installed.Package.ManifestSha256 != footprint.Package.ManifestSha256)) throw Invalid();
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "INSERT INTO extension_installation_revisions(extension_id,revision,is_installed," +
+        command.CommandText = "INSERT INTO extensions.extension_installation_revisions(extension_id,revision,is_installed," +
             "package_version,package_kind,archive_sha256,manifest_sha256,journal_id,footprint_sha256,footprint_size) " +
             "VALUES($id,$revision,$installed,$version,$kind,$archive,$manifest,$journal,$footprint,$size);";
         command.Parameters.AddWithValue("$id", footprint.ExtensionId);
@@ -112,10 +112,10 @@ internal static class ExtensionInstalledRows
         command.Parameters.AddWithValue("$size", reference.SizeBytes);
         if (command.ExecuteNonQuery() != 1) throw Invalid();
         if (source.ExpectedInstalledRevision == 0)
-            command.CommandText = "INSERT INTO extension_installations(extension_id,revision) VALUES($id,$revision);";
+            command.CommandText = "INSERT INTO extensions.extension_installations(extension_id,revision) VALUES($id,$revision);";
         else
         {
-            command.CommandText = "UPDATE extension_installations SET revision=$revision WHERE extension_id=$id AND revision=$expected;";
+            command.CommandText = "UPDATE extensions.extension_installations SET revision=$revision WHERE extension_id=$id AND revision=$expected;";
             command.Parameters.AddWithValue("$expected", source.ExpectedInstalledRevision);
         }
         if (command.ExecuteNonQuery() != 1) throw Invalid();
@@ -124,8 +124,8 @@ internal static class ExtensionInstalledRows
     private const string Select = "SELECT r.revision,r.is_installed,r.package_version,r.package_kind,r.archive_sha256," +
         "r.manifest_sha256,r.journal_id,r.footprint_sha256,r.footprint_size,j.operation_kind,j.phase," +
         "o.operation_kind,o.status,o.initial_journal_id ";
-    private const string Joins = " LEFT JOIN operation_journals j ON j.journal_id=r.journal_id " +
-        "LEFT JOIN operations o ON o.operation_id=j.operation_id ";
+    private const string Joins = " LEFT JOIN main.operation_journals j ON j.journal_id=r.journal_id " +
+        "LEFT JOIN main.operations o ON o.operation_id=j.operation_id ";
 
     private static ExtensionInstalledMetadata Read(SqliteDataReader row, string extensionId)
     {

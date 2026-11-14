@@ -1,6 +1,7 @@
 using System.Runtime.Versioning;
 using NexusPipeline.Platform.Storage.Scheduling;
 using NexusPipeline.Platform.Storage.Execution;
+using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
 
 namespace NexusPipeline.StorageTests;
@@ -8,11 +9,36 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class ScheduleLifetimeTests
 {
+    [Fact(DisplayName = "A Busy Rollback Commit Keeps The Scheduler Alive And The Same Minute Resumes After Its Reader Closes")]
+    public async Task RetriesBusyMetadata()
+    {
+        var clock = new Clock(); using var fixture = new ScheduleNativeFixture(clock); var source = fixture.Source;
+        var service = new PersistentScheduleService(source.Instance, source.Database, source.Lease,
+            fixture.Base.Resources, fixture.Base.Lifecycle, fixture.Base.Index, fixture.Base.Service, clock);
+        try
+        {
+            using (var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime))
+            using (var transaction = connection.BeginTransaction(deferred: true))
+            {
+                using var command = connection.CreateCommand(); command.Transaction = transaction;
+                command.CommandText = "SELECT count(*) FROM main.operations;"; _ = command.ExecuteScalar();
+                service.Start();
+                Assert.True(service.IsRunning); Assert.Null(service.FailureCode); Assert.True(fixture.Base.Index.Current.IsReady);
+            }
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (fixture.Base.Count("schedule_minute_claims") != 1 && DateTime.UtcNow < deadline)
+                await Task.Delay(50);
+            Assert.Equal(1, fixture.Base.Count("schedule_minute_claims"));
+            Assert.Null(service.FailureCode); Assert.True(service.IsRunning); Assert.True(fixture.Base.Index.Current.IsReady);
+        }
+        finally { await service.StopAsync(); }
+    }
+
     [Fact]
     public async Task ReportsLoopFailure()
     {
         var clock = new Clock(); using var fixture = new ScheduleNativeFixture(clock); var source = fixture.Source;
-        fixture.Base.Execute("CREATE TRIGGER fixture_schedule_failure BEFORE INSERT ON schedule_minute_claims BEGIN SELECT RAISE(ABORT,'fixture_schedule_failure'); END;");
+        fixture.Base.Execute("CREATE TRIGGER main.fixture_schedule_failure BEFORE INSERT ON schedule_minute_claims BEGIN SELECT RAISE(ABORT,'fixture_schedule_failure'); END;");
         var service = new PersistentScheduleService(source.Instance, source.Database, source.Lease,
             fixture.Base.Resources, fixture.Base.Lifecycle, fixture.Base.Index, fixture.Base.Service, clock);
         service.Start(); await service.Completion.WaitAsync(TimeSpan.FromSeconds(5));
@@ -24,7 +50,7 @@ public sealed class ScheduleLifetimeTests
     public async Task SkipsEmptyMinutes()
     {
         using var fixture = new ExecutionAdmissionFixture(); var source = fixture.Source; var clock = new Clock();
-        fixture.Execute("CREATE TRIGGER reject_empty_minute BEFORE INSERT ON schedule_minute_claims BEGIN SELECT RAISE(ABORT,'unexpected_empty_minute'); END;");
+        fixture.Execute("CREATE TRIGGER main.reject_empty_minute BEFORE INSERT ON schedule_minute_claims BEGIN SELECT RAISE(ABORT,'unexpected_empty_minute'); END;");
         var store = new ScheduleOccurrenceStore(source.Instance, source.Database, source.Lease, fixture.Resources, clock);
         var admission = new ScheduledExecutionAdmission(source.Instance, source.Database, source.Lease, fixture.Service, clock);
         var before = fixture.Count("operations");

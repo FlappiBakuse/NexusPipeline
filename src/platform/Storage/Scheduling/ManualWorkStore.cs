@@ -34,12 +34,12 @@ internal sealed class ManualWorkStore
     {
         _lease.VerifyHeld(_instance);
         if (operationId == Guid.Empty || string.IsNullOrWhiteSpace(caller) || caller.Length > 256) throw new ArgumentException("manual_work_query_invalid");
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         if (ManualWorkRows.Find(connection, transaction, operationId) is not { } reference)
         {
             using var occupied = connection.CreateCommand(); occupied.Transaction = transaction;
-            occupied.CommandText = "SELECT EXISTS(SELECT 1 FROM operations WHERE operation_id=$id);";
+            occupied.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operations WHERE operation_id=$id);";
             occupied.Parameters.AddWithValue("$id", operationId.ToString("D"));
             if ((long)occupied.ExecuteScalar()! != 0) throw new OperationConflictException();
             return null;
@@ -88,7 +88,7 @@ internal sealed class ManualWorkStore
     internal ManualWorkState Read(AcceptedManualWork work)
     {
         RequireOwner(work);
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         return ManualWorkRows.Read(_instance, _contracts, connection, transaction, work.Source.Reference);
     }

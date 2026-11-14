@@ -63,12 +63,12 @@ internal sealed class BindingSkipStore(RuntimeInstance instance, StateDatabase d
                 DispatchIntentCodec.Read(before.Root, state.Total) is not null) throw Invalid();
             var step = state.Total.Steps.Single(step => step.StepId == item.StepId);
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT EXISTS(SELECT 1 FROM configuration_run_sessions WHERE parent_journal_id=$parent AND step_id=$step);";
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM configuration.configuration_run_sessions WHERE parent_journal_id=$parent AND step_id=$step);";
             command.Parameters.AddWithValue("$parent", state.Journal.JournalId.ToString("D")); command.Parameters.AddWithValue("$step", item.StepId);
             if ((long)command.ExecuteScalar()! != 0) throw Invalid();
             if (item.ReasonCode == "execution_daily_success_limit")
             {
-                command.CommandText = "SELECT count(*) FROM execution_binding_successes WHERE binding_id=$binding AND started_at_utc_ticks>=$start " +
+                command.CommandText = "SELECT count(*) FROM main.execution_binding_successes WHERE binding_id=$binding AND started_at_utc_ticks>=$start " +
                     "AND started_at_utc_ticks<$end AND started_at_utc_ticks<=$observed;";
                 command.Parameters.AddWithValue("$binding", step.BindingId!); command.Parameters.AddWithValue("$start", item.DailyWindowStartUtc.UtcTicks);
                 command.Parameters.AddWithValue("$end", item.DailyWindowEndUtc.UtcTicks); command.Parameters.AddWithValue("$observed", item.EvaluatedAtUtc.UtcTicks);

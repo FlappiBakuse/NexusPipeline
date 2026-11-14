@@ -7,17 +7,15 @@ public sealed record StartupPresentation(DesktopPreferences Desktop, HostLocale 
     public static StartupPresentation Read(RuntimeInstance instance, InstanceLease lease)
     {
         lease.VerifyHeld(instance);
-        var path = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(instance.RuntimeRoot, "state", "nexus.db"));
+        var path = DatabaseLayout.RuntimePath(instance);
+        if (File.Exists(Path.Combine(Path.GetDirectoryName(path)!, "nexus.db"))) DatabaseLayout.RequireFiles(path);
         var guard = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(instance.RuntimeRoot, "state-initialization.guard"));
-        if (!File.Exists(guard) && !File.Exists(path))
-            return new(HostSettings.Default.Desktop, HostSettings.Default.Locale);
-        if (!File.Exists(guard) || new FileInfo(guard).Length != 0 || !File.Exists(path))
-            throw new IOException("startup_presentation_database_incomplete");
-        using var reading = new StartupDatabaseRead(path);
-        var connection = reading.Connection;
+        if (!File.Exists(guard) && !File.Exists(path)) return new(HostSettings.Default.Desktop, HostSettings.Default.Locale);
+        var database = StateDatabase.OpenCurrent(instance, lease);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
-        DatabaseInspector.VerifyIdentity(connection, instance.InstanceId, transaction: transaction);
         var settings = HostSettingsRows.ReadCurrent(connection, transaction).Values;
+        transaction.Commit();
         return new(settings.Desktop, settings.Locale);
     }
 }

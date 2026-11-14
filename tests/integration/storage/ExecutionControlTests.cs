@@ -72,7 +72,7 @@ public sealed class ExecutionControlTests
         var control = new ExecutionControlService(fixture.Source.Instance, fixture.Source.Database, new(),
             fixture.Source.Lease, fixture.Service, retries);
         var operation = Guid.NewGuid(); var counts = fixture.Base.Counts();
-        fixture.Base.Execute("CREATE TRIGGER control_cancel_failure BEFORE UPDATE OF status ON operations " +
+        fixture.Base.Execute("CREATE TRIGGER main.control_cancel_failure BEFORE UPDATE OF status ON operations " +
             "WHEN NEW.operation_kind='execution.retry.cancel' BEGIN SELECT RAISE(" + failure +
             (failure == "ABORT" ? ",'fixture_failure'" : "") + "); END;");
         try
@@ -84,7 +84,7 @@ public sealed class ExecutionControlTests
             Assert.False(new ExecutionRunFinality(fixture.Source.Instance, fixture.Source.Database, new()).IsFinal(receipt));
             Assert.Equal(receipt, new AttemptReceiptStore(fixture.Source.Database).Read(receipt.Facts.AttemptId));
         }
-        finally { fixture.Base.Execute("DROP TRIGGER control_cancel_failure;"); }
+        finally { fixture.Base.Execute("DROP TRIGGER main.control_cancel_failure;"); }
         var result = control.Cancel(operation, "provider-runtime-fixture", receipt.OperationId, receipt.Facts.RunId,
             receipt.Facts.AttemptId, DateTimeOffset.UtcNow);
         Assert.Equal("retry-declined", result.Acknowledgement);

@@ -12,7 +12,7 @@ public sealed class ExecutionRetryService(RuntimeInstance instance, StateDatabas
 {
     private readonly ExecutionRunFinality _finality = new(instance, database, contracts);
     private readonly object _waitingGate = new();
-    private long _waitingRevision = -1;
+    private DatabaseVersion? _waitingRevision;
     private IReadOnlyList<ExecutionRetryIntent> _waiting = [];
 
     public IPreparedExecutionRetry? Prepare(Guid runId, Guid previousAttemptId, DateTimeOffset now)
@@ -104,10 +104,10 @@ public sealed class ExecutionRetryService(RuntimeInstance instance, StateDatabas
         lease.VerifyHeld(instance);
         lease.PublishExecution(() =>
         {
-            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
             using var transaction = connection.BeginTransaction(deferred: true);
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT operation_id FROM execution_retry_intents WHERE run_id=$run ORDER BY next_ordinal DESC LIMIT 1;";
+            command.CommandText = "SELECT operation_id FROM main.execution_retry_intents WHERE run_id=$run ORDER BY next_ordinal DESC LIMIT 1;";
             command.Parameters.AddWithValue("$run", runId.ToString("D"));
             var id = command.ExecuteScalar() as string ?? throw new IOException("execution_retry_not_waiting");
             var found = ExecutionRetryRows.Read(connection, transaction, Guid.ParseExact(id, "D"));
@@ -134,9 +134,9 @@ public sealed class ExecutionRetryService(RuntimeInstance instance, StateDatabas
 
     public void ReleaseIfFinal(Guid runId)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT attempt_id FROM attempt_receipts WHERE run_id=$run ORDER BY ordinal DESC LIMIT 1;";
+        command.CommandText = "SELECT attempt_id FROM records.attempt_receipts WHERE run_id=$run ORDER BY ordinal DESC LIMIT 1;";
         command.Parameters.AddWithValue("$run", runId.ToString("D"));
         if (command.ExecuteScalar() is not string id) return;
         var receipt = new AttemptReceiptStore(database).Read(Guid.ParseExact(id, "D")) ?? throw RetryIntentCodec.Invalid();
@@ -151,21 +151,22 @@ public sealed class ExecutionRetryService(RuntimeInstance instance, StateDatabas
     {
         lock (_waitingGate)
         {
-            var revision = database.CommitSequence;
+            var revision = DatabaseVersion.Read(database, null, DatabaseDomain.Runtime | DatabaseDomain.Records);
             if (_waitingRevision == revision) return _waiting;
-            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
             using var transaction = connection.BeginTransaction(deferred: true);
             var values = ExecutionRetryRows.Waiting(connection, transaction)
                 .Select(id => ExecutionRetryRows.Read(connection, transaction, id)).ToArray();
             // These bounded candidates carry no admission authority; due retries acquire fresh preparation.
-            if (revision == database.CommitSequence) { _waiting = values; _waitingRevision = revision; }
+            if (revision == DatabaseVersion.Read(database, null, DatabaseDomain.Runtime | DatabaseDomain.Records))
+            { _waiting = values; _waitingRevision = revision; }
             return values;
         }
     }
 
     private ExecutionRetryIntent? ReadAfter(Guid attempt)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
         using var transaction = connection.BeginTransaction(deferred: true);
         return ExecutionRetryRows.After(connection, transaction, attempt);
     }

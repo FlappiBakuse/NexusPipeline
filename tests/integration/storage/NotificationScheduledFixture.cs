@@ -113,7 +113,7 @@ internal sealed class NotificationScheduledFixture : IAsyncDisposable
 
     private SqliteConnection OpenPrivate(bool create = false)
     {
-        var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = PrivateDatabase,
+        var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open(new SqliteConnectionStringBuilder { DataSource = PrivateDatabase,
             Mode = create ? SqliteOpenMode.ReadWriteCreate : SqliteOpenMode.ReadWrite, Pooling = false }.ToString());
         connection.Open(); return connection;
     }

@@ -68,7 +68,7 @@ internal sealed class ExecutionAdmissionPort : IExecutionAdmissionPort
     {
         _lease.VerifyHeld(_instance);
         _retryOrigin?.RequireRequest(operationId, subject, request, false);
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         ExecutionRetryRows.RequireExplicit(connection, transaction, operationId, _retryOrigin?.Intent);
         transaction.Commit();
@@ -107,9 +107,9 @@ internal sealed class ExecutionAdmissionPort : IExecutionAdmissionPort
     {
         if (_scheduledOrigin is not null) return true;
         if (_retryOrigin is null) return false;
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM scheduled_occurrences WHERE run_id=$run UNION ALL SELECT 1 FROM startup_queue_occurrences WHERE run_id=$run);";
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.scheduled_occurrences WHERE run_id=$run UNION ALL SELECT 1 FROM main.startup_queue_occurrences WHERE run_id=$run);";
         command.Parameters.AddWithValue("$run", _retryOrigin.Intent.Frozen.RunId.ToString("D"));
         return (long)command.ExecuteScalar()! == 1;
     }

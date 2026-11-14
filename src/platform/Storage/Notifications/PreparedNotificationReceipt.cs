@@ -31,7 +31,7 @@ internal sealed class PreparedNotificationReceipt : IDisposable
         {
             NotificationCatalogCursor? cursor;
             NexusPipeline.Core.Records.RecordAsset? screenshot;
-            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System | DatabaseDomain.Content))
                 cursor = NotificationCatalogRows.ReadCurrent(connection, null);
             var codec = new NotificationCatalogCodec(instance, contracts);
             var catalog = cursor is null ? codec.Persist(NotificationTaskCatalog.Empty) : codec.Read(cursor.Reference);
@@ -42,7 +42,7 @@ internal sealed class PreparedNotificationReceipt : IDisposable
             var selected = source.Routes.SelectMany(route => route.Selection.TaskIds).ToHashSet();
             var tasks = ImmutableArray.CreateBuilder<ReceiptTaskSecrets>();
             var files = new SecretPayloadFiles(instance, new UserSecretProtector());
-            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System | DatabaseDomain.Content))
             using (var transaction = connection.BeginTransaction(deferred: true))
             {
                 if (NotificationCatalogRows.ReadCurrent(connection, transaction) != cursor)
@@ -80,7 +80,7 @@ internal sealed class PreparedNotificationReceipt : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (database.InstanceId != Snapshot.Document.InstanceId || lease.Instance.InstanceId != database.InstanceId ||
             database.RuntimeRoot != lease.Instance.RuntimeRoot ||
-            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(database.RuntimeRoot, "state", "nexus.db"))) throw NotificationReceiptCodec.Invalid();
+            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(database.RuntimeRoot, "state", "runtime.db"))) throw NotificationReceiptCodec.Invalid();
         return lease.PublishExecution(() => database.Write((connection, transaction) =>
             NotificationReceiptRows.AcceptInside(connection, transaction, Snapshot, _catalogTasks, DateTimeOffset.UtcNow)));
     }

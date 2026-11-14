@@ -30,7 +30,7 @@ public sealed class ContentRetirementService
         ICleanupPersistenceObserver? observer = null)
     {
         if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot ||
-            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "nexus.db")) ||
+            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "runtime.db")) ||
             !resources.UsesRecoveryIndex(index)) throw RecordRetirementCodec.Invalid();
         _instance = instance; _database = database; _contracts = contracts; _lease = lease; _resources = resources; _index = index; _observer = observer;
     }
@@ -72,12 +72,12 @@ public sealed class ContentRetirementService
                 if (settings.Revision != settingsRevision) throw new IOException("record_retirement_settings_changed");
                 RecordRetirementRows.RequireSettledInside(connection, transaction, runId, family.Attempts.Length);
                 using var command = RecordRetirementRows.Command(connection, transaction,
-                    "SELECT o.created_at FROM execution_start_sources s JOIN operations o USING(operation_id) WHERE s.run_id=$0 AND s.attempt_ordinal=1;", runId);
+                    "SELECT o.created_at FROM main.execution_start_sources s JOIN main.operations o USING(operation_id) WHERE s.run_id=$0 AND s.attempt_ordinal=1;", runId);
                 var start = DateTimeOffset.ParseExact(command.ExecuteScalar() as string ?? throw RecordRetirementCodec.Invalid(), "O",
                     System.Globalization.CultureInfo.InvariantCulture);
                 var cutoff = TimeZoneInfo.ConvertTime(now, TimeZoneInfo.Local).Date.AddDays(1 - settings.Values.HistoryRetentionDays);
                 if (TimeZoneInfo.ConvertTime(start, TimeZoneInfo.Local).Date >= cutoff) return false;
-                command.CommandText = "UPDATE run_records SET history_retired_at_utc_ticks=$time WHERE run_id=$0 AND history_retired_at_utc_ticks IS NULL;";
+                command.CommandText = "UPDATE records.run_records SET history_retired_at_utc_ticks=$time WHERE run_id=$0 AND history_retired_at_utc_ticks IS NULL;";
                 command.Parameters.AddWithValue("$time", now.UtcTicks);
                 return command.ExecuteNonQuery() == 1;
             });
@@ -115,7 +115,7 @@ public sealed class ContentRetirementService
                     throw RecordRetirementCodec.Invalid();
                 if (current.JournalId != original.JournalId)
                 {
-                    using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+                    using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
                     using var transaction = connection.BeginTransaction(deferred: true);
                     var identity = ResumeIdentity(subject, reference, current);
                     if (OperationRows.ReadExisting(connection, transaction, identity) is null) throw RecordRetirementCodec.Invalid();
@@ -158,16 +158,16 @@ public sealed class ContentRetirementService
 
     private (Guid Operation, Guid Run, BlobReference Reference)? ReadResumable(Guid? after, DateTimeOffset cutoff)
     {
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
         using var command = RecordRetirementRows.Command(connection, null,
-            "SELECT r.operation_id,r.run_id,r.relative_path,r.size_bytes,r.sha256 FROM record_content_retirements r " +
-            "JOIN operations o USING(operation_id) JOIN operation_journals j ON j.journal_id=r.cleanup_journal_id " +
-            "JOIN execution_start_sources s ON s.run_id=r.run_id AND s.attempt_ordinal=1 " +
-            "JOIN operations start ON start.operation_id=s.operation_id " +
+            "SELECT r.operation_id,r.run_id,r.relative_path,r.size_bytes,r.sha256 FROM records.record_content_retirements r " +
+            "JOIN main.operations o USING(operation_id) JOIN main.operation_journals j ON j.journal_id=r.cleanup_journal_id " +
+            "JOIN main.execution_start_sources s ON s.run_id=r.run_id AND s.attempt_ordinal=1 " +
+            "JOIN main.operations start ON start.operation_id=s.operation_id " +
             "WHERE o.subject_id='host:history-retention' AND r.operation_id>$0 AND julianday(start.created_at)<julianday($1) " +
-            "AND (j.phase<>'committed' OR NOT EXISTS(SELECT 1 FROM file_effects f WHERE f.journal_id=j.journal_id AND f.state<>'notExecuted')) " +
-            "AND NOT EXISTS(SELECT 1 FROM operations n JOIN operation_journals c ON c.operation_id=n.operation_id " +
-            "JOIN file_effects f ON f.journal_id=c.journal_id WHERE n.subject_id='host:history-retention:'||r.operation_id " +
+            "AND (j.phase<>'committed' OR NOT EXISTS(SELECT 1 FROM main.file_effects f WHERE f.journal_id=j.journal_id AND f.state<>'notExecuted')) " +
+            "AND NOT EXISTS(SELECT 1 FROM main.operations n JOIN main.operation_journals c ON c.operation_id=n.operation_id " +
+            "JOIN main.file_effects f ON f.journal_id=c.journal_id WHERE n.subject_id='host:history-retention:'||r.operation_id " +
             "AND n.operation_kind='records.retention.cleanup' AND c.phase='committed' AND f.state='completed') " +
             "ORDER BY r.operation_id LIMIT 1;", after?.ToString("D") ?? "",
             cutoff.ToUniversalTime().ToString("O", System.Globalization.CultureInfo.InvariantCulture));
@@ -178,9 +178,9 @@ public sealed class ContentRetirementService
 
     private RegisteredJournal? ReadResume(string subject)
     {
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var command = RecordRetirementRows.Command(connection, null,
-            "SELECT j.journal_id FROM operations o JOIN operation_journals j USING(operation_id) " +
+            "SELECT j.journal_id FROM main.operations o JOIN main.operation_journals j USING(operation_id) " +
             "WHERE o.subject_id=$0 AND o.operation_kind='records.retention.cleanup' " +
             "ORDER BY o.created_at DESC,o.operation_id DESC LIMIT 1;", subject);
         return command.ExecuteScalar() is string id ? new RecoveryJournalRegistry(_database).ReadJournal(Guid.ParseExact(id, "D")) : null;
@@ -201,7 +201,7 @@ public sealed class ContentRetirementService
         using var borrow = root.Borrow(_resources, operationId, Claims);
         return borrow.Use(() => _lease.PublishExecution<ContentRetirementPage?>(() =>
         {
-            using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
             using (var transaction = connection.BeginTransaction(deferred: true))
             {
                 var existing = OperationRows.ReadExisting(connection, transaction, identity);

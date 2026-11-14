@@ -134,9 +134,9 @@ public sealed class BusinessPreservationTests
         Assert.Equal(new[] { first, first, first, state.Total.Steps[1].StepId, state.Total.Steps[2].StepId },
             state.AllJobs.Where(job => job.Role == "process").Select(job => job.StepId));
         Assert.Equal(5, fixture.Base.Count($"journal_writer_job_roots WHERE journal_id='{state.Journal.JournalId:D}'"));
-        Assert.Equal(5, fixture.Base.Count("(SELECT DISTINCT job_name FROM journal_writer_job_roots)"));
-        Assert.Equal(3, fixture.Base.Count($"journal_writer_job_roots j JOIN configuration_run_resources r ON r.journal_id=j.journal_id " +
-            $"JOIN configuration_run_sessions s ON s.session_id=r.session_id WHERE s.parent_journal_id='{state.Journal.JournalId:D}' " +
+        Assert.Equal(5, fixture.Base.Count("(SELECT DISTINCT job_name FROM main.journal_writer_job_roots)"));
+        Assert.Equal(3, fixture.Base.Count($"journal_writer_job_roots j JOIN configuration.configuration_run_resources r ON r.journal_id=j.journal_id " +
+            $"JOIN configuration.configuration_run_sessions s ON s.session_id=r.session_id WHERE s.parent_journal_id='{state.Journal.JournalId:D}' " +
             "AND s.primary_job_name=j.job_name AND s.invocation_ordinal BETWEEN 1 AND 3"));
         Assert.Equal(3, fixture.Base.Count("configuration_run_sessions"));
         Assert.Equal(0, fixture.Base.Count("execution_retry_intents"));

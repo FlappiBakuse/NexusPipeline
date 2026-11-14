@@ -61,7 +61,7 @@ internal static class UpdateSourceSeed
         {
             OperationRows.Accept(connection, transaction, identity, DateTimeOffset.UtcNow);
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$operation;";
+            command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$operation;";
             command.Parameters.AddWithValue("$operation", identity.OperationId.ToString("D"));
             if (command.ExecuteNonQuery() != 1) throw new IOException("fixture_feed_acceptance_failed");
             UpdateFeedRows.Accept(connection, transaction, saved, 1, identity.OperationId); return true;

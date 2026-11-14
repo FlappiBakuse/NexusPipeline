@@ -26,7 +26,7 @@ public sealed class RuntimeRecoveryTests
             new(source.Instance, source.Database, new()));
         var consumer = new ExecutionRuntimeConsumer(source.Instance, source.Database, new(), source.Lease,
             fixture.Base.Resources, fixture.Base.Index, fixture.Base.Inbox, projection);
-        fixture.Base.Execute("CREATE TRIGGER fixture_preparation_failure BEFORE INSERT ON configuration_run_sessions " +
+        fixture.Base.Execute("CREATE TRIGGER configuration.fixture_preparation_failure BEFORE INSERT ON configuration_run_sessions " +
             "BEGIN SELECT RAISE(ABORT, 'fixture_preparation_failure'); END;");
         await Assert.ThrowsAsync<SqliteException>(() => consumer.RunNextAsync());
         var receipt = Assert.IsType<AttemptReceipt>(new AttemptReceiptStore(source.Database)
@@ -92,7 +92,7 @@ public sealed class RuntimeRecoveryTests
             Assert.Throws<IOException>(() => session.PrepareNextStep(failingStep)).Message);
         session.FreezeDispatch(ExecutionStopReason.Cancelled);
         await session.CollectRemainingAsync(); session.CloseUndispatched();
-        fixture.Base.Execute("CREATE TRIGGER fixture_owned_completion_failure BEFORE UPDATE OF phase ON configuration_run_sessions " +
+        fixture.Base.Execute("CREATE TRIGGER configuration.fixture_owned_completion_failure BEFORE UPDATE OF phase ON configuration_run_sessions " +
             $"WHEN OLD.step_id='{failingStep}' AND NEW.phase=3 BEGIN SELECT RAISE(ABORT,'fixture_owned_completion_failure'); END;");
         Guid operation;
         try
@@ -108,7 +108,7 @@ public sealed class RuntimeRecoveryTests
             Assert.Null(new AttemptReceiptStore(source.Database).Read(Guid.Parse(state.Attempt.AttemptId)));
             Assert.Empty(state.AllJobs);
         }
-        finally { fixture.Base.Execute("DROP TRIGGER fixture_owned_completion_failure;"); }
+        finally { fixture.Base.Execute("DROP TRIGGER configuration.fixture_owned_completion_failure;"); }
         await session.RestoreRemainingAsync(ExecutionStopReason.Cancelled);
         var finalIntents = SnapshotIntentCodec.Read(fixture.State.Latest.Root);
         Assert.Equal(operation, Assert.Single(finalIntents).CompletionOperationId);

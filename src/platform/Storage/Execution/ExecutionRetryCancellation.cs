@@ -30,7 +30,7 @@ internal static class ExecutionRetryCancellation
             ExecutionRetryOutcomes.DeclineInside(connection, transaction, retry, "retry_run_cancelled", now);
             var accepted = OperationRows.Accept(connection, transaction, identity, now);
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "UPDATE operations SET initial_journal_id=$journal,status='completed' WHERE operation_id=$id;";
+            command.CommandText = "UPDATE main.operations SET initial_journal_id=$journal,status='completed' WHERE operation_id=$id;";
             command.Parameters.AddWithValue("$journal", source.JournalId.ToString("D"));
             command.Parameters.AddWithValue("$id", operationId.ToString("D"));
             if (command.ExecuteNonQuery() != 1) throw RetryIntentCodec.Invalid();
@@ -41,10 +41,10 @@ internal static class ExecutionRetryCancellation
 
     internal static void VerifyInventory(StateDatabase database)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT o.operation_id,r.operation_id FROM operations o LEFT JOIN execution_retry_intents r " +
+        command.CommandText = "SELECT o.operation_id,r.operation_id FROM main.operations o LEFT JOIN main.execution_retry_intents r " +
             "ON r.previous_journal_id=o.initial_journal_id WHERE o.operation_kind=$kind ORDER BY o.operation_id;";
         command.Parameters.AddWithValue("$kind", Kind);
         var pairs = new List<(Guid Operation, Guid Retry)>();
@@ -85,7 +85,7 @@ internal static class ExecutionRetryCancellation
             ExecutionRetryOutcomes.ReadReason(connection, transaction, retry) != "retry_run_cancelled")
             throw RetryIntentCodec.Invalid();
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT initial_journal_id FROM operations WHERE operation_id=$id;";
+        command.CommandText = "SELECT initial_journal_id FROM main.operations WHERE operation_id=$id;";
         command.Parameters.AddWithValue("$id", identity.OperationId.ToString("D"));
         if (command.ExecuteScalar() as string != retry.PreviousJournalId.ToString("D"))
             throw RetryIntentCodec.Invalid();

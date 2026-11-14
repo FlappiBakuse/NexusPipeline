@@ -12,7 +12,7 @@ internal static class StartupIntentRows
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT command_json FROM startup_registration_current WHERE singleton=1;";
+        command.CommandText = "SELECT command_json FROM system.startup_registration_current WHERE singleton=1;";
         using var row = command.ExecuteReader();
         if (!row.Read()) throw new IOException("startup_registration_current_missing");
         return row.IsDBNull(0) ? null : row.GetFieldValue<byte[]>(0);
@@ -28,7 +28,7 @@ internal static class StartupIntentRows
             throw new IOException("startup_intent_settings_unbound");
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "INSERT INTO startup_registration_intents VALUES($id,$revision,$document,$digest,1);";
+        command.CommandText = "INSERT INTO system.startup_registration_intents VALUES($id,$revision,$document,$digest,1);";
         var bytes = draft.Export();
         command.Parameters.AddWithValue("$id", operationId.ToString("D"));
         command.Parameters.AddWithValue("$revision", next.Revision);
@@ -41,7 +41,7 @@ internal static class StartupIntentRows
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT settings_revision,document,document_digest,phase FROM startup_registration_intents WHERE operation_id=$id;";
+        command.CommandText = "SELECT settings_revision,document,document_digest,phase FROM system.startup_registration_intents WHERE operation_id=$id;";
         command.Parameters.AddWithValue("$id", operationId.ToString("D"));
         using var row = command.ExecuteReader();
         if (!row.Read()) return null;
@@ -58,7 +58,7 @@ internal static class StartupIntentRows
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT operation_id FROM startup_registration_intents " + (pendingOnly ? "WHERE phase<>3 " : "") + "ORDER BY settings_revision LIMIT 10001;";
+        command.CommandText = "SELECT operation_id FROM system.startup_registration_intents " + (pendingOnly ? "WHERE phase<>3 " : "") + "ORDER BY settings_revision LIMIT 10001;";
         var ids = new List<Guid>();
         using (var rows = command.ExecuteReader()) while (rows.Read()) ids.Add(Guid.Parse(rows.GetString(0)));
         if (ids.Count > 10000 || pendingOnly && ids.Count > 1) throw new IOException("startup_intent_inventory_unrecognized");
@@ -82,16 +82,16 @@ internal static class StartupIntentRows
             throw new IOException("startup_intent_prior_registration_changed");
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "UPDATE startup_registration_intents SET phase=$phase WHERE operation_id=$id AND phase=$before;";
+        command.CommandText = "UPDATE system.startup_registration_intents SET phase=$phase WHERE operation_id=$id AND phase=$before;";
         command.Parameters.AddWithValue("$phase", (int)after);
         command.Parameters.AddWithValue("$id", operationId.ToString("D"));
         command.Parameters.AddWithValue("$before", (int)before);
         if (command.ExecuteNonQuery() != 1) throw new IOException("startup_intent_phase_conflict");
         if (after != StartupEffectState.Completed) return;
-        command.CommandText = "UPDATE startup_registration_current SET command_json=$command WHERE singleton=1;";
+        command.CommandText = "UPDATE system.startup_registration_current SET command_json=$command WHERE singleton=1;";
         command.Parameters.AddWithValue("$command", document.Enable ? StartupIntentCodec.EncodeCommand(document.Command) : DBNull.Value);
         if (command.ExecuteNonQuery() != 1) throw new IOException("startup_registration_current_missing");
-        command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$id;";
+        command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$id;";
         command.ExecuteNonQuery();
     }
 
@@ -104,7 +104,7 @@ internal static class StartupIntentRows
         foreach (var intent in intents)
         {
             using var command = connection.CreateCommand();
-            command.CommandText = "SELECT result_revision FROM settings_mutations WHERE operation_id=$id;";
+            command.CommandText = "SELECT result_revision FROM system.settings_mutations WHERE operation_id=$id;";
             command.Parameters.AddWithValue("$id", intent.Status.OperationId.ToString("D"));
             if (command.ExecuteScalar() is not long revision || revision != intent.Status.SettingsRevision)
                 throw new IOException("startup_intent_settings_result_unbound");

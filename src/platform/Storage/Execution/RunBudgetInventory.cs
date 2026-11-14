@@ -12,18 +12,18 @@ internal static class RunBudgetInventory
 {
     internal static void Verify(RuntimeInstance instance, StateDatabase database, ContractReader contracts)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var inputs = new BudgetPlanInputs(instance, contracts);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT run_id FROM execution_run_budget_states ORDER BY run_id;";
+        command.CommandText = "SELECT run_id FROM main.execution_run_budget_states ORDER BY run_id;";
         using (var reader = command.ExecuteReader())
             while (reader.Read())
                 _ = RunBudgetRows.Read(connection, transaction, Guid.ParseExact(reader.GetString(0), "D"),
                     value => RequireHistory(connection, transaction, instance, inputs, value)) ?? throw RunBudgetRows.Invalid();
-        command.CommandText = "SELECT 1 FROM operations o LEFT JOIN execution_run_budget_observations b ON b.operation_id=o.operation_id WHERE o.operation_kind='execution.budget.observe' AND b.operation_id IS NULL LIMIT 1;";
+        command.CommandText = "SELECT 1 FROM main.operations o LEFT JOIN main.execution_run_budget_observations b ON b.operation_id=o.operation_id WHERE o.operation_kind='execution.budget.observe' AND b.operation_id IS NULL LIMIT 1;";
         if (command.ExecuteScalar() is not null) throw RunBudgetRows.Invalid();
-        command.CommandText = "SELECT 1 FROM execution_run_budget_observations b LEFT JOIN execution_run_budget_states s ON s.run_id=b.run_id WHERE s.run_id IS NULL LIMIT 1;";
+        command.CommandText = "SELECT 1 FROM main.execution_run_budget_observations b LEFT JOIN main.execution_run_budget_states s ON s.run_id=b.run_id WHERE s.run_id IS NULL LIMIT 1;";
         if (command.ExecuteScalar() is not null) throw RunBudgetRows.Invalid();
     }
 
@@ -33,7 +33,7 @@ internal static class RunBudgetInventory
         if (value.OccurrenceId is { } occurrence)
         {
             using var source = connection.CreateCommand(); source.Transaction = transaction;
-            source.CommandText = "SELECT EXISTS(SELECT 1 FROM startup_queue_occurrences WHERE occurrence_id=$id);";
+            source.CommandText = "SELECT EXISTS(SELECT 1 FROM main.startup_queue_occurrences WHERE occurrence_id=$id);";
             source.Parameters.AddWithValue("$id", occurrence.ToString("D"));
             if ((long)source.ExecuteScalar()! != 0)
             {
@@ -59,12 +59,12 @@ internal static class RunBudgetInventory
             DateTimeOffset.Parse(total.RetryPolicy.DeadlineUtc, CultureInfo.InvariantCulture) != value.DeadlineUtc)
             throw RunBudgetRows.Invalid();
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM operations WHERE operation_id=$operation AND initial_journal_id=$journal AND subject_id=$subject AND operation_kind='execution.start');";
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operations WHERE operation_id=$operation AND initial_journal_id=$journal AND subject_id=$subject AND operation_kind='execution.start');";
         command.Parameters.AddWithValue("$operation", attempt.OperationId); command.Parameters.AddWithValue("$journal", attempt.JournalId);
         command.Parameters.AddWithValue("$subject", value.SubjectId);
         if ((long)command.ExecuteScalar()! != 1) throw RunBudgetRows.Invalid();
         if (value.TerminalReceiptDigest is not { } terminalDigest) return;
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM attempt_receipts r JOIN operations o ON o.operation_id=r.operation_id WHERE r.attempt_id=$attempt AND r.run_id=$run AND r.journal_id=$journal AND r.operation_id=$operation AND r.source_receipt_digest=$digest AND o.subject_id=$subject AND o.status='completed');";
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM records.attempt_receipts r JOIN main.operations o ON o.operation_id=r.operation_id WHERE r.attempt_id=$attempt AND r.run_id=$run AND r.journal_id=$journal AND r.operation_id=$operation AND r.source_receipt_digest=$digest AND o.subject_id=$subject AND o.status='completed');";
         command.Parameters.AddWithValue("$attempt", attempt.AttemptId); command.Parameters.AddWithValue("$run", attempt.RunId);
         command.Parameters.AddWithValue("$digest", terminalDigest);
         if ((long)command.ExecuteScalar()! != 1) throw RunBudgetRows.Invalid();

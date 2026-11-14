@@ -22,7 +22,7 @@ internal sealed class ExecutionSqlScope(StateDatabase database) : IDisposable
                 // Pin the actual file without blocking other SQL writers or allowing a pathname replacement.
                 _file = new(database.DatabasePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
                 _ = PhysicalObjectIdentity.Read(_file.SafeFileHandle);
-                _connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+                _connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
             }
             catch { Dispose(); throw; }
         }

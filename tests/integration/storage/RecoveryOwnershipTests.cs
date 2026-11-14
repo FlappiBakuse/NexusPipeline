@@ -141,17 +141,17 @@ public sealed class RecoveryOwnershipTests(ITestOutputHelper output)
     {
         using var fixture = await Fixture.Create("host");
         await fixture.StopRoot();
-        using (var connection = new SqliteConnection($"Data Source={fixture.Report.GetProperty("DatabasePath").GetString()};Pooling=False"))
+        using (var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open($"Data Source={fixture.Report.GetProperty("DatabasePath").GetString()};Pooling=False"))
         {
             connection.Open();
             using var command = connection.CreateCommand();
             var change = fault switch
             {
-                "missing" => "DELETE FROM journal_writers",
-                "hash" => "UPDATE journal_writers SET image_sha256='zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz'",
-                "path" => "UPDATE journal_writers SET image_path='relative.exe'",
-                "sid" => "UPDATE journal_writers SET user_sid='not-a-sid'",
-                _ => "UPDATE journal_writers SET writer_id='00000000-0000-0000-0000-000000000000'"
+                "missing" => "DELETE FROM main.journal_writers",
+                "hash" => "UPDATE main.journal_writers SET image_sha256='zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz'",
+                "path" => "UPDATE main.journal_writers SET image_path='relative.exe'",
+                "sid" => "UPDATE main.journal_writers SET user_sid='not-a-sid'",
+                _ => "UPDATE main.journal_writers SET writer_id='00000000-0000-0000-0000-000000000000'"
             };
             command.CommandText = change + " WHERE journal_id=$journal;";
             command.Parameters.AddWithValue("$journal", fixture.JournalId.ToString("D"));

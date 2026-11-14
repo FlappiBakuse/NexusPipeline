@@ -34,7 +34,10 @@ internal static class HistoryDatasetFixture
             for (var start = previous; start < size; start += 256)
                 records.AppendCompleted(Enumerable.Range(start, Math.Min(256, size - start)).Select(Record).ToArray());
             stages.Add(new { rows = size, appended = size - previous, appendMilliseconds = elapsed.Elapsed.TotalMilliseconds,
-                queries = MeasureQueries(records, size), databaseBytes = new FileInfo(database.DatabasePath).Length });
+                queries = MeasureQueries(records, size), databaseBytes = DatabaseLayout.Domains.Sum(domain =>
+                    new FileInfo(DatabaseLayout.PathFor(database.DatabasePath, domain)).Length),
+                databaseFiles = DatabaseLayout.Domains.Select(domain => new { domain = DatabaseLayout.Name(domain),
+                    sizeBytes = new FileInfo(DatabaseLayout.PathFor(database.DatabasePath, domain)).Length }).ToArray() });
             previous = size;
             Console.WriteLine($"history rows verified: {size}");
         }
@@ -131,7 +134,7 @@ internal static class HistoryDatasetFixture
         var destination = Path.Combine(root, "restored-fixture");
         Directory.CreateDirectory(destination);
         Directory.CreateDirectory(Path.Combine(destination, "state"));
-        var backup = database.BackupTo(Path.Combine(destination, "state/nexus.db"));
+        var backup = database.BackupTo(Path.Combine(destination, "state/runtime.db"));
         var identity = JsonNode.Parse(File.ReadAllBytes(Path.Combine(source.RuntimeRoot, "instance.json")))!.AsObject();
         identity["runtimeRoot"] = destination;
         var identityBytes = JsonSerializer.SerializeToUtf8Bytes(identity);

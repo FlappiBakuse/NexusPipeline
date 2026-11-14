@@ -29,9 +29,9 @@ public sealed class DeclarationStorageTests
         Assert.Equal("one-dragon", actual.ResourceId); Assert.Equal(ConfigurationSyntax.Json, actual.Syntax);
         Assert.False(Assert.Single(actual.Access.Write).Descendants);
         Assert.Equal("TaskDefinitions", Assert.IsType<ConfigurationProperty>(Assert.Single(Assert.Single(actual.Access.Protected).Steps)).Name);
-        using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath);
+        using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Notifications | DatabaseDomain.Content);
         using var command = connection.CreateCommand();
-        command.CommandText = "UPDATE automations SET adapter_resources_json=json_remove(adapter_resources_json,'$[0].access.protected') WHERE automation_id=$id;";
+        command.CommandText = "UPDATE automation.automations SET adapter_resources_json=json_remove(adapter_resources_json,'$[0].access.protected') WHERE automation_id=$id;";
         command.Parameters.AddWithValue("$id", fixture.OtherScriptId.ToString("D")); Assert.Equal(1, command.ExecuteNonQuery());
         Assert.Throws<IOException>(() => fixture.Definitions.Read());
     }

@@ -82,8 +82,8 @@ public sealed class ProjectSaveTests
         }
         else
         {
-            using var connection = DatabaseConnections.Open(catalog.Database.DatabasePath, readOnly: true);
-            using var command = connection.CreateCommand(); command.CommandText = "SELECT operation_kind,status FROM operations WHERE operation_id=$id;";
+            using var connection = DatabaseConnections.Open(catalog.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.All);
+            using var command = connection.CreateCommand(); command.CommandText = "SELECT operation_kind,status FROM main.operations WHERE operation_id=$id;";
             command.Parameters.AddWithValue("$id", operation.ToString("D")); using var row = command.ExecuteReader();
             Assert.True(row.Read()); Assert.Equal("extension.document.write", row.GetString(0));
             Assert.Equal(stage == "accepted" ? "accepted" : "completed", row.GetString(1));

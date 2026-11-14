@@ -26,7 +26,7 @@ internal static class MaintenanceEffectCursor
             !current.ResourceKeys.SequenceEqual(inputs.Plan.ResourceKeys) ||
             !current.ResourceKeys.SequenceEqual(expected.ResourceKeys)) throw Invalid();
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT initial_journal_id,status FROM operations WHERE operation_id=$operation AND subject_id=$subject AND operation_kind='maintenance.update';";
+        command.CommandText = "SELECT initial_journal_id,status FROM main.operations WHERE operation_id=$operation AND subject_id=$subject AND operation_kind='maintenance.update';";
         command.Parameters.AddWithValue("$operation", inputs.Plan.OperationId.ToString("D"));
         command.Parameters.AddWithValue("$subject", inputs.Operation.Identity.SubjectId);
         using var operation = command.ExecuteReader();

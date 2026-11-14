@@ -50,8 +50,8 @@ internal sealed class PreparedExecutionOrigin : IDisposable
     {
         lease.VerifyHeld(instance);
         if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot ||
-            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "nexus.db"))) throw Invalid();
-        using var connection = NexusPipeline.Platform.Storage.Sqlite.DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "runtime.db"))) throw Invalid();
+        using var connection = NexusPipeline.Platform.Storage.Sqlite.DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: Sqlite.DatabaseDomain.Runtime | Sqlite.DatabaseDomain.Automation | Sqlite.DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         var saved = StartupQueueRows.Read(connection, transaction, occurrenceId, instance.InstanceId);
         if (!allowBlocked && saved.BlockReason is not null || saved.Batch.Generation != lease.StartupGeneration) throw new IOException("execution_occurrence_blocked");
@@ -69,13 +69,13 @@ internal sealed class PreparedExecutionOrigin : IDisposable
     {
         lease.VerifyHeld(instance);
         if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot ||
-            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "nexus.db"))) throw Invalid();
-        using var connection = NexusPipeline.Platform.Storage.Sqlite.DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "runtime.db"))) throw Invalid();
+        using var connection = NexusPipeline.Platform.Storage.Sqlite.DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: Sqlite.DatabaseDomain.Runtime | Sqlite.DatabaseDomain.Automation | Sqlite.DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         var saved = ScheduleMinuteRows.ReadOccurrence(connection, transaction, occurrenceId, instance.InstanceId);
         if (!allowBlocked && saved.Phase == ScheduleOccurrencePhase.Blocked) throw new IOException("execution_occurrence_blocked");
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT first_operation_id FROM scheduled_occurrences WHERE occurrence_id=$id;";
+        command.CommandText = "SELECT first_operation_id FROM main.scheduled_occurrences WHERE occurrence_id=$id;";
         command.Parameters.AddWithValue("$id", occurrenceId.ToString("D"));
         var source = command.ExecuteScalar() as string ?? throw Invalid();
         var document = ScheduleMinuteRows.ReadMinute(connection, transaction, Guid.ParseExact(source, "D"), instance.InstanceId) ?? throw Invalid();
@@ -91,7 +91,7 @@ internal sealed class PreparedExecutionOrigin : IDisposable
     internal AcceptedExecutionRun RegisterUnderRoot(ResourceLeaseManager resources, ResourceOperationLease root)
     {
         RequireRequest(Request);
-        using var connection = NexusPipeline.Platform.Storage.Sqlite.DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = NexusPipeline.Platform.Storage.Sqlite.DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: Sqlite.DatabaseDomain.Runtime | Sqlite.DatabaseDomain.Automation | Sqlite.DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         if (_startup is not null)
         {
@@ -108,7 +108,7 @@ internal sealed class PreparedExecutionOrigin : IDisposable
             if (actual.Phase != ScheduleOccurrencePhase.WaitingForAdmission) throw Invalid();
         }
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM operations WHERE operation_id=$id);";
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operations WHERE operation_id=$id);";
         command.Parameters.AddWithValue("$id", OperationId.ToString("D"));
         if ((long)command.ExecuteScalar()! != 0) throw new IOException("execution_scheduled_already_accepted");
         if (_revalidated) _ = RequireCurrentSource(connection, transaction);
@@ -149,7 +149,7 @@ internal sealed class PreparedExecutionOrigin : IDisposable
     internal void ReleaseBlocked(ResourceLeaseManager resources)
     {
         RequireRequest(Request);
-        using var connection = NexusPipeline.Platform.Storage.Sqlite.DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = NexusPipeline.Platform.Storage.Sqlite.DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: Sqlite.DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         var blocked = _startup is not null ? StartupQueueRows.Read(connection, transaction, OccurrenceId, _instance.InstanceId).BlockReason is not null :
             ScheduleMinuteRows.ReadOccurrence(connection, transaction, OccurrenceId, _instance.InstanceId).Phase == ScheduleOccurrencePhase.Blocked;
@@ -184,7 +184,7 @@ internal sealed class PreparedExecutionOrigin : IDisposable
         OperationIdentity operation, ExecutionSelectionRequest request, RunAttemptPlan attempt, ExecutionPlan total)
     {
         RequireRequest(request); RequirePlan(attempt);
-        if (!StringComparer.OrdinalIgnoreCase.Equals(connection.DataSource, PhysicalPathPolicy.NativePath(_database.DatabasePath))) throw Invalid();
+        if (!DatabaseConnections.IsBound(connection, _database.DatabasePath)) throw Invalid();
         Guid queueId; long queueRevision;
         if (_startup is not null)
         {
@@ -223,7 +223,7 @@ internal sealed class PreparedExecutionOrigin : IDisposable
     private static long SettingsRevision(SqliteConnection connection, SqliteTransaction transaction)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT revision FROM settings_current WHERE singleton=1;";
+        command.CommandText = "SELECT revision FROM system.settings_current WHERE singleton=1;";
         return command.ExecuteScalar() is long revision ? revision : throw Invalid();
     }
 
@@ -231,7 +231,7 @@ internal sealed class PreparedExecutionOrigin : IDisposable
         PreparedExecutionOrigin? origin)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT occurrence_id,0 FROM scheduled_occurrences WHERE start_operation_id=$id UNION ALL SELECT occurrence_id,1 FROM startup_queue_occurrences WHERE start_operation_id=$id;";
+        command.CommandText = "SELECT occurrence_id,0 FROM main.scheduled_occurrences WHERE start_operation_id=$id UNION ALL SELECT occurrence_id,1 FROM main.startup_queue_occurrences WHERE start_operation_id=$id;";
         command.Parameters.AddWithValue("$id", operationId.ToString("D"));
         using var reader = command.ExecuteReader();
         if (!reader.Read()) { if (origin is not null) throw Invalid(); return; }

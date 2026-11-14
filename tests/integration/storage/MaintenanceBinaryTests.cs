@@ -63,7 +63,7 @@ public sealed class MaintenanceBinaryTests
         Assert.Equal(200, (int)restoredOperation.StatusCode);
         using var restoredOutcome = JsonDocument.Parse(await restoredOperation.Content.ReadAsStringAsync(deadline.Token));
         Assert.Equal("originalRestored", restoredOutcome.RootElement.GetProperty("outcome").GetString());
-        using (var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System))
         using (var transaction = connection.BeginTransaction(deferred: true))
         {
             var row = MaintenanceOperationRows.ReadOwned(connection, transaction, fixture.Plan.OperationId, fixture.Subject);
@@ -74,14 +74,14 @@ public sealed class MaintenanceBinaryTests
         else published.VerifyPayload(fixture.Plan.TargetPath);
         var journal = new RecoveryJournalRegistry(fixture.Database).ReadJournal(fixture.Plan.JournalId);
         Assert.Equal(NexusPipeline.Core.Configuration.JournalPhase.Committed, journal.Phase);
-        using var sql = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true);
+        using var sql = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         using var command = sql.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM journal_writers WHERE journal_id=$journal;";
+        command.CommandText = "SELECT COUNT(*) FROM main.journal_writers WHERE journal_id=$journal;";
         command.Parameters.AddWithValue("$journal", fixture.Plan.JournalId.ToString("D"));
         Assert.Equal(4L, command.ExecuteScalar());
-        command.CommandText = "SELECT COUNT(*) FROM journal_writer_jobs WHERE journal_id=$journal;";
+        command.CommandText = "SELECT COUNT(*) FROM main.journal_writer_jobs WHERE journal_id=$journal;";
         Assert.Equal(3L, command.ExecuteScalar());
-        command.CommandText = "SELECT process_id FROM journal_writers WHERE journal_id=$journal AND image_path=$path AND process_id<>$old ORDER BY created_file_time DESC LIMIT 1;";
+        command.CommandText = "SELECT process_id FROM main.journal_writers WHERE journal_id=$journal AND image_path=$path AND process_id<>$old ORDER BY created_file_time DESC LIMIT 1;";
         command.Parameters.AddWithValue("$path", fixture.HostPath); command.Parameters.AddWithValue("$old", old.Id);
         var restoredId = Convert.ToInt32(command.ExecuteScalar());
         Assert.NotEqual(old.Id, restoredId); fixture.TrackCandidate(restoredId);
@@ -183,7 +183,7 @@ public sealed class MaintenanceBinaryTests
         using var operation = JsonDocument.Parse(await completed.Content.ReadAsStringAsync(deadline.Token));
         Assert.Equal("updated", operation.RootElement.GetProperty("outcome").GetString());
         MaintenanceOperationRow? row;
-        using (var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var transaction = connection.BeginTransaction(deferred: true))
         {
             row = MaintenanceOperationRows.ReadOwned(connection, transaction, fixture.Plan.OperationId, fixture.Subject);
@@ -194,10 +194,10 @@ public sealed class MaintenanceBinaryTests
         Assert.Equal("candidate_started", row.TerminalCode);
         if (published is null) Assert.Equal("candidate", File.ReadAllText(Path.Combine(fixture.Plan.TargetPath, "README.md")));
         else published.VerifyPayload(fixture.Plan.TargetPath);
-        using (var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var command = connection.CreateCommand())
         {
-            command.CommandText = "SELECT process_id FROM journal_writers WHERE journal_id=$journal AND image_path=$path AND process_id<>$old;";
+            command.CommandText = "SELECT process_id FROM main.journal_writers WHERE journal_id=$journal AND image_path=$path AND process_id<>$old;";
             command.Parameters.AddWithValue("$journal", fixture.Plan.JournalId.ToString("D"));
             command.Parameters.AddWithValue("$path", fixture.HostPath); command.Parameters.AddWithValue("$old", old.Id);
             var candidateId = Convert.ToInt32(command.ExecuteScalar());

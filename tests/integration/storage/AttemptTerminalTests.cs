@@ -86,7 +86,8 @@ public sealed class AttemptTerminalTests
             "operation" => "BEFORE UPDATE OF status ON operations WHEN NEW.operation_id='" + state.Journal.OperationId.ToString("D") + "' AND NEW.status='completed'",
             _ => "BEFORE UPDATE OF phase ON operation_journals WHEN NEW.journal_id='" + fixture.JournalId.ToString("D") + "' AND NEW.phase='committed'"
         };
-        fixture.Base.Execute("CREATE TRIGGER fail_attempt_terminal " + trigger + " BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
+        var triggerName = (boundary == "receipt" ? "records" : "main") + ".fail_attempt_terminal";
+        fixture.Base.Execute("CREATE TRIGGER " + triggerName + " " + trigger + " BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
         byte[] committedBytes;
         try
         {
@@ -99,7 +100,7 @@ public sealed class AttemptTerminalTests
             AssertOperation(fixture, "accepted");
             Assert.False(File.Exists(fixture.Marker));
         }
-        finally { fixture.Base.Execute("DROP TRIGGER fail_attempt_terminal;"); }
+        finally { fixture.Base.Execute("DROP TRIGGER " + triggerName + ";"); }
         var result = Store(fixture).CommitPreparedCancellation(fixture.JournalId);
         var completed = fixture.Scope.VerifyReadOnly(); Assert.Equal(JournalPhase.Committed, completed.Journal.Phase);
         Assert.Equal(completed.Latest.Revision, completed.Journal.Revision);

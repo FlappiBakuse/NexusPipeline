@@ -11,7 +11,7 @@ internal static class NotificationReferenceMetadata
         Action<TaskTestSnapshot> savedTestVisit, Action<NotificationWorkSnapshot> scheduledVisit,
         Action<NotificationWorkSnapshot> manualVisit)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         foreach (var item in NotificationReferenceInventory.Pages(connection, transaction, "notification_receipt_sources"))
         {
@@ -19,7 +19,7 @@ internal static class NotificationReferenceMetadata
             if (source.Document.OperationId != item.OperationId) throw NotificationReceiptCodec.Invalid();
             var next = ReceiptProgressRows.Require(connection, transaction, item.OperationId, source.Document.RouteCount);
             using var command = NotificationDeliveryRows.Command(connection, transaction,
-                "SELECT ordinal,relative_path,size_bytes,sha256 FROM notification_receipt_routes WHERE operation_id=$0 ORDER BY ordinal;",
+                "SELECT ordinal,relative_path,size_bytes,sha256 FROM notifications.notification_receipt_routes WHERE operation_id=$0 ORDER BY ordinal;",
                 item.OperationId.ToString("D"));
             var routes = new List<BlobReference>();
             using (var rows = command.ExecuteReader())

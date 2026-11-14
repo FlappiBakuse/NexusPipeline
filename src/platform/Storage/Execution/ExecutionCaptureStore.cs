@@ -162,7 +162,7 @@ internal sealed class ExecutionCaptureStore(RuntimeInstance instance, StateDatab
         }
         if (png is not null || frames.Count != 0)
         {
-            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
             using var transaction = connection.BeginTransaction(deferred: true);
             if (ExecutionCancellationRows.Read(connection, transaction, state.Journal, state.Attempt) is not null)
             { png = null; frames = []; reason = "execution_capture_context_closed"; }
@@ -256,7 +256,7 @@ internal sealed class ExecutionCaptureStore(RuntimeInstance instance, StateDatab
         if (budget is null || budget.Read().Remaining == TimeSpan.Zero) throw new IOException("execution_capture_deadline");
         ExecutionCaptureProjection.RequireNewEffectInside(connection, transaction, state, state.Latest, binding);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT process_id,created_file_time,image_path,image_sha256,user_sid,elevated FROM journal_writer_job_roots " +
+        command.CommandText = "SELECT process_id,created_file_time,image_path,image_sha256,user_sid,elevated FROM main.journal_writer_job_roots " +
             "WHERE journal_id=$journal AND writer_id=$writer AND job_name=$job;";
         command.Parameters.AddWithValue("$journal", binding.Primary.ParentJournalId.ToString("D"));
         command.Parameters.AddWithValue("$writer", binding.Primary.WriterId.ToString("D"));

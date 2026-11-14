@@ -15,7 +15,7 @@ internal static class AccountRecordProjection
             var engine = facts.Engine; var business = facts.Business; var lifecycle = facts.Lifecycle;
             (run with { UserId = Guid.Parse(account.Key!), FinalAttempt = facts }).Validate();
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "INSERT INTO account_run_records(ended_at_utc_ticks,run_id,user_id,engine_outcome,business_outcome,lifecycle_outcome,reason_code) " +
+            command.CommandText = "INSERT INTO records.account_run_records(ended_at_utc_ticks,run_id,user_id,engine_outcome,business_outcome,lifecycle_outcome,reason_code) " +
                 "VALUES($ended,$run,$user,$engine,$business,$lifecycle,$reason);";
             command.Parameters.AddWithValue("$ended", run.EndedAt.UtcTicks);
             command.Parameters.AddWithValue("$run", run.FinalAttempt.RunId.ToString("D"));

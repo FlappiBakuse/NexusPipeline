@@ -109,7 +109,7 @@ public sealed class LocalCompletionAuthorization : ICompletionLocalAuthorization
         lock (_gate)
         {
             if (_disposed || !_finality.IsFinal(receipt) || _source.Capture(receipt) is not null) return;
-            using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
             using var transaction = connection.BeginTransaction(deferred: true);
             var current = StartSourceRows.Read(connection, transaction, receipt.OperationId);
             var original = StartSourceRows.Original(connection, transaction, current);
@@ -141,7 +141,7 @@ public sealed class LocalCompletionAuthorization : ICompletionLocalAuthorization
     {
         if (context is null || context.Sources.Length is < 1 or > 4096) throw Invalid();
         var origins = new List<Guid>();
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         foreach (var source in context.Sources)
         {
@@ -162,8 +162,8 @@ public sealed class LocalCompletionAuthorization : ICompletionLocalAuthorization
         FrozenStartSource original, CompletionAuthorizationSource source)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT occurrence_id,0 FROM scheduled_occurrences WHERE start_operation_id=$id " +
-            "UNION ALL SELECT occurrence_id,1 FROM startup_queue_occurrences WHERE start_operation_id=$id;";
+        command.CommandText = "SELECT occurrence_id,0 FROM main.scheduled_occurrences WHERE start_operation_id=$id " +
+            "UNION ALL SELECT occurrence_id,1 FROM main.startup_queue_occurrences WHERE start_operation_id=$id;";
         command.Parameters.AddWithValue("$id", original.Identity.OperationId.ToString("D"));
         Guid occurrence; int kind;
         using (var row = command.ExecuteReader())

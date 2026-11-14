@@ -1,5 +1,3 @@
-using Microsoft.Data.Sqlite;
-
 namespace NexusPipeline.Platform.Storage.Sqlite;
 
 internal sealed class DatabaseReadScope : IDisposable
@@ -13,7 +11,6 @@ internal sealed class DatabaseReadScope : IDisposable
     private DatabaseReadScope Owner => _owner ?? this;
     private StableDirectoryLease? _directory;
     private FileStream? _file;
-    private string? _pool;
     private bool _disposed;
 
     private DatabaseReadScope(string path)
@@ -52,11 +49,6 @@ internal sealed class DatabaseReadScope : IDisposable
         return scope._path;
     }
 
-    internal static void Track(SqliteConnection connection)
-    {
-        if (_current is { } scope) scope.Owner._pool ??= connection.ConnectionString;
-    }
-
     public void Dispose()
     {
         if (_disposed) return;
@@ -64,19 +56,7 @@ internal sealed class DatabaseReadScope : IDisposable
             throw new InvalidOperationException("database_read_scope_order");
         _disposed = true; _current = _previous;
         if (_owner is not null) return;
-        // Native connections must close while the file and its pathname are still protected.
-        try
-        {
-            if (_pool is not null)
-            {
-                using var pool = new SqliteConnection(_pool);
-                SqliteConnection.ClearPool(pool);
-            }
-        }
-        finally
-        {
-            try { _shared?.Dispose(); }
-            finally { try { _file?.Dispose(); } finally { _directory?.Dispose(); } }
-        }
+        try { _shared?.Dispose(); }
+        finally { try { _file?.Dispose(); } finally { _directory?.Dispose(); } }
     }
 }

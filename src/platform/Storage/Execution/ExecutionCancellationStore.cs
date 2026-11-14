@@ -33,8 +33,8 @@ internal sealed class ExecutionCancellationStore(RuntimeInstance instance, State
         var state = AttemptWriterState.Read(instance, database, contracts, parentJournalId);
         if (state.Cancellation is { } existing)
             return AcceptClose(existing.Identity, parentJournalId, DateTimeOffset.UtcNow, existing.ReasonCode);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
-        using var command = connection.CreateCommand(); command.CommandText = "SELECT subject_id FROM operations WHERE operation_id=$operation;";
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
+        using var command = connection.CreateCommand(); command.CommandText = "SELECT subject_id FROM main.operations WHERE operation_id=$operation;";
         command.Parameters.AddWithValue("$operation", state.Journal.OperationId.ToString("D"));
         var subject = command.ExecuteScalar() as string ?? throw new IOException("execution_writer_operation_unbound");
         var identity = DispatchIntentCodec.Identity(Guid.NewGuid(), subject, parentJournalId, state.Journal.OperationId,
@@ -45,7 +45,7 @@ internal sealed class ExecutionCancellationStore(RuntimeInstance instance, State
     private ExecutionCancellationResult AcceptClose(OperationIdentity identity, Guid parentJournalId, DateTimeOffset acceptedAt, string reason)
     {
         lease.VerifyHeld(instance);
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var transaction = connection.BeginTransaction(deferred: true)) _ = OperationRows.ReadExisting(connection, transaction, identity);
         if (identity.Kind != DispatchIntentCodec.Kind(reason)) throw new OperationConflictException();
         var state = AttemptWriterState.Read(instance, database, contracts, parentJournalId);
@@ -68,15 +68,15 @@ internal sealed class ExecutionCancellationStore(RuntimeInstance instance, State
                 state.Gate.State == EffectGateState.Sealed)
                 throw new IOException("execution_cancel_parent_unavailable");
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT EXISTS(SELECT 1 FROM operations WHERE operation_id=$parentOperation AND subject_id=$subject AND status='accepted');";
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operations WHERE operation_id=$parentOperation AND subject_id=$subject AND status='accepted');";
             command.Parameters.AddWithValue("$parentOperation", state.Journal.OperationId.ToString("D")); command.Parameters.AddWithValue("$subject", identity.SubjectId);
             if ((long)command.ExecuteScalar()! != 1) throw new OperationConflictException();
             ExecutionCancellationRows.RequireDispatchOpen(connection, transaction, parentJournalId);
             var result = OperationRows.Accept(connection, transaction, identity, acceptedAt);
-            command.CommandText = "UPDATE operations SET initial_journal_id=$parent WHERE operation_id=$operation;";
+            command.CommandText = "UPDATE main.operations SET initial_journal_id=$parent WHERE operation_id=$operation;";
             command.Parameters.AddWithValue("$parent", parentJournalId.ToString("D")); command.Parameters.AddWithValue("$operation", identity.OperationId.ToString("D"));
             if (command.ExecuteNonQuery() != 1) throw new IOException("execution_cancel_operation_unbound");
-            command.CommandText = "UPDATE recovery_index_state SET ready=0,revision=revision+1 WHERE singleton=1;";
+            command.CommandText = "UPDATE main.recovery_index_state SET ready=0,revision=revision+1 WHERE singleton=1;";
             if (command.ExecuteNonQuery() != 1) throw new IOException("execution_cancel_index_unbound");
             return result;
         });
@@ -122,14 +122,14 @@ internal sealed class ExecutionCancellationStore(RuntimeInstance instance, State
     {
         if (pageSize is < 1 or > 128) throw new ArgumentOutOfRangeException(nameof(pageSize));
         VerifyTargets(database);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         const string targets = "(c.operation_kind IN ('execution.cancel','execution.close') OR j.operation_kind='runAttempt' AND c.operation_id<>j.operation_id AND c.operation_kind<>'execution.retry.cancel')";
         var after = "";
         while (true)
         {
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT DISTINCT c.initial_journal_id FROM operations c LEFT JOIN operation_journals j ON j.journal_id=c.initial_journal_id WHERE " +
+            command.CommandText = "SELECT DISTINCT c.initial_journal_id FROM main.operations c LEFT JOIN main.operation_journals j ON j.journal_id=c.initial_journal_id WHERE " +
                 targets + " AND c.initial_journal_id>$after ORDER BY c.initial_journal_id LIMIT $limit;";
             command.Parameters.AddWithValue("$after", after); command.Parameters.AddWithValue("$limit", pageSize);
             var parents = new List<Guid>();
@@ -143,11 +143,11 @@ internal sealed class ExecutionCancellationStore(RuntimeInstance instance, State
 
     internal static void VerifyTargets(StateDatabase database)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         ExecutionCancellationRows.RequireRecognizedTargets(connection, transaction);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM operations c LEFT JOIN operation_journals j ON j.journal_id=c.initial_journal_id " +
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operations c LEFT JOIN main.operation_journals j ON j.journal_id=c.initial_journal_id " +
             "WHERE (c.operation_kind IN ('execution.cancel','execution.close') OR j.operation_kind='runAttempt' " +
             "AND c.operation_id<>j.operation_id AND c.operation_kind<>'execution.retry.cancel') " +
             "AND (c.initial_journal_id IS NULL OR j.operation_kind IS NULL OR j.operation_kind<>'runAttempt'));";

@@ -59,12 +59,12 @@ public sealed class RecordHistoryRetention
         }
         if (_nextSweep is { } next && today < next) return;
         Guid? run;
-        using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var command = connection.CreateCommand())
         {
-            command.CommandText = "SELECT r.run_id FROM operations o INDEXED BY execution_start_retention_read " +
-                "JOIN execution_start_sources s ON s.operation_id=o.operation_id AND s.attempt_ordinal=1 " +
-                "JOIN run_records r ON r.run_id=s.run_id WHERE o.operation_kind='execution.start' AND r.history_retired_at_utc_ticks IS NULL AND r.run_id>$after " +
+            command.CommandText = "SELECT r.run_id FROM main.operations o INDEXED BY execution_start_retention_read " +
+                "JOIN main.execution_start_sources s ON s.operation_id=o.operation_id AND s.attempt_ordinal=1 " +
+                "JOIN records.run_records r ON r.run_id=s.run_id WHERE o.operation_kind='execution.start' AND r.history_retired_at_utc_ticks IS NULL AND r.run_id>$after " +
                 "AND julianday(o.created_at)<julianday($cutoff) ORDER BY r.run_id LIMIT 1;";
             command.Parameters.AddWithValue("$after", _after?.ToString("D") ?? "");
             command.Parameters.AddWithValue("$cutoff", cutoff.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));

@@ -33,7 +33,7 @@ public sealed class CheckInTests
                 var secret = await fixture.Secrets.GetStateAsync(new("game-checkin", task, field), default);
                 Assert.True(secret.IsReadable); Assert.Equal(1, secret.Revision);
             }
-        fixture.Http.BeforeSubmission = () => Assert.Equal(1L, Count("SELECT COUNT(*) FROM work_effect_events WHERE kind='submitted';"));
+        fixture.Http.BeforeSubmission = () => Assert.Equal(1L, Count("SELECT COUNT(*) FROM main.work_effect_events WHERE kind='submitted';"));
         _ = await fixture.Call("run-task", new { taskId = first }); var completed = await fixture.Completed(first);
         Assert.Equal(completed.Source.Document.LocalDate.ToString("MM", CultureInfo.InvariantCulture), fixture.Http.Month);
         state = await fixture.Call("read-state", new { }, read: true);
@@ -45,9 +45,9 @@ public sealed class CheckInTests
         state = await fixture.Call("read-state", new { }, read: true);
         var shared = TaskView(state, second).GetProperty("recentRun").GetProperty("results")[0];
         Assert.Equal(responseCode == 0 ? "effect_unknown" : "already", shared.GetProperty("code").GetString());
-        Assert.Equal(1L, Count("SELECT COUNT(*) FROM work_effect_events WHERE kind='submitted';"));
-        Assert.Equal(2L, Count("SELECT COUNT(*) FROM work_effect_claims;"));
-        Assert.Equal(0L, Count("SELECT COUNT(*) FROM schedule_minute_claims;"));
+        Assert.Equal(1L, Count("SELECT COUNT(*) FROM main.work_effect_events WHERE kind='submitted';"));
+        Assert.Equal(2L, Count("SELECT COUNT(*) FROM main.work_effect_claims;"));
+        Assert.Equal(0L, Count("SELECT COUNT(*) FROM main.schedule_minute_claims;"));
         WorkEffectInventory.Verify(fixture.Catalog.Instance, fixture.Catalog.Database, new());
         new SecretDocumentInventory(fixture.Catalog.Instance, fixture.Catalog.Database, new()).Verify();
         foreach (var task in new[] { first, second })
@@ -57,8 +57,8 @@ public sealed class CheckInTests
                 Assert.False((await fixture.Secrets.GetStateAsync(new("game-checkin", task, field), default)).IsReadable);
         }
         Assert.Empty(state.GetProperty("tasks").EnumerateArray()); inputs.VerifyUnchanged();
-        using var connection = DatabaseConnections.Open(fixture.Catalog.Database.DatabasePath, readOnly: true);
-        using var documents = connection.CreateCommand(); documents.CommandText = "SELECT content FROM extension_documents WHERE extension_id='game-checkin';";
+        using var connection = DatabaseConnections.Open(fixture.Catalog.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
+        using var documents = connection.CreateCommand(); documents.CommandText = "SELECT content FROM extensions.extension_documents WHERE extension_id='game-checkin';";
         using var rows = documents.ExecuteReader();
         while (rows.Read()) Assert.DoesNotContain("synthetic-private-token", Encoding.UTF8.GetString((byte[])rows.GetValue(0)), StringComparison.Ordinal);
 
@@ -74,7 +74,7 @@ public sealed class CheckInTests
         }
         long Count(string sql)
         {
-            using var read = DatabaseConnections.Open(fixture.Catalog.Database.DatabasePath, readOnly: true);
+            using var read = DatabaseConnections.Open(fixture.Catalog.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
             using var query = read.CreateCommand(); query.CommandText = sql; return (long)query.ExecuteScalar()!;
         }
     }

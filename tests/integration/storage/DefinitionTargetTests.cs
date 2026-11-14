@@ -66,10 +66,10 @@ public sealed class DefinitionTargetTests
         if (damage == "mixed") document["Android"] = JsonSerializer.SerializeToNode(new AutomationAndroidTarget(AutomationAndroidDriver.GenericAdb,
             fixture.Store.Read().Scripts[0].Executable, "127.0.0.1:5555", "test.game", []));
         if (damage == "missing") document.Remove("WaitSeconds");
-        using (var connection = new SqliteConnection($"Data Source={fixture.Database.DatabasePath};Pooling=False"))
+        using (var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open($"Data Source={fixture.Database.DatabasePath};Pooling=False"))
         {
             connection.Open(); using var command = connection.CreateCommand();
-            command.CommandText = "UPDATE automations SET target_json=$target;";
+            command.CommandText = "UPDATE automation.automations SET target_json=$target;";
             command.Parameters.AddWithValue("$target", document.ToJsonString()); command.ExecuteNonQuery();
         }
         var before = Fingerprints(fixture.Instance.RuntimeRoot);

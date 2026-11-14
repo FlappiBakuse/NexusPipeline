@@ -26,7 +26,7 @@ internal sealed class MaintenanceRegisteredActor : IDisposable
         if (writerId == Guid.Empty || !RecognizedJobName(jobName)) throw Invalid();
         var current = ProcessIdentityReader.Read(Environment.ProcessId); bootstrap.RequireHelper(current);
         var writer = new JournalWriter(writerId, current);
-        using (var connection = DatabaseConnections.Open(bootstrap.Inputs.Database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(bootstrap.Inputs.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System))
         using (var transaction = connection.BeginTransaction(deferred: true))
         { RequireRegistered(connection, transaction, bootstrap.Inputs.Plan.JournalId, writer, jobName); transaction.Commit(); }
         var job = JobNative.OpenJobObjectW(4, false, jobName);
@@ -63,14 +63,14 @@ internal sealed class MaintenanceRegisteredActor : IDisposable
             using (var existing = connection.CreateCommand())
             {
                 existing.Transaction = transaction;
-                existing.CommandText = "SELECT COUNT(*)=1 AND COALESCE(SUM(writer_id=$creator),0)=1 FROM journal_writers WHERE journal_id=$journal;";
+                existing.CommandText = "SELECT COUNT(*)=1 AND COALESCE(SUM(writer_id=$creator),0)=1 FROM main.journal_writers WHERE journal_id=$journal;";
                 existing.Parameters.AddWithValue("$creator", JournalWriterStore.CurrentWriter.WriterId.ToString("D"));
                 existing.Parameters.AddWithValue("$journal", handoff.Plan.JournalId.ToString("D"));
                 if ((long)existing.ExecuteScalar()! != 1) throw Invalid();
             }
             JournalWriterStore.Insert(connection, transaction, handoff.Plan.JournalId, writer);
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "INSERT INTO journal_writer_jobs VALUES($journal,$writer,$job,$session);";
+            command.CommandText = "INSERT INTO main.journal_writer_jobs VALUES($journal,$writer,$job,$session);";
             command.Parameters.AddWithValue("$journal", handoff.Plan.JournalId.ToString("D"));
             command.Parameters.AddWithValue("$writer", writer.WriterId.ToString("D")); command.Parameters.AddWithValue("$job", actualJob.Name);
             command.Parameters.AddWithValue("$session", creator.SessionId); command.ExecuteNonQuery();
@@ -100,11 +100,11 @@ internal sealed class MaintenanceRegisteredActor : IDisposable
             var journal = RecoveryJournalRegistry.ReadJournalInside(connection, transaction, inputs.Plan.JournalId);
             if (journal.Phase != JournalPhase.Applied) throw Invalid();
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT COUNT(*) FROM journal_writers WHERE journal_id=$journal;";
+            command.CommandText = "SELECT COUNT(*) FROM main.journal_writers WHERE journal_id=$journal;";
             command.Parameters.AddWithValue("$journal", inputs.Plan.JournalId.ToString("D"));
             if ((long)command.ExecuteScalar()! != 2) throw Invalid();
             JournalWriterStore.Insert(connection, transaction, inputs.Plan.JournalId, writer);
-            command.CommandText = "INSERT INTO journal_writer_jobs VALUES($journal,$writer,$job,$session);";
+            command.CommandText = "INSERT INTO main.journal_writer_jobs VALUES($journal,$writer,$job,$session);";
             command.Parameters.AddWithValue("$writer", writer.WriterId.ToString("D")); command.Parameters.AddWithValue("$job", actualJob.Name);
             command.Parameters.AddWithValue("$session", creator.SessionId); command.ExecuteNonQuery();
             RecordRoot(connection, transaction, inputs.Plan.JournalId, writer, actualJob.Name);
@@ -133,11 +133,11 @@ internal sealed class MaintenanceRegisteredActor : IDisposable
         {
             actualJob.RequirePersistingRoot(actualRoot); restored.RequireInside(connection, transaction);
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT COUNT(*) FROM journal_writers WHERE journal_id=$journal;";
+            command.CommandText = "SELECT COUNT(*) FROM main.journal_writers WHERE journal_id=$journal;";
             command.Parameters.AddWithValue("$journal", inputs.Plan.JournalId.ToString("D"));
             if ((long)command.ExecuteScalar()! is not (2 or 3)) throw Invalid();
             JournalWriterStore.Insert(connection, transaction, inputs.Plan.JournalId, writer);
-            command.CommandText = "INSERT INTO journal_writer_jobs VALUES($journal,$writer,$job,$session);";
+            command.CommandText = "INSERT INTO main.journal_writer_jobs VALUES($journal,$writer,$job,$session);";
             command.Parameters.AddWithValue("$writer", writer.WriterId.ToString("D")); command.Parameters.AddWithValue("$job", actualJob.Name);
             command.Parameters.AddWithValue("$session", creator.SessionId); command.ExecuteNonQuery();
             RecordRoot(connection, transaction, inputs.Plan.JournalId, writer, actualJob.Name);
@@ -157,7 +157,7 @@ internal sealed class MaintenanceRegisteredActor : IDisposable
         JournalWriter writer, string jobName)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "INSERT INTO journal_writer_job_roots VALUES($journal,$writer,$job,$pid,$created,$path,$hash,$sid,$elevated);";
+        command.CommandText = "INSERT INTO main.journal_writer_job_roots VALUES($journal,$writer,$job,$pid,$created,$path,$hash,$sid,$elevated);";
         command.Parameters.AddWithValue("$journal", journal.ToString("D")); command.Parameters.AddWithValue("$writer", writer.WriterId.ToString("D"));
         command.Parameters.AddWithValue("$job", jobName); command.Parameters.AddWithValue("$pid", writer.Process.ProcessId);
         command.Parameters.AddWithValue("$created", writer.Process.CreatedAtUtc.ToFileTimeUtc()); command.Parameters.AddWithValue("$path", writer.Process.ImagePath);
@@ -181,7 +181,7 @@ internal sealed class MaintenanceRegisteredActor : IDisposable
     {
         _bootstrap.RequireCurrent();
         RequireNativeBound();
-        using var connection = DatabaseConnections.Open(_bootstrap.Inputs.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_bootstrap.Inputs.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         RequireRegistered(connection, transaction, _bootstrap.Inputs.Plan.JournalId, Writer, JobName); transaction.Commit();
     }
@@ -207,8 +207,8 @@ internal sealed class MaintenanceRegisteredActor : IDisposable
         Guid journalId, JournalWriter writer, string jobName)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM journal_writers w JOIN journal_writer_jobs b USING(journal_id,writer_id) " +
-            "JOIN operation_journals j USING(journal_id) JOIN maintenance_operations m ON m.operation_id=j.operation_id " +
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.journal_writers w JOIN main.journal_writer_jobs b USING(journal_id,writer_id) " +
+            "JOIN main.operation_journals j USING(journal_id) JOIN system.maintenance_operations m ON m.operation_id=j.operation_id " +
             "WHERE w.journal_id=$journal AND w.writer_id=$writer AND b.job_name=$job AND m.state=1 AND m.handoff_id IS NOT NULL " +
             "AND j.operation_kind='updateApply' AND w.process_id=$pid AND w.created_file_time=$created " +
             "AND w.image_path=$path AND w.image_sha256=$hash AND w.user_sid=$sid AND w.elevated=$elevated);";

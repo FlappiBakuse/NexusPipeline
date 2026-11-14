@@ -28,7 +28,7 @@ internal sealed class ScheduledProviderEvidence(RuntimeInstance instance, Contra
             throw ScheduledProviderCodec.Invalid();
         if (operation.Status != (result is null ? "accepted" : "completed")) throw ScheduledProviderCodec.Invalid();
         using var pending = DatabaseConnections.Command(connection, transaction,
-            "SELECT trigger_utc_minute FROM scheduled_provider_pending WHERE occurrence_id=$0;", id.ToString("D"));
+            "SELECT trigger_utc_minute FROM main.scheduled_provider_pending WHERE occurrence_id=$0;", id.ToString("D"));
         var indexed = pending.ExecuteScalar();
         if (result is null ? indexed is not long minute || minute != source.Document.TriggerUtcMinute : indexed is not null)
             throw ScheduledProviderCodec.Invalid();

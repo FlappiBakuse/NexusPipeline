@@ -8,11 +8,11 @@ public sealed class AttemptHistoryReader(StateDatabase database) : IAttemptHisto
     public AttemptHistoryPage ReadPage(AttemptHistoryQuery query)
     {
         AttemptHistoryPolicy.Validate(query);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT attempt_id,ordinal FROM attempt_receipts WHERE run_id=$run AND ordinal>$ordinal " +
-            "AND NOT EXISTS(SELECT 1 FROM run_records WHERE run_id=$run AND history_retired_at_utc_ticks IS NOT NULL) ORDER BY ordinal LIMIT $limit;";
+        command.CommandText = "SELECT attempt_id,ordinal FROM records.attempt_receipts WHERE run_id=$run AND ordinal>$ordinal " +
+            "AND NOT EXISTS(SELECT 1 FROM records.run_records WHERE run_id=$run AND history_retired_at_utc_ticks IS NOT NULL) ORDER BY ordinal LIMIT $limit;";
         command.Parameters.AddWithValue("$run", query.RunId.ToString("D"));
         command.Parameters.AddWithValue("$ordinal", query.AfterOrdinal);
         command.Parameters.AddWithValue("$limit", query.Limit + 1);

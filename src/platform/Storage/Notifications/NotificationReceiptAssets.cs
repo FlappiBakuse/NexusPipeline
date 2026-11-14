@@ -9,7 +9,7 @@ internal static class NotificationReceiptAssets
     internal static RecordAsset? ReadPublished(SqliteConnection connection, SqliteTransaction transaction, Guid runId)
     {
         using var command = NotificationDeliveryRows.Command(connection, transaction,
-            "SELECT a.digest,b.size_bytes,b.relative_path FROM record_assets a JOIN blobs b ON b.digest=a.digest " +
+            "SELECT a.digest,b.size_bytes,b.relative_path FROM records.record_assets a JOIN content.blobs b ON b.digest=a.digest " +
             "WHERE a.run_id=$0 AND a.kind=0 ORDER BY a.digest LIMIT 1;", runId.ToString("D"));
         using var row = command.ExecuteReader();
         if (!row.Read()) return null;

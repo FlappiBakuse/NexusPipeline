@@ -8,6 +8,42 @@ namespace NexusPipeline.StorageTests;
 
 public sealed class DatabaseReaderTests
 {
+    [Fact(DisplayName = "Domain Pool Eviction Preserves Borrowed And Recently Used Connections Within The Four Handle Budget")]
+    public async Task RetainsBusyConnections()
+    {
+        var root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "domain-pool-" + Guid.NewGuid().ToString("N"));
+        var instance = new InstanceRoot(new()).OpenOrCreate(root);
+        var lease = InstanceLease.Acquire(instance, new());
+        var handles = new List<SQLitePCL.sqlite3>();
+        try
+        {
+            var database = StateDatabase.CreateFresh(instance, lease);
+            SQLitePCL.sqlite3 writer;
+            using (var held = DatabaseConnections.Open(database.DatabasePath))
+            {
+                writer = held.Handle!; handles.Add(writer);
+                foreach (var domain in DatabaseLayout.Domains)
+                {
+                    using var reader = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: domain);
+                    handles.Add(reader.Handle!); Assert.Equal(0L, Count(reader));
+                }
+            }
+            using (var following = DatabaseConnections.Open(database.DatabasePath)) Assert.Same(writer, following.Handle);
+            using (var selected = DatabaseConnections.Open(database.DatabasePath, readOnly: true,
+                domains: DatabaseDomain.Automation | DatabaseDomain.Records)) handles.Add(selected.Handle!);
+            using (var following = DatabaseConnections.Open(database.DatabasePath)) Assert.Same(writer, following.Handle);
+            Assert.InRange(handles.Distinct().Count(handle => !handle.IsClosed), 1, 4);
+            using var wide = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+            var budgets = DatabaseLayout.Domains.ToDictionary(domain => domain, domain =>
+                -(long)DatabaseConnections.Scalar(wide, $"PRAGMA {DatabaseLayout.Alias(domain)}.cache_size;"));
+            Assert.InRange(budgets.Values.Sum(), 1, 8192);
+            Assert.True(budgets[DatabaseDomain.Runtime] > budgets[DatabaseDomain.Configuration]);
+            Assert.True(budgets[DatabaseDomain.Configuration] > budgets[DatabaseDomain.Records]);
+        }
+        finally { lease.Dispose(); await lease.WhenExecutionPublicationsReleased; }
+        Assert.All(handles, handle => Assert.True(handle.IsClosed));
+    }
+
     [Fact(DisplayName = "Synchronous Read Scope Release Preserves The Instance Background Reader Pool")]
     public async Task PreservesBackgroundPool()
     {
@@ -18,17 +54,17 @@ public sealed class DatabaseReaderTests
         {
             var database = StateDatabase.CreateFresh(instance, lease);
             object? background;
-            using (var reader = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+            using (var reader = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime))
             {
                 Assert.Equal(0L, Count(reader));
                 background = reader.Handle;
             }
             lease.PublishExecution(() =>
             {
-                using var reader = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+                using var reader = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
                 Assert.Equal(0L, Count(reader));
             });
-            using var following = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+            using var following = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
             Assert.Equal(0L, Count(following));
             Assert.Same(background, following.Handle);
         }
@@ -54,15 +90,15 @@ public sealed class DatabaseReaderTests
             var b = StateDatabase.CreateFresh(second, secondLease);
             var accepted = new OperationIdentity(Guid.NewGuid(), "reader-fixture", new string('a', 64), "fixture.reader");
             Assert.True(a.Accept(accepted, DateTimeOffset.UtcNow).IsNew);
-            for (var index = 0; index < 12; index++) readers.Add(DatabaseConnections.Open(a.DatabasePath, readOnly: true));
+            for (var index = 0; index < 12; index++) readers.Add(DatabaseConnections.Open(a.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime));
             Assert.All(readers, connection => Assert.Equal(1L, Count(connection)));
-            using (var other = DatabaseConnections.Open(b.DatabasePath, readOnly: true)) Assert.Equal(0L, Count(other));
+            using (var other = DatabaseConnections.Open(b.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime)) Assert.Equal(0L, Count(other));
             var following = new OperationIdentity(Guid.NewGuid(), "reader-fixture", new string('b', 64), "fixture.reader");
             Assert.True(a.Accept(following, DateTimeOffset.UtcNow).IsNew);
             Assert.All(readers, connection => Assert.Equal(2L, Count(connection)));
             firstLease.PublishExecution(() =>
             {
-                using var inside = DatabaseConnections.Open(a.DatabasePath, readOnly: true);
+                using var inside = DatabaseConnections.Open(a.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
                 Assert.Equal(2L, Count(inside));
                 Assert.False(a.Accept(following, DateTimeOffset.UtcNow).IsNew);
                 Assert.Equal(2L, Count(inside));
@@ -74,7 +110,7 @@ public sealed class DatabaseReaderTests
             foreach (var reader in readers) reader.Dispose();
             readers.Clear();
             Directory.Move(first.RuntimeRoot, first.RuntimeRoot + "-released");
-            using (var other = DatabaseConnections.Open(b.DatabasePath, readOnly: true)) Assert.Equal(0L, Count(other));
+            using (var other = DatabaseConnections.Open(b.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime)) Assert.Equal(0L, Count(other));
             secondLease.Dispose();
             await secondLease.WhenExecutionPublicationsReleased;
             Directory.Move(second.RuntimeRoot, second.RuntimeRoot + "-released");
@@ -91,7 +127,7 @@ public sealed class DatabaseReaderTests
     private static long Count(SqliteConnection connection)
     {
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT count(*) FROM operations;";
+        command.CommandText = "SELECT count(*) FROM main.operations;";
         return (long)command.ExecuteScalar()!;
     }
 }

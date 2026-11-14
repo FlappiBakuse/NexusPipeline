@@ -17,14 +17,14 @@ public sealed class ScheduledReplayTests
             if (fixture.Base.Count("scheduled_provider_occurrences") != 1) return;
             fixture.Clock.BeforeUtcRead = null; fixture.Clock.Move(TimeSpan.FromMinutes(3));
         };
-        fixture.Base.Execute("CREATE TRIGGER corrupt_after_provider_result AFTER INSERT ON scheduled_provider_result BEGIN UPDATE scheduled_provider_occurrences SET size_bytes=size_bytes+1 WHERE occurrence_id=NEW.occurrence_id; END;");
+        fixture.Base.Execute("CREATE TRIGGER main.corrupt_after_provider_result AFTER INSERT ON scheduled_provider_result BEGIN UPDATE scheduled_provider_occurrences SET size_bytes=size_bytes+1 WHERE occurrence_id=NEW.occurrence_id; END;");
         try { await Assert.ThrowsAnyAsync<IOException>(() => fixture.Tick.TickAsync()); }
-        finally { fixture.Base.Execute("DROP TRIGGER corrupt_after_provider_result;"); fixture.Clock.BeforeUtcRead = null; }
+        finally { fixture.Base.Execute("DROP TRIGGER main.corrupt_after_provider_result;"); fixture.Clock.BeforeUtcRead = null; }
         Assert.Equal(1, fixture.Base.Count("scheduled_provider_result")); Assert.Equal(0, fixture.Base.Count("scheduled_provider_pending"));
         Assert.Equal(0, fixture.Base.Count("scheduled_provider_begin")); Assert.Equal(0, fixture.PlannedCalls); Assert.Equal(0, fixture.Effects);
         var session = Guid.NewGuid();
         Assert.Null(fixture.Base.Lifecycle.RequestClose(session, Guid.NewGuid()).Permit);
-        fixture.Base.Execute("UPDATE scheduled_provider_occurrences SET size_bytes=size_bytes-1;");
+        fixture.Base.Execute("UPDATE main.scheduled_provider_occurrences SET size_bytes=size_bytes-1;");
         var before = Assert.Single(fixture.States()); Assert.Equal("notStarted", before.Result!.Completion);
         Assert.Null(before.Begin); Assert.Equal("scheduled_provider_deadline", before.Close!.ReasonCode);
         await fixture.Tick.TickAsync();

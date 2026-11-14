@@ -11,7 +11,7 @@ internal sealed class AndroidEvidenceScope(ExecutionPlan ownedTotal, StateDataba
     internal T ReadSql<T>(StateDatabase requestedDatabase, Func<SqliteConnection, T> read)
     {
         if (_sql is not null) return _sql.Read(requestedDatabase, read);
-        using var connection = DatabaseConnections.Open(requestedDatabase.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(requestedDatabase.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         return read(connection);
     }
 

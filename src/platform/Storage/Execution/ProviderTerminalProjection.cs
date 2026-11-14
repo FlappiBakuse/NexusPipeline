@@ -40,7 +40,7 @@ internal static class ProviderTerminalProjection
         ExecutionCancellationRows.RequireDispatchOpen(connection, transaction, state.Journal.JournalId);
         var binding = admission.Item.Binding;
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM journal_writer_job_roots r JOIN journal_writer_jobs j " +
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.journal_writer_job_roots r JOIN main.journal_writer_jobs j " +
             "ON j.journal_id=r.journal_id AND j.writer_id=r.writer_id AND j.job_name=r.job_name " +
             "WHERE r.journal_id=$journal AND r.writer_id=$writer AND r.job_name=$job AND j.session_id=$session);";
         command.Parameters.AddWithValue("$journal", binding.ParentJournalId.ToString("D"));

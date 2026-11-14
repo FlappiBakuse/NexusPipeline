@@ -59,7 +59,7 @@ internal sealed class InstalledWorkEffects(RuntimeInstance instance, StateDataba
         using var material = await secretStore.ReadAsync(key, lifetime.Token).ConfigureAwait(false);
         var version = work.RequireIdentity(); using var identity = work.ProjectIdentity(field, material);
         string family;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System))
             family = SecretReplayProof.Identity(instance, connection, key, version, identity);
         var owner = Owner(work, secretId, status.Revision);
         var effectKey = new WorkEffectKey(extensionId, field, activityId, work.LocalDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), family);
@@ -165,7 +165,7 @@ internal sealed class InstalledWorkEffects(RuntimeInstance instance, StateDataba
 
     private WorkEffectState State(WorkEffectClaim claim, IInstalledWork work, CancellationToken cancellation)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         var state = WorkEffectRows.State(connection, null, claim.Id);
         var owner = claim.Owner;
         var stopped = scheduling.ObserveEffectOwner(extensionId, owner.ProviderId, owner.TaskId, owner.OperationId, owner.RunId, owner.AttemptId, work, cancellation);
@@ -178,7 +178,7 @@ internal sealed class InstalledWorkEffects(RuntimeInstance instance, StateDataba
         InstalledExtensionConsumption.Use use, CancellationToken cancellation)
     {
         WorkEffectEpoch epoch;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true)) epoch = WorkEffectEpochs.Latest(connection, null, claim.Id);
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System)) epoch = WorkEffectEpochs.Latest(connection, null, claim.Id);
         if (epoch.Closed?.OperationId == work.OperationId) return (epoch.Ordinal, WorkEffectState.Confirmed);
         if (epoch.Closed is null && epoch.Owner.OperationId == work.OperationId) return (epoch.Ordinal, WorkEffectState.New);
         var operation = epoch.Closed?.OperationId ?? epoch.Owner.OperationId;

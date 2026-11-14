@@ -131,7 +131,7 @@ public sealed class ExecutionLogReader(RuntimeInstance instance, StateDatabase d
                 character is not (>= 'a' and <= 'z' or >= 'A' and <= 'Z' or >= '0' and <= '9' or '-' or '_' or '.')))
             throw new ArgumentException("record_log_query_invalid");
         if (database.InstanceId != instance.InstanceId || !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath,
-            Path.Combine(instance.RuntimeRoot, "state", "nexus.db"))) throw Invalid();
+            Path.Combine(instance.RuntimeRoot, "state", "runtime.db"))) throw Invalid();
         return ReadSource(key, Context(key.RunId, key.AttemptId)) ?? throw new IOException("record_log_not_captured");
     }
 
@@ -139,7 +139,7 @@ public sealed class ExecutionLogReader(RuntimeInstance instance, StateDatabase d
     {
         RegisteredJournal registered;
         NexusPipeline.Core.Execution.AttemptReceipt receipt;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records))
         using (var transaction = connection.BeginTransaction(deferred: true))
         {
             receipt = AttemptReceiptStore.ReadInside(connection, transaction, attemptId) ?? throw Invalid();
@@ -242,7 +242,7 @@ public sealed class ExecutionLogReader(RuntimeInstance instance, StateDatabase d
     {
         if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot) throw Invalid();
         _ = state.RequireValidatedRead();
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         AttemptWriterState.RequireCursor(connection, transaction, state.Journal, state.Gate.State);
         var source = StartSourceRows.Read(connection, transaction, expected.OperationId);
@@ -259,7 +259,7 @@ public sealed class ExecutionLogReader(RuntimeInstance instance, StateDatabase d
         RegisteredJournal registered, RunAttemptPlan attempt, ExecutionPlan total, JournalDocument journal)
     {
         if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot) throw Invalid();
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         var current = RecoveryJournalRegistry.ReadInside(connection, transaction, registered.JournalId);
         AttemptPreparedBinding.RequireRegistration(current, attempt);

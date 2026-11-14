@@ -32,7 +32,7 @@ internal static class StartupQueueRows
     internal static StartupQueueBatch? ReadBatch(SqliteConnection connection, SqliteTransaction transaction, Guid generation, Guid instance)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT operation_id,document_json FROM startup_queue_batches WHERE generation=$id;";
+        command.CommandText = "SELECT operation_id,document_json FROM main.startup_queue_batches WHERE generation=$id;";
         command.Parameters.AddWithValue("$id", generation.ToString("D"));
         string operation, json;
         using (var reader = command.ExecuteReader())
@@ -54,7 +54,7 @@ internal static class StartupQueueRows
                 item.SettingsRevision is < 0 or > 9007199254740991 || item != StartupQueuePolicy.CreateOccurrence(
                     instance, generation, item.QueueId, item.QueueRevision, item.CatalogRevision, item.SettingsRevision)) throw Invalid();
         if (OperationRows.ReadExisting(connection, transaction, Identity(batch))?.Status != "completed") throw Invalid();
-        command.CommandText = "SELECT occurrence_id,queue_id,run_id,start_operation_id FROM startup_queue_occurrences WHERE generation=$id ORDER BY queue_id;";
+        command.CommandText = "SELECT occurrence_id,queue_id,run_id,start_operation_id FROM main.startup_queue_occurrences WHERE generation=$id ORDER BY queue_id;";
         var actual = new List<string>();
         using (var reader = command.ExecuteReader())
             while (reader.Read()) actual.Add(string.Join("/", Enumerable.Range(0, 4).Select(reader.GetString)));
@@ -68,7 +68,7 @@ internal static class StartupQueueRows
         StartupQueueBatch? verifiedBatch = null)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT c.generation,b.reason_code FROM startup_queue_occurrences c LEFT JOIN startup_queue_outcomes b ON b.occurrence_id=c.occurrence_id WHERE c.occurrence_id=$id;";
+        command.CommandText = "SELECT c.generation,b.reason_code FROM main.startup_queue_occurrences c LEFT JOIN main.startup_queue_outcomes b ON b.occurrence_id=c.occurrence_id WHERE c.occurrence_id=$id;";
         command.Parameters.AddWithValue("$id", occurrence.ToString("D"));
         Guid generation; string? reason;
         using (var reader = command.ExecuteReader())
@@ -80,7 +80,7 @@ internal static class StartupQueueRows
         var batch = verifiedBatch ?? ReadBatch(connection, transaction, generation, instance) ?? throw Invalid();
         if (batch.InstanceId != instance || batch.Generation != generation) throw Invalid();
         var item = batch.Occurrences.SingleOrDefault(item => item.OccurrenceId == occurrence) ?? throw Invalid();
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM operations WHERE operation_id=$start);";
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operations WHERE operation_id=$start);";
         command.Parameters.AddWithValue("$start", item.StartOperationId.ToString("D"));
         if ((long)command.ExecuteScalar()! != 0)
         {
@@ -98,19 +98,19 @@ internal static class StartupQueueRows
         var identity = Identity(batch);
         _ = OperationRows.Accept(connection, transaction, identity, batch.CreatedAtUtc);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "INSERT INTO startup_queue_batches VALUES($generation,$operation,$json);";
+        command.CommandText = "INSERT INTO main.startup_queue_batches VALUES($generation,$operation,$json);";
         command.Parameters.AddWithValue("$generation", batch.Generation.ToString("D"));
         command.Parameters.AddWithValue("$operation", identity.OperationId.ToString("D")); command.Parameters.AddWithValue("$json", Encode(batch));
         command.ExecuteNonQuery();
         foreach (var item in batch.Occurrences)
         {
-            command.Parameters.Clear(); command.CommandText = "INSERT INTO startup_queue_occurrences VALUES($id,$generation,$queue,$run,$start);";
+            command.Parameters.Clear(); command.CommandText = "INSERT INTO main.startup_queue_occurrences VALUES($id,$generation,$queue,$run,$start);";
             command.Parameters.AddWithValue("$id", item.OccurrenceId.ToString("D")); command.Parameters.AddWithValue("$generation", batch.Generation.ToString("D"));
             command.Parameters.AddWithValue("$queue", item.QueueId.ToString("D")); command.Parameters.AddWithValue("$run", item.RunId.ToString("D"));
             command.Parameters.AddWithValue("$start", item.StartOperationId.ToString("D")); command.ExecuteNonQuery();
         }
         command.Parameters.Clear();
-        command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$id AND operation_kind='schedule.startup' AND status='accepted';";
+        command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$id AND operation_kind='schedule.startup' AND status='accepted';";
         command.Parameters.AddWithValue("$id", identity.OperationId.ToString("D"));
         if (command.ExecuteNonQuery() != 1) throw Invalid();
     }

@@ -27,7 +27,7 @@ internal sealed class AutomationAssetRetirement : IDisposable
         var scripts = changes.Removed.Where(value => value.Kind == AutomationDefinitionKind.Script).Select(value => value.Id).Distinct().Order().ToArray();
         if (scripts.Length == 0) return null;
         IReadOnlyList<Ownership> ownership;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Content))
         using (var transaction = connection.BeginTransaction(deferred: true)) ownership = Read(connection, transaction, scripts);
         var result = new AutomationAssetRetirement(database, scripts, Digest(ownership));
         try
@@ -65,10 +65,10 @@ internal sealed class AutomationAssetRetirement : IDisposable
             RecoveryJournalRegistry.RegisterInside(connection, transaction, journal, effects, _writer);
         }
         foreach (var script in _scripts)
-            AutomationRowWriter.Row(connection, transaction, "DELETE FROM automation_asset_owners WHERE automation_id=$0;", script);
+            AutomationRowWriter.Row(connection, transaction, "DELETE FROM automation.automation_asset_owners WHERE automation_id=$0;", script);
         foreach (var asset in ownership.Select(value => value.AssetId).Distinct())
-            AutomationRowWriter.Row(connection, transaction, "DELETE FROM automation_assets WHERE asset_id=$0 AND NOT EXISTS " +
-                "(SELECT 1 FROM automation_asset_owners WHERE asset_id=$0);", asset);
+            AutomationRowWriter.Row(connection, transaction, "DELETE FROM automation.automation_assets WHERE asset_id=$0 AND NOT EXISTS " +
+                "(SELECT 1 FROM automation.automation_asset_owners WHERE asset_id=$0);", asset);
     }
 
     internal void MaterializeInitials()
@@ -97,9 +97,9 @@ internal sealed class AutomationAssetRetirement : IDisposable
             command.Parameters.AddWithValue(name, script.ToString("D"));
             return name;
         });
-        command.CommandText = "SELECT a.asset_id,o.automation_id,a.digest,b.size_bytes,b.relative_path FROM automation_assets a " +
-            "JOIN automation_asset_owners o USING(asset_id) JOIN blobs b USING(digest) WHERE EXISTS " +
-            "(SELECT 1 FROM automation_asset_owners s WHERE s.asset_id=a.asset_id AND s.automation_id IN (" + string.Join(',', names) +
+        command.CommandText = "SELECT a.asset_id,o.automation_id,a.digest,b.size_bytes,b.relative_path FROM automation.automation_assets a " +
+            "JOIN automation.automation_asset_owners o USING(asset_id) JOIN content.blobs b USING(digest) WHERE EXISTS " +
+            "(SELECT 1 FROM automation.automation_asset_owners s WHERE s.asset_id=a.asset_id AND s.automation_id IN (" + string.Join(',', names) +
             ")) ORDER BY a.asset_id,o.automation_id LIMIT 65537;";
         using var reader = command.ExecuteReader();
         var result = new List<Ownership>();

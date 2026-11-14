@@ -26,7 +26,7 @@ public sealed class SnapshotCompletionTests
         var source = fixture.Run.Source; var operation = Guid.NewGuid();
         if (fault == "unknown") fixture.Run.Index.BlockUnknown("fixture_unknown");
         if (fault == "quarantined") fixture.Quarantine();
-        if (fault == "child-reference") fixture.Run.Execute("UPDATE configuration_run_resources SET plan_digest='" + new string('0', 64) +
+        if (fault == "child-reference") fixture.Run.Execute("UPDATE configuration.configuration_run_resources SET plan_digest='" + new string('0', 64) +
             "',plan_path='blobs/plans/" + new string('0', 64) + $".json' WHERE session_id='{fixture.SessionId:D}';");
         var target = Path.Combine(fixture.Run.Request.Resources[0].Target.TargetPath, "settings.bin");
         var original = File.Exists(target) ? File.ReadAllBytes(target) : null;
@@ -54,14 +54,14 @@ public sealed class SnapshotCompletionTests
     {
         using var fixture = new SnapshotCompletionFixture();
         var run = fixture.Run; var operation = Guid.NewGuid(); var before = Counts(run);
-        run.Execute("CREATE TRIGGER fixture_finish_failure BEFORE INSERT ON configuration_run_sync_items BEGIN SELECT RAISE(ABORT,'fixture_finish_failure'); END;");
+        run.Execute("CREATE TRIGGER configuration.fixture_finish_failure BEFORE INSERT ON configuration_run_sync_items BEGIN SELECT RAISE(ABORT,'fixture_finish_failure'); END;");
         Assert.Throws<SqliteException>(() => fixture.Completion.CompleteInterrupted(operation, ConfigurationRunFixture.Subject, fixture.SessionId));
         Assert.Equal(before, Counts(run)); Assert.False(run.Index.Current.IsReady); Assert.Null(fixture.Session.CompletionOperationId);
         var journal = new JournalStore(run.Source.Instance, new()).Read(fixture.ParentId);
         var intent = Assert.Single(SnapshotIntentCodec.Read(journal.Root));
         Assert.Equal(operation, intent.CompletionOperationId); Assert.Equal(fixture.Session.Revision, intent.GroupRevision);
         Assert.Throws<ConfigurationException>(() => fixture.Completion.CompleteInterrupted(operation, ConfigurationRunFixture.Subject, fixture.SessionId));
-        run.Execute("DROP TRIGGER fixture_finish_failure;");
+        run.Execute("DROP TRIGGER configuration.fixture_finish_failure;");
         fixture.Publish(completionEvidence: true);
         var grant = Assert.Single(run.Index.Current.SnapshotCompletions);
         Assert.Equal(operation, grant.CompletionOperationId);

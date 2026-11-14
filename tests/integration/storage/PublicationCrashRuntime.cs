@@ -30,12 +30,12 @@ internal sealed record PublicationCrashRuntime(string Root, RuntimeInstance Inst
         {
             if (mode == "final-sql")
             {
-                using var connection = DatabaseConnections.Open(Path.Combine(instance.RuntimeRoot, "state", "nexus.db"));
+                using var connection = DatabaseConnections.Open(Path.Combine(instance.RuntimeRoot, "state", "runtime.db"), domains: DatabaseDomain.Notifications);
                 using var command = connection.CreateCommand();
-                command.CommandText = "SELECT sql FROM sqlite_schema WHERE type='trigger' AND name='notification_final_fault';";
+                command.CommandText = "SELECT sql FROM notifications.sqlite_schema WHERE type='trigger' AND name='notification_final_fault';";
                 Assert.Equal("CREATE TRIGGER notification_final_fault BEFORE INSERT ON notification_publication_outcomes BEGIN SELECT RAISE(ABORT,'notification_final_fault'); END",
                     command.ExecuteScalar());
-                command.CommandText = "DROP TRIGGER notification_final_fault;";
+                command.CommandText = "DROP TRIGGER notifications.notification_final_fault;";
                 command.ExecuteNonQuery();
             }
             var database = StateDatabase.OpenExisting(instance, Path.Combine(root, "post-owner-inspection"));
@@ -50,7 +50,7 @@ internal sealed record PublicationCrashRuntime(string Root, RuntimeInstance Inst
     internal string[] Snapshot(bool includeDatabaseBytes = true)
     {
         var result = new List<string>();
-        using (var connection = DatabaseConnections.Open(Database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime))
         using (var transaction = connection.BeginTransaction(deferred: true))
         {
             foreach (var table in new[] { "operations", "operation_journals", "journal_writers", "file_effects", "resource_isolations",

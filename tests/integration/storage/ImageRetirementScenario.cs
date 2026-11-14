@@ -93,7 +93,7 @@ internal sealed class ImageRetirementScenario(PcStageFixture fixture, AttemptRec
     {
         new ExecutionNotificationRegistration(Source.Instance, Source.Database, new(), Source.Lease,
             new(Source.Instance, Source.Database, new())).OnCommitted(receipt);
-        using var connection = DatabaseConnections.Open(Source.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(Source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         var reference = Assert.IsType<BlobReference>(NotificationReceiptRows.Find(connection, transaction, receipt.Facts.AttemptId));
         transaction.Commit(); return reference;

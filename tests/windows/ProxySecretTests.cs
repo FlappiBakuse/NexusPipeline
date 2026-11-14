@@ -103,9 +103,9 @@ public sealed class ProxySecretTests
         using var root = Root(fixture, out var owner);
         using var credential = fixture.Service.PrepareProxyCredential(root, owner);
         Execute(fixture, fault == "revision"
-            ? "UPDATE secret_fields SET revision=revision+1 WHERE owner_kind='host';"
-            : "UPDATE secret_fields SET secret_id=NULL WHERE owner_kind='extension'; " +
-                "UPDATE secret_fields SET secret_id=$id WHERE owner_kind='host';", alternate.SecretId?.ToString("D"));
+            ? "UPDATE system.secret_fields SET revision=revision+1 WHERE owner_kind='host';"
+            : "UPDATE system.secret_fields SET secret_id=NULL WHERE owner_kind='extension'; " +
+                "UPDATE system.secret_fields SET secret_id=$id WHERE owner_kind='host';", alternate.SecretId?.ToString("D"));
         var before = PersistentFingerprints(fixture);
         Assert.Equal("secret_revision_conflict", Assert.Throws<InvalidOperationException>(() => credential.Use(_ =>
             throw new Exception("stale_credential_callback_reached"))).Message);
@@ -185,9 +185,9 @@ public sealed class ProxySecretTests
         var foreign = Guid.NewGuid().ToString("D");
         Execute(fixture, fault switch
         {
-            "foreign-instance" => "UPDATE secret_fields SET owner_id=$id,subject_id=$id WHERE owner_kind='host';",
-            "unknown-owner" => "PRAGMA ignore_check_constraints=ON; UPDATE secret_fields SET owner_kind='system' WHERE owner_kind='host';",
-            _ => "PRAGMA ignore_check_constraints=ON; UPDATE secret_fields SET field='arbitrary' WHERE owner_kind='host';"
+            "foreign-instance" => "UPDATE system.secret_fields SET owner_id=$id,subject_id=$id WHERE owner_kind='host';",
+            "unknown-owner" => "PRAGMA ignore_check_constraints=ON; UPDATE system.secret_fields SET owner_kind='system' WHERE owner_kind='host';",
+            _ => "PRAGMA ignore_check_constraints=ON; UPDATE system.secret_fields SET field='arbitrary' WHERE owner_kind='host';"
         }, foreign);
         var before = PersistentFingerprints(fixture);
         var diagnostics = Path.Combine(Path.GetDirectoryName(fixture.Instance.RuntimeRoot)!, "namespace-diagnostics");
@@ -242,14 +242,14 @@ public sealed class ProxySecretTests
         var payload = Assert.Single(Directory.GetFiles(Path.Combine(fixture.Instance.RuntimeRoot, "secrets/payloads")));
         var ciphertext = File.ReadAllBytes(payload);
         var operation = Guid.NewGuid();
-        Execute(fixture, "CREATE TRIGGER fail_host_publication BEFORE UPDATE ON secret_fields WHEN NEW.owner_kind='host' " +
+        Execute(fixture, "CREATE TRIGGER system.fail_host_publication BEFORE UPDATE ON secret_fields WHEN NEW.owner_kind='host' " +
             "BEGIN SELECT RAISE(ABORT,'fixture_host_field_rollback'); END;");
         await Assert.ThrowsAsync<SqliteException>(async () =>
             await fixture.Service.ApplyAsync(operation, host, 1, SecretDisposition.Clear, null, default));
         Assert.DoesNotContain(new RecoveryJournalRegistry(fixture.Database).ReadHistory(), journal => journal.OperationId == operation);
         Assert.Equal(state, await fixture.Service.GetStateAsync(host, default));
         Assert.Equal(ciphertext, File.ReadAllBytes(payload));
-        Execute(fixture, "DROP TRIGGER fail_host_publication;");
+        Execute(fixture, "DROP TRIGGER system.fail_host_publication;");
         using (var root = Root(fixture, out var owner))
         using (var prepared = fixture.Service.PrepareProxyCredential(root, owner))
             prepared.Use(secret => Assert.True(secret.SequenceEqual(Canary)));

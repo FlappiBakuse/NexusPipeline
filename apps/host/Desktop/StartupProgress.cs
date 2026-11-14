@@ -97,7 +97,14 @@ internal sealed class StartupProgress : IDisposable
     {
         Console.Error.WriteLine(JsonSerializer.Serialize(new { kind = "host.startup.failed", reason, errorCode }));
         if (!Environment.UserInteractive) return;
-        MessageBoxW(IntPtr.Zero, $"NexusPipeline 启动失败 / Startup failed\n{reason}\n0x{errorCode:X8}\n{runtimeRoot}", "NexusPipeline", 0x10);
+        var detail = reason == "legacy_database_layout_requires_new_instance"
+            ? "检测到旧版 nexus.db。请在新的空目录安装；原账号、配置和历史数据已保留。\n" +
+                "Legacy nexus.db detected. Install in a new empty directory. Existing accounts, configuration and history are preserved.\n"
+            : reason == "database_set_incomplete"
+                ? "业务数据库组缺少文件。请保留当前目录，恢复完整备份后再启动。\n" +
+                    "Business database files are missing. Preserve this directory and restore a complete backup before starting.\n"
+                : "";
+        MessageBoxW(IntPtr.Zero, $"NexusPipeline 启动失败 / Startup failed\n{detail}{reason}\n0x{errorCode:X8}\n{runtimeRoot}", "NexusPipeline", 0x10);
     }
 
     public void Dispose()

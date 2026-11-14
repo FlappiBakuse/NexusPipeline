@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+if (args is ["database-transaction", .. var databaseArgs]) return DatabaseCrashFixture.Run(databaseArgs);
 if (await FixtureExtensions.RunAsync(args) is { } pluginExit) return pluginExit;
 if (args is ["installer-shortcut-native", .. var shortcutArgs]) return await InstallerShortcutFixture.RunAsync(shortcutArgs);
 if (args is ["account-task-fixture", var accountOutcome, var accountMarker]) return await AccountTaskFixture.RunAsync(accountOutcome, accountMarker);

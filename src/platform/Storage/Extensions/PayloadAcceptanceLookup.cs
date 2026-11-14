@@ -17,7 +17,7 @@ internal sealed class PayloadAcceptanceLookup(RuntimeInstance instance, StateDat
             throw Invalid();
         var identity = request.Identity(operationId, subject);
         OperationAcceptance acceptance; RegisteredJournal registered;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System))
         using (var transaction = connection.BeginTransaction(deferred: true))
         {
             var existing = OperationRows.ReadExisting(connection, transaction, identity);
@@ -35,7 +35,7 @@ internal sealed class PayloadAcceptanceLookup(RuntimeInstance instance, StateDat
         var source = codec.ReadMetadata(plan.ExtensionSource);
         codec.RequireFrozenBinding(source, plan);
         if (ExtensionApplyRequest.FromSource(source).Identity(operationId, subject) != identity) throw new OperationConflictException();
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System))
         using (var transaction = connection.BeginTransaction(deferred: true))
         {
             if (OperationRows.ReadExisting(connection, transaction, identity) != acceptance) throw Invalid();
@@ -45,7 +45,7 @@ internal sealed class PayloadAcceptanceLookup(RuntimeInstance instance, StateDat
                 fresh.PlanDigest != registered.PlanDigest || fresh.PlanPath != registered.PlanPath ||
                 !fresh.ResourceKeys.SequenceEqual(registered.ResourceKeys)) throw Invalid();
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT resource_key,mode FROM journal_resource_claims WHERE journal_id=$id ORDER BY resource_key LIMIT 4097;";
+            command.CommandText = "SELECT resource_key,mode FROM main.journal_resource_claims WHERE journal_id=$id ORDER BY resource_key LIMIT 4097;";
             command.Parameters.AddWithValue("$id", registered.JournalId.ToString("D"));
             using (var row = command.ExecuteReader())
             {
@@ -88,7 +88,7 @@ internal sealed class PayloadAcceptanceLookup(RuntimeInstance instance, StateDat
     private static RegisteredJournal ReadInitial(SqliteConnection connection, SqliteTransaction transaction, Guid operationId)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT initial_journal_id FROM operations WHERE operation_id=$id AND operation_kind='extension.apply';";
+        command.CommandText = "SELECT initial_journal_id FROM main.operations WHERE operation_id=$id AND operation_kind='extension.apply';";
         command.Parameters.AddWithValue("$id", operationId.ToString("D"));
         var value = command.ExecuteScalar();
         if (value is not string text || !Guid.TryParseExact(text, "D", out var journalId) || journalId == Guid.Empty) throw Invalid();

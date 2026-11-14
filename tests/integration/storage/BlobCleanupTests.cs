@@ -179,15 +179,15 @@ public sealed class BlobCleanupTests
         var fixture = Create();
         var asset = Attach(fixture);
         var preserved = File.ReadAllBytes(fixture.Path);
-        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection(
+        using (var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open(
             new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = fixture.Database.DatabasePath, Pooling = false }.ToString()))
         {
             connection.Open(); using var command = connection.CreateCommand();
             command.CommandText = "PRAGMA foreign_keys=OFF;"; command.ExecuteNonQuery();
-            command.CommandText = "DELETE FROM blobs WHERE digest=$digest;";
+            command.CommandText = "DELETE FROM content.blobs WHERE digest=$digest;";
             command.Parameters.AddWithValue("$digest", fixture.Item.Blob.Sha256);
             command.ExecuteNonQuery();
-            command.CommandText = "SELECT run_id FROM record_assets WHERE digest=$digest;";
+            command.CommandText = "SELECT run_id FROM records.record_assets WHERE digest=$digest;";
             Assert.Equal(asset.RunId.ToString("D"), command.ExecuteScalar());
         }
         Assert.Equal("record_retirement_unbound", Assert.Throws<IOException>(() => fixture.Cleanup.RemoveVerified(fixture.Item)).Message);

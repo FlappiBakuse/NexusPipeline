@@ -112,7 +112,7 @@ public sealed class ConfigurationRunPreparation
         void VerifySourceAuthority()
         {
             if (origin is null) { VerifyDefinitions(execution.ReadWire(), step, request); return; }
-            using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Content);
             using var transaction = connection.BeginTransaction(deferred: true);
             origin.RequireCurrentInside(connection, transaction);
         }

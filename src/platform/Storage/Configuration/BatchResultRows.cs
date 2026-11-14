@@ -14,7 +14,7 @@ internal static class BatchResultRows
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.Parameters.AddWithValue("$operation", operationId.ToString("D"));
-        command.CommandText = "SELECT resource_count,source_request_digest FROM configuration_batch_results WHERE operation_id=$operation;";
+        command.CommandText = "SELECT resource_count,source_request_digest FROM configuration.configuration_batch_results WHERE operation_id=$operation;";
         int count;
         string? digest;
         using (var row = command.ExecuteReader())
@@ -24,7 +24,7 @@ internal static class BatchResultRows
             if (count is < 1 or > 32 || digest is not null && !FileTreePolicy.Digest(digest))
                 throw new IOException("configuration_batch_result_unrecognized");
         }
-        command.CommandText = "SELECT ordinal,binding_id,resource_id,revision,has_changes FROM configuration_batch_items " +
+        command.CommandText = "SELECT ordinal,binding_id,resource_id,revision,has_changes FROM configuration.configuration_batch_items " +
             "WHERE operation_id=$operation ORDER BY ordinal LIMIT 33;";
         var items = new List<BatchResultItem>();
         using (var row = command.ExecuteReader())

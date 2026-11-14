@@ -88,7 +88,7 @@ public sealed class AndroidFaultTests
             var projection = new ImageCatalogProjection(source.Instance, source.Database, new(), source.Lease);
             if (fault == "rollback")
             {
-                fixture.Base.Execute("CREATE TRIGGER fixture_generic_image BEFORE INSERT ON execution_image_entries " +
+                fixture.Base.Execute("CREATE TRIGGER records.fixture_generic_image BEFORE INSERT ON execution_image_entries " +
                     "BEGIN SELECT RAISE(ABORT,'fixture_generic_image'); END;");
                 try
                 {
@@ -96,14 +96,14 @@ public sealed class AndroidFaultTests
                     Assert.Equal(0, fixture.Base.Count("execution_image_catalog"));
                     Assert.Equal(0, fixture.Base.Count("execution_image_entries"));
                 }
-                finally { fixture.Base.Execute("DROP TRIGGER fixture_generic_image;"); }
+                finally { fixture.Base.Execute("DROP TRIGGER records.fixture_generic_image;"); }
             }
             projection.OnCommitted(receipt);
             var reader = new ImageCatalogReader(source.Instance, source.Database, new());
             var image = Assert.Single(reader.ReadPage(new(receipt.Facts.RunId, receipt.Facts.AttemptId)).Items);
             if (fault == "dimensions")
             {
-                fixture.Base.Execute($"UPDATE execution_image_entries SET width=width+1 WHERE attempt_id='{receipt.Facts.AttemptId:D}';");
+                fixture.Base.Execute($"UPDATE records.execution_image_entries SET width=width+1 WHERE attempt_id='{receipt.Facts.AttemptId:D}';");
                 Assert.ThrowsAny<IOException>(() => reader.ReadPage(new(image.Key.RunId, image.Key.AttemptId)));
                 Assert.ThrowsAny<IOException>(() => reader.OpenOriginal(image.Key, image.ResultSha256));
             }

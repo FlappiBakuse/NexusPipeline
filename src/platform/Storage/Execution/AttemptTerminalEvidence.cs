@@ -31,7 +31,7 @@ internal static class AttemptTerminalEvidence
             var job = jobs.Single(job => job.StepId == item.StepId && job.Role == item.Role);
             command.Parameters.Clear(); command.Parameters.AddWithValue("$journal", state.Journal.JournalId.ToString("D"));
             command.Parameters.AddWithValue("$writer", job.WriterId.ToString("D")); command.Parameters.AddWithValue("$job", job.JobName);
-            command.CommandText = "SELECT EXISTS(SELECT 1 FROM journal_writer_job_closures WHERE journal_id=$journal AND writer_id=$writer AND job_name=$job);";
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.journal_writer_job_closures WHERE journal_id=$journal AND writer_id=$writer AND job_name=$job);";
             if ((long)command.ExecuteScalar()! != 1) throw new IOException("writer_job_closure_missing");
         }
     }
@@ -83,7 +83,7 @@ internal static class AttemptTerminalEvidence
 
     internal static void RequireCollected(StateDatabase database, AttemptWriterState state)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records);
         using var transaction = connection.BeginTransaction(deferred: true);
         RequireCollectedInside(connection, transaction, state, state.Latest); transaction.Commit();
     }
@@ -108,12 +108,12 @@ internal static class AttemptTerminalEvidence
         RequireHookResultsInside(connection, transaction, state, document);
         _ = ExecutionCancellationRows.Read(connection, transaction, state.Journal, state.Attempt) ?? throw new IOException("execution_dispatch_open");
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT count(*) FROM journal_writer_jobs WHERE journal_id=$journal;";
+        command.CommandText = "SELECT count(*) FROM main.journal_writer_jobs WHERE journal_id=$journal;";
         command.Parameters.AddWithValue("$journal", state.Journal.JournalId.ToString("D"));
         if ((long)command.ExecuteScalar()! != jobs.Length) throw new IOException("execution_writer_jobs_unbound");
         foreach (var job in jobs)
         {
-            command.CommandText = "SELECT EXISTS(SELECT 1 FROM journal_writer_job_closures c JOIN journal_writer_jobs b " +
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.journal_writer_job_closures c JOIN main.journal_writer_jobs b " +
                 "ON b.journal_id=c.journal_id AND b.writer_id=c.writer_id AND b.job_name=c.job_name " +
                 "WHERE c.journal_id=$journal AND c.writer_id=$writer AND c.job_name=$job AND b.session_id=$session);";
             command.Parameters.AddWithValue("$writer", job.WriterId.ToString("D")); command.Parameters.AddWithValue("$job", job.JobName);

@@ -61,7 +61,7 @@ public sealed class ActivationFailureTests
         var actual = fixture.Scan(fixture.Original.Target);
         Assert.Equal(bound.Plan.Before.Snapshot.Entries, actual.Entries);
         Assert.Equal(bound.Plan.Before.OriginalObjects, PhysicalTreeIdentity.Capture(fixture.Original.Target, actual));
-        using (var connection = DatabaseConnections.Open(owner.Database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(owner.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var transaction = connection.BeginTransaction(deferred: true))
             Assert.Equal(original.Commit!.InstalledRevision,
                 ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, "fixture-plugin")!.Revision);
@@ -130,14 +130,14 @@ public sealed class ActivationFailureTests
         await using var fixture = await ExtensionUpgradeFixture.CreateAsync(enabled: true, nextMode: "throw");
         var owner = fixture.Original.Package.Catalog;
         fixture.Prepare(PayloadAction.Upgrade); fixture.Accept();
-        Sql("CREATE TRIGGER fixture_restore_fail BEFORE UPDATE OF phase ON operation_journals " +
+        Sql("CREATE TRIGGER main.fixture_restore_fail BEFORE UPDATE OF phase ON operation_journals " +
             "WHEN NEW.journal_id='" + fixture.Accepted!.JournalId.ToString("D") +
             "' AND NEW.phase='reverting' BEGIN SELECT RAISE(ABORT,'fixture'); END;");
         try
         {
             await Assert.ThrowsAnyAsync<Exception>(async () => await fixture.Session().ApplyAsync(fixture.Prepared!, default));
         }
-        finally { Sql("DROP TRIGGER fixture_restore_fail;"); }
+        finally { Sql("DROP TRIGGER main.fixture_restore_fail;"); }
         var bound = fixture.Bound();
         Assert.Equal(JournalPhase.Applied, bound.Registered.Phase); Assert.Equal(JournalPhase.Reverting, bound.Latest.Phase);
         Assert.Equal("started", Assert.Single(bound.Restoration).Record.Stage);
@@ -152,7 +152,7 @@ public sealed class ActivationFailureTests
 
         void Sql(string sql)
         {
-            using var connection = DatabaseConnections.Open(owner.Database.DatabasePath);
+            using var connection = DatabaseConnections.Open(owner.Database.DatabasePath, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
             using var command = connection.CreateCommand(); command.CommandText = sql; command.ExecuteNonQuery();
         }
     }

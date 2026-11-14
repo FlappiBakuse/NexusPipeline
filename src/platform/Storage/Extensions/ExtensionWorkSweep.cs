@@ -14,8 +14,8 @@ internal sealed class ExtensionWorkSweep(StateDatabase database, PayloadApplyRoo
 {
     private readonly HashSet<Guid> _blocked = [];
     private IEnumerator<DirectoryInfo>? _entries;
-    private long _scanRevision;
-    private long? _completedRevision;
+    private DatabaseVersion _scanRevision;
+    private DatabaseVersion? _completedRevision;
     private string? _completedScopes, _scanningScopes;
     private bool _unresolved;
     private bool _inventoryUnavailable;
@@ -49,6 +49,11 @@ internal sealed class ExtensionWorkSweep(StateDatabase database, PayloadApplyRoo
             }
             catch (IOException error) when (error.Message is "extension_work_cleanup_resource_unavailable" or
                 "extension_work_scope_referenced" or "extension_scope_reserved") { _unresolved = true; }
+            catch (SqliteException error) when (error.SqliteErrorCode == 5)
+            {
+                _entries?.Dispose(); _entries = null; _completedRevision = null; _unresolved = true;
+                _retryAt = DateTimeOffset.UtcNow.AddSeconds(1);
+            }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException or SqliteException or
                 System.ComponentModel.Win32Exception or System.Text.Json.JsonException or InvalidOperationException)
             { Block(candidate.OperationId, error.GetType().Name); }
@@ -59,21 +64,22 @@ internal sealed class ExtensionWorkSweep(StateDatabase database, PayloadApplyRoo
     {
         var published = activator.ReadPublishedScopes();
         var scopes = string.Join(',', published.Select(scope => scope.ActivationId).Order());
-        if (_entries is null && _completedRevision == database.CommitSequence && _completedScopes == scopes) return [];
-        if (_entries is null && DateTimeOffset.UtcNow < _retryAt && _scanRevision == database.CommitSequence && _scanningScopes == scopes) return [];
+        var revision = DatabaseVersion.Read(database, null, DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System);
+        if (_entries is null && _completedRevision == revision && _completedScopes == scopes) return [];
+        if (_entries is null && DateTimeOffset.UtcNow < _retryAt && _scanRevision == revision && _scanningScopes == scopes) return [];
         var root = PhysicalPathPolicy.NormalizeWithoutLinks(roots.ExtensionPayloadRoot);
         if (!Directory.Exists(root)) return [];
         if (_entries is null)
         {
-            _scanRevision = database.CommitSequence;
+            _scanRevision = revision;
             _scanningScopes = scopes; _unresolved = false;
             _entries = new DirectoryInfo(root).EnumerateDirectories(ExtensionWorkspacePath.Prefix + "*",
                 new EnumerationOptions { AttributesToSkip = FileAttributes.ReparsePoint, IgnoreInaccessible = false }).GetEnumerator();
         }
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT j.journal_id,EXISTS(SELECT 1 FROM journal_writers w " +
-            "WHERE w.journal_id=j.journal_id AND w.writer_id=$writer) FROM operations o JOIN operation_journals j " +
+        command.CommandText = "SELECT j.journal_id,EXISTS(SELECT 1 FROM main.journal_writers w " +
+            "WHERE w.journal_id=j.journal_id AND w.writer_id=$writer) FROM main.operations o JOIN main.operation_journals j " +
             "ON j.journal_id=o.initial_journal_id AND j.operation_id=o.operation_id " +
             "WHERE o.operation_id=$operation AND o.operation_kind='extension.apply' " +
             "AND j.operation_kind='extensionApply' AND j.phase='committed';";

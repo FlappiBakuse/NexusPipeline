@@ -112,21 +112,27 @@ public sealed class RunAttemptAcceptance(RuntimeInstance instance, ContractReade
     {
         if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot || operation.Kind != "execution.start")
             throw new IOException("attempt_acceptance_identity_unbound");
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
-        using var transaction = connection.BeginTransaction(deferred: true);
-        var accepted = OperationRows.ReadExisting(connection, transaction, operation);
-        if (accepted is null) return null;
-        using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT initial_journal_id FROM operations WHERE operation_id=$operation;";
-        command.Parameters.AddWithValue("$operation", operation.OperationId.ToString("D"));
-        var id = command.ExecuteScalar() as string ?? throw new IOException("accepted_operation_requires_reconciliation");
-        var journal = RecoveryJournalRegistry.ReadInside(connection, transaction, Guid.Parse(id));
-        if (journal.OperationId != operation.OperationId || journal.Kind != JournalKind.RunAttempt)
-            throw new IOException("attempt_acceptance_identity_unbound");
-        var source = StartSourceRows.Read(connection, transaction, operation.OperationId);
-        if (source.JournalId != journal.JournalId || source.Identity != operation) throw new OperationConflictException();
-        StartSourceRows.RequireAttempt(source, new AttemptPlanCodec(instance, contracts, new(instance, contracts))
-            .Read(AttemptPreparedBinding.Reference(instance, journal)).ReadWire());
+        OperationAcceptance accepted;
+        RegisteredJournal journal;
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime))
+        using (var transaction = connection.BeginTransaction(deferred: true))
+        {
+            var existing = OperationRows.ReadExisting(connection, transaction, operation);
+            if (existing is null) return null;
+            accepted = existing;
+            using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "SELECT initial_journal_id FROM main.operations WHERE operation_id=$operation;";
+            command.Parameters.AddWithValue("$operation", operation.OperationId.ToString("D"));
+            var id = command.ExecuteScalar() as string ?? throw new IOException("accepted_operation_requires_reconciliation");
+            journal = RecoveryJournalRegistry.ReadInside(connection, transaction, Guid.Parse(id));
+            if (journal.OperationId != operation.OperationId || journal.Kind != JournalKind.RunAttempt)
+                throw new IOException("attempt_acceptance_identity_unbound");
+            var source = StartSourceRows.Read(connection, transaction, operation.OperationId);
+            if (source.JournalId != journal.JournalId || source.Identity != operation) throw new OperationConflictException();
+            StartSourceRows.RequireAttempt(source, new AttemptPlanCodec(instance, contracts, new(instance, contracts))
+                .Read(AttemptPreparedBinding.Reference(instance, journal)).ReadWire());
+            transaction.Commit();
+        }
         JournalResourceClaims.VerifyAttempt(instance, database, contracts, journal);
         return new(accepted, journal.JournalId, AttemptPreparedBinding.Reference(instance, journal));
     }
@@ -134,10 +140,10 @@ public sealed class RunAttemptAcceptance(RuntimeInstance instance, ContractReade
     private static void RequireSourceCursors(SqliteConnection connection, SqliteTransaction transaction, ExecutionSelectionRequest request)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT revision FROM automation_catalog_state WHERE singleton=1;";
+        command.CommandText = "SELECT revision FROM automation.automation_catalog_state WHERE singleton=1;";
         if ((long?)command.ExecuteScalar() != request.ExpectedCatalogRevision)
             throw new ExecutionSelectionException("execution_catalog_revision_conflict");
-        command.CommandText = "SELECT revision FROM settings_current WHERE singleton=1;";
+        command.CommandText = "SELECT revision FROM system.settings_current WHERE singleton=1;";
         if ((long?)command.ExecuteScalar() != request.ExpectedSettingsRevision)
             throw new ExecutionSelectionException("execution_settings_revision_conflict");
     }
@@ -147,7 +153,7 @@ public sealed class RunAttemptAcceptance(RuntimeInstance instance, ContractReade
         RejectDirectStart(operation);
         if (database.InstanceId != instance.InstanceId || operation.OperationId.ToString("D") != candidate.OperationId)
             throw new IOException("attempt_acceptance_identity_unbound");
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         var accepted = OperationRows.ReadExisting(connection, transaction, operation);
         if (accepted is null) return null;

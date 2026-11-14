@@ -49,7 +49,7 @@ public sealed class InitializationCrashTests
         while (!File.Exists(marker)) await Task.Delay(50, deadline.Token);
         var instance = source.Catalog.Instance; var database = source.Catalog.Database;
         Guid journal;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.All))
         using (var transaction = connection.BeginTransaction(deferred: true)) journal = StartSourceRows.Read(connection, transaction, operation).JournalId;
         var state = AttemptWriterState.Read(instance, database, new(), journal);
         var binding = StepResultCodec.Binding(state.Latest.Root, state.Steps.Single());

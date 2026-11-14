@@ -37,7 +37,7 @@ internal static class PayloadPreparedBinding
         {
             var sourceCodec = new UpdateSourceCodec(instance, contracts);
             var source = sourceCodec.ReadMetadata(plan.MaintenanceSource ?? throw new IOException("maintenance_update_source_required"));
-            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
             using var transaction = connection.BeginTransaction(deferred: true);
             sourceCodec.RequireAcceptedInside(connection, transaction, source);
             transaction.Commit();

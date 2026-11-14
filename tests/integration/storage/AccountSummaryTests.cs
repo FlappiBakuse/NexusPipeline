@@ -115,9 +115,9 @@ public sealed class AccountSummaryTests
         Service(fixture, active).Read(new(ControlOrigin.Local, "summary-reader", null, () => new(true, true))), JsonSerializerOptions.Web);
     private static void AddBinding(StateDatabase database, Guid run, Guid binding, Guid user, Guid script, string tone, string reason)
     {
-        using var connection = new SqliteConnection($"Data Source={database.DatabasePath};Pooling=False"); connection.Open();
+        using var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open($"Data Source={database.DatabasePath};Pooling=False"); connection.Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "INSERT INTO binding_task_records VALUES($run,$binding,$user,$script,$tone,$reason)";
+        command.CommandText = "INSERT INTO records.binding_task_records VALUES($run,$binding,$user,$script,$tone,$reason)";
         foreach (var (key, value) in new[] { ("$run", run.ToString("D")), ("$binding", binding.ToString("D")),
             ("$user", user.ToString("D")), ("$script", script.ToString("D")), ("$tone", tone), ("$reason", reason) })
             command.Parameters.AddWithValue(key, value);

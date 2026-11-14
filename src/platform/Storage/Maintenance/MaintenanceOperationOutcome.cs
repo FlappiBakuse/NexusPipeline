@@ -12,7 +12,7 @@ internal static class MaintenanceOperationOutcome
         string planDigest, JournalPhase phase, string detail)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT subject_id,operation_kind FROM operations WHERE operation_id=$operation;";
+        command.CommandText = "SELECT subject_id,operation_kind FROM main.operations WHERE operation_id=$operation;";
         command.Parameters.AddWithValue("$operation", plan.OperationId.ToString("D"));
         string subject;
         using (var operation = command.ExecuteReader())
@@ -27,14 +27,14 @@ internal static class MaintenanceOperationOutcome
             phase is not (JournalPhase.Committed or JournalPhase.Quarantined) || detail is not ("payload_not_executed" or
                 "payload_writer_stop_unconfirmed" or "payload_effect_entry_observed" or "payload_prepared_no_effect_unverified") ||
             (phase == JournalPhase.Committed) != (detail == "payload_not_executed")) throw Invalid();
-        command.CommandText = "UPDATE maintenance_operations SET state=$state,terminal_code=$detail " +
+        command.CommandText = "UPDATE system.maintenance_operations SET state=$state,terminal_code=$detail " +
             "WHERE operation_id=$operation AND state=1 AND handoff_id IS NOT NULL;";
         command.Parameters.AddWithValue("$state", phase == JournalPhase.Committed ? 2 : 4);
         command.Parameters.AddWithValue("$detail", detail);
         if (command.ExecuteNonQuery() != 1) throw Invalid();
         if (phase == JournalPhase.Committed)
         {
-            command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$operation AND status='accepted' AND initial_journal_id=$journal;";
+            command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$operation AND status='accepted' AND initial_journal_id=$journal;";
             command.Parameters.AddWithValue("$journal", plan.JournalId.ToString("D"));
             if (command.ExecuteNonQuery() != 1) throw Invalid();
         }
@@ -58,12 +58,12 @@ internal static class MaintenanceOperationOutcome
             row.InitialJournalId != bound.Plan.JournalId || row.Plan != bound.PlanReference || row.Source != bound.Plan.MaintenanceSource)
             throw Invalid();
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "UPDATE maintenance_operations SET state=2,terminal_code='maintenance_original_restored' " +
+        command.CommandText = "UPDATE system.maintenance_operations SET state=2,terminal_code='maintenance_original_restored' " +
             "WHERE operation_id=$operation AND state=1 AND handoff_id=$handoff AND terminal_code IS NULL;";
         command.Parameters.AddWithValue("$operation", bound.Plan.OperationId.ToString("D"));
         command.Parameters.AddWithValue("$handoff", row.HandoffId.Value.ToString("D"));
         if (command.ExecuteNonQuery() != 1) throw Invalid();
-        command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$operation AND status='accepted' AND initial_journal_id=$journal;";
+        command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$operation AND status='accepted' AND initial_journal_id=$journal;";
         command.Parameters.AddWithValue("$journal", bound.Plan.JournalId.ToString("D"));
         if (command.ExecuteNonQuery() != 1) throw Invalid();
     }

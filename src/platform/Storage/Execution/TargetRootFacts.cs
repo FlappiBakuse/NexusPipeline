@@ -12,14 +12,14 @@ internal static class TargetRootFacts
 {
     internal static ProcessIdentity Creator(StateDatabase database, ExecutionTargetBinding binding)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         return CreatorInside(connection, binding);
     }
 
     internal static ProcessIdentity CreatorInside(SqliteConnection connection, ExecutionTargetBinding binding)
     {
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT process_id,created_file_time,image_path,image_sha256,user_sid,elevated FROM journal_writers WHERE journal_id=$journal AND writer_id=$writer;";
+        command.CommandText = "SELECT process_id,created_file_time,image_path,image_sha256,user_sid,elevated FROM main.journal_writers WHERE journal_id=$journal AND writer_id=$writer;";
         command.Parameters.AddWithValue("$journal", binding.ParentJournalId.ToString("D"));
         command.Parameters.AddWithValue("$writer", binding.OwnerWriterId.ToString("D"));
         using var row = command.ExecuteReader();
@@ -36,10 +36,10 @@ internal static class TargetRootFacts
             .DistinctBy(item => item.Binding.TargetId).ToArray();
         if (jobs.Select(item => item.Binding.TargetId).Intersect(commands.Select(item => item.Binding.TargetId)).Any())
             throw new IOException("execution_target_sql_root_unbound");
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT target_id,command_sequence FROM execution_target_job_roots WHERE journal_id=$journal LIMIT 1025;";
+        command.CommandText = "SELECT target_id,command_sequence FROM main.execution_target_job_roots WHERE journal_id=$journal LIMIT 1025;";
         command.Parameters.AddWithValue("$journal", journalId.ToString("D"));
         var roots = new List<(Guid Id, int? Sequence)>();
         using (var rows = command.ExecuteReader())
@@ -72,7 +72,7 @@ internal static class TargetRootFacts
 
     internal static ProcessIdentity? Read(StateDatabase database, ExecutionTargetBinding binding)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         var result = ReadInside(connection, transaction, binding);
         transaction.Commit(); return result;
@@ -82,7 +82,7 @@ internal static class TargetRootFacts
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT step_id,job_name,writer_id,session_id,total_plan_sha256,process_id,created_file_time," +
-            "image_path,image_sha256,user_sid,elevated,command_sequence FROM execution_target_job_roots WHERE journal_id=$journal AND target_id=$target;";
+            "image_path,image_sha256,user_sid,elevated,command_sequence FROM main.execution_target_job_roots WHERE journal_id=$journal AND target_id=$target;";
         command.Parameters.AddWithValue("$journal", binding.ParentJournalId.ToString("D"));
         command.Parameters.AddWithValue("$target", binding.TargetId.ToString("D"));
         using var row = command.ExecuteReader();
@@ -110,13 +110,13 @@ internal static class TargetRootFacts
         PcStageProjection.RequireConfigurationInstalledInside(connection, transaction, state, binding.StepId);
         var role = state.Jobs.Single(item => item.StepId == binding.StepId && item.Role == "process");
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT NOT EXISTS(SELECT 1 FROM journal_writer_job_roots WHERE journal_id=$journal AND job_name=$main);";
+        command.CommandText = "SELECT NOT EXISTS(SELECT 1 FROM main.journal_writer_job_roots WHERE journal_id=$journal AND job_name=$main);";
         command.Parameters.AddWithValue("$journal", binding.ParentJournalId.ToString("D")); command.Parameters.AddWithValue("$main", role.JobName);
         if ((long)command.ExecuteScalar()! != 1) throw new IOException("execution_target_launch_after_main");
         ExecutionStepAdmission.RequirePredecessorsInside(connection, transaction, state, state.Latest,
             state.Total.Steps.ToList().FindIndex(item => item.StepId == binding.StepId));
         command.Parameters.Clear();
-        command.CommandText = "INSERT INTO execution_target_job_roots(journal_id,target_id,step_id,job_name,writer_id,session_id," +
+        command.CommandText = "INSERT INTO main.execution_target_job_roots(journal_id,target_id,step_id,job_name,writer_id,session_id," +
             "total_plan_sha256,process_id,created_file_time,image_path,image_sha256,user_sid,elevated) " +
             "VALUES($journal,$target,$step,$job,$writer,$session,$plan,$pid,$created,$path,$hash,$sid,$elevated);";
         command.Parameters.AddWithValue("$journal", binding.ParentJournalId.ToString("D")); command.Parameters.AddWithValue("$target", binding.TargetId.ToString("D"));
@@ -130,7 +130,7 @@ internal static class TargetRootFacts
 
     internal static ProcessIdentity? ReadCommand(StateDatabase database, AndroidCommandRegistration registration)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         var result = ReadCommandInside(connection, transaction, registration);
         transaction.Commit(); return result;
@@ -142,7 +142,7 @@ internal static class TargetRootFacts
         var binding = registration.Binding;
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT step_id,job_name,writer_id,session_id,total_plan_sha256,command_sequence," +
-            "process_id,created_file_time,image_path,image_sha256,user_sid,elevated FROM execution_target_job_roots " +
+            "process_id,created_file_time,image_path,image_sha256,user_sid,elevated FROM main.execution_target_job_roots " +
             "WHERE journal_id=$journal AND target_id=$target;";
         command.Parameters.AddWithValue("$journal", binding.ParentJournalId.ToString("D"));
         command.Parameters.AddWithValue("$target", binding.TargetId.ToString("D"));
@@ -175,7 +175,7 @@ internal static class TargetRootFacts
         AndroidControlAdmission.RequireInside(connection, transaction, state, request);
         var binding = registration.Binding;
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "INSERT INTO execution_target_job_roots(journal_id,target_id,step_id,job_name,writer_id,session_id," +
+        command.CommandText = "INSERT INTO main.execution_target_job_roots(journal_id,target_id,step_id,job_name,writer_id,session_id," +
             "total_plan_sha256,process_id,created_file_time,image_path,image_sha256,user_sid,elevated,command_sequence) " +
             "VALUES($journal,$target,$step,$job,$writer,$session,$plan,$pid,$created,$path,$hash,$sid,$elevated,$sequence);";
         command.Parameters.AddWithValue("$journal", binding.ParentJournalId.ToString("D"));
@@ -190,9 +190,9 @@ internal static class TargetRootFacts
 
     internal static void RequireRootAbsent(StateDatabase database, Guid journalId, string jobName)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM execution_target_job_roots WHERE journal_id=$journal AND job_name=$job);";
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.execution_target_job_roots WHERE journal_id=$journal AND job_name=$job);";
         command.Parameters.AddWithValue("$journal", journalId.ToString("D")); command.Parameters.AddWithValue("$job", jobName);
         if ((long)command.ExecuteScalar()! != 0) throw new IOException("execution_android_command_was_registered");
     }

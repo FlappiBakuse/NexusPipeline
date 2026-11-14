@@ -30,7 +30,7 @@ internal static class ScheduleOccurrenceOutcomes
         ScheduledOccurrenceProposal frozen, string subject)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT b.operation_id,b.reason_code,o.subject_id,o.request_digest,o.operation_kind,o.status,o.initial_journal_id FROM schedule_occurrence_outcomes b LEFT JOIN operations o ON o.operation_id=b.operation_id WHERE b.occurrence_id=$occurrence;";
+        command.CommandText = "SELECT b.operation_id,b.reason_code,o.subject_id,o.request_digest,o.operation_kind,o.status,o.initial_journal_id FROM main.schedule_occurrence_outcomes b LEFT JOIN main.operations o ON o.operation_id=b.operation_id WHERE b.occurrence_id=$occurrence;";
         command.Parameters.AddWithValue("$occurrence", frozen.OccurrenceId.ToString("D"));
         using var reader = command.ExecuteReader();
         if (!reader.Read()) return null;
@@ -53,17 +53,17 @@ internal static class ScheduleOccurrenceOutcomes
             return;
         }
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "INSERT INTO schedule_occurrence_outcomes(occurrence_id,operation_id,reason_code) VALUES($occurrence,$operation,$reason);";
+        command.CommandText = "INSERT INTO main.schedule_occurrence_outcomes(occurrence_id,operation_id,reason_code) VALUES($occurrence,$operation,$reason);";
         command.Parameters.AddWithValue("$occurrence", occurrence.Frozen.OccurrenceId.ToString("D"));
         command.Parameters.AddWithValue("$operation", identity.OperationId.ToString("D"));
         command.Parameters.AddWithValue("$reason", reason); command.ExecuteNonQuery();
-        command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$operation;"; command.ExecuteNonQuery();
+        command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$operation;"; command.ExecuteNonQuery();
     }
 
     internal static void VerifyInventory(SqliteConnection connection, SqliteTransaction transaction)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT 1 FROM operations o LEFT JOIN schedule_occurrence_outcomes b ON b.operation_id=o.operation_id WHERE o.operation_kind='schedule.occurrence.block' AND b.operation_id IS NULL LIMIT 1;";
+        command.CommandText = "SELECT 1 FROM main.operations o LEFT JOIN main.schedule_occurrence_outcomes b ON b.operation_id=o.operation_id WHERE o.operation_kind='schedule.occurrence.block' AND b.operation_id IS NULL LIMIT 1;";
         if (command.ExecuteScalar() is not null) throw ScheduleMinuteCodec.Invalid();
     }
 }

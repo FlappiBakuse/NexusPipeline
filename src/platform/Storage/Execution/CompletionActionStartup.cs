@@ -13,7 +13,7 @@ internal static class CompletionActionStartup
     {
         lease.VerifyHeld(instance);
         if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot ||
-            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "nexus.db")))
+            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "runtime.db")))
             throw CompletionActionCodec.Invalid();
         VerifyInventory(database, source.Require);
     }
@@ -31,7 +31,7 @@ internal static class CompletionActionStartup
 
     private static void VerifyInventory(StateDatabase database, Action<BoundCompletionIntent> requireSource)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         foreach (var page in Pages(connection, transaction, "completion_candidates", "run_id"))
             foreach (var id in page) VerifyCandidate(connection, transaction, id, requireSource);
@@ -47,9 +47,9 @@ internal static class CompletionActionStartup
                 }
             }
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT 1 FROM operations o WHERE (o.operation_kind='execution.completion.candidate' AND NOT EXISTS(SELECT 1 FROM completion_candidates c WHERE c.operation_id=o.operation_id)) OR (o.operation_kind='execution.completion' AND NOT EXISTS(SELECT 1 FROM completion_actions a WHERE a.operation_id=o.operation_id)) LIMIT 1;";
+        command.CommandText = "SELECT 1 FROM main.operations o WHERE (o.operation_kind='execution.completion.candidate' AND NOT EXISTS(SELECT 1 FROM main.completion_candidates c WHERE c.operation_id=o.operation_id)) OR (o.operation_kind='execution.completion' AND NOT EXISTS(SELECT 1 FROM main.completion_actions a WHERE a.operation_id=o.operation_id)) LIMIT 1;";
         if (command.ExecuteScalar() is not null) throw CompletionActionCodec.Invalid();
-        command.CommandText = "SELECT 1 FROM completion_candidate_outcomes o LEFT JOIN completion_candidates c ON c.run_id=o.run_id LEFT JOIN completion_action_members m ON m.run_id=o.run_id WHERE c.run_id IS NULL OR m.run_id IS NOT NULL OR o.reason_code NOT IN ('completion_action_conflict','completion_cancelled','completion_local_authorization_required','completion_lifecycle_unavailable','completion_owner_restarted') LIMIT 1;";
+        command.CommandText = "SELECT 1 FROM main.completion_candidate_outcomes o LEFT JOIN main.completion_candidates c ON c.run_id=o.run_id LEFT JOIN main.completion_action_members m ON m.run_id=o.run_id WHERE c.run_id IS NULL OR m.run_id IS NOT NULL OR o.reason_code NOT IN ('completion_action_conflict','completion_cancelled','completion_local_authorization_required','completion_lifecycle_unavailable','completion_owner_restarted') LIMIT 1;";
         if (command.ExecuteScalar() is not null) throw CompletionActionCodec.Invalid();
     }
 
@@ -57,7 +57,7 @@ internal static class CompletionActionStartup
     {
         lease.VerifyHeld(lease.Instance);
         var holds = new List<RecoveryResourceHold>();
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         foreach (var page in Pages(connection, transaction, "completion_actions", "operation_id"))
             foreach (var id in page)
@@ -89,7 +89,7 @@ internal static class CompletionActionStartup
         var candidate = ReadCandidate(connection, transaction, run); requireSource(candidate);
         var expected = CompletionCandidateStore.Identity(candidate);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT operation_id,attempt_id,owner_generation FROM completion_candidates WHERE run_id=$run;";
+        command.CommandText = "SELECT operation_id,attempt_id,owner_generation FROM main.completion_candidates WHERE run_id=$run;";
         command.Parameters.AddWithValue("$run", run);
         using (var reader = command.ExecuteReader())
         {
@@ -103,7 +103,7 @@ internal static class CompletionActionStartup
     private static BoundCompletionIntent ReadCandidate(SqliteConnection connection, SqliteTransaction transaction, string run)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT intent_json,total_plan_path,total_plan_size,total_plan_sha256,subject_id FROM completion_candidates WHERE run_id=$run;";
+        command.CommandText = "SELECT intent_json,total_plan_path,total_plan_size,total_plan_sha256,subject_id FROM main.completion_candidates WHERE run_id=$run;";
         command.Parameters.AddWithValue("$run", run);
         using var reader = command.ExecuteReader(); if (!reader.Read()) throw CompletionActionCodec.Invalid();
         var intent = CompletionActionCodec.Decode<FrozenCompletionIntent>(reader.GetString(0));
@@ -119,7 +119,7 @@ internal static class CompletionActionStartup
         while (true)
         {
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = $"SELECT {key} FROM {table} WHERE {key}>$after ORDER BY {key} LIMIT 128;";
+            command.CommandText = $"SELECT {key} FROM {DatabaseTables.Name(table)} WHERE {key}>$after ORDER BY {key} LIMIT 128;";
             command.Parameters.AddWithValue("$after", after); var page = new List<string>();
             using (var reader = command.ExecuteReader())
                 while (reader.Read())

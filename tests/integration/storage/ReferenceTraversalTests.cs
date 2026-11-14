@@ -79,7 +79,7 @@ public sealed class ReferenceTraversalTests
         else source.Database.Write((connection, transaction) =>
         {
             using var command = DatabaseConnections.Command(connection, transaction,
-                "UPDATE attempt_receipts SET source_receipt_digest=$0 WHERE attempt_id=$1;", new string('0', 64), receipt.Facts.AttemptId.ToString("D"));
+                "UPDATE records.attempt_receipts SET source_receipt_digest=$0 WHERE attempt_id=$1;", new string('0', 64), receipt.Facts.AttemptId.ToString("D"));
             return command.ExecuteNonQuery();
         });
         var blobs = new ImmutableBlobStore(source.Instance, new());

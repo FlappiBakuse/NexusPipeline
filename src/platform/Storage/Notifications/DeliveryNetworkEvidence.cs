@@ -32,7 +32,7 @@ internal static class DeliveryNetworkEvidence
         if (reference.SecretId is { } id)
         {
             using var command = NotificationDeliveryRows.Command(connection, transaction,
-                "SELECT protection_scheme,owner_sid,digest,size_bytes,state FROM secret_payloads WHERE secret_id=$0;", id.ToString("D"));
+                "SELECT protection_scheme,owner_sid,digest,size_bytes,state FROM system.secret_payloads WHERE secret_id=$0;", id.ToString("D"));
             using var row = command.ExecuteReader();
             if (!row.Read() || row.GetString(4) != "committed") throw Invalid();
             payload = new(id, row.GetString(0), row.GetString(1), row.GetString(2), row.GetInt64(3));
@@ -62,7 +62,7 @@ internal static class DeliveryNetworkEvidence
             NotificationDeliveryRows.RequirePayloadMetadata(connection, transaction, payload, allowRetired: true);
         if (reference.Revision == 0 && reference.SecretId is null) return;
         using var command = NotificationDeliveryRows.Command(connection, transaction,
-            "SELECT m.operation_id,o.request_digest FROM secret_mutations m JOIN operations o ON o.operation_id=m.operation_id " +
+            "SELECT m.operation_id,o.request_digest FROM system.secret_mutations m JOIN main.operations o ON o.operation_id=m.operation_id " +
             "WHERE o.operation_kind='secret.change' AND o.status='completed' AND o.subject_id=$0 " +
             "AND m.result_revision=$1 AND m.result_secret_id IS $2;",
             $"host/{instanceId:D}/proxy-password", reference.Revision,

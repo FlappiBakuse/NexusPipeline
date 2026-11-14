@@ -219,14 +219,14 @@ internal sealed class AndroidControlEvidence(RuntimeInstance instance, StateData
     private string Subject(Guid journalId, Guid operationId)
     {
         if (readScope is not null) return readScope.ReadSql(database, connection => SubjectInside(connection, journalId, operationId));
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         return SubjectInside(connection, journalId, operationId);
     }
 
     private static string SubjectInside(SqliteConnection connection, Guid journalId, Guid operationId)
     {
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT subject_id FROM operations WHERE operation_id=$operation AND operation_kind='execution.start' AND initial_journal_id=$journal;";
+        command.CommandText = "SELECT subject_id FROM main.operations WHERE operation_id=$operation AND operation_kind='execution.start' AND initial_journal_id=$journal;";
         command.Parameters.AddWithValue("$operation", operationId.ToString("D"));
         command.Parameters.AddWithValue("$journal", journalId.ToString("D"));
         return command.ExecuteScalar() as string ?? throw Invalid();

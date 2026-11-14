@@ -28,7 +28,7 @@ public sealed class ConfigurationRunStore
 
     public ConfigurationRunStatus? Read(Guid sessionId, string subject)
     {
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration);
         using var transaction = connection.BeginTransaction(deferred: true);
         return ConfigurationRunRows.Read(connection, transaction, sessionId, subject);
     }
@@ -40,7 +40,7 @@ public sealed class ConfigurationRunStore
             resources.Any(item => item.Plan.OperationId == operation.OperationId) || operation !=
             new OperationIdentity(operation.OperationId, operation.SubjectId, Digest(prepared, parentJournalId, stepId, resources), "configuration.run.begin"))
             throw new OperationConflictException();
-        using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var transaction = connection.BeginTransaction(deferred: true))
             if (OperationRows.ReadExisting(connection, transaction, operation) is not null)
                 return Required(connection, transaction, operation.OperationId, operation.SubjectId);
@@ -105,10 +105,10 @@ public sealed class ConfigurationRunStore
                 ConfigurationRevisionPolicy.RequireCurrentContract(saved, resource.Contract);
             }
             using var command = ConfigurationRunRows.Command(connection, transaction, sessionId);
-            command.CommandText = "UPDATE configuration_run_sessions SET phase=1,entered_running=1,revision=revision+1 WHERE session_id=$session AND phase=0 AND writer_gate=0 AND revision=$revision;";
+            command.CommandText = "UPDATE configuration.configuration_run_sessions SET phase=1,entered_running=1,revision=revision+1 WHERE session_id=$session AND phase=0 AND writer_gate=0 AND revision=$revision;";
             command.Parameters.AddWithValue("$revision", expectedRevision);
             if (command.ExecuteNonQuery() != 1) throw new ConfigurationException("configuration_run_revision_conflict");
-            command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$session;"; command.ExecuteNonQuery();
+            command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$session;"; command.ExecuteNonQuery();
             return Required(connection, transaction, sessionId, subject) with { IsNew = true };
         });
     }
@@ -122,7 +122,7 @@ public sealed class ConfigurationRunStore
     private static void RequireParent(SqliteConnection connection, SqliteTransaction transaction, RegisteredJournal parent, string subject)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM operation_journals j JOIN operations o ON o.operation_id=j.operation_id " +
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operation_journals j JOIN main.operations o ON o.operation_id=j.operation_id " +
             "WHERE j.journal_id=$journal AND j.operation_id=$owner AND j.operation_kind='runAttempt' AND j.phase=$phase AND j.revision=$revision " +
             "AND j.plan_path=$path AND j.plan_digest=$digest AND o.subject_id=$subject AND o.status='accepted');";
         command.Parameters.AddWithValue("$journal", parent.JournalId.ToString("D")); command.Parameters.AddWithValue("$owner", parent.OperationId.ToString("D"));

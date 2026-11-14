@@ -22,7 +22,7 @@ internal sealed class SecretPreparationExecutor(RuntimeInstance instance, Contra
         var plan = draft.Plan.ReadWire(); var id = Guid.Parse(plan.JournalId);
         if (!new SecretPreparationAcceptance(database).Accept(operation, draft))
         {
-            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System);
             return SecretFieldStore.ReadReplay(connection, null, operation, plan.ReplayProof)
                 ?? throw new IOException("secret_preparation_original_result_missing");
         }

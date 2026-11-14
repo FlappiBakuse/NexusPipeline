@@ -49,9 +49,9 @@ public sealed class FeedStoreTests
         var store = new UpdateFeedStore(owner.Instance, owner.Database, owner.Lease, owner.Resources, owner.Contracts, verifier);
         var bytes = input.Signed(input.Document());
         var verified = verifier.Verify(bytes.Feed, bytes.Signature, HostUpdateChannel.Stable); var operation = Guid.NewGuid();
-        owner.Sql("CREATE TRIGGER stop_feed_head BEFORE INSERT ON trusted_update_feed_heads BEGIN SELECT RAISE(ABORT,'controlled'); END;");
+        owner.Sql("CREATE TRIGGER system.stop_feed_head BEFORE INSERT ON trusted_update_feed_heads BEGIN SELECT RAISE(ABORT,'controlled'); END;");
         Assert.Throws<SqliteException>(() => store.Accept(operation, "local", verified));
-        owner.Sql("DROP TRIGGER stop_feed_head;");
+        owner.Sql("DROP TRIGGER system.stop_feed_head;");
         Assert.Equal(0, owner.Count("operations")); Assert.Null(store.ReadCached(HostUpdateChannel.Stable));
         store.Accept(operation, "local", verified); store.Accept(operation, "local", verified);
         Assert.Equal(1, owner.Count("operations"));

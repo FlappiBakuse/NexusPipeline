@@ -89,14 +89,14 @@ public sealed class MuMuFaultTests
             var projection = new ImageCatalogProjection(source.Instance, source.Database, new(), source.Lease);
             if (fault == "sqlRollback")
             {
-                fixture.Base.Execute("CREATE TRIGGER fixture_mumu_image BEFORE INSERT ON execution_image_entries " +
+                fixture.Base.Execute("CREATE TRIGGER records.fixture_mumu_image BEFORE INSERT ON execution_image_entries " +
                     "BEGIN SELECT RAISE(ABORT,'fixture_mumu_image'); END;");
                 try
                 {
                     Assert.Throws<SqliteException>(() => projection.OnCommitted(receipt));
                     Assert.Equal(0, fixture.Base.Count("execution_image_catalog")); Assert.Equal(0, fixture.Base.Count("execution_image_entries"));
                 }
-                finally { fixture.Base.Execute("DROP TRIGGER fixture_mumu_image;"); }
+                finally { fixture.Base.Execute("DROP TRIGGER records.fixture_mumu_image;"); }
             }
             projection.OnCommitted(receipt);
             var reader = new ImageCatalogReader(source.Instance, source.Database, new());

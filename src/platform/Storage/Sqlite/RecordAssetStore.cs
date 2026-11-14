@@ -16,16 +16,16 @@ public sealed class RecordAssetStore(StateDatabase database, ImmutableBlobStore 
         {
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
-            command.CommandText = "INSERT INTO blobs VALUES($digest,$size,$path) ON CONFLICT(digest) DO NOTHING;";
+            command.CommandText = "INSERT INTO content.blobs VALUES($digest,$size,$path) ON CONFLICT(digest) DO NOTHING;";
             command.Parameters.AddWithValue("$digest", asset.Sha256);
             command.Parameters.AddWithValue("$size", asset.SizeBytes);
             command.Parameters.AddWithValue("$path", reference.RelativePath);
             command.ExecuteNonQuery();
-            command.CommandText = "SELECT size_bytes,relative_path FROM blobs WHERE digest=$digest;";
+            command.CommandText = "SELECT size_bytes,relative_path FROM content.blobs WHERE digest=$digest;";
             using (var existing = command.ExecuteReader())
                 if (!existing.Read() || existing.GetInt64(0) != asset.SizeBytes || existing.GetString(1) != reference.RelativePath)
                     throw new IOException("record_blob_identity_conflict");
-            command.CommandText = "INSERT INTO record_assets VALUES($run,$digest,$kind) ON CONFLICT(run_id,digest,kind) DO NOTHING;";
+            command.CommandText = "INSERT INTO records.record_assets VALUES($run,$digest,$kind) ON CONFLICT(run_id,digest,kind) DO NOTHING;";
             command.Parameters.AddWithValue("$run", asset.RunId.ToString("D"));
             command.Parameters.AddWithValue("$kind", (int)asset.Kind);
             command.ExecuteNonQuery();
@@ -36,7 +36,7 @@ public sealed class RecordAssetStore(StateDatabase database, ImmutableBlobStore 
     public RecordAssetPage ReadForRun(Guid runId, RecordAssetCursor? after = null, int limit = 50)
     {
         VerifyBinding(); ValidatePage(runId, after, limit);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Content);
         using var command = CreatePageQuery(connection, runId, after, limit);
         using var reader = command.ExecuteReader();
         var records = new List<RecordAsset>();
@@ -49,7 +49,7 @@ public sealed class RecordAssetStore(StateDatabase database, ImmutableBlobStore 
     internal IReadOnlyList<string> ExplainPage(Guid runId, RecordAssetCursor? after = null, int limit = 50)
     {
         VerifyBinding(); ValidatePage(runId, after, limit);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Content);
         using var command = CreatePageQuery(connection, runId, after, limit);
         command.CommandText = "EXPLAIN QUERY PLAN " + command.CommandText;
         using var rows = command.ExecuteReader(); var result = new List<string>();
@@ -68,7 +68,7 @@ public sealed class RecordAssetStore(StateDatabase database, ImmutableBlobStore 
     private static SqliteCommand CreatePageQuery(SqliteConnection connection, Guid runId, RecordAssetCursor? after, int limit)
     {
         var command = connection.CreateCommand();
-        command.CommandText = "SELECT a.digest,b.size_bytes,a.kind FROM record_assets a JOIN blobs b ON a.digest=b.digest " +
+        command.CommandText = "SELECT a.digest,b.size_bytes,a.kind FROM records.record_assets a JOIN content.blobs b ON a.digest=b.digest " +
             "WHERE a.run_id=$run AND (a.digest,a.kind)>($after,$kind) ORDER BY a.digest,a.kind LIMIT $limit;";
         command.Parameters.AddWithValue("$run", runId.ToString("D"));
         command.Parameters.AddWithValue("$after", after?.Sha256 ?? "");
@@ -82,10 +82,10 @@ public sealed class RecordAssetStore(StateDatabase database, ImmutableBlobStore 
         asset.Validate();
         VerifyBinding();
         BlobReference reference;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var command = connection.CreateCommand())
         {
-            command.CommandText = "SELECT b.size_bytes,b.relative_path FROM record_assets a JOIN blobs b ON a.digest=b.digest " +
+            command.CommandText = "SELECT b.size_bytes,b.relative_path FROM records.record_assets a JOIN content.blobs b ON a.digest=b.digest " +
                 "WHERE a.run_id=$run AND a.digest=$digest AND a.kind=$kind;";
             command.Parameters.AddWithValue("$run", asset.RunId.ToString("D"));
             command.Parameters.AddWithValue("$digest", asset.Sha256);
@@ -105,7 +105,7 @@ public sealed class RecordAssetStore(StateDatabase database, ImmutableBlobStore 
     private void VerifyBinding()
     {
         if (database.InstanceId != blobs.Instance.InstanceId || !string.Equals(database.DatabasePath,
-            Path.Combine(blobs.Instance.RuntimeRoot, "state", "nexus.db"), StringComparison.OrdinalIgnoreCase))
+            Path.Combine(blobs.Instance.RuntimeRoot, "state", "runtime.db"), StringComparison.OrdinalIgnoreCase))
             throw new IOException("record_asset_store_instance_unbound");
     }
 }

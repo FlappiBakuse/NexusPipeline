@@ -155,9 +155,9 @@ internal sealed class MaintenanceRestorationCodec(RuntimeInstance instance, Cont
         RequireFailure(failure);
         var writer = failure.Writer;
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM journal_writers WHERE journal_id=$journal AND writer_id=$writer " +
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.journal_writers WHERE journal_id=$journal AND writer_id=$writer " +
             "AND process_id=$pid AND created_file_time=$created AND image_path=$path AND image_sha256=$hash " +
-            "AND user_sid=$sid AND elevated=$elevated) AND EXISTS(SELECT 1 FROM journal_writer_jobs WHERE journal_id=$journal " +
+            "AND user_sid=$sid AND elevated=$elevated) AND EXISTS(SELECT 1 FROM main.journal_writer_jobs WHERE journal_id=$journal " +
             "AND writer_id=$writer AND job_name=$job);";
         command.Parameters.AddWithValue("$journal", journalId.ToString("D"));
         command.Parameters.AddWithValue("$writer", writer.WriterId.ToString("D"));

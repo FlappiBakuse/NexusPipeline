@@ -16,7 +16,7 @@ public sealed class AutomationDefinitionStore(StateDatabase database) : IAutomat
 
     public AutomationCatalog Read()
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         var result = Configuration.BindingConfigurationSource.Read(database, connection, transaction, AutomationRows.Read(connection, transaction));
         VerifyRoots(result.Roots);
@@ -27,9 +27,9 @@ public sealed class AutomationDefinitionStore(StateDatabase database) : IAutomat
     // The source lease re-checks its definitions on every read, so it needs the revision without materializing the catalog.
     public long ReadRevision()
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT revision FROM automation_catalog_state WHERE singleton=1;";
+        command.CommandText = "SELECT revision FROM automation.automation_catalog_state WHERE singleton=1;";
         return Convert.ToInt64(command.ExecuteScalar() ?? throw new IOException("automation_catalog_revision_missing"), CultureInfo.InvariantCulture);
     }
 
@@ -42,7 +42,7 @@ public sealed class AutomationDefinitionStore(StateDatabase database) : IAutomat
     internal AutomationChangeResult? Lookup(OperationIdentity operation, AutomationChanges changes)
     {
         if (operation.Kind != "automation.change" || operation.RequestDigest != Digest(changes)) throw new OperationConflictException();
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation);
         using var transaction = connection.BeginTransaction(deferred: true);
         return OperationRows.ReadExisting(connection, transaction, operation) is null ? null : ReadResult(connection, transaction, operation.OperationId);
     }
@@ -56,7 +56,7 @@ public sealed class AutomationDefinitionStore(StateDatabase database) : IAutomat
     private AutomationChangeResult CommitChanges(OperationIdentity operation, AutomationChanges changes, DateTimeOffset acceptedAt)
     {
         VerifySavedRoots(changes);
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Notifications | DatabaseDomain.Content))
         using (var transaction = connection.BeginTransaction(deferred: true))
             if (OperationRows.ReadExisting(connection, transaction, operation) is not null) return ReadResult(connection, transaction, operation.OperationId);
         var current = Read();
@@ -88,8 +88,8 @@ public sealed class AutomationDefinitionStore(StateDatabase database) : IAutomat
             _ = BoundedJson.Serialize(next);
             retirement?.RetireOwners(connection, transaction);
             AutomationRowWriter.Write(connection, transaction, before, next);
-            AutomationRowWriter.Row(connection, transaction, "INSERT INTO automation_mutations VALUES($0,$1);", operation.OperationId, next.Revision);
-            AutomationRowWriter.Row(connection, transaction, "UPDATE operations SET status='completed' WHERE operation_id=$0;", operation.OperationId);
+            AutomationRowWriter.Row(connection, transaction, "INSERT INTO automation.automation_mutations VALUES($0,$1);", operation.OperationId, next.Revision);
+            AutomationRowWriter.Row(connection, transaction, "UPDATE main.operations SET status='completed' WHERE operation_id=$0;", operation.OperationId);
             return ReadResult(connection, transaction, operation.OperationId) with { IsNew = true };
         });
         if (result.IsNew) retirement?.MaterializeInitials();
@@ -100,11 +100,11 @@ public sealed class AutomationDefinitionStore(StateDatabase database) : IAutomat
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT catalog_revision FROM automation_mutations WHERE operation_id=$id;";
+        command.CommandText = "SELECT catalog_revision FROM automation.automation_mutations WHERE operation_id=$id;";
         command.Parameters.AddWithValue("$id", operationId.ToString("D"));
         var revision = command.ExecuteScalar();
         if (revision is null) throw new IOException("automation_operation_requires_reconciliation");
-        command.CommandText = "SELECT journal_id FROM operation_journals WHERE operation_id=$id AND operation_kind='fileCleanup' ORDER BY journal_id LIMIT 257;";
+        command.CommandText = "SELECT journal_id FROM main.operation_journals WHERE operation_id=$id AND operation_kind='fileCleanup' ORDER BY journal_id LIMIT 257;";
         using var reader = command.ExecuteReader();
         var journals = ImmutableArray.CreateBuilder<Guid>();
         while (reader.Read())

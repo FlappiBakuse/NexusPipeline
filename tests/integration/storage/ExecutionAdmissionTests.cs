@@ -113,11 +113,11 @@ public sealed class ExecutionAdmissionTests
     public void ReleasesFailedAcceptance(string table)
     {
         using var fixture = new ExecutionAdmissionFixture(); var source = fixture.Source; var operation = Guid.NewGuid(); var before = fixture.Counts();
-        fixture.Execute($"CREATE TRIGGER fixture_admission_failure BEFORE INSERT ON {table} BEGIN SELECT RAISE(ABORT,'fixture_admission_failure'); END;");
+        fixture.Execute($"CREATE TRIGGER main.fixture_admission_failure BEFORE INSERT ON {table} BEGIN SELECT RAISE(ABORT,'fixture_admission_failure'); END;");
         var request = source.Request(new BindingTarget(source.BindingB));
         Assert.Throws<SqliteException>(() => fixture.Service.Start(operation, Subject, request, PlanBuilderFixture.CreatedAt));
         Assert.Equal(before, fixture.Counts()); Assert.True(fixture.Index.Current.IsReady); Assert.Empty(fixture.Index.Current.Isolations); Assert.Equal(0, fixture.Inbox.PendingCount);
-        fixture.Execute("DROP TRIGGER fixture_admission_failure;");
+        fixture.Execute("DROP TRIGGER main.fixture_admission_failure;");
         Assert.True(fixture.Service.Start(operation, Subject, request, PlanBuilderFixture.CreatedAt).Acceptance.IsNew);
         Assert.Equal(1, fixture.Inbox.PendingCount);
     }

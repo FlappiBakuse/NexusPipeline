@@ -19,22 +19,22 @@ internal static class RecordRetirementRows
     internal static void RequireFamilyInside(SqliteConnection connection, SqliteTransaction transaction, Guid runId, int count)
     {
         using var command = Command(connection, transaction,
-            "SELECT count(*),coalesce(min(ordinal),0),coalesce(max(ordinal),0) FROM attempt_receipts WHERE run_id=$0;", runId);
+            "SELECT count(*),coalesce(min(ordinal),0),coalesce(max(ordinal),0) FROM records.attempt_receipts WHERE run_id=$0;", runId);
         using (var rows = command.ExecuteReader())
             if (!rows.Read() || rows.GetInt32(0) != count || rows.GetInt32(1) != 1 || rows.GetInt32(2) != count) throw RecordRetirementCodec.Invalid();
-        command.CommandText = "SELECT count(*) FROM execution_start_sources WHERE run_id=$0;";
+        command.CommandText = "SELECT count(*) FROM main.execution_start_sources WHERE run_id=$0;";
         if ((long)command.ExecuteScalar()! != count) throw RecordRetirementCodec.Invalid();
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM attempt_receipts a JOIN operation_journals j USING(journal_id) " +
-            "JOIN operations o ON o.operation_id=a.operation_id WHERE a.run_id=$0 AND " +
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM records.attempt_receipts a JOIN main.operation_journals j USING(journal_id) " +
+            "JOIN main.operations o ON o.operation_id=a.operation_id WHERE a.run_id=$0 AND " +
             "(j.phase!='committed' OR j.operation_id!=a.operation_id OR j.plan_digest!=a.plan_digest OR o.status!='completed' OR a.recovery_outcome NOT IN(0,2))) " +
-            "OR NOT EXISTS(SELECT 1 FROM run_records r JOIN attempt_receipts a ON a.attempt_id=r.attempt_id " +
+            "OR NOT EXISTS(SELECT 1 FROM records.run_records r JOIN records.attempt_receipts a ON a.attempt_id=r.attempt_id " +
             "WHERE r.run_id=$0 AND a.run_id=r.run_id AND a.ordinal=$1 AND r.attempt_ordinal=a.ordinal " +
             "AND r.engine_outcome=a.engine_outcome AND r.business_outcome=a.business_outcome " +
             "AND r.lifecycle_outcome=a.lifecycle_outcome AND r.recovery_outcome=a.recovery_outcome AND r.reason_code=a.reason_code) " +
-            "OR EXISTS(SELECT 1 FROM execution_retry_intents i LEFT JOIN execution_retry_outcomes d ON d.retry_operation_id=i.operation_id " +
+            "OR EXISTS(SELECT 1 FROM main.execution_retry_intents i LEFT JOIN main.execution_retry_outcomes d ON d.retry_operation_id=i.operation_id " +
             "WHERE i.run_id=$0 AND d.operation_id IS NULL AND NOT EXISTS(" +
-            "SELECT 1 FROM execution_start_sources s JOIN attempt_receipts n ON n.operation_id=s.operation_id " +
-            "JOIN attempt_receipts p ON p.attempt_id=i.previous_attempt_id AND p.journal_id=i.previous_journal_id AND p.run_id=i.run_id " +
+            "SELECT 1 FROM main.execution_start_sources s JOIN records.attempt_receipts n ON n.operation_id=s.operation_id " +
+            "JOIN records.attempt_receipts p ON p.attempt_id=i.previous_attempt_id AND p.journal_id=i.previous_journal_id AND p.run_id=i.run_id " +
             "WHERE s.operation_id=i.next_operation_id AND s.run_id=i.run_id AND s.journal_id=i.next_journal_id " +
             "AND s.attempt_ordinal=i.next_ordinal AND s.retry_source_operation_id=p.operation_id AND p.ordinal+1=i.next_ordinal " +
             "AND n.attempt_id=i.next_attempt_id AND n.run_id=i.run_id AND n.journal_id=i.next_journal_id AND n.ordinal=i.next_ordinal)) " +
@@ -47,24 +47,24 @@ internal static class RecordRetirementRows
     {
         RequireFamilyInside(connection, transaction, runId, count);
         using var command = Command(connection, transaction,
-            "SELECT EXISTS(SELECT 1 FROM notification_receipt_sources s JOIN notification_receipt_progress p USING(operation_id) " +
-            "WHERE s.run_id=$0 AND p.next_ordinal!=p.route_count) OR EXISTS(SELECT 1 FROM notification_receipt_sources s " +
-            "JOIN notification_delivery_pending p ON p.source_operation_id=s.operation_id WHERE s.run_id=$0);", runId);
+            "SELECT EXISTS(SELECT 1 FROM notifications.notification_receipt_sources s JOIN notifications.notification_receipt_progress p USING(operation_id) " +
+            "WHERE s.run_id=$0 AND p.next_ordinal!=p.route_count) OR EXISTS(SELECT 1 FROM notifications.notification_receipt_sources s " +
+            "JOIN notifications.notification_delivery_pending p ON p.source_operation_id=s.operation_id WHERE s.run_id=$0);", runId);
         if ((long)command.ExecuteScalar()! != 0) throw new IOException("record_retirement_notification_pending");
     }
 
     internal static void RequireWritersInside(SqliteConnection connection, SqliteTransaction transaction, RecordRetirementAttempt attempt)
     {
         using var count = Command(connection, transaction,
-            "SELECT count(*) FROM journal_writer_jobs WHERE journal_id=$0;", attempt.Receipt.JournalId);
+            "SELECT count(*) FROM main.journal_writer_jobs WHERE journal_id=$0;", attempt.Receipt.JournalId);
         if ((long)count.ExecuteScalar()! != attempt.Writers.Length) throw RecordRetirementCodec.Invalid();
         foreach (var writer in attempt.Writers)
         {
             var binding = writer.Binding;
             using var command = Command(connection, transaction,
                 "SELECT b.session_id,c.plan_path,c.plan_size,c.plan_digest,r.process_id,r.created_file_time,r.image_path,r.image_sha256,r.user_sid,r.elevated " +
-                "FROM journal_writer_jobs b JOIN journal_writer_job_closures c USING(journal_id,writer_id,job_name) " +
-                "LEFT JOIN journal_writer_job_roots r USING(journal_id,writer_id,job_name) WHERE b.journal_id=$0 AND b.writer_id=$1 AND b.job_name=$2;",
+                "FROM main.journal_writer_jobs b JOIN main.journal_writer_job_closures c USING(journal_id,writer_id,job_name) " +
+                "LEFT JOIN main.journal_writer_job_roots r USING(journal_id,writer_id,job_name) WHERE b.journal_id=$0 AND b.writer_id=$1 AND b.job_name=$2;",
                 binding.ParentJournalId, binding.WriterId, binding.JobName);
             using var row = command.ExecuteReader();
             if (!row.Read() || row.GetInt32(0) != binding.SessionId ||
@@ -78,7 +78,7 @@ internal static class RecordRetirementRows
     internal static BlobReference? Find(SqliteConnection connection, SqliteTransaction? transaction, Guid operationId)
     {
         using var command = Command(connection, transaction,
-            "SELECT relative_path,size_bytes,sha256 FROM record_content_retirements WHERE operation_id=$0;", operationId);
+            "SELECT relative_path,size_bytes,sha256 FROM records.record_content_retirements WHERE operation_id=$0;", operationId);
         using var row = command.ExecuteReader();
         return row.Read() ? new(row.GetString(0), row.GetInt64(1), row.GetString(2)) : null;
     }
@@ -91,7 +91,7 @@ internal static class RecordRetirementRows
         {
             using var command = Command(connection, transaction,
                 "SELECT r.relative_path,r.size_bytes,r.sha256,c.size_bytes,c.relative_path " +
-                "FROM record_retired_contents c JOIN record_content_retirements r USING(operation_id) " +
+                "FROM records.record_retired_contents c JOIN records.record_content_retirements r USING(operation_id) " +
                 "WHERE c.run_id=$0 AND c.digest=$1;", runId, content.Sha256);
             using var rows = command.ExecuteReader();
             while (rows.Read())
@@ -108,7 +108,7 @@ internal static class RecordRetirementRows
     {
         using var command = Command(connection, transaction,
             "SELECT r.run_id,r.family_digest,r.cleanup_journal_id,o.subject_id,o.request_digest,o.operation_kind,o.status,o.initial_journal_id " +
-            "FROM record_content_retirements r JOIN operations o USING(operation_id) WHERE r.operation_id=$0;", document.OperationId);
+            "FROM records.record_content_retirements r JOIN main.operations o USING(operation_id) WHERE r.operation_id=$0;", document.OperationId);
         if (Find(connection, transaction, document.OperationId) != reference) throw RecordRetirementCodec.Invalid();
         using (var row = command.ExecuteReader())
             if (!row.Read() || row.GetString(0) != document.RunId.ToString("D") || row.GetString(1) != document.Family.Sha256 ||
@@ -116,7 +116,7 @@ internal static class RecordRetirementRows
                 row.GetString(4) != Identity(document).RequestDigest || row.GetString(5) != "records.content.retire" ||
                 row.GetString(6) != "completed" || row.GetString(7) != document.CleanupJournalId.ToString("D"))
                 throw RecordRetirementCodec.Invalid();
-        command.CommandText = "SELECT digest,size_bytes,relative_path,run_id,content_kind FROM record_retired_contents WHERE operation_id=$0 ORDER BY digest;";
+        command.CommandText = "SELECT digest,size_bytes,relative_path,run_id,content_kind FROM records.record_retired_contents WHERE operation_id=$0 ORDER BY digest;";
         using var rows = command.ExecuteReader(); var index = 0;
         while (rows.Read())
         {
@@ -138,19 +138,19 @@ internal static class RecordRetirementRows
         RecordRetirementDocument document, BlobReference reference)
     {
         using var command = Command(connection, transaction,
-            "INSERT INTO record_content_retirements VALUES($0,$1,$2,$3,$4,$5,$6);",
+            "INSERT INTO records.record_content_retirements VALUES($0,$1,$2,$3,$4,$5,$6);",
             document.OperationId, document.RunId, document.Family.Sha256, document.CleanupJournalId,
             reference.RelativePath, reference.SizeBytes, reference.Sha256);
         command.ExecuteNonQuery();
         foreach (var content in document.Contents)
         {
             using var item = Command(connection, transaction,
-                "INSERT INTO record_retired_contents VALUES($0,$1,$2,$3,$4,$5);",
+                "INSERT INTO records.record_retired_contents VALUES($0,$1,$2,$3,$4,$5);",
                 document.OperationId, document.RunId, content.Sha256, (int)document.ContentKind, content.SizeBytes, content.RelativePath);
             item.ExecuteNonQuery();
         }
         using var complete = Command(connection, transaction,
-            "UPDATE operations SET status='completed' WHERE operation_id=$0 AND status='accepted';", document.OperationId);
+            "UPDATE main.operations SET status='completed' WHERE operation_id=$0 AND status='accepted';", document.OperationId);
         if (complete.ExecuteNonQuery() != 1) throw RecordRetirementCodec.Invalid();
     }
 }

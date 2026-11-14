@@ -89,13 +89,13 @@ public sealed class ScreenshotRetryTests
         else
         {
             Assert.Equal(1, receipts[0].Facts.Ordinal);
-            using var connection = DatabaseConnections.Open(database!.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(database!.DatabasePath, readOnly: true, domains: DatabaseDomain.All);
             using var command = connection.CreateCommand();
-            command.CommandText = "SELECT reason_code FROM execution_retry_outcomes";
+            command.CommandText = "SELECT reason_code FROM main.execution_retry_outcomes";
             Assert.Equal("retry_budget_unknown", command.ExecuteScalar());
-            command.CommandText = "SELECT count(*) FROM attempt_receipts";
+            command.CommandText = "SELECT count(*) FROM records.attempt_receipts";
             Assert.Equal(1L, command.ExecuteScalar());
-            command.CommandText = "SELECT count(*) FROM execution_start_sources";
+            command.CommandText = "SELECT count(*) FROM main.execution_start_sources";
             Assert.Equal(1L, command.ExecuteScalar());
         }
         inputs.VerifyUnchanged();

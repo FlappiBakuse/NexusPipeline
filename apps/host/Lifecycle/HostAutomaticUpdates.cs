@@ -33,7 +33,7 @@ internal sealed class HostAutomaticUpdates : IAsyncDisposable
     private DateTimeOffset _nextCheck;
     private bool _pendingPluginScan;
     private long _observedSettingsRevision = -1;
-    private long _observedMutation = -1;
+    private DatabaseVersion? _observedMutation;
     private bool _hasPending;
     private AutomaticUpdateStatus _status = new(null, null, null);
     internal AutomaticUpdateStatus Status => Volatile.Read(ref _status);
@@ -91,7 +91,7 @@ internal sealed class HostAutomaticUpdates : IAsyncDisposable
 
     private async Task<bool> TickAsync()
     {
-        var observed = _database.CommitSequence;
+        var observed = DatabaseVersion.Read(_database, null, DatabaseDomain.Runtime | DatabaseDomain.System | DatabaseDomain.Extensions);
         if (_observedMutation == observed && !_hasPending && !_pendingPluginScan && _clock.GetUtcNow() < _nextCheck) return false;
         if (await ApplyPendingAsync(false)) return true;
         var saved = _settings.Read();
@@ -162,7 +162,7 @@ internal sealed class HostAutomaticUpdates : IAsyncDisposable
         {
             if (!_settings.Read().Effective.Updates.PluginAutoUpdateEnabled) return;
             ExtensionInstalledMetadata original;
-            using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
             using (var transaction = connection.BeginTransaction(deferred: true))
             { original = ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, state.ExtensionId) ?? throw new IOException("automatic_extension_missing"); transaction.Commit(); }
             var candidate = catalog.Entries.SingleOrDefault(item => item.ExtensionId == state.ExtensionId);

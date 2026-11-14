@@ -65,7 +65,7 @@ internal sealed class InstalledActivationService(RuntimeInstance instance, State
         lease.RequireExtensionActivator(activator, resources);
         acceptedHostCancellation.ThrowIfCancellationRequested();
         string[] ids;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var transaction = connection.BeginTransaction(deferred: true))
         {
             ids = HostSettingsRows.ReadCurrent(connection, transaction).Values.Extensions.Where(item => item.Enabled)

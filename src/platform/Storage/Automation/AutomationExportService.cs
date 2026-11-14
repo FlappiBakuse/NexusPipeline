@@ -13,7 +13,7 @@ public sealed class AutomationExportService(RuntimeInstance instance, ContractRe
             throw new IOException("automation_export_instance_unbound");
         AutomationCatalog catalog;
         IReadOnlyList<ExportSource> sources;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Content))
         using (var transaction = connection.BeginTransaction(deferred: true))
         {
             catalog = AutomationRows.Read(connection, transaction);
@@ -45,8 +45,8 @@ public sealed class AutomationExportService(RuntimeInstance instance, ContractRe
             command.Parameters.AddWithValue(name, script.ToString("D"));
             return name;
         });
-        command.CommandText = "SELECT DISTINCT a.asset_id,a.package_path,a.digest,b.size_bytes,b.relative_path FROM automation_assets a " +
-            "JOIN automation_asset_owners o USING(asset_id) JOIN blobs b USING(digest) WHERE o.automation_id IN (" + string.Join(',', names) + ") ORDER BY a.asset_id LIMIT 257;";
+        command.CommandText = "SELECT DISTINCT a.asset_id,a.package_path,a.digest,b.size_bytes,b.relative_path FROM automation.automation_assets a " +
+            "JOIN automation.automation_asset_owners o USING(asset_id) JOIN content.blobs b USING(digest) WHERE o.automation_id IN (" + string.Join(',', names) + ") ORDER BY a.asset_id LIMIT 257;";
         using var reader = command.ExecuteReader();
         var result = new List<ExportSource>();
         while (reader.Read())

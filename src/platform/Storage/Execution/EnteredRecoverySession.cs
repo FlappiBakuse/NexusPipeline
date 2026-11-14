@@ -106,9 +106,9 @@ internal sealed class EnteredRecoverySession(RuntimeInstance instance, StateData
 
     private void CloseStoppedGroups()
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT s.session_id,o.subject_id FROM configuration_run_sessions s JOIN operations o ON o.operation_id=s.session_id " +
+        command.CommandText = "SELECT s.session_id,o.subject_id FROM configuration.configuration_run_sessions s JOIN main.operations o ON o.operation_id=s.session_id " +
             "WHERE s.parent_journal_id=$parent AND s.writer_gate=0 LIMIT 4097;";
         command.Parameters.AddWithValue("$parent", parentJournalId.ToString("D"));
         var groups = new List<(Guid Id, string Subject)>();
@@ -195,7 +195,7 @@ internal sealed class EnteredRecoverySession(RuntimeInstance instance, StateData
     {
         try
         {
-            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration);
             using var transaction = connection.BeginTransaction(deferred: true);
             AttemptTerminalEvidence.RequireRestoredInside(connection, transaction, state, completeGroups); transaction.Commit(); return true;
         }

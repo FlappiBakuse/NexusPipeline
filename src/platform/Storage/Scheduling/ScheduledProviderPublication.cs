@@ -31,7 +31,7 @@ internal sealed class ScheduledProviderPublication(RuntimeInstance instance, Sta
             if (now.Offset != TimeSpan.Zero || now.ToUnixTimeSeconds() / 60 != occurrence.TriggerUtcMinute ||
                 counter.Read().IsExhausted) return null;
             plans.Entry.Use(() => true);
-            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.All))
             using (var transaction = connection.BeginTransaction(deferred: true))
             {
                 if (ScheduledProviderRows.Find(connection, transaction, operation) is { } prior)
@@ -40,7 +40,7 @@ internal sealed class ScheduledProviderPublication(RuntimeInstance instance, Sta
                     return null;
                 }
                 using var occupied = DatabaseConnections.Command(connection, transaction,
-                    "SELECT 1 FROM operations WHERE operation_id=$0;", operation.ToString("D"));
+                    "SELECT 1 FROM main.operations WHERE operation_id=$0;", operation.ToString("D"));
                 if (occupied.ExecuteScalar() is not null) throw ScheduledProviderCodec.Invalid();
             }
             var codec = new ScheduledProviderCodec(instance, contracts);
@@ -87,7 +87,7 @@ internal sealed class ScheduledProviderPublication(RuntimeInstance instance, Sta
             {
                 if (NexusPipeline.Platform.Processes.WriterStopEvidence.ObserveProcess(before.Source.Document.Creator.Process) != WriterState.Stopped)
                     throw new IOException("scheduled_provider_owner_unconfirmed");
-                using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+                using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.All);
                 using var transaction = connection.BeginTransaction(deferred: true);
                 var current = new ScheduledProviderEvidence(instance, contracts).Read(before.Source.Reference, connection, transaction);
                 transaction.Commit();
@@ -121,7 +121,7 @@ internal sealed class ScheduledProviderPublication(RuntimeInstance instance, Sta
     internal ScheduledProviderState Read(AcceptedProviderInvocation invocation)
     {
         Require();
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         var state = new ScheduledProviderEvidence(instance, contracts).Read(invocation.Source.Reference, connection, transaction);
         if (state.Source.Document.Creator != JournalWriterStore.CurrentWriter ||
@@ -219,7 +219,7 @@ internal sealed class ScheduledProviderPublication(RuntimeInstance instance, Sta
     {
         lease.VerifyHeld(instance);
         if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot ||
-            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "nexus.db")))
+            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "runtime.db")))
             throw ScheduledProviderCodec.Invalid();
     }
 }

@@ -18,12 +18,12 @@ internal static class LegacySchemaChecks
         var sql = (string)property.GetValue(null)!;
         var digest = Convert.ToHexStringLower(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(sql)));
         var historical = Path.Combine(root, "historical.db");
-        using (var connection = new SqliteConnection($"Data Source={historical};Pooling=False"))
+        using (var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open($"Data Source={historical};Pooling=False"))
         {
             connection.Open();
             using var command = connection.CreateCommand();
             command.CommandText = sql; command.ExecuteNonQuery();
-            command.CommandText = "INSERT INTO schema_info VALUES(1,'nexus.state.database',1,$instance,$digest,'2026-11-01T00:00:00.0000000Z'); PRAGMA user_version=1;";
+            command.CommandText = "INSERT INTO main.schema_info VALUES(1,'nexus.state.database',1,$instance,$digest,'2026-11-01T00:00:00.0000000Z'); PRAGMA user_version=1;";
             command.Parameters.AddWithValue("$instance", instance.InstanceId.ToString("D"));
             command.Parameters.AddWithValue("$digest", digest); command.ExecuteNonQuery();
         }

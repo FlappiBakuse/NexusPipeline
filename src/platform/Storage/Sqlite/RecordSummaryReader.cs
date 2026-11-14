@@ -11,13 +11,13 @@ public sealed class RecordSummaryReader(StateDatabase database)
         if (bindings.Count > 10000 || bindings.Select(item => item.Id).Distinct().Count() != bindings.Count)
             throw new ArgumentException("binding_summary_query_invalid");
         if (bindings.Count == 0) return [];
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
         using var command = connection.CreateCommand();
         command.CommandText = "WITH requested AS (SELECT json_extract(value,'$.binding') binding_id," +
             "json_extract(value,'$.user') user_id,json_extract(value,'$.script') script_id FROM json_each($bindings))," +
             "ranked AS (SELECT q.binding_id,b.user_id,b.script_id,b.run_id,b.tone,b.reason,r.ended_at_utc_ticks," +
             "r.history_retired_at_utc_ticks,ROW_NUMBER() OVER (PARTITION BY q.binding_id ORDER BY r.ended_at_utc_ticks DESC,r.run_id DESC) rank " +
-            "FROM requested q JOIN binding_task_records b ON b.binding_id=q.binding_id AND b.user_id=q.user_id AND b.script_id=q.script_id JOIN run_records r ON r.run_id=b.run_id) " +
+            "FROM requested q JOIN records.binding_task_records b ON b.binding_id=q.binding_id AND b.user_id=q.user_id AND b.script_id=q.script_id JOIN records.run_records r ON r.run_id=b.run_id) " +
             "SELECT binding_id,user_id,script_id,run_id,tone,reason,ended_at_utc_ticks,history_retired_at_utc_ticks FROM ranked WHERE rank=1;";
         command.Parameters.AddWithValue("$bindings", System.Text.Json.JsonSerializer.Serialize(bindings.Select(item =>
             new { binding = item.Id.ToString("D"), user = item.UserId.ToString("D"), script = item.ScriptId.ToString("D") })));
@@ -40,11 +40,11 @@ public sealed class RecordSummaryReader(StateDatabase database)
     public CompletedRunRecord? Read(Guid runId, Guid? userId = null)
     {
         if (runId == Guid.Empty || userId == Guid.Empty) throw new ArgumentException("record_run_invalid");
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Records);
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT run_id,automation_id,user_id,ended_at_utc_ticks,duration_milliseconds,attempt_id,attempt_ordinal," +
             "engine_outcome,business_outcome,lifecycle_outcome,recovery_outcome,reason_code,duration_kind,end_time_kind " +
-            "FROM " + (userId.HasValue ? "account_history" : "run_records") +
+            "FROM " + (userId.HasValue ? "records.account_history" : "records.run_records") +
             " WHERE run_id=$run AND history_retired_at_utc_ticks IS NULL" + (userId.HasValue ? " AND user_id=$user" : "") + ";";
         command.Parameters.AddWithValue("$run", runId.ToString("D"));
         if (userId.HasValue) command.Parameters.AddWithValue("$user", userId.Value.ToString("D"));
@@ -55,7 +55,7 @@ public sealed class RecordSummaryReader(StateDatabase database)
     public RecordSummary Read(RecordSummaryQuery query)
     {
         query.Validate();
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         var where = Prepare(command, query);
@@ -68,7 +68,7 @@ public sealed class RecordSummaryReader(StateDatabase database)
     public RecordDaySummary ReadDays(RecordSummaryQuery query)
     {
         query.Validate();
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
         using var command = connection.CreateCommand();
         return ReadDays(command, query, Prepare(command, query));
     }
@@ -76,7 +76,7 @@ public sealed class RecordSummaryReader(StateDatabase database)
     public RecordUserPage ReadUsers(RecordSummaryQuery query)
     {
         query.Validate();
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
         using var command = connection.CreateCommand();
         return ReadUsers(command, query, Prepare(command, query));
     }
@@ -98,7 +98,7 @@ public sealed class RecordSummaryReader(StateDatabase database)
         command.Parameters.AddWithValue("$offset", query.OffsetMinutes * TimeSpan.TicksPerMinute);
         command.Parameters.AddWithValue("$day", TimeSpan.TicksPerDay);
         command.CommandText = "SELECT (ended_at_utc_ticks+$offset)/$day AS day," + Measures +
-            " FROM account_history WHERE " + where + " GROUP BY day ORDER BY day DESC;";
+            " FROM records.account_history WHERE " + where + " GROUP BY day ORDER BY day DESC;";
         var days = new List<RecordDay>();
         using (var reader = command.ExecuteReader())
             while (reader.Read()) days.Add(new(new DateTime(reader.GetInt64(0) * TimeSpan.TicksPerDay, DateTimeKind.Utc)
@@ -115,7 +115,7 @@ public sealed class RecordSummaryReader(StateDatabase database)
         var userWhere = where;
         if (query.AfterUserId is { } after)
         { userWhere += " AND user_id>$after"; command.Parameters.AddWithValue("$after", after.ToString("D")); }
-        command.CommandText = "SELECT user_id," + Measures + " FROM account_history WHERE " + userWhere +
+        command.CommandText = "SELECT user_id," + Measures + " FROM records.account_history WHERE " + userWhere +
             " GROUP BY user_id ORDER BY user_id LIMIT 201;";
         var users = new List<RecordUser>();
         using (var reader = command.ExecuteReader())

@@ -26,13 +26,13 @@ public sealed class PcFreshnessTests
             }
             Verify();
             var where = " WHERE journal_id='" + binding.ParentJournalId.ToString("D") + "' AND target_id='" + binding.TargetId.ToString("D") + "';";
-            fixture.Base.Execute("UPDATE execution_target_job_roots SET total_plan_sha256='" + new string('0', 64) + "'" + where);
+            fixture.Base.Execute("UPDATE main.execution_target_job_roots SET total_plan_sha256='" + new string('0', 64) + "'" + where);
             try
             {
                 Assert.Throws<IOException>(() => targets.RequireAll(state.Latest.Root, state.Total, state.Attempt.ExecutionPlan.Sha256));
                 Assert.Throws<IOException>(() => stages.RequireAll(state.Latest.Root, state.Total, state.Attempt.ExecutionPlan.Sha256));
             }
-            finally { fixture.Base.Execute("UPDATE execution_target_job_roots SET total_plan_sha256='" + binding.TotalPlanSha256 + "'" + where); }
+            finally { fixture.Base.Execute("UPDATE main.execution_target_job_roots SET total_plan_sha256='" + binding.TotalPlanSha256 + "'" + where); }
             Verify();
             scope.Dispose();
             Assert.Throws<ObjectDisposedException>(() => targets.RequireAll(state.Latest.Root, state.Total, state.Attempt.ExecutionPlan.Sha256));

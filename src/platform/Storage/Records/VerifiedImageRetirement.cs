@@ -35,7 +35,7 @@ internal sealed class VerifiedImageRetirement
         ContractReader contracts, Guid runId, BlobReference png, Func<RecordRetirementImage, bool> matches, ReadScope? scope)
     {
         IReadOnlyList<BlobReference> references;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var transaction = connection.BeginTransaction(deferred: true))
         {
             references = RecordRetirementRows.ProofsFor(connection, transaction, runId, [png]);

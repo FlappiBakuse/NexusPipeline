@@ -32,7 +32,7 @@ internal sealed class DeliveryReferenceFixture : IDisposable
         using var secret = new SecretValue("https://notification-fixture.invalid/original");
         _ = await Catalog.SaveAsync(Guid.NewGuid(), "local:delivery-component", 0, TaskId, 0, Input,
             [new(NotificationSecretField.WebhookUrl, 0, SecretDisposition.Set, secret)]);
-        using var connection = DatabaseConnections.Open(Source.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(Source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         var cursor = NotificationCatalogRows.ReadCurrent(connection, null)!;
         var catalog = new NotificationCatalogCodec(Source.Instance, new()).Read(cursor.Reference);
         var secrets = Enum.GetValues<NotificationSecretField>().Select(field =>
@@ -42,7 +42,7 @@ internal sealed class DeliveryReferenceFixture : IDisposable
             if (reference.SecretId is { } id)
             {
                 using var command = connection.CreateCommand();
-                command.CommandText = "SELECT protection_scheme,owner_sid,digest,size_bytes FROM secret_payloads WHERE secret_id=$id;";
+                command.CommandText = "SELECT protection_scheme,owner_sid,digest,size_bytes FROM system.secret_payloads WHERE secret_id=$id;";
                 command.Parameters.AddWithValue("$id", id.ToString("D"));
                 using var row = command.ExecuteReader(); Assert.True(row.Read());
                 payload = new(id, row.GetString(0), row.GetString(1), row.GetString(2), row.GetInt64(3));
@@ -89,8 +89,8 @@ internal sealed class DeliveryReferenceFixture : IDisposable
 
     internal long Operations()
     {
-        using var connection = DatabaseConnections.Open(Source.Database.DatabasePath, readOnly: true);
-        using var command = connection.CreateCommand(); command.CommandText = "SELECT count(*) FROM operations;";
+        using var connection = DatabaseConnections.Open(Source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
+        using var command = connection.CreateCommand(); command.CommandText = "SELECT count(*) FROM main.operations;";
         return (long)command.ExecuteScalar()!;
     }
 

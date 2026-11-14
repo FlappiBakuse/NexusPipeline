@@ -38,13 +38,13 @@ public sealed class RunHistoryTests
         var where = $"binding_id='{main.Target.Address.BindingId:D}' AND resource_id='main' AND revision=2";
         fixture.Base.Execute(field switch
         {
-            "manifest" => $"UPDATE configuration_revisions SET manifest_size=manifest_size+1 WHERE {where};",
-            "contract" => $"UPDATE configuration_revisions SET contract_digest='{new string('b', 64)}' WHERE {where};",
-            _ => $"DELETE FROM configuration_revision_assets WHERE {where};"
+            "manifest" => $"UPDATE configuration.configuration_revisions SET manifest_size=manifest_size+1 WHERE {where};",
+            "contract" => $"UPDATE configuration.configuration_revisions SET contract_digest='{new string('b', 64)}' WHERE {where};",
+            _ => $"DELETE FROM configuration.configuration_revision_assets WHERE {where};"
         });
         var saved = new ConfigurationRevisionStore(source.Instance, source.Database, new()).Read(main.Target.Address)!;
         Assert.Equal(3, saved.Revision); Assert.Contains("\"count\":42", fixture.Base.Read(saved.Tree));
-        using (var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var transaction = connection.BeginTransaction(deferred: true))
             Assert.Equal(1, ConfigurationRevisionRows.Read(connection, transaction, main.Target.Address, 1,
                 new(new(source.Instance, new()))).Revision.Revision);

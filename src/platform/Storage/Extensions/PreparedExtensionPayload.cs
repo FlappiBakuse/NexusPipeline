@@ -126,7 +126,7 @@ internal sealed class PreparedExtensionPayload : IDisposable
                         settings.DesiredEnabled, NexusPipeline.Core.Extensions.ExtensionObservedActivity.None,
                         ExtensionUpgradeSource.AllowsSameVersion(binding?.Catalog.Channel, original?.Operation.Source.Package?.Catalog.Identity.Channel));
                     ExtensionCatalogSaved? catalog = null;
-                    using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+                    using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System))
                     using (var transaction = connection.BeginTransaction(deferred: true))
                     {
                         ExtensionInstalledRows.RequireExpectedInside(connection, transaction, extensionId,

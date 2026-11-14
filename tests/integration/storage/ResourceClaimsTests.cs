@@ -88,7 +88,7 @@ public sealed class ResourceClaimsTests
     {
         var fixture = AttemptTestFixture.Create();
         var selected = ExecutionPlanResources.Claims(fixture.Source.Plan).Last(claim => claim.Mode == ResourceClaimMode.Mutation);
-        Execute(fixture.Database, "CREATE TRIGGER fixture_fail_claim BEFORE INSERT ON journal_resource_claims WHEN NEW.resource_key=" +
+        Execute(fixture.Database, "CREATE TRIGGER main.fixture_fail_claim BEFORE INSERT ON journal_resource_claims WHEN NEW.resource_key=" +
             Literal(selected.ResourceKey) + " BEGIN SELECT RAISE(ABORT,'fixture_mode_insert_failure'); END;");
         var commits = fixture.Database.CommitSequence; var target = TreeBytes(fixture.Configuration.TargetPath);
         try
@@ -99,7 +99,7 @@ public sealed class ResourceClaimsTests
             Assert.False(Directory.Exists(Path.Combine(fixture.Instance.RuntimeRoot, "journals", fixture.JournalId.ToString("D"))));
             Assert.Equal(target, TreeBytes(fixture.Configuration.TargetPath));
         }
-        finally { Execute(fixture.Database, "DROP TRIGGER fixture_fail_claim;"); }
+        finally { Execute(fixture.Database, "DROP TRIGGER main.fixture_fail_claim;"); }
         Assert.True(fixture.Accept().Acceptance.IsNew);
         Assert.Equal(ExecutionPlanResources.Claims(fixture.Source.Plan).Select(ClaimText), ReadClaims(fixture.Database, fixture.JournalId));
     }
@@ -118,12 +118,12 @@ public sealed class ResourceClaimsTests
         var journal = Literal(fixture.JournalId.ToString("D")); var key = Literal(chosen.ResourceKey);
         var sql = damage switch
         {
-            "missing" => $"DELETE FROM journal_resource_claims WHERE journal_id={journal} AND resource_key={key};",
-            "all-missing" => $"DELETE FROM journal_resource_claims WHERE journal_id={journal};",
-            "extra" => $"INSERT INTO journal_resources VALUES({journal},'fixture:extra'); " +
-                $"INSERT INTO resource_isolations VALUES('fixture:extra',{journal},'verified','recovery_pending'); " +
-                $"INSERT INTO journal_resource_claims VALUES({journal},'fixture:extra',0);",
-            _ => $"UPDATE journal_resource_claims SET mode={(damage == "reference-to-mutation" ? 1 : 0)} " +
+            "missing" => $"DELETE FROM main.journal_resource_claims WHERE journal_id={journal} AND resource_key={key};",
+            "all-missing" => $"DELETE FROM main.journal_resource_claims WHERE journal_id={journal};",
+            "extra" => $"INSERT INTO main.journal_resources VALUES({journal},'fixture:extra'); " +
+                $"INSERT INTO main.resource_isolations VALUES('fixture:extra',{journal},'verified','recovery_pending'); " +
+                $"INSERT INTO main.journal_resource_claims VALUES({journal},'fixture:extra',0);",
+            _ => $"UPDATE main.journal_resource_claims SET mode={(damage == "reference-to-mutation" ? 1 : 0)} " +
                 $"WHERE journal_id={journal} AND resource_key={key};"
         };
         Execute(fixture.Database, sql);
@@ -273,7 +273,7 @@ public sealed class ResourceClaimsTests
 
     private static SqliteConnection Connect(StateDatabase database)
     {
-        var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = database.DatabasePath, Pooling = false }.ToString());
+        var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open(new SqliteConnectionStringBuilder { DataSource = database.DatabasePath, Pooling = false }.ToString());
         connection.Open(); return connection;
     }
 
@@ -282,7 +282,7 @@ public sealed class ResourceClaimsTests
         .Select(path => Path.GetRelativePath(root, path) + ":" + PhysicalObjectIdentity.Read(path) + ":" +
             Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path)))).ToArray();
     private static string[] RuntimeBytes(string root) => Directory.GetFiles(root, "*", SearchOption.AllDirectories)
-        .Where(path => Path.GetFileName(path) != "instance.lock" && !path.EndsWith("nexus.db", StringComparison.Ordinal) &&
+        .Where(path => Path.GetFileName(path) != "instance.lock" && !path.EndsWith("runtime.db", StringComparison.Ordinal) &&
             !path.EndsWith("nexus.db-wal", StringComparison.Ordinal) && !path.EndsWith("nexus.db-shm", StringComparison.Ordinal))
         .Order(StringComparer.Ordinal).Select(path => Path.GetRelativePath(root, path) + ":" +
             Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path)))).ToArray();

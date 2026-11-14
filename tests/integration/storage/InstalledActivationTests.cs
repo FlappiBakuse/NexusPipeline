@@ -114,9 +114,9 @@ public sealed class InstalledActivationTests
             var catalog = bound.Source.Package!.Catalog;
             void SetReady(int ready)
             {
-                using var connection = DatabaseConnections.Open(context.Database.DatabasePath);
+                using var connection = DatabaseConnections.Open(context.Database.DatabasePath, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
                 using var command = connection.CreateCommand();
-                command.CommandText = "UPDATE recovery_index_state SET ready=$ready WHERE singleton=1;";
+                command.CommandText = "UPDATE main.recovery_index_state SET ready=$ready WHERE singleton=1;";
                 command.Parameters.AddWithValue("$ready", ready);
                 Assert.Equal(1, command.ExecuteNonQuery());
             }
@@ -134,7 +134,7 @@ public sealed class InstalledActivationTests
             context.Database.Write((connection, transaction) =>
             {
                 using var command = connection.CreateCommand(); command.Transaction = transaction;
-                command.CommandText = "DELETE FROM extension_catalog_heads;";
+                command.CommandText = "DELETE FROM extensions.extension_catalog_heads;";
                 return command.ExecuteNonQuery();
             });
             try { Assert.Throws<IOException>(() => origin.RequireCurrent()); }
@@ -143,8 +143,8 @@ public sealed class InstalledActivationTests
                 context.Database.Write((connection, transaction) =>
                 {
                     using var command = connection.CreateCommand(); command.Transaction = transaction;
-                    command.CommandText = "INSERT INTO extension_catalog_heads(format,channel,sequence,catalog_sha) " +
-                        "SELECT format,channel,sequence,catalog_sha FROM extension_catalog_acceptances;";
+                    command.CommandText = "INSERT INTO extensions.extension_catalog_heads(format,channel,sequence,catalog_sha) " +
+                        "SELECT format,channel,sequence,catalog_sha FROM extensions.extension_catalog_acceptances;";
                     return command.ExecuteNonQuery();
                 });
             }
@@ -152,9 +152,9 @@ public sealed class InstalledActivationTests
             Assert.Throws<IOException>(() => { using var writer = File.Open(revision, FileMode.Open, FileAccess.Write, FileShare.Read); });
             void ChangePhase(string phase)
             {
-                using var connection = DatabaseConnections.Open(context.Database.DatabasePath);
+                using var connection = DatabaseConnections.Open(context.Database.DatabasePath, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
                 using var command = connection.CreateCommand();
-                command.CommandText = "UPDATE operation_journals SET phase=$phase WHERE journal_id=$journal;";
+                command.CommandText = "UPDATE main.operation_journals SET phase=$phase WHERE journal_id=$journal;";
                 command.Parameters.AddWithValue("$phase", phase);
                 command.Parameters.AddWithValue("$journal", bound.Registered.JournalId.ToString("D"));
                 Assert.Equal(1, command.ExecuteNonQuery());
@@ -207,7 +207,7 @@ public sealed class InstalledActivationTests
             database.Write((connection, transaction) =>
             {
                 using var command = connection.CreateCommand(); command.Transaction = transaction;
-                command.CommandText = "DELETE FROM journal_writers WHERE journal_id=$journal AND writer_id=$writer;";
+                command.CommandText = "DELETE FROM main.journal_writers WHERE journal_id=$journal AND writer_id=$writer;";
                 command.Parameters.AddWithValue("$journal", journal.ToString("D"));
                 command.Parameters.AddWithValue("$writer", writer.WriterId.ToString("D"));
                 return command.ExecuteNonQuery();

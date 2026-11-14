@@ -15,7 +15,7 @@ internal static class ConfigurationEditRows
         using (var command = Command(connection, transaction, sessionId))
         {
             command.CommandText = "SELECT s.revision,s.phase,s.expected_binding_revision,s.binding_id,s.completion_operation_id,o.subject_id " +
-                "FROM configuration_edit_sessions s JOIN operations o ON o.operation_id=s.session_id WHERE s.session_id=$session;";
+                "FROM configuration.configuration_edit_sessions s JOIN main.operations o ON o.operation_id=s.session_id WHERE s.session_id=$session;";
             using var row = command.ExecuteReader();
             if (!row.Read()) return null;
             if (row.GetString(5) != subject) throw new NexusPipeline.Core.Operations.OperationConflictException();
@@ -24,7 +24,7 @@ internal static class ConfigurationEditRows
         }
         using var items = Command(connection, transaction, sessionId);
         items.CommandText = "SELECT resource_id,expected_revision,contract_revision,contract_digest,instance_key,requires_instance,journal_id," +
-            "plan_path,plan_digest FROM configuration_edit_resources WHERE session_id=$session ORDER BY resource_id LIMIT 33;";
+            "plan_path,plan_digest FROM configuration.configuration_edit_resources WHERE session_id=$session ORDER BY resource_id LIMIT 33;";
         var resources = ImmutableArray.CreateBuilder<ConfigurationEditResource>();
         using (var row = items.ExecuteReader())
             while (row.Read()) resources.Add(new(new(binding, row.GetString(0)), row.GetInt64(1),
@@ -40,7 +40,7 @@ internal static class ConfigurationEditRows
         ConfigurationEditRequest request, ImmutableArray<ConfigurationEditResource> resources)
     {
         using var command = Command(connection, transaction, sessionId);
-        command.CommandText = "INSERT INTO configuration_edit_sessions(session_id,revision,phase,binding_id,expected_binding_revision,completion_operation_id,source_request_digest) " +
+        command.CommandText = "INSERT INTO configuration.configuration_edit_sessions(session_id,revision,phase,binding_id,expected_binding_revision,completion_operation_id,source_request_digest) " +
             "VALUES($session,1,0,$binding,$bindingRevision,NULL,$source);";
         command.Parameters.AddWithValue("$binding", request.Targets[0].Address.BindingId.ToString("D"));
         command.Parameters.AddWithValue("$bindingRevision", request.ExpectedBindingRevision);
@@ -49,7 +49,7 @@ internal static class ConfigurationEditRows
         foreach (var resource in resources)
         {
             using var item = Command(connection, transaction, sessionId);
-            item.CommandText = "INSERT INTO configuration_edit_resources VALUES($session,$resource,$expected,$contractRevision,$contractDigest,$instance,$required,$journal,$path,$digest);";
+            item.CommandText = "INSERT INTO configuration.configuration_edit_resources VALUES($session,$resource,$expected,$contractRevision,$contractDigest,$instance,$required,$journal,$path,$digest);";
             item.Parameters.AddWithValue("$resource", resource.Address.ResourceId);
             item.Parameters.AddWithValue("$expected", resource.ExpectedRevision);
             item.Parameters.AddWithValue("$contractRevision", resource.Contract.Revision);
@@ -66,7 +66,7 @@ internal static class ConfigurationEditRows
         ConfigurationEditPhase next, Guid? completion = null)
     {
         using var command = Command(connection, transaction, session.SessionId);
-        command.CommandText = "UPDATE configuration_edit_sessions SET revision=revision+1,phase=$next,completion_operation_id=$completion " +
+        command.CommandText = "UPDATE configuration.configuration_edit_sessions SET revision=revision+1,phase=$next,completion_operation_id=$completion " +
             "WHERE session_id=$session AND revision=$expected AND phase=$before;";
         command.Parameters.AddWithValue("$next", (int)next); command.Parameters.AddWithValue("$before", (int)session.Phase);
         command.Parameters.AddWithValue("$expected", session.Revision); command.Parameters.AddWithValue("$completion", (object?)completion?.ToString("D") ?? DBNull.Value);

@@ -24,7 +24,7 @@ public sealed class PublicationCrashTests
     {
         using var runtime = await PublicationCrashRuntime.CreateAsync(mode);
         var publication = runtime.Read();
-        using (var connection = DatabaseConnections.Open(runtime.Database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(runtime.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         {
             Assert.Null(NotificationCatalogRows.ReadCurrent(connection, null));
             foreach (var field in publication.Document.Secrets)
@@ -115,12 +115,12 @@ public sealed class PublicationCrashTests
 
     private static void AssertMaterial(PublicationCrashRuntime runtime, StateDatabase database, NotificationSecretField field, string expected)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         var reference = SecretFieldRows.ReadField(connection, null, SecretFieldKey.NotificationTask(runtime.Instance.InstanceId, runtime.TaskId, field));
         Assert.Equal(1, reference.Revision);
         Assert.NotNull(reference.SecretId);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT protection_scheme,owner_sid,digest,size_bytes,state FROM secret_payloads WHERE secret_id=$id;";
+        command.CommandText = "SELECT protection_scheme,owner_sid,digest,size_bytes,state FROM system.secret_payloads WHERE secret_id=$id;";
         command.Parameters.AddWithValue("$id", reference.SecretId.Value.ToString("D"));
         using var row = command.ExecuteReader();
         Assert.True(row.Read()); Assert.Equal("committed", row.GetString(4));

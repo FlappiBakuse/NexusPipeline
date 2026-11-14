@@ -79,7 +79,7 @@ internal sealed class NotificationReceiptFixture : IDisposable
         Receipt = Assert.IsType<AttemptReceipt>(await consumer.RunNextAsync());
         Assert.Null(consumer.FailureCode);
         if (!readSnapshot) return;
-        using var connection = DatabaseConnections.Open(Source.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(Source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.All);
         using var transaction = connection.BeginTransaction(deferred: true);
         var reference = NotificationReceiptRows.Find(connection, transaction, Receipt.Facts.AttemptId);
         Assert.NotNull(reference);
@@ -96,14 +96,14 @@ internal sealed class NotificationReceiptFixture : IDisposable
 
     internal void Sql(string sql)
     {
-        using var connection = DatabaseConnections.Open(Source.Database.DatabasePath);
+        using var connection = DatabaseConnections.Open(Source.Database.DatabasePath, domains: DatabaseDomain.All);
         using var command = connection.CreateCommand(); command.CommandText = sql; command.ExecuteNonQuery();
     }
 
     internal long Count(string table)
     {
-        using var connection = DatabaseConnections.Open(Source.Database.DatabasePath, readOnly: true);
-        using var command = connection.CreateCommand(); command.CommandText = $"SELECT count(*) FROM {table};";
+        using var connection = DatabaseConnections.Open(Source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.All);
+        using var command = connection.CreateCommand(); command.CommandText = $"SELECT count(*) FROM {DatabaseTables.Name(table)};";
         return (long)command.ExecuteScalar()!;
     }
 

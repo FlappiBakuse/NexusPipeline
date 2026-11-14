@@ -63,9 +63,9 @@ internal sealed class AdmissionPublicationFixture : IDisposable
         {
             using var foreign = Store.Prepare(Guid.NewGuid(), Request);
             var other = foreign.Use((_, resources) => Assert.Single(resources));
-            Admission.Execute($"UPDATE operation_journals SET plan_path='{other.PlanPath}',plan_digest='{other.PlanDigest}' WHERE journal_id='{resource.JournalId:D}';");
+            Admission.Execute($"UPDATE main.operation_journals SET plan_path='{other.PlanPath}',plan_digest='{other.PlanDigest}' WHERE journal_id='{resource.JournalId:D}';");
         }
-        else if (fault == "claim-mode") Admission.Execute($"UPDATE journal_resource_claims SET mode=1 WHERE journal_id='{resource.JournalId:D}' AND resource_key='automation:definitions';");
+        else if (fault == "claim-mode") Admission.Execute($"UPDATE main.journal_resource_claims SET mode=1 WHERE journal_id='{resource.JournalId:D}' AND resource_key='automation:definitions';");
         else throw new ArgumentException("unknown fixture fault", nameof(fault));
     }
 

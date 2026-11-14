@@ -150,9 +150,9 @@ public sealed class RunRecoveryTests
 
     private static (Guid Journal, Guid Writer, string Name, int DesktopSession)[] Jobs(StateDatabase database, Guid session)
     {
-        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = database.DatabasePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+        using var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open(new SqliteConnectionStringBuilder { DataSource = database.DatabasePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
         connection.Open(); using var command = connection.CreateCommand();
-        command.CommandText = "SELECT b.journal_id,b.writer_id,b.job_name,b.session_id FROM journal_writer_jobs b JOIN configuration_run_resources r " +
+        command.CommandText = "SELECT b.journal_id,b.writer_id,b.job_name,b.session_id FROM main.journal_writer_jobs b JOIN configuration.configuration_run_resources r " +
             "ON r.journal_id=b.journal_id WHERE r.session_id=$session ORDER BY b.journal_id;";
         command.Parameters.AddWithValue("$session", session.ToString("D"));
         var result = new List<(Guid, Guid, string, int)>(); using var rows = command.ExecuteReader();

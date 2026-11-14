@@ -11,7 +11,7 @@ internal static class NotificationWorkFanout
     {
         if (table is not ("notification_scheduled_deliveries" or "notification_manual_deliveries")) throw NotificationWorkShape.Invalid();
         using var command = NotificationDeliveryRows.Command(connection, transaction,
-            $"SELECT d.relative_path,d.size_bytes,d.sha256 FROM {table} m JOIN notification_deliveries d ON d.operation_id=m.delivery_operation_id WHERE m.operation_id=$0 ORDER BY m.task_id;",
+            $"SELECT d.relative_path,d.size_bytes,d.sha256 FROM {DatabaseTables.Name(table)} m JOIN notifications.notification_deliveries d ON d.operation_id=m.delivery_operation_id WHERE m.operation_id=$0 ORDER BY m.task_id;",
             source.Document.OperationId.ToString("D"));
         var deliveries = new List<BlobReference>();
         using (var rows = command.ExecuteReader()) while (rows.Read()) deliveries.Add(new(rows.GetString(0), rows.GetInt64(1), rows.GetString(2)));

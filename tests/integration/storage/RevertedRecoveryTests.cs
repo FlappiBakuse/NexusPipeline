@@ -75,10 +75,10 @@ public sealed class RevertedRecoveryTests
         using (ownership.Begin(snapshot.Journals))
         {
             var restore = new ExtensionPayloadRestoration(fixture.Instance, database, new(), fixture.Roots, lease, ownership);
-            Sql(database, "CREATE TRIGGER fixture_reverted_failure BEFORE UPDATE OF phase ON operation_journals " +
+            Sql(database, "CREATE TRIGGER main.fixture_reverted_failure BEFORE UPDATE OF phase ON operation_journals " +
                 "WHEN NEW.operation_kind='extensionApply' AND NEW.phase='reverted' BEGIN SELECT RAISE(ABORT,'fixture'); END;");
             try { Assert.Throws<SqliteException>(() => restore.Recover(fixture.JournalId)); }
-            finally { Sql(database, "DROP TRIGGER fixture_reverted_failure;"); }
+            finally { Sql(database, "DROP TRIGGER main.fixture_reverted_failure;"); }
             var pending = Binding(fixture, database);
             Assert.Equal(JournalPhase.Reverting, pending.Registered.Phase); Assert.Equal(JournalPhase.Reverted, pending.Latest.Phase);
             Assert.Equal("restored", pending.Restoration[^1].Record.Stage);
@@ -121,10 +121,10 @@ public sealed class RevertedRecoveryTests
         using (ownership.Begin(before.Journals))
         {
             var restore = new ExtensionPayloadRestoration(fixture.Instance, database, new(), fixture.Roots, lease, ownership);
-            Sql(database, "CREATE TRIGGER fixture_reverting_failure BEFORE UPDATE OF phase ON operation_journals " +
+            Sql(database, "CREATE TRIGGER main.fixture_reverting_failure BEFORE UPDATE OF phase ON operation_journals " +
                 "WHEN NEW.operation_kind='extensionApply' AND NEW.phase='reverting' BEGIN SELECT RAISE(ABORT,'fixture'); END;");
             try { Assert.Throws<SqliteException>(() => restore.Recover(fixture.JournalId)); }
-            finally { Sql(database, "DROP TRIGGER fixture_reverting_failure;"); }
+            finally { Sql(database, "DROP TRIGGER main.fixture_reverting_failure;"); }
             var bound = Binding(fixture, database); var recorded = Assert.Single(bound.Restoration);
             var target = Fingerprint(bound.Plan.TargetPath); var cursor = registry.ReadJournal(fixture.JournalId);
             var effects = new FileEffectOutbox(database).Read(fixture.JournalId).ToArray();
@@ -149,7 +149,7 @@ public sealed class RevertedRecoveryTests
     }
     private static void AssertInstalledRevision(StateDatabase database, long? expected)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions);
         using var transaction = connection.BeginTransaction(deferred: true);
         var current = ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, "fixture-plugin");
         Assert.Equal(expected, current?.Revision);
@@ -159,7 +159,7 @@ public sealed class RevertedRecoveryTests
             PhysicalObjectIdentity.Read(item) + ":" + Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(item)))));
     private static void Sql(StateDatabase database, string statement)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, domains: DatabaseDomain.Runtime);
         using var command = connection.CreateCommand(); command.CommandText = statement; command.ExecuteNonQuery();
     }
 }

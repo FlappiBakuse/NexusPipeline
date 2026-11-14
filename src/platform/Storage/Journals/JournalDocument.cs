@@ -30,6 +30,8 @@ public sealed class JournalDocument
     public string PlanDigest { get; }
     public string PlanPath { get; }
     public byte[] Export() => _bytes.ToArray();
+    internal int ByteLength => _bytes.Length;
+    internal void WriteTo(Stream output) => output.Write(_bytes);
     internal bool HasSameBytes(JournalDocument other) => other is not null && _bytes.AsSpan().SequenceEqual(other._bytes);
 
     private JournalDocument(byte[] bytes, JsonElement root, TextKey textKey)

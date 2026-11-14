@@ -10,7 +10,7 @@ internal static class OperationRows
         Guid operationId, string subject)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT subject_id,operation_kind,status,initial_journal_id FROM operations WHERE operation_id=$id;";
+        command.CommandText = "SELECT subject_id,operation_kind,status,initial_journal_id FROM main.operations WHERE operation_id=$id;";
         command.Parameters.AddWithValue("$id", operationId.ToString("D"));
         using var row = command.ExecuteReader();
         if (!row.Read() || row.GetString(0) != subject) return null;
@@ -33,7 +33,7 @@ internal static class OperationRows
         if (found is not null) return found;
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "INSERT INTO operations(operation_id,subject_id,request_digest,operation_kind,status,created_at) VALUES($id,$subject,$digest,$kind,'accepted',$created);";
+        command.CommandText = "INSERT INTO main.operations(operation_id,subject_id,request_digest,operation_kind,status,created_at) VALUES($id,$subject,$digest,$kind,'accepted',$created);";
         command.Parameters.AddWithValue("$id", identity.OperationId.ToString("D"));
         command.Parameters.AddWithValue("$subject", identity.SubjectId);
         command.Parameters.AddWithValue("$digest", identity.RequestDigest);
@@ -47,7 +47,7 @@ internal static class OperationRows
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT subject_id, request_digest, operation_kind, status FROM operations WHERE operation_id=$id;";
+        command.CommandText = "SELECT subject_id, request_digest, operation_kind, status FROM main.operations WHERE operation_id=$id;";
         command.Parameters.AddWithValue("$id", identity.OperationId.ToString("D"));
         using (var existing = command.ExecuteReader())
         {

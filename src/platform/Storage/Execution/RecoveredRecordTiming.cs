@@ -19,7 +19,7 @@ internal sealed record RecoveredRecordTiming(DateTimeOffset ObservedAtUtc, long?
         if (!bound.IsExecutionStart || physical.Phase != JournalPhase.Committed ||
             AttemptPreparedBinding.ExpectedReceipt(bound.Plan, physical) != receipt) throw Invalid();
         AttemptTerminalEvidence.RequireStopped(database, receipt.JournalId);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         ExecutionRecordWitness.RequireFinalInside(connection, transaction, receipt);
         var source = StartSourceRows.Read(connection, transaction, receipt.OperationId);

@@ -11,7 +11,7 @@ public sealed class LogCatalogProjection(RuntimeInstance instance, StateDatabase
     {
         ArgumentNullException.ThrowIfNull(receipt); lease.VerifyHeld(instance);
         if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot ||
-            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "nexus.db")))
+            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "runtime.db")))
             throw LogCatalogRows.Invalid();
         lease.PublishExecution(() =>
         {
@@ -29,10 +29,10 @@ public sealed class LogCatalogProjection(RuntimeInstance instance, StateDatabase
         lease.VerifyHeld(instance);
         if (after == Guid.Empty || maximum is < 1 or > 200) throw new ArgumentOutOfRangeException(nameof(maximum));
         var ids = new List<Guid>();
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var command = connection.CreateCommand())
         {
-            command.CommandText = "SELECT a.attempt_id FROM attempt_receipts a LEFT JOIN execution_log_catalog l ON l.attempt_id=a.attempt_id " +
+            command.CommandText = "SELECT a.attempt_id FROM records.attempt_receipts a LEFT JOIN records.execution_log_catalog l ON l.attempt_id=a.attempt_id " +
                 "WHERE a.attempt_id>$after AND l.attempt_id IS NULL ORDER BY a.attempt_id LIMIT $limit;";
             command.Parameters.AddWithValue("$after", after?.ToString("D") ?? ""); command.Parameters.AddWithValue("$limit", maximum);
             using var rows = command.ExecuteReader();

@@ -69,13 +69,13 @@ public sealed class ConfigurationRevisionStore : IConfigurationRevisionStore
         if (!accepted.IsNew) return ReadResult(connection, transaction, operation.OperationId);
         var (next, changed) = Publish(connection, transaction, change, manifest);
         using var command = ConfigurationRevisionRows.KeyCommand(connection, transaction, change.Address);
-        command.CommandText = "INSERT INTO configuration_mutations VALUES($operation,$binding,$resource,$revision,$changed,$source);";
+        command.CommandText = "INSERT INTO configuration.configuration_mutations VALUES($operation,$binding,$resource,$revision,$changed,$source);";
         command.Parameters.AddWithValue("$operation", operation.OperationId.ToString("D"));
         command.Parameters.AddWithValue("$revision", next.Revision);
         command.Parameters.AddWithValue("$changed", changed);
         command.Parameters.AddWithValue("$source", (object?)change.SourceRequestDigest ?? DBNull.Value);
         command.ExecuteNonQuery();
-        command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$operation;";
+        command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$operation;";
         command.ExecuteNonQuery();
         return ReadResult(connection, transaction, operation.OperationId) with { IsNew = true };
     }
@@ -100,7 +100,7 @@ public sealed class ConfigurationRevisionStore : IConfigurationRevisionStore
     public ConfigurationSaveResult? Lookup(OperationIdentity operation, ConfigurationRevisionChange change)
     {
         RequireIdentity(operation, ConfigurationRevisionPolicy.Freeze(change));
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         return OperationRows.ReadExisting(connection, transaction, operation) is null ? null : ReadResult(connection, transaction, operation.OperationId);
     }
@@ -110,12 +110,12 @@ public sealed class ConfigurationRevisionStore : IConfigurationRevisionStore
 
     internal ConfigurationSaveResult? LookupSource(Guid operationId, string subject, IReadOnlyCollection<ConfigurationAddress> addresses, string sourceRequestDigest)
     {
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = "SELECT o.subject_id,o.operation_kind,m.binding_id,m.resource_id,m.source_request_digest " +
-            "FROM operations o LEFT JOIN configuration_mutations m ON m.operation_id=o.operation_id WHERE o.operation_id=$id;";
+            "FROM main.operations o LEFT JOIN configuration.configuration_mutations m ON m.operation_id=o.operation_id WHERE o.operation_id=$id;";
         command.Parameters.AddWithValue("$id", operationId.ToString("D"));
         using (var row = command.ExecuteReader())
         {
@@ -132,7 +132,7 @@ public sealed class ConfigurationRevisionStore : IConfigurationRevisionStore
 
     internal StoredConfigurationRevision? ReadStored(ConfigurationAddress address)
     {
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         var binding = ConfigurationRevisionRows.Binding(connection, transaction, address.BindingId);
         var result = ConfigurationRevisionRows.Current(connection, transaction, address, _codec);
@@ -143,9 +143,9 @@ public sealed class ConfigurationRevisionStore : IConfigurationRevisionStore
 
     internal long? ReadCurrentRevision(ConfigurationAddress address)
     {
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT revision FROM configuration_current WHERE binding_id=$binding AND resource_id=$resource;";
+        command.CommandText = "SELECT revision FROM configuration.configuration_current WHERE binding_id=$binding AND resource_id=$resource;";
         command.Parameters.AddWithValue("$binding", address.BindingId.ToString("D"));
         command.Parameters.AddWithValue("$resource", address.ResourceId);
         return command.ExecuteScalar() as long?;
@@ -175,11 +175,11 @@ public sealed class ConfigurationRevisionStore : IConfigurationRevisionStore
     private static void VerifyCurrent(RuntimeInstance instance, StateDatabase database, ContractReader contracts)
     {
         var store = new ConfigurationRevisionStore(instance, database, contracts);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT binding_id,resource_id FROM configuration_current;";
+        command.CommandText = "SELECT binding_id,resource_id FROM configuration.configuration_current;";
         var addresses = new List<ConfigurationAddress>();
         using (var row = command.ExecuteReader()) while (row.Read()) addresses.Add(new(Guid.Parse(row.GetString(0)), row.GetString(1)));
         foreach (var address in addresses)
@@ -188,8 +188,8 @@ public sealed class ConfigurationRevisionStore : IConfigurationRevisionStore
             var saved = ConfigurationRevisionRows.Current(connection, transaction, address, store._codec)!.Revision;
             if (saved.UserId != binding.UserId || saved.ScriptId != binding.ScriptId) throw new IOException("configuration_binding_owner_changed");
         }
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM configuration_revisions r JOIN bindings b ON b.binding_id=r.binding_id " +
-            "WHERE NOT EXISTS(SELECT 1 FROM configuration_current c WHERE c.binding_id=r.binding_id AND c.resource_id=r.resource_id));";
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM configuration.configuration_revisions r JOIN automation.bindings b ON b.binding_id=r.binding_id " +
+            "WHERE NOT EXISTS(SELECT 1 FROM configuration.configuration_current c WHERE c.binding_id=r.binding_id AND c.resource_id=r.resource_id));";
         if ((long)command.ExecuteScalar()! != 0) throw new IOException("configuration_current_missing");
     }
 
@@ -201,7 +201,7 @@ public sealed class ConfigurationRevisionStore : IConfigurationRevisionStore
         using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
-            command.CommandText = "SELECT binding_id,resource_id,revision,has_changes FROM configuration_mutations WHERE operation_id=$operation;";
+            command.CommandText = "SELECT binding_id,resource_id,revision,has_changes FROM configuration.configuration_mutations WHERE operation_id=$operation;";
             command.Parameters.AddWithValue("$operation", operationId.ToString("D"));
             using var row = command.ExecuteReader();
             if (!row.Read()) throw new IOException("configuration_operation_result_missing");

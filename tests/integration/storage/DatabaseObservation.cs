@@ -10,13 +10,13 @@ internal sealed class DatabaseObservation : IDisposable
 
     internal DatabaseObservation(StateDatabase database)
     {
-        _connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        _connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         try
         {
             _transaction = _connection.BeginTransaction(deferred: true);
             using var command = _connection.CreateCommand();
             command.Transaction = _transaction;
-            command.CommandText = "SELECT count(*) FROM operation_journals;";
+            command.CommandText = "SELECT count(*) FROM main.operation_journals;";
             _ = command.ExecuteScalar();
         }
         catch { _connection.Dispose(); throw; }

@@ -80,7 +80,7 @@ internal static class RetirementImageEvidence
         {
             var png = image.Png!;
             using var command = RecordRetirementRows.Command(connection, transaction,
-                "SELECT EXISTS(SELECT 1 FROM record_assets a JOIN blobs b ON b.digest=a.digest " +
+                "SELECT EXISTS(SELECT 1 FROM records.record_assets a JOIN content.blobs b ON b.digest=a.digest " +
                 "WHERE a.run_id=$0 AND a.digest=$1 AND a.kind=0 AND b.size_bytes=$2 AND b.relative_path=$3);",
                 attempt.Receipt.Facts.RunId, png.Sha256, png.SizeBytes, png.RelativePath);
             if ((long)command.ExecuteScalar()! != 1) throw RecordRetirementCodec.Invalid();

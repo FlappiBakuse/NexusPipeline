@@ -50,8 +50,8 @@ public sealed class CatalogSecretTests
         var error = await Assert.ThrowsAsync<IOException>(async () =>
             await service.SaveAsync(rejectedOperation, "local:notification-fixture", 3, taskId, 0, input, []));
         Assert.Equal("notification_task_id_retired", error.Message);
-        using var connection = DatabaseConnections.Open(runtime.Database.DatabasePath, readOnly: true);
-        using var command = connection.CreateCommand(); command.CommandText = "SELECT 1 FROM operations WHERE operation_id=$id;";
+        using var connection = DatabaseConnections.Open(runtime.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
+        using var command = connection.CreateCommand(); command.CommandText = "SELECT 1 FROM main.operations WHERE operation_id=$id;";
         command.Parameters.AddWithValue("$id", rejectedOperation.ToString("D"));
         Assert.Null(command.ExecuteScalar());
     }
@@ -81,7 +81,7 @@ public sealed class CatalogSecretTests
         Assert.True(new NotificationCatalogAcceptance(runtime.Instance, runtime.Database, new()).Accept(prepared, DateTimeOffset.UtcNow));
         foreach (var payload in prepared.Payloads)
             _ = new SecretPreparationExecutor(runtime.Instance, new(), runtime.Database).WriteAcceptedCandidate(payload);
-        ExecuteSql(runtime, "CREATE TRIGGER notification_final_fault BEFORE INSERT ON notification_publication_outcomes BEGIN SELECT RAISE(ABORT,'notification_final_fault'); END;");
+        ExecuteSql(runtime, "CREATE TRIGGER notifications.notification_final_fault BEFORE INSERT ON notification_publication_outcomes BEGIN SELECT RAISE(ABORT,'notification_final_fault'); END;");
         var publisher = new SecretPreparationPublication(runtime.Instance, runtime.Database);
         Assert.Throws<SqliteException>(() => publisher.CloseNotification(prepared.Publication, new()));
         Assert.Equal(1, service.Read().Revision);
@@ -89,14 +89,14 @@ public sealed class CatalogSecretTests
         Assert.Equal(oldSecret, await Status(runtime, taskId, NotificationSecretField.WebhookSecret));
         AssertMaterial(runtime, oldUrl.SecretId!.Value, "https://notification-fixture.invalid/before");
         AssertMaterial(runtime, oldSecret.SecretId!.Value, "notification-before");
-        using (var connection = DatabaseConnections.Open(runtime.Database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(runtime.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         {
             var pending = NotificationCatalogRows.Lookup(connection, null, NotificationPublicationCodec.Identity(prepared.Publication.Document))
                 ?? throw new IOException("notification_fixture_pending_missing");
             Assert.Equal("accepted", pending.Status);
             Assert.Equal(prepared.Publication.Reference, pending.Reference);
         }
-        ExecuteSql(runtime, "DROP TRIGGER notification_final_fault;");
+        ExecuteSql(runtime, "DROP TRIGGER notifications.notification_final_fault;");
         publisher.CloseNotification(prepared.Publication, new());
         Assert.Equal(2, service.Read().Revision);
         AssertMaterial(runtime, (await Status(runtime, taskId, NotificationSecretField.WebhookUrl)).SecretId!.Value,
@@ -112,9 +112,9 @@ public sealed class CatalogSecretTests
 
     private static void AssertMaterial(SecretTestRuntime runtime, Guid id, string expected)
     {
-        using var connection = DatabaseConnections.Open(runtime.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(runtime.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT protection_scheme,owner_sid,digest,size_bytes,state FROM secret_payloads WHERE secret_id=$id;";
+        command.CommandText = "SELECT protection_scheme,owner_sid,digest,size_bytes,state FROM system.secret_payloads WHERE secret_id=$id;";
         command.Parameters.AddWithValue("$id", id.ToString("D"));
         using var row = command.ExecuteReader();
         Assert.True(row.Read()); Assert.Equal("committed", row.GetString(4));
@@ -126,7 +126,7 @@ public sealed class CatalogSecretTests
 
     private static void ExecuteSql(SecretTestRuntime runtime, string sql)
     {
-        using var connection = DatabaseConnections.Open(runtime.Database.DatabasePath);
+        using var connection = DatabaseConnections.Open(runtime.Database.DatabasePath, domains: DatabaseDomain.Runtime);
         using var command = connection.CreateCommand(); command.CommandText = sql; command.ExecuteNonQuery();
     }
 }

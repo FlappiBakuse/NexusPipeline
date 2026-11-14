@@ -55,9 +55,9 @@ public sealed class ActivitiesInstalledTests
                 Assert.Equal("fresh", feed.GetProperty("cacheState").GetString());
                 Assert.NotEqual(JsonValueKind.Null, feed.GetProperty("lastGoodAt").ValueKind);
             }
-            using var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
             using var command = connection.CreateCommand();
-            command.CommandText = "SELECT o.subject_id FROM extension_documents d JOIN operations o ON o.operation_id=d.operation_id " +
+            command.CommandText = "SELECT o.subject_id FROM extensions.extension_documents d JOIN main.operations o ON o.operation_id=d.operation_id " +
                 "WHERE d.extension_id='game-activities' AND d.name LIKE 'feed-%';";
             using var rows = command.ExecuteReader(); var count = 0;
             while (rows.Read()) { Assert.Equal("extension:game-activities", rows.GetString(0)); count++; }

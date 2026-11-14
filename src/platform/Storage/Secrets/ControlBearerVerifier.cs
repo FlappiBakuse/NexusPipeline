@@ -53,7 +53,7 @@ public sealed class ControlBearerVerifier : IDisposable
                     ObjectDisposedException.ThrowIf(_disposed, this);
                     var key = SecretFieldKey.HostControlBearer(_instance.InstanceId);
                     SecretFieldReference reference;
-                    using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true))
+                    using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System))
                         reference = SecretFieldRows.ReadField(connection, null, key);
                     if (reference.SecretId is null) { Invalidate(); return null; }
                     LoadedCredential loaded;
@@ -137,7 +137,7 @@ public sealed class ControlBearerVerifier : IDisposable
                 ObjectDisposedException.ThrowIf(_disposed, this);
                 var key = SecretFieldKey.HostControlBearer(_instance.InstanceId);
                 SecretFieldReference reference;
-                using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true))
+                using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System))
                     reference = SecretFieldRows.ReadField(connection, null, key);
                 try { _ = Load(reference); return _secrets.ReadControlBearer(reference); }
                 catch { Invalidate(); throw; }
@@ -210,7 +210,7 @@ public sealed class ControlBearerVerifier : IDisposable
         var key = SecretFieldKey.HostControlBearer(_instance.InstanceId);
         if (reference.SecretId is not { } secret || reference.Revision < 1)
             throw new IOException("control_credential_producer_unbound");
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         SecretFieldRows.RequireReference(connection, transaction, key, reference);
         Guid operation, journalId;
@@ -218,9 +218,9 @@ public sealed class ControlBearerVerifier : IDisposable
         {
             query.Transaction = transaction;
             query.CommandText = "SELECT p.preparation_operation_id,s.journal_id,o.subject_id,o.request_digest,o.operation_kind,o.status," +
-                "m.result_revision,m.result_secret_id,s.state,p.state,m.result_readable FROM secret_payloads p " +
-                "JOIN secret_preparations s ON s.operation_id=p.preparation_operation_id AND s.candidate_id=p.secret_id " +
-                "JOIN operations o ON o.operation_id=p.preparation_operation_id JOIN secret_mutations m ON m.operation_id=o.operation_id " +
+                "m.result_revision,m.result_secret_id,s.state,p.state,m.result_readable FROM system.secret_payloads p " +
+                "JOIN system.secret_preparations s ON s.operation_id=p.preparation_operation_id AND s.candidate_id=p.secret_id " +
+                "JOIN main.operations o ON o.operation_id=p.preparation_operation_id JOIN system.secret_mutations m ON m.operation_id=o.operation_id " +
                 "WHERE p.secret_id=$id;";
             query.Parameters.AddWithValue("$id", secret.ToString("D"));
             using var row = query.ExecuteReader();

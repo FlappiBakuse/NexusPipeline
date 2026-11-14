@@ -80,12 +80,12 @@ public sealed class AutomationImportService(RuntimeInstance instance, ContractRe
 
     private AutomationImportResult? Lookup(OperationIdentity operation)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation);
         using var transaction = connection.BeginTransaction(deferred: true);
         if (OperationRows.ReadExisting(connection, transaction, operation) is null) return null;
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT initial_journal_id FROM operations WHERE operation_id=$id;";
+        command.CommandText = "SELECT initial_journal_id FROM main.operations WHERE operation_id=$id;";
         command.Parameters.AddWithValue("$id", operation.OperationId.ToString("D"));
         return command.ExecuteScalar() is DBNull ? Published(AutomationDefinitionStore.ReadResult(connection, transaction, operation.OperationId))
             : AssetPreparationAcceptance.ReadAccepted(connection, transaction, operation.OperationId, false).Result;

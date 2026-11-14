@@ -135,11 +135,11 @@ public sealed class RecordSummaryTests(ITestOutputHelper output)
 
     private static void Retire(StateDatabase database, Guid runId)
     {
-        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        using var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open(new SqliteConnectionStringBuilder
             { DataSource = database.DatabasePath, Pooling = false }.ToString());
         connection.Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "UPDATE run_records SET history_retired_at_utc_ticks=$time WHERE run_id=$run;";
+        command.CommandText = "UPDATE records.run_records SET history_retired_at_utc_ticks=$time WHERE run_id=$run;";
         command.Parameters.AddWithValue("$time", Utc(2026, 4, 1).UtcTicks);
         command.Parameters.AddWithValue("$run", runId.ToString("D"));
         Assert.Equal(1, command.ExecuteNonQuery());

@@ -16,13 +16,13 @@ internal static class ExtensionCatalogRows
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT c.generation_id,c.sequence,c.catalog_sha,c.key_id," +
             "c.pointer_sha,c.pointer_size,c.catalog_size,c.signature_sha,c.signature_size,o.request_digest,o.operation_kind,o.status " +
-            "FROM extension_catalog_heads h LEFT JOIN extension_catalog_acceptances c " +
+            "FROM extensions.extension_catalog_heads h LEFT JOIN extensions.extension_catalog_acceptances c " +
             "ON c.format=h.format AND c.channel=h.channel AND c.sequence=h.sequence AND c.catalog_sha=h.catalog_sha " +
-            "LEFT JOIN operations o ON o.operation_id=c.first_operation_id WHERE h.format='nexus.store.catalog' AND h.channel=$channel;";
+            "LEFT JOIN main.operations o ON o.operation_id=c.first_operation_id WHERE h.format='nexus.store.catalog' AND h.channel=$channel;";
         command.Parameters.AddWithValue("$channel", Channel(channel));
         ExtensionCatalogSaved? saved;
         using (var row = command.ExecuteReader()) saved = row.Read() ? Read(row, channel) : null;
-        command.CommandText = "SELECT sequence,catalog_sha FROM extension_catalog_acceptances " +
+        command.CommandText = "SELECT sequence,catalog_sha FROM extensions.extension_catalog_acceptances " +
             "WHERE format='nexus.store.catalog' AND channel=$channel ORDER BY sequence DESC LIMIT 1;";
         using var last = command.ExecuteReader();
         if (last.Read())
@@ -40,7 +40,7 @@ internal static class ExtensionCatalogRows
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT c.generation_id,c.sequence,c.catalog_sha,c.key_id," +
             "c.pointer_sha,c.pointer_size,c.catalog_size,c.signature_sha,c.signature_size,o.request_digest,o.operation_kind,o.status " +
-            "FROM extension_catalog_acceptances c LEFT JOIN operations o ON o.operation_id=c.first_operation_id " +
+            "FROM extensions.extension_catalog_acceptances c LEFT JOIN main.operations o ON o.operation_id=c.first_operation_id " +
             "WHERE c.format='nexus.store.catalog' AND c.channel=$channel AND c.sequence=$sequence;";
         command.Parameters.AddWithValue("$channel", Channel(expected.Identity.Channel));
         command.Parameters.AddWithValue("$sequence", expected.Identity.Sequence);
@@ -60,7 +60,7 @@ internal static class ExtensionCatalogRows
             return;
         }
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "INSERT INTO extension_catalog_acceptances(format,channel,sequence,generation_id,catalog_sha,key_id," +
+        command.CommandText = "INSERT INTO extensions.extension_catalog_acceptances(format,channel,sequence,generation_id,catalog_sha,key_id," +
             "pointer_sha,pointer_size,catalog_size,signature_sha,signature_size,first_operation_id) " +
             "VALUES('nexus.store.catalog',$channel,$seq,$generation,$sha,$key,$pointer,$psize,$csize,$signature,$ssize,$operation);";
         command.Parameters.AddWithValue("$channel", Channel(candidate.Identity.Channel));
@@ -75,7 +75,7 @@ internal static class ExtensionCatalogRows
         command.Parameters.AddWithValue("$ssize", candidate.Signature.SizeBytes);
         command.Parameters.AddWithValue("$operation", operationId.ToString("D"));
         command.ExecuteNonQuery();
-        command.CommandText = "INSERT INTO extension_catalog_heads(format,channel,sequence,catalog_sha) " +
+        command.CommandText = "INSERT INTO extensions.extension_catalog_heads(format,channel,sequence,catalog_sha) " +
             "VALUES('nexus.store.catalog',$channel,$seq,$sha) ON CONFLICT(format,channel) " +
             "DO UPDATE SET sequence=excluded.sequence,catalog_sha=excluded.catalog_sha;";
         command.ExecuteNonQuery();

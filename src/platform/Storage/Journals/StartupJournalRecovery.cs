@@ -112,10 +112,10 @@ public sealed class StartupJournalRecovery(RuntimeInstance instance, ContractRea
                 if (current.OperationId != journal.OperationId || current.Phase != journal.Phase || current.Revision != journal.Revision ||
                     current.PlanDigest != journal.PlanDigest) throw RecoveryCapacityStore.Invalid();
                 using var command = connection.CreateCommand(); command.Transaction = transaction;
-                command.CommandText = "UPDATE recovery_capacity_reservations SET remaining_journals=0,remaining_effects=0,remaining_jobs=0,released=1 " +
-                    "WHERE owner_journal_id=$journal AND released=0 AND EXISTS(SELECT 1 FROM maintenance_operations " +
-                    "WHERE operation_id=$operation AND state=2) AND NOT EXISTS(SELECT 1 FROM recovery_capacity_members m " +
-                    "JOIN operation_journals j USING(journal_id) WHERE m.owner_journal_id=$journal AND j.phase<>'committed');";
+                command.CommandText = "UPDATE main.recovery_capacity_reservations SET remaining_journals=0,remaining_effects=0,remaining_jobs=0,released=1 " +
+                    "WHERE owner_journal_id=$journal AND released=0 AND EXISTS(SELECT 1 FROM system.maintenance_operations " +
+                    "WHERE operation_id=$operation AND state=2) AND NOT EXISTS(SELECT 1 FROM main.recovery_capacity_members m " +
+                    "JOIN main.operation_journals j USING(journal_id) WHERE m.owner_journal_id=$journal AND j.phase<>'committed');";
                 command.Parameters.AddWithValue("$journal", journal.JournalId.ToString("D"));
                 command.Parameters.AddWithValue("$operation", journal.OperationId.ToString("D"));
                 return command.ExecuteNonQuery();

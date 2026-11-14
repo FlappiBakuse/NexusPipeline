@@ -101,7 +101,7 @@ public sealed class ParentAdmissionTests
 
     private static SqliteConnection Open(StepWriterFixture fixture)
     {
-        var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open(new SqliteConnectionStringBuilder
         { DataSource = fixture.Base.Source.Database.DatabasePath, Pooling = false }.ToString());
         connection.Open(); return connection;
     }

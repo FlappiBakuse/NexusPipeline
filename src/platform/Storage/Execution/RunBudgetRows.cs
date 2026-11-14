@@ -30,7 +30,7 @@ internal static class RunBudgetRows
         Action<RunBudgetObservation>? verifyHistorical = null)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT last_operation_id,observation_count FROM execution_run_budget_states WHERE run_id=$run;";
+        command.CommandText = "SELECT last_operation_id,observation_count FROM main.execution_run_budget_states WHERE run_id=$run;";
         command.Parameters.AddWithValue("$run", runId.ToString("D"));
         Guid last; int expected;
         using (var reader = command.ExecuteReader())
@@ -39,7 +39,7 @@ internal static class RunBudgetRows
             last = Guid.ParseExact(reader.GetString(0), "D"); expected = reader.GetInt32(1);
             if (expected is < 1 or > MaximumObservations) throw Invalid();
         }
-        command.CommandText = "SELECT b.document_json,o.operation_id,o.subject_id,o.request_digest,o.operation_kind,o.status,b.journal_id FROM execution_run_budget_observations b JOIN operations o ON o.operation_id=b.operation_id WHERE b.run_id=$run ORDER BY b.ordinal;";
+        command.CommandText = "SELECT b.document_json,o.operation_id,o.subject_id,o.request_digest,o.operation_kind,o.status,b.journal_id FROM main.execution_run_budget_observations b JOIN main.operations o ON o.operation_id=b.operation_id WHERE b.run_id=$run ORDER BY b.ordinal;";
         RunBudgetObservation? before = null; var ordinal = 0;
         using (var reader = command.ExecuteReader())
         {
@@ -82,20 +82,20 @@ internal static class RunBudgetRows
         var identity = Identity(next);
         if (!OperationRows.Accept(connection, transaction, identity, next.ObservedAtUtc).IsNew) throw Invalid();
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "INSERT INTO execution_run_budget_observations(operation_id,run_id,ordinal,document_json,journal_id) VALUES($id,$run,$ordinal,$json,$journal);";
+        command.CommandText = "INSERT INTO main.execution_run_budget_observations(operation_id,run_id,ordinal,document_json,journal_id) VALUES($id,$run,$ordinal,$json,$journal);";
         command.Parameters.AddWithValue("$id", identity.OperationId.ToString("D")); command.Parameters.AddWithValue("$run", next.RunId.ToString("D"));
         command.Parameters.AddWithValue("$journal", next.JournalId is { } journal ? journal.ToString("D") : DBNull.Value);
         command.Parameters.AddWithValue("$ordinal", next.Ordinal); command.Parameters.AddWithValue("$json",
             Encoding.UTF8.GetString(BoundedJson.Serialize(next, StepResultCodec.Options))); command.ExecuteNonQuery();
         if (prior is null)
-            command.CommandText = "INSERT INTO execution_run_budget_states(run_id,last_operation_id,observation_count) VALUES($run,$id,1);";
+            command.CommandText = "INSERT INTO main.execution_run_budget_states(run_id,last_operation_id,observation_count) VALUES($run,$id,1);";
         else
         {
-            command.CommandText = "UPDATE execution_run_budget_states SET last_operation_id=$id,observation_count=observation_count+1 WHERE run_id=$run AND last_operation_id=$previous AND observation_count=$ordinal;";
+            command.CommandText = "UPDATE main.execution_run_budget_states SET last_operation_id=$id,observation_count=observation_count+1 WHERE run_id=$run AND last_operation_id=$previous AND observation_count=$ordinal;";
             command.Parameters.AddWithValue("$previous", Identity(prior).OperationId.ToString("D"));
         }
         if (command.ExecuteNonQuery() != 1) throw Invalid();
-        command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$id;"; command.ExecuteNonQuery();
+        command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$id;"; command.ExecuteNonQuery();
         _ = Read(connection, transaction, next.RunId);
     }
 

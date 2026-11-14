@@ -62,9 +62,9 @@ public sealed class RecoveryCompletionService(RuntimeInstance instance, StateDat
 
     private IReadOnlyList<(Guid JournalId, string Subject)> Pending()
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT j.journal_id,o.subject_id FROM operation_journals j JOIN operations o ON o.operation_id=j.operation_id " +
+        command.CommandText = "SELECT j.journal_id,o.subject_id FROM main.operation_journals j JOIN main.operations o ON o.operation_id=j.operation_id " +
             "WHERE j.operation_kind='runAttempt' AND j.phase IN ('prepared','applied') AND o.operation_kind='execution.start' LIMIT 10001;";
         using var rows = command.ExecuteReader(); var result = new List<(Guid, string)>();
         while (rows.Read())

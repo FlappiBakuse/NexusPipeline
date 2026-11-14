@@ -10,7 +10,7 @@ internal static class NotificationReceiptRows
     internal static BlobReference? Find(SqliteConnection connection, SqliteTransaction? transaction, Guid attemptId)
     {
         using var command = NotificationDeliveryRows.Command(connection, transaction,
-            "SELECT relative_path,size_bytes,sha256 FROM notification_receipt_sources WHERE attempt_id=$0;", attemptId.ToString("D"));
+            "SELECT relative_path,size_bytes,sha256 FROM notifications.notification_receipt_sources WHERE attempt_id=$0;", attemptId.ToString("D"));
         using var row = command.ExecuteReader();
         return row.Read() ? new(row.GetString(0), row.GetInt64(1), row.GetString(2)) : null;
     }
@@ -39,17 +39,17 @@ internal static class NotificationReceiptRows
         if (document.Screenshot is { } screenshot) NotificationDeliveryRows.RequireAsset(connection, transaction, screenshot);
         _ = OperationRows.Accept(connection, transaction, Identity(snapshot), acceptedAt);
         var reference = snapshot.Reference;
-        Execute(connection, transaction, "INSERT INTO notification_receipt_sources VALUES($0,$1,$2,$3,$4,$5,$6);",
+        Execute(connection, transaction, "INSERT INTO notifications.notification_receipt_sources VALUES($0,$1,$2,$3,$4,$5,$6);",
             document.OperationId.ToString("D"), document.Receipt.Facts.RunId.ToString("D"),
             document.Receipt.Facts.AttemptId.ToString("D"), document.RouteCount,
             reference.RelativePath, reference.SizeBytes, reference.Sha256);
         ReceiptProgressRows.RegisterInside(connection, transaction, document.OperationId, document.RouteCount);
         foreach (var task in document.Tasks)
             foreach (var field in task.Secrets)
-                Execute(connection, transaction, "INSERT INTO notification_receipt_secrets VALUES($0,$1,$2,$3,$4);",
+                Execute(connection, transaction, "INSERT INTO notifications.notification_receipt_secrets VALUES($0,$1,$2,$3,$4);",
                     document.OperationId.ToString("D"), task.TaskId.ToString("D"), NotificationSecretFields.Name(field.Field),
                     field.Reference.Revision, field.Reference.SecretId is { } secret ? secret.ToString("D") : DBNull.Value);
-        Execute(connection, transaction, "UPDATE operations SET status='completed' WHERE operation_id=$0 AND status='accepted';",
+        Execute(connection, transaction, "UPDATE main.operations SET status='completed' WHERE operation_id=$0 AND status='accepted';",
             document.OperationId.ToString("D"));
         return reference;
     }
@@ -59,8 +59,8 @@ internal static class NotificationReceiptRows
         var document = snapshot.Document;
         using var command = NotificationDeliveryRows.Command(connection, transaction,
             "SELECT s.run_id,s.attempt_id,s.route_count,s.relative_path,s.size_bytes,s.sha256,o.subject_id,o.request_digest,o.operation_kind,o.status " +
-            "FROM notification_receipt_sources s JOIN operations o ON o.operation_id=s.operation_id " +
-            "JOIN attempt_receipts a ON a.attempt_id=s.attempt_id JOIN operations e ON e.operation_id=a.operation_id " +
+            "FROM notifications.notification_receipt_sources s JOIN main.operations o ON o.operation_id=s.operation_id " +
+            "JOIN records.attempt_receipts a ON a.attempt_id=s.attempt_id JOIN main.operations e ON e.operation_id=a.operation_id " +
             "WHERE s.operation_id=$0 AND e.subject_id=o.subject_id AND e.operation_kind=\'execution.start\' AND e.status=\'completed\';",
             document.OperationId.ToString("D"));
         using var row = command.ExecuteReader();
@@ -78,7 +78,7 @@ internal static class NotificationReceiptRows
         var expected = snapshot.Document.Tasks.SelectMany(task => task.Secrets.Select(field =>
             (TaskId: task.TaskId, Field: NotificationSecretFields.Name(field.Field), field.Reference, Secret: field))).ToArray();
         using var command = NotificationDeliveryRows.Command(connection, transaction,
-            "SELECT task_id,field,revision,secret_id FROM notification_receipt_secrets WHERE operation_id=$0;",
+            "SELECT task_id,field,revision,secret_id FROM notifications.notification_receipt_secrets WHERE operation_id=$0;",
             snapshot.Document.OperationId.ToString("D"));
         using var rows = command.ExecuteReader(); var seen = new HashSet<(Guid, string)>();
         while (rows.Read())
@@ -98,8 +98,8 @@ internal static class NotificationReceiptRows
     private static void RequireNoSuccessor(SqliteConnection connection, SqliteTransaction transaction, NotificationReceiptDocument document)
     {
         using var command = NotificationDeliveryRows.Command(connection, transaction,
-            "SELECT EXISTS(SELECT 1 FROM execution_start_sources WHERE run_id=$0 AND attempt_ordinal>$1) " +
-            "OR EXISTS(SELECT 1 FROM execution_retry_intents i LEFT JOIN execution_retry_outcomes o ON o.retry_operation_id=i.operation_id " +
+            "SELECT EXISTS(SELECT 1 FROM main.execution_start_sources WHERE run_id=$0 AND attempt_ordinal>$1) " +
+            "OR EXISTS(SELECT 1 FROM main.execution_retry_intents i LEFT JOIN main.execution_retry_outcomes o ON o.retry_operation_id=i.operation_id " +
             "WHERE i.previous_attempt_id=$2 AND o.retry_operation_id IS NULL);",
             document.Receipt.Facts.RunId.ToString("D"), document.Receipt.Facts.Ordinal, document.Receipt.Facts.AttemptId.ToString("D"));
         if ((long)command.ExecuteScalar()! != 0) throw NotificationReceiptCodec.Invalid();

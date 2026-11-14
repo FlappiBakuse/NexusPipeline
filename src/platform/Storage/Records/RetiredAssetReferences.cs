@@ -11,9 +11,9 @@ internal static class RetiredAssetReferences
         while (true)
         {
             var rows = new List<(Guid Run, int Kind)>();
-            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
             using (var command = RecordRetirementRows.Command(connection, null,
-                "SELECT a.run_id,a.kind,b.size_bytes,b.relative_path FROM record_assets a LEFT JOIN blobs b USING(digest) " +
+                "SELECT a.run_id,a.kind,b.size_bytes,b.relative_path FROM records.record_assets a LEFT JOIN content.blobs b USING(digest) " +
                 "WHERE a.digest=$0 AND (a.run_id,a.kind)>($1,$2) ORDER BY a.run_id,a.kind LIMIT 128;",
                 content.Sha256, afterRun, afterKind))
             using (var reader = command.ExecuteReader())

@@ -30,7 +30,7 @@ public sealed class OwnedPayloadTests
             .ReadJournal(accepted.JournalId).Phase);
         Assert.All(new FileEffectOutbox(fixture.Package.Catalog.Database).Read(accepted.JournalId),
             item => Assert.Equal(FileEffectState.Completed, item.State));
-        using var connection = DatabaseConnections.Open(fixture.Package.Catalog.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(fixture.Package.Catalog.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         Assert.Null(ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, "fixture-plugin"));
         Assert.False(new HostSettingsStore(fixture.Package.Catalog.Database).Read().Values.Extensions.Single().Enabled);
@@ -62,10 +62,10 @@ public sealed class OwnedPayloadTests
         using var fixture = new PayloadAcceptanceFixture(savedEnabled: false);
         _ = fixture.Prepare(); var accepted = fixture.Accept();
         using var scope = await Inventory(fixture).ReserveForApplyAsync(fixture.Package.OperationId, "fixture-plugin", default);
-        fixture.Package.Catalog.Sql("CREATE TRIGGER fixture_fail_extension_applied BEFORE UPDATE OF phase ON operation_journals " +
+        fixture.Package.Catalog.Sql("CREATE TRIGGER main.fixture_fail_extension_applied BEFORE UPDATE OF phase ON operation_journals " +
             "WHEN NEW.operation_kind='extensionApply' AND NEW.phase='applied' BEGIN SELECT RAISE(ABORT,'fixture'); END;");
         try { Assert.Throws<SqliteException>(() => Journal(fixture).Apply(fixture.Prepared!, scope, default)); }
-        finally { fixture.Package.Catalog.Sql("DROP TRIGGER fixture_fail_extension_applied;"); }
+        finally { fixture.Package.Catalog.Sql("DROP TRIGGER main.fixture_fail_extension_applied;"); }
         var identity = PhysicalObjectIdentity.Read(fixture.Target);
         var current = new JournalStore(fixture.Package.Catalog.Instance, fixture.Package.Catalog.Contracts).Read(accepted.JournalId);
         Assert.Equal(JournalPhase.Applied, current.Phase);

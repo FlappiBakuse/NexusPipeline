@@ -13,7 +13,7 @@ internal sealed class ExtensionInstalledEvidence(RuntimeInstance instance, State
     internal BoundExtensionInstallation? ReadCurrent(string extensionId)
     {
         ExtensionInstalledMetadata? saved;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System))
         using (var transaction = connection.BeginTransaction(deferred: true))
         {
             saved = ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, extensionId);
@@ -25,7 +25,7 @@ internal sealed class ExtensionInstalledEvidence(RuntimeInstance instance, State
             bound.Commit is null || bound.Footprint is null || bound.Commit.Footprint != saved.Footprint ||
             ExtensionPayloadBinding.DerivedInstallation(bound.Plan, bound.Commit, bound.Footprint) != saved)
             throw Invalid();
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System))
         using (var transaction = connection.BeginTransaction(deferred: true))
         {
             if (ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, extensionId) != saved) throw Invalid();
@@ -37,7 +37,7 @@ internal sealed class ExtensionInstalledEvidence(RuntimeInstance instance, State
     internal InstallationReadLease? ProtectCurrent(string extensionId, InstanceLease lease)
     {
         ExtensionInstalledMetadata? saved;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System))
         using (var transaction = connection.BeginTransaction(deferred: true))
         {
             saved = ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, extensionId);

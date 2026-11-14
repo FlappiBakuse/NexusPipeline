@@ -68,7 +68,7 @@ public sealed class InstallerRetainedTests
             Directory.CreateDirectory(Path.GetDirectoryName(bundled)!);
             File.WriteAllText(bundled, "Retained public bundle data");
         }
-        if (fault == "database") File.WriteAllText(Path.Combine(fixture.Runtime.RuntimeRoot, "state/nexus.db"), "Retained unknown database");
+        if (fault == "database") File.WriteAllText(Path.Combine(fixture.Runtime.RuntimeRoot, "state/runtime.db"), "Retained unknown database");
         if (fault == "manager") File.WriteAllText(Path.Combine(product.Paths.ManagerRoot, "foreign.txt"), "Retained unknown manager");
         if (fault == "ownership")
         {

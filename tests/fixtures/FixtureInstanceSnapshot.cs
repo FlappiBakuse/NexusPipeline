@@ -19,7 +19,7 @@ internal static class FixtureInstanceSnapshot
         RequireDisjoint(instance.RuntimeRoot, artifact);
         if (database.InstanceId != instance.InstanceId || Directory.Exists(artifact) || File.Exists(artifact)) throw new IOException("snapshot_fixture_destination_invalid");
         Directory.CreateDirectory(Path.Combine(artifact, "state"));
-        database.BackupTo(Path.Combine(artifact, "state/nexus.db"));
+        database.BackupTo(Path.Combine(artifact, "state/runtime.db"));
         foreach (var relative in new[] { "instance.json", "state-initialization.guard" })
             CopyNew(Path.Combine(instance.RuntimeRoot, relative), Path.Combine(artifact, relative));
         foreach (var name in new[] { "blobs", "journals", "secrets" })

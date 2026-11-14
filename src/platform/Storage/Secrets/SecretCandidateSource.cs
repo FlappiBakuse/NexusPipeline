@@ -29,7 +29,7 @@ internal static class SecretCandidateSource
             var candidate = plan.Candidate;
             var payload = new ProtectedSecretPayload(candidate.ProtectionScheme, candidate.OwnerSid, candidate.Sha256, bytes);
             using var value = new UserSecretProtector().Unprotect(instance.InstanceId, Guid.Parse(candidate.SecretId), payload);
-            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System);
             held.Add(SecretReplayProof.Hold(instance, connection));
             var operation = SecretFieldStore.Identity(Guid.Parse(plan.OperationId), SecretPreparationRows.Key(plan),
                 plan.ExpectedRevision, SecretDisposition.Set);

@@ -29,7 +29,7 @@ public sealed class ImageSchemaTests
                 .ReadPage(new(receipt.Facts.RunId, receipt.Facts.AttemptId)).Items);
             Assert.Equal(RunImageOutcome.Captured, original.Outcome);
         });
-        var path = Path.Combine(instance.RuntimeRoot, "state", "nexus.db");
+        var path = Path.Combine(instance.RuntimeRoot, "state", "runtime.db");
         using var owner = InstanceLease.Acquire(instance, new());
         Assert.Throws<IOException>(() => InstanceLease.Acquire(instance, new()));
         var database = StateDatabase.OpenExisting(instance, Path.Combine(root, "owned-image-inspection"),
@@ -64,7 +64,7 @@ public sealed class ImageSchemaTests
             using var original = reader.OpenOriginal(key, snapshot);
             length = original.Length; digest = Convert.ToHexStringLower(SHA256.HashData(original));
         }
-        var path = Path.Combine(instance.RuntimeRoot, "state", "nexus.db");
+        var path = Path.Combine(instance.RuntimeRoot, "state", "runtime.db");
         using var owner = InstanceLease.Acquire(instance, new());
         var database = StateDatabase.OpenExisting(instance, Path.Combine(root, "long-log-image-inspection"),
             new JournalStartupAdmission(instance, new()), owner);
@@ -81,12 +81,12 @@ public sealed class ImageSchemaTests
         RuntimeInstance instance; string root;
         using (var fixture = new PlanBuilderFixture())
         { instance = fixture.Instance; root = fixture.Root; }
-        var path = Path.Combine(instance.RuntimeRoot, "state", "nexus.db");
-        using (var connection = new SqliteConnection($"Data Source={path};Pooling=False;Foreign Keys=False"))
+        var path = Path.Combine(instance.RuntimeRoot, "state", "runtime.db");
+        using (var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open($"Data Source={path};Pooling=False;Foreign Keys=False"))
         {
             connection.Open();
             using var command = connection.CreateCommand();
-            command.CommandText = "CREATE TABLE fixture_unknown_image_catalog(value INTEGER);";
+            command.CommandText = "CREATE TABLE records.fixture_unknown_image_catalog(value INTEGER);";
             command.ExecuteNonQuery();
         }
         var before = GroupHashes(path);
@@ -97,33 +97,10 @@ public sealed class ImageSchemaTests
         Assert.Equal(before, GroupHashes(path));
     }
 
-    internal static void RevertImageTable(string path, string schema, string digest)
-    {
-        using var connection = new SqliteConnection($"Data Source={path};Pooling=False;Foreign Keys=False"); connection.Open();
-        using var transaction = connection.BeginTransaction(deferred: false);
-        var start = schema.IndexOf("CREATE TABLE execution_image_entries(", StringComparison.Ordinal);
-        var end = start < 0 ? -1 : schema.IndexOf(';', start);
-        Assert.True(start >= 0 && end > start);
-        using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "DROP INDEX execution_image_entries_png;" +
-            " ALTER TABLE execution_image_entries RENAME TO fixture_new_image_entries;" +
-            schema[start..(end + 1)] +
-            " INSERT INTO execution_image_entries SELECT * FROM fixture_new_image_entries;" +
-            " DROP TABLE fixture_new_image_entries;" +
-            " CREATE INDEX execution_image_entries_png ON execution_image_entries(png_sha256,attempt_id) WHERE png_sha256 IS NOT NULL;";
-        command.ExecuteNonQuery();
-        StateSchemaFixture.RevertTables(connection, transaction, schema);
-        command.CommandText = "UPDATE schema_info SET contract_digest=$digest WHERE singleton=1;";
-        command.Parameters.AddWithValue("$digest", digest);
-        Assert.Equal(1, command.ExecuteNonQuery());
-        transaction.Commit();
-        Assert.Equal(digest, DatabaseSchema.VerifyCatalog(connection));
-    }
-
-    private static string[] GroupHashes(string path) => new[] { "", "-wal", "-shm", "-journal" }
-        .Where(suffix => File.Exists(path + suffix)).Select(suffix =>
+    private static string[] GroupHashes(string path) => Directory.GetFiles(Path.GetDirectoryName(path)!).Order(StringComparer.Ordinal)
+        .Select(filePath =>
         {
-            using var file = File.OpenRead(path + suffix);
-            return suffix + ":" + Convert.ToHexStringLower(SHA256.HashData(file));
+            using var file = File.OpenRead(filePath);
+            return Path.GetFileName(filePath) + ":" + Convert.ToHexStringLower(SHA256.HashData(file));
         }).ToArray();
 }

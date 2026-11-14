@@ -23,7 +23,7 @@ public sealed class RunRecordStore(StateDatabase database) : IRunRecordStore
         record.Validate();
         using var query = connection.CreateCommand(); query.Transaction = transaction;
         query.CommandText = "SELECT run_id,automation_id,user_id,ended_at_utc_ticks,duration_milliseconds,attempt_id,attempt_ordinal," +
-            "engine_outcome,business_outcome,lifecycle_outcome,recovery_outcome,reason_code,duration_kind,end_time_kind FROM run_records WHERE run_id=$run;";
+            "engine_outcome,business_outcome,lifecycle_outcome,recovery_outcome,reason_code,duration_kind,end_time_kind FROM records.run_records WHERE run_id=$run;";
         query.Parameters.AddWithValue("$run", record.FinalAttempt.RunId.ToString("D"));
         using (var row = query.ExecuteReader())
             if (row.Read())
@@ -38,7 +38,7 @@ public sealed class RunRecordStore(StateDatabase database) : IRunRecordStore
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT run_id,automation_id,user_id,ended_at_utc_ticks,duration_milliseconds,attempt_id,attempt_ordinal," +
-            "engine_outcome,business_outcome,lifecycle_outcome,recovery_outcome,reason_code,duration_kind,end_time_kind FROM run_records WHERE run_id=$run;";
+            "engine_outcome,business_outcome,lifecycle_outcome,recovery_outcome,reason_code,duration_kind,end_time_kind FROM records.run_records WHERE run_id=$run;";
         command.Parameters.AddWithValue("$run", expected.FinalAttempt.RunId.ToString("D"));
         using var row = command.ExecuteReader();
         if (!row.Read()) throw new IOException("record_execution_projection_missing");
@@ -55,7 +55,7 @@ public sealed class RunRecordStore(StateDatabase database) : IRunRecordStore
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            INSERT INTO run_records VALUES($run,$automation,$user,$ended,$duration,$attempt,$ordinal,$engine,$business,$lifecycle,$recovery,$reason,$durationKind,$endTimeKind,NULL);
+            INSERT INTO records.run_records VALUES($run,$automation,$user,$ended,$duration,$attempt,$ordinal,$engine,$business,$lifecycle,$recovery,$reason,$durationKind,$endTimeKind,NULL);
             """;
         foreach (var name in new[] { "$run", "$automation", "$user", "$ended", "$duration", "$attempt", "$ordinal", "$engine", "$business", "$lifecycle", "$recovery", "$reason", "$durationKind", "$endTimeKind" })
             command.Parameters.Add(new SqliteParameter(name, null));
@@ -83,7 +83,7 @@ public sealed class RunRecordStore(StateDatabase database) : IRunRecordStore
     public RecordPage ReadPage(RecordQuery query)
     {
         ArgumentNullException.ThrowIfNull(query); query.Validate();
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
         using var command = RecordPageQuery.Create(connection, query);
         using var reader = command.ExecuteReader();
         var rows = new List<CompletedRunRecord>();
@@ -96,7 +96,7 @@ public sealed class RunRecordStore(StateDatabase database) : IRunRecordStore
     public IReadOnlyList<string> ExplainPage(RecordQuery query)
     {
         ArgumentNullException.ThrowIfNull(query); query.Validate();
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
         using var command = RecordPageQuery.Create(connection, query);
         command.CommandText = "EXPLAIN QUERY PLAN " + command.CommandText;
         using var reader = command.ExecuteReader();

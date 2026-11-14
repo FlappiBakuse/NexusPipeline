@@ -2,7 +2,7 @@ using NexusPipeline.Core.Maintenance;
 
 namespace NexusPipeline.Platform.Storage.Notifications;
 
-internal sealed class QueueActivityOwner(ResourceLeaseManager resources) : IDisposable
+internal sealed class QueueActivityOwner(ResourceLeaseManager resources, Action? signal = null) : IDisposable
 {
     private readonly object _gate = new();
     private AcceptedNotificationQueue? _queue;
@@ -72,6 +72,7 @@ internal sealed class QueueActivityOwner(ResourceLeaseManager resources) : IDisp
     private void EndRegistration()
     {
         lock (_gate) { _registrations--; _epoch = checked(_epoch + 1); }
+        signal?.Invoke();
     }
 
     private sealed class Registration(QueueActivityOwner owner) : IDisposable

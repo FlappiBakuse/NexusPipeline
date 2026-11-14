@@ -39,7 +39,7 @@ public sealed class StartupRegistrationCoordinator
     {
         _lease.VerifyHeld(_instance);
         _ = HostSettingsPolicy.Next(before, change.ExpectedRevision, change.Values);
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         var prior = StartupIntentRows.ReadCurrent(connection, null);
         if (StartupIntentRows.ReadAll(connection, null, _instance.InstanceId, pendingOnly: true).Count != 0)
             throw new HostSettingsException("settings_startup_recovery_required");
@@ -64,7 +64,7 @@ public sealed class StartupRegistrationCoordinator
     {
         _lease.VerifyHeld(_instance);
         byte[]? current;
-        using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System))
             current = StartupIntentRows.ReadCurrent(connection, null);
         if (current is null) return false;
         var command = StartupIntentCodec.DecodeCommand(current);
@@ -76,7 +76,7 @@ public sealed class StartupRegistrationCoordinator
     public StartupEffectStatus? ReadPendingStatus()
     {
         _lease.VerifyHeld(_instance);
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         return StartupIntentRows.ReadAll(connection, null, _instance.InstanceId, pendingOnly: true).SingleOrDefault()?.Status;
     }
 
@@ -113,7 +113,7 @@ public sealed class StartupRegistrationCoordinator
 
     public static void VerifyReadOnly(StateDatabase database)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         StartupIntentRows.Verify(connection, database.InstanceId);
         foreach (var intent in StartupIntentRows.ReadAll(connection, null, database.InstanceId, pendingOnly: true))
             if (WriterStopEvidence.ObserveProcess(intent.Document.Creator) != WriterState.Stopped)
@@ -128,7 +128,7 @@ public sealed class StartupRegistrationCoordinator
             throw new IOException("startup_reconciliation_instance_unbound");
         VerifyReadOnly(database);
         StoredStartupIntent[] pending;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System))
             pending = StartupIntentRows.ReadAll(connection, null, instance.InstanceId, pendingOnly: true).ToArray();
         foreach (var intent in pending)
         {
@@ -150,7 +150,7 @@ public sealed class StartupRegistrationCoordinator
 
     private static StoredStartupIntent Read(StateDatabase database, Guid operationId)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         return StartupIntentRows.Read(connection, null, operationId, database.InstanceId) ?? throw new IOException("startup_intent_missing");
     }
 
@@ -163,7 +163,7 @@ public sealed class StartupRegistrationCoordinator
 
     private static void PublishHolds(StateDatabase database, RecoveryIndex index)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         var holds = StartupIntentRows.ReadAll(connection, null, database.InstanceId, pendingOnly: true)
             .SelectMany(intent => new[] { "settings:host", "system:startup" }.Select(key =>
                 new RecoveryResourceHold(intent.Status.OperationId, key, "startup_effect_pending"))).ToArray();

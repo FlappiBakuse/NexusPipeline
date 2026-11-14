@@ -15,7 +15,7 @@ public sealed class HostSettingsStore(StateDatabase database) : IHostSettingsSto
 
     public HostSettingsSnapshot Read()
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         return HostSettingsRows.ReadCurrent(connection, transaction);
     }
@@ -23,7 +23,7 @@ public sealed class HostSettingsStore(StateDatabase database) : IHostSettingsSto
     internal HostSettingsSnapshot ReadRevision(long revision)
     {
         if (revision is < 0 or > 9007199254740991) throw new HostSettingsException("settings_revision_invalid");
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         return HostSettingsRows.Read(connection, transaction, revision);
     }
@@ -47,10 +47,10 @@ public sealed class HostSettingsStore(StateDatabase database) : IHostSettingsSto
             if (StartupIntentRows.ReadAll(connection, transaction, database.InstanceId, pendingOnly: true).Count != 0)
                 throw new HostSettingsException("settings_startup_recovery_required");
             HostSettingsRows.Insert(connection, transaction, next);
-            HostSettingsRows.Execute(connection, transaction, "UPDATE settings_current SET revision=$0 WHERE singleton=1;", next.Revision);
-            HostSettingsRows.Execute(connection, transaction, "INSERT INTO settings_mutations VALUES($0,$1);", operation.OperationId, next.Revision);
+            HostSettingsRows.Execute(connection, transaction, "UPDATE system.settings_current SET revision=$0 WHERE singleton=1;", next.Revision);
+            HostSettingsRows.Execute(connection, transaction, "INSERT INTO system.settings_mutations VALUES($0,$1);", operation.OperationId, next.Revision);
             if (startup is not null) StartupIntentRows.Register(connection, transaction, startup, database.InstanceId, operation.OperationId, before, next);
-            else HostSettingsRows.Execute(connection, transaction, "UPDATE operations SET status='completed' WHERE operation_id=$0;", operation.OperationId);
+            else HostSettingsRows.Execute(connection, transaction, "UPDATE main.operations SET status='completed' WHERE operation_id=$0;", operation.OperationId);
             return ReadResult(connection, transaction, operation.OperationId) with { IsNew = true };
         });
     }
@@ -75,12 +75,12 @@ public sealed class HostSettingsStore(StateDatabase database) : IHostSettingsSto
         using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
-            command.CommandText = "SELECT EXISTS(SELECT 1 FROM operation_journals j JOIN operations o USING(operation_id) " +
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operation_journals j JOIN main.operations o USING(operation_id) " +
                 "WHERE j.journal_id=$journal AND j.operation_kind='extensionApply' AND j.phase='applied' " +
                 "AND o.operation_kind='extension.apply' AND o.status='accepted' AND o.initial_journal_id=j.journal_id " +
-                "AND EXISTS(SELECT 1 FROM journal_resource_claims c WHERE c.journal_id=j.journal_id " +
+                "AND EXISTS(SELECT 1 FROM main.journal_resource_claims c WHERE c.journal_id=j.journal_id " +
                 "AND c.resource_key=$extension AND c.mode=$mutation) " +
-                "AND EXISTS(SELECT 1 FROM journal_resource_claims c WHERE c.journal_id=j.journal_id " +
+                "AND EXISTS(SELECT 1 FROM main.journal_resource_claims c WHERE c.journal_id=j.journal_id " +
                 "AND c.resource_key='settings:host' AND (c.mode=$settingsMode OR c.mode=$mutation)));";
             command.Parameters.AddWithValue("$journal", journalId.ToString("D"));
             command.Parameters.AddWithValue("$extension", "extension:" + extensionId);
@@ -103,7 +103,7 @@ public sealed class HostSettingsStore(StateDatabase database) : IHostSettingsSto
         var next = HostSettingsPolicy.Next(before, expected.SettingsRevision, values);
         HostSettingsRows.Insert(connection, transaction, next);
         using var advance = connection.CreateCommand(); advance.Transaction = transaction;
-        advance.CommandText = "UPDATE settings_current SET revision=$next WHERE singleton=1 AND revision=$expected;";
+        advance.CommandText = "UPDATE system.settings_current SET revision=$next WHERE singleton=1 AND revision=$expected;";
         advance.Parameters.AddWithValue("$next", next.Revision);
         advance.Parameters.AddWithValue("$expected", before.Revision);
         if (advance.ExecuteNonQuery() != 1) throw new HostSettingsException("settings_revision_conflict");
@@ -127,7 +127,7 @@ public sealed class HostSettingsStore(StateDatabase database) : IHostSettingsSto
     internal SettingsSaveResult? Lookup(OperationIdentity operation, HostSettingsChange change)
     {
         VerifyIdentity(operation, change);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         return OperationRows.ReadExisting(connection, transaction, operation) is null ? null : ReadResult(connection, transaction, operation.OperationId);
     }
@@ -136,7 +136,7 @@ public sealed class HostSettingsStore(StateDatabase database) : IHostSettingsSto
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT result_revision FROM settings_mutations WHERE operation_id=$id;";
+        command.CommandText = "SELECT result_revision FROM system.settings_mutations WHERE operation_id=$id;";
         command.Parameters.AddWithValue("$id", operationId.ToString("D"));
         var revision = command.ExecuteScalar() ?? throw new IOException("settings_operation_requires_reconciliation");
         return new(operationId, HostSettingsRows.Read(connection, transaction, Convert.ToInt64(revision)), false)

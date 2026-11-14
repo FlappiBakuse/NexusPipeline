@@ -46,7 +46,7 @@ public sealed class ImageCatalogTests
                 Assert.Equal(row, Assert.Single(reader.ReadPage(new(receipt.Facts.RunId, receipt.Facts.AttemptId)).Items));
                 Assert.ThrowsAny<IOException>(() => reader.OpenOriginal(row.Key, row.ResultSha256));
                 Assert.Equal(1, fixture.Base.Count("execution_image_asset_catalog"));
-                using var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true);
+                using var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
                 using var transaction = connection.BeginTransaction(deferred: true);
                 var published = Assert.IsType<RecordAsset>(NotificationReceiptAssets.ReadPublished(connection, transaction, receipt.Facts.RunId));
                 Assert.Equal(row.ImageSha256, published.Sha256); Assert.Equal(row.SizeBytes, published.SizeBytes);
@@ -74,7 +74,7 @@ public sealed class ImageCatalogTests
             var projection = new ImageCatalogProjection(source.Instance, source.Database, new(), source.Lease);
             if (fault == "rollback")
             {
-                fixture.Base.Execute("CREATE TRIGGER fixture_image_projection BEFORE INSERT ON execution_image_entries " +
+                fixture.Base.Execute("CREATE TRIGGER records.fixture_image_projection BEFORE INSERT ON execution_image_entries " +
                     "BEGIN SELECT RAISE(ABORT,'fixture_image_projection'); END;");
                 try
                 {
@@ -82,14 +82,14 @@ public sealed class ImageCatalogTests
                     Assert.Equal(0, fixture.Base.Count("execution_image_catalog")); Assert.Equal(0, fixture.Base.Count("execution_image_entries"));
                     Assert.Equal(0, fixture.Base.Count("record_assets"));
                 }
-                finally { fixture.Base.Execute("DROP TRIGGER fixture_image_projection;"); }
+                finally { fixture.Base.Execute("DROP TRIGGER records.fixture_image_projection;"); }
             }
             projection.OnCommitted(receipt);
             var reader = new ImageCatalogReader(source.Instance, source.Database, new());
             var row = Assert.Single(reader.ReadPage(new(receipt.Facts.RunId, receipt.Facts.AttemptId)).Items);
             if (fault == "entry")
             {
-                fixture.Base.Execute("UPDATE execution_image_entries SET png_sha256='" + new string('0', 64) +
+                fixture.Base.Execute("UPDATE records.execution_image_entries SET png_sha256='" + new string('0', 64) +
                     $"' WHERE attempt_id='{receipt.Facts.AttemptId:D}' AND position=0;");
                 Assert.ThrowsAny<IOException>(() => reader.ReadPage(new(receipt.Facts.RunId, receipt.Facts.AttemptId)));
                 Assert.ThrowsAny<IOException>(() => reader.OpenOriginal(row.Key, row.ResultSha256));
@@ -99,7 +99,7 @@ public sealed class ImageCatalogTests
             {
                 var records = new ExecutionRecordProjection(source.Instance, source.Database, new(), source.Lease,
                     new(source.Instance, source.Database, new()));
-                fixture.Base.Execute("CREATE TRIGGER fixture_image_assets BEFORE INSERT ON execution_image_asset_catalog " +
+                fixture.Base.Execute("CREATE TRIGGER records.fixture_image_assets BEFORE INSERT ON execution_image_asset_catalog " +
                     "BEGIN SELECT RAISE(ABORT,'fixture_image_assets'); END;");
                 try
                 {
@@ -108,7 +108,7 @@ public sealed class ImageCatalogTests
                     Assert.Equal(0, fixture.Base.Count("execution_image_asset_catalog"));
                     Assert.Equal(row, Assert.Single(reader.ReadPage(new(receipt.Facts.RunId, receipt.Facts.AttemptId)).Items));
                 }
-                finally { fixture.Base.Execute("DROP TRIGGER fixture_image_assets;"); }
+                finally { fixture.Base.Execute("DROP TRIGGER records.fixture_image_assets;"); }
                 records.OnCommitted(receipt); records.OnCommitted(receipt);
                 Assert.Equal(1, fixture.Base.Count("run_records")); Assert.Equal(1, fixture.Base.Count("record_assets"));
                 Assert.Equal(1, fixture.Base.Count("execution_image_asset_catalog"));
@@ -173,7 +173,7 @@ public sealed class ImageCatalogTests
                 .ReadPage(new(receipt.Facts.RunId, receipt.Facts.AttemptId)).Items);
             new ExecutionNotificationRegistration(source.Instance, source.Database, new(), source.Lease, finality).OnCommitted(receipt);
             BlobReference sourceReference;
-            using (var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.All))
             using (var transaction = connection.BeginTransaction(deferred: true))
             {
                 sourceReference = Assert.IsType<BlobReference>(NotificationReceiptRows.Find(connection, transaction, receipt.Facts.AttemptId));

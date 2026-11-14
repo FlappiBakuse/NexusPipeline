@@ -29,7 +29,7 @@ public sealed class DatabaseCopyTests
         byte[]? copyBytes = null;
         var admission = new Admission(inspection =>
         {
-            var path = Path.Combine(inspection.DiagnosticCopyRoot, "nexus.db");
+            var path = Path.Combine(inspection.DiagnosticCopyRoot, "runtime.db");
             var inspected = PhysicalObjectIdentity.Read(path);
             if (fault == "source")
             {
@@ -83,7 +83,7 @@ public sealed class DatabaseCopyTests
 
     private static OperationSnapshot? ReadOperation(string path, OperationIdentity operation)
     {
-        using var connection = DatabaseConnections.Open(path, readOnly: true, allowPooling: false);
+        using var connection = DatabaseConnections.Open(path, readOnly: true, allowPooling: false, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction(deferred: true);
         return OperationRows.ReadOwned(connection, transaction, operation.OperationId, operation.SubjectId);
     }

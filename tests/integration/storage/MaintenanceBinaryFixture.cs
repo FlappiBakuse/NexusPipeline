@@ -82,7 +82,7 @@ internal sealed class MaintenanceBinaryFixture : IDisposable
             {
                 _ = service.PrepareAsync(new(Plan.OperationId, Subject, source.Feed.Identity, source.HostVersion,
                     source.Timing, source.Window), CancellationToken.None).GetAwaiter().GetResult();
-                using var connection = DatabaseConnections.Open(Database.DatabasePath, readOnly: true);
+                using var connection = DatabaseConnections.Open(Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
                 using var transaction = connection.BeginTransaction(deferred: true);
                 var row = MaintenanceOperationRows.ReadOwned(connection, transaction, Plan.OperationId, Subject)!;
                 Plan = new PayloadPlanCodec(Instance, contracts, blobs, roots).Read(row.Plan);
@@ -111,7 +111,7 @@ internal sealed class MaintenanceBinaryFixture : IDisposable
 
     internal void UseOperation(Guid operationId, string subject)
     {
-        using var connection = DatabaseConnections.Open(Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         var row = MaintenanceOperationRows.ReadOwned(connection, transaction, operationId, subject) ?? throw new IOException("fixture_pending_missing");
         Plan = new PayloadPlanCodec(Instance, new(), new(Instance, new()),
@@ -179,10 +179,10 @@ internal sealed class MaintenanceBinaryFixture : IDisposable
         while (true)
         {
             cancellation.ThrowIfCancellationRequested();
-            using (var connection = DatabaseConnections.Open(Database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime))
             using (var command = connection.CreateCommand())
             {
-                command.CommandText = "SELECT EXISTS(SELECT 1 FROM operations WHERE operation_kind='schedule.minute' AND status='completed');";
+                command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operations WHERE operation_kind='schedule.minute' AND status='completed');";
                 if ((long)command.ExecuteScalar()! == 1) return;
             }
             await Task.Delay(20, cancellation);

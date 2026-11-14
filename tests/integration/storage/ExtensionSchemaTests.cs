@@ -36,14 +36,14 @@ public sealed class ExtensionSchemaTests
         var bytes = "{\"existing\":1}"u8.ToArray(); var digest = ExtensionDocumentRows.Digest(bytes);
         var operation = ExtensionDocumentRows.Identity(Guid.NewGuid(), "subject", "fixture", "settings", 0, digest);
         database.Write((connection, transaction) => ExtensionDocumentRows.Write(connection, transaction, operation, "fixture", "settings", 0, bytes, digest));
-        using var current = DatabaseConnections.Open(database.DatabasePath, readOnly: false);
+        using var current = DatabaseConnections.Open(database.DatabasePath, readOnly: false, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions);
         using var command = current.CreateCommand();
         var unknown = "{\"duplicate\":1,\"duplicate\":2}"u8.ToArray();
-        command.CommandText = "UPDATE extension_documents SET content=$content,sha256=$sha WHERE extension_id='fixture';";
+        command.CommandText = "UPDATE extensions.extension_documents SET content=$content,sha256=$sha WHERE extension_id='fixture';";
         command.Parameters.AddWithValue("$content", unknown); command.Parameters.AddWithValue("$sha", ExtensionDocumentRows.Digest(unknown));
         command.ExecuteNonQuery();
         Assert.Throws<System.Text.Json.JsonException>(() => ExtensionDocumentRows.Read(current, null, "fixture", "settings"));
-        command.CommandText = "SELECT content FROM extension_documents WHERE extension_id='fixture';";
+        command.CommandText = "SELECT content FROM extensions.extension_documents WHERE extension_id='fixture';";
         Assert.Equal(unknown, Assert.IsType<byte[]>(command.ExecuteScalar()));
         Assert.Throws<System.Text.Json.JsonException>(() => database.Write((connection, transaction) => ExtensionDocumentRows.Write(connection, transaction,
             ExtensionDocumentRows.Identity(Guid.NewGuid(), "subject", "fixture", "settings", 1, digest), "fixture", "settings", 1, bytes, digest)));

@@ -89,7 +89,7 @@ public sealed class RetirementNotificationTests
 
         NotificationDeliveryTransition ReadState()
         {
-            using var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.All);
             return NotificationDeliveryRows.ReadState(connection, null, delivery.Document.OperationId);
         }
     }

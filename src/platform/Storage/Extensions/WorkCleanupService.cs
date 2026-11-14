@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
+using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Core.Operations;
@@ -68,14 +69,23 @@ internal sealed class WorkCleanupService(RuntimeInstance instance, StateDatabase
             resources, activator, root, candidate, subject, isNew: true, acceptedCancellation).ConfigureAwait(false);
         var accepted = new FileCleanupAcceptance(instance, contracts, database, observer, roots)
             .AcceptPrepared(identity, prepared, DateTimeOffset.UtcNow);
-        _ = new OwnedCleanupExecutor(instance, contracts, database, recovery).ExecutePrepared(
-            accepted.JournalId, lease, root, roots, prepared.Execution, observer);
+        for (var retry = 0; ; retry++)
+        {
+            try
+            {
+                _ = new OwnedCleanupExecutor(instance, contracts, database, recovery).ExecutePrepared(
+                    accepted.JournalId, lease, root, roots, prepared.Execution, observer);
+                break;
+            }
+            catch (SqliteException error) when (error.SqliteErrorCode == 5 && retry < 2)
+            { await Task.Delay(TimeSpan.FromSeconds(1), acceptedCancellation).ConfigureAwait(false); }
+        }
         return accepted;
     }
 
     private CleanupAcceptanceResult? ReadAccepted(OperationIdentity identity)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         var acceptance = OperationRows.ReadExisting(connection, transaction, identity);
         if (acceptance is null) return null;

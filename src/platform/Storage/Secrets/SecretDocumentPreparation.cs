@@ -34,7 +34,7 @@ internal sealed class SecretDocumentPreparation(RuntimeInstance instance, StateD
         using var parsed = StrictJson.Parse(json);
         var content = new ImmutableBlobStore(instance, contracts).PersistContent(json, default);
         var changes = ImmutableArray.CreateBuilder<SecretDocumentMutation>();
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         foreach (var edit in edits.OrderBy(value => value.SubjectId).ThenBy(value => value.Field, StringComparer.Ordinal))
         {
             var key = new SecretFieldKey(extensionId, edit.SubjectId, edit.Field);

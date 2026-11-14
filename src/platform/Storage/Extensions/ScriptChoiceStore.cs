@@ -24,7 +24,7 @@ internal sealed class ScriptChoiceStore(RuntimeInstance instance, StateDatabase 
         source.RequireOwner(instance, database, lease, resources);
         if (!source.IsScriptAuthority) throw new IOException("project_script_authority_required");
         ExtensionIdentifiers.Require(providerId);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Extensions | DatabaseDomain.Content);
         var saved = ExtensionDocumentRows.Read(connection, null, providerId, Name(source.Script.Id));
         if (saved is null) return null;
         using var parsed = StrictJson.Parse(saved.Json);
@@ -66,7 +66,7 @@ internal sealed class ScriptChoiceStore(RuntimeInstance instance, StateDatabase 
     {
         lease.VerifyHeld(instance);
         var identity = Identity(operationId, subject, scriptId, scriptRevision, expectedRevision, extensionId, providerId, selection);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions);
         using var transaction = connection.BeginTransaction(deferred: true);
         if (OperationRows.ReadExisting(connection, transaction, identity) is null) return null;
         return ExtensionDocumentRows.ReadCommit(connection, transaction, operationId, providerId, subject)

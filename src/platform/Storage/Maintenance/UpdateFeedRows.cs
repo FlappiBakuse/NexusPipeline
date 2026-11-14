@@ -13,13 +13,13 @@ internal static class UpdateFeedRows
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT f.sequence,f.feed_sha256,f.key_id,f.feed_size,f.signature_sha256,f.signature_size," +
-            "o.request_digest,o.operation_kind,o.status FROM trusted_update_feed_heads h LEFT JOIN trusted_update_feeds f " +
+            "o.request_digest,o.operation_kind,o.status FROM system.trusted_update_feed_heads h LEFT JOIN system.trusted_update_feeds f " +
             "ON f.format=h.format AND f.channel=h.channel AND f.sequence=h.sequence AND f.feed_sha256=h.feed_sha256 " +
-            "LEFT JOIN operations o ON o.operation_id=f.first_operation_id WHERE h.format='nexus.update.feed' AND h.channel=$channel;";
+            "LEFT JOIN main.operations o ON o.operation_id=f.first_operation_id WHERE h.format='nexus.update.feed' AND h.channel=$channel;";
         command.Parameters.AddWithValue("$channel", Channel(channel));
         SavedUpdateFeed? result;
         using (var row = command.ExecuteReader()) result = row.Read() ? Read(row, channel) : null;
-        command.CommandText = "SELECT sequence,feed_sha256 FROM trusted_update_feeds WHERE format='nexus.update.feed' " +
+        command.CommandText = "SELECT sequence,feed_sha256 FROM system.trusted_update_feeds WHERE format='nexus.update.feed' " +
             "AND channel=$channel ORDER BY sequence DESC LIMIT 1;";
         using var latest = command.ExecuteReader();
         if (latest.Read())
@@ -34,7 +34,7 @@ internal static class UpdateFeedRows
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT f.sequence,f.feed_sha256,f.key_id,f.feed_size,f.signature_sha256,f.signature_size," +
-            "o.request_digest,o.operation_kind,o.status FROM trusted_update_feeds f LEFT JOIN operations o " +
+            "o.request_digest,o.operation_kind,o.status FROM system.trusted_update_feeds f LEFT JOIN main.operations o " +
             "ON o.operation_id=f.first_operation_id WHERE f.format='nexus.update.feed' AND f.channel=$channel AND f.sequence=$seq;";
         command.Parameters.AddWithValue("$channel", Channel(expected.Identity.Channel));
         command.Parameters.AddWithValue("$seq", expected.Identity.Sequence);
@@ -52,7 +52,7 @@ internal static class UpdateFeedRows
             return;
         }
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "INSERT INTO trusted_update_feeds(format,channel,sequence,feed_sha256,key_id,feed_size," +
+        command.CommandText = "INSERT INTO system.trusted_update_feeds(format,channel,sequence,feed_sha256,key_id,feed_size," +
             "signature_sha256,signature_size,first_operation_id) VALUES('nexus.update.feed',$channel,$seq,$sha,$key,$size,$sig,$sigsize,$operation);";
         command.Parameters.AddWithValue("$channel", Channel(proposed.Identity.Channel));
         command.Parameters.AddWithValue("$seq", proposed.Identity.Sequence);
@@ -63,7 +63,7 @@ internal static class UpdateFeedRows
         command.Parameters.AddWithValue("$sigsize", proposed.Signature.SizeBytes);
         command.Parameters.AddWithValue("$operation", operationId.ToString("D"));
         command.ExecuteNonQuery();
-        command.CommandText = "INSERT INTO trusted_update_feed_heads(format,channel,sequence,feed_sha256) " +
+        command.CommandText = "INSERT INTO system.trusted_update_feed_heads(format,channel,sequence,feed_sha256) " +
             "VALUES('nexus.update.feed',$channel,$seq,$sha) ON CONFLICT(format,channel) " +
             "DO UPDATE SET sequence=excluded.sequence,feed_sha256=excluded.feed_sha256;";
         command.ExecuteNonQuery();

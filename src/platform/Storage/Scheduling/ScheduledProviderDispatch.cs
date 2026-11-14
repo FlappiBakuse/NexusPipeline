@@ -61,7 +61,7 @@ internal sealed class ScheduledProviderDispatch : IPlannedInvocationAuthorizatio
         if (canCommit && (_scanned is null || currentMinute > _scanned))
         {
             ScheduleMinuteDocument? minute;
-            using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true))
+            using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.System))
             using (var transaction = connection.BeginTransaction(deferred: true))
             {
                 var current = _clock.GetUtcNow().ToUnixTimeSeconds() / 60;
@@ -151,7 +151,7 @@ internal sealed class ScheduledProviderDispatch : IPlannedInvocationAuthorizatio
         _lease.PublishExecution(() =>
         {
             work.Use(_publication, () => true);
-            using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+            using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
             using var transaction = connection.BeginTransaction(deferred: true);
             var verified = new ScheduledProviderEvidence(_instance, _contracts).Read(work.Source.Reference, connection, transaction);
             if (verified.Source.Reference != work.Source.Reference || verified.Source.Document.Creator != JournalWriterStore.CurrentWriter ||

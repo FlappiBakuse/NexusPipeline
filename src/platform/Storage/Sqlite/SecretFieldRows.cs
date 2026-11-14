@@ -10,7 +10,7 @@ internal static class SecretFieldRows
         RequireDatabaseKey(connection, transaction, key);
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT revision,secret_id FROM secret_fields WHERE owner_kind=$kind AND owner_id=$owner AND subject_id=$subject AND field=$field;";
+        command.CommandText = "SELECT revision,secret_id FROM system.secret_fields WHERE owner_kind=$kind AND owner_id=$owner AND subject_id=$subject AND field=$field;";
         BindKey(command, key);
         using var reader = command.ExecuteReader();
         return reader.Read() ? new(reader.GetInt64(0), reader.IsDBNull(1) ? null : Guid.Parse(reader.GetString(1))) : new(0, null);
@@ -26,7 +26,7 @@ internal static class SecretFieldRows
         ArgumentNullException.ThrowIfNull(key);
         if (key.OwnerKind == FieldOwnerKind.Extension) return;
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT instance_id FROM schema_info WHERE singleton=1;";
+        command.CommandText = "SELECT instance_id FROM main.schema_info WHERE singleton=1;";
         var expected = key.OwnerKind == FieldOwnerKind.Host ? key.SubjectId : key.OwnerInstanceId;
         if ((string?)command.ExecuteScalar() != expected?.ToString("D"))
             throw new IOException(key.OwnerKind == FieldOwnerKind.Host ? "secret_host_instance_unbound" : "secret_notification_instance_unbound");

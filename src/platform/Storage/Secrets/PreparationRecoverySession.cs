@@ -42,7 +42,7 @@ internal sealed class PreparationRecoverySession : IDisposable
             var state = State(); var closed = state is SecretPreparationState.Published or SecretPreparationState.Cancelled;
             if (!closed)
             {
-                using var keyConnection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+                using var keyConnection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System);
                 _held.Add(SecretReplayProof.Hold(instance, keyConnection));
             }
             VerifySql(closed, state, physical);
@@ -111,7 +111,7 @@ internal sealed class PreparationRecoverySession : IDisposable
     private void VerifySql(bool closed, SecretPreparationState state, JournalDocument? physical)
     {
         var plan = _frozen.ReadWire();
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         SecretPreparationRows.VerifyPlan(connection, transaction, plan);
         var identity = SecretFieldStore.Identity(Guid.Parse(plan.OperationId), SecretPreparationRows.Key(plan), plan.ExpectedRevision, SecretDisposition.Set);
@@ -164,14 +164,14 @@ internal sealed class PreparationRecoverySession : IDisposable
 
     private bool BeforeMatches()
     {
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         using var transaction = connection.BeginTransaction(deferred: true);
         try { SecretPreparationRows.VerifyBefore(connection, transaction, _frozen.ReadWire()); return true; }
         catch (InvalidOperationException) { return false; }
     }
     private SecretPreparationState State()
     {
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         return SecretPreparationRows.Read(connection, null, Guid.Parse(_frozen.ReadWire().OperationId), _frozen.ReadWire().ReplayProof);
     }
     private FileEffect Effect() => new FileEffectOutbox(_database).Read(_journal.Id).Single();

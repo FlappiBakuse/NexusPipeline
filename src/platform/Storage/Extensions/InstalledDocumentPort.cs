@@ -21,7 +21,7 @@ internal sealed class InstalledDocumentPort(StateDatabase database, ResourceLeas
     {
         RequireName(name); cancellationToken.ThrowIfCancellationRequested();
         using var use = await consumption.BeginAsync(cancellationToken).ConfigureAwait(false);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System);
         var result = ExtensionDocumentRows.Read(connection, null, extensionId, name);
         use.RequireCurrent(); cancellationToken.ThrowIfCancellationRequested();
         return result;
@@ -60,7 +60,7 @@ internal sealed class InstalledDocumentPort(StateDatabase database, ResourceLeas
         if (operationId == Guid.Empty) throw new ArgumentException("extension_document_operation_invalid");
         cancellationToken.ThrowIfCancellationRequested();
         using var use = consumption.Begin();
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System);
         var result = ExtensionDocumentRows.ReadCommit(connection, null, operationId, extensionId, consumption.SubjectId);
         use.RequireCurrent(); return ValueTask.FromResult(result);
     }

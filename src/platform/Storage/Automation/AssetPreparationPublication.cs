@@ -49,9 +49,9 @@ internal sealed class AssetPreparationPublication(RuntimeInstance instance, Cont
             var state = cancelled ? AutomationImportState.Cancelled : AutomationImportState.Published;
             var reason = cancelled ? "asset_preparation_not_executed" : "automation_import_published";
             AutomationRowWriter.Row(connection, transaction,
-                "UPDATE automation_imports SET state=$0,catalog_revision=$1,reason_code=$2 WHERE operation_id=$3 AND state=0;",
+                "UPDATE automation.automation_imports SET state=$0,catalog_revision=$1,reason_code=$2 WHERE operation_id=$3 AND state=0;",
                 (int)state, next.Revision, reason, accepted.OperationId);
-            AutomationRowWriter.Row(connection, transaction, "UPDATE operations SET status='completed' WHERE operation_id=$0;", accepted.OperationId);
+            AutomationRowWriter.Row(connection, transaction, "UPDATE main.operations SET status='completed' WHERE operation_id=$0;", accepted.OperationId);
             var registered = RecoveryJournalRegistry.ReadInside(connection, transaction, accepted.JournalId ?? throw new IOException("asset_publication_journal_missing"));
             new RecoveryJournalRegistry(database).AdvanceInside(connection, transaction,
                 registered with { Phase = JournalPhase.Committed, Revision = committed.Revision }, registered.Revision,
@@ -65,19 +65,19 @@ internal sealed class AssetPreparationPublication(RuntimeInstance instance, Cont
         if (definitions.Scripts.IsEmpty) throw new IOException("asset_publication_requires_script_owner");
         foreach (var asset in plan.Assets)
         {
-            AutomationRowWriter.Row(connection, transaction, "INSERT INTO blobs VALUES($0,$1,$2) ON CONFLICT(digest) DO NOTHING;",
+            AutomationRowWriter.Row(connection, transaction, "INSERT INTO content.blobs VALUES($0,$1,$2) ON CONFLICT(digest) DO NOTHING;",
                 asset.Content.Sha256, asset.Content.SizeBytes, asset.Content.RelativePath);
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
-            command.CommandText = "SELECT size_bytes,relative_path FROM blobs WHERE digest=$digest;";
+            command.CommandText = "SELECT size_bytes,relative_path FROM content.blobs WHERE digest=$digest;";
             command.Parameters.AddWithValue("$digest", asset.Content.Sha256);
             using (var reader = command.ExecuteReader())
                 if (!reader.Read() || reader.GetInt64(0) != asset.Content.SizeBytes || reader.GetString(1) != asset.Content.RelativePath)
                     throw new IOException("asset_publication_blob_conflict");
-            AutomationRowWriter.Row(connection, transaction, "INSERT INTO automation_assets VALUES($0,$1,$2,$3);",
+            AutomationRowWriter.Row(connection, transaction, "INSERT INTO automation.automation_assets VALUES($0,$1,$2,$3);",
                 Guid.Parse(asset.AssetId), Guid.Parse(plan.OperationId), asset.PackagePath, asset.Content.Sha256);
             foreach (var script in definitions.Scripts)
-                AutomationRowWriter.Row(connection, transaction, "INSERT INTO automation_asset_owners VALUES($0,$1);", Guid.Parse(asset.AssetId), script.Id);
+                AutomationRowWriter.Row(connection, transaction, "INSERT INTO automation.automation_asset_owners VALUES($0,$1);", Guid.Parse(asset.AssetId), script.Id);
         }
     }
 }

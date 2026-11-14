@@ -35,7 +35,7 @@ internal sealed class NotificationCatalogPreparation(RuntimeInstance instance, S
         RequireEdits(request, edits);
         var codec = new NotificationCatalogCodec(instance, contracts);
         NotificationCatalogCursor? cursor;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System))
             cursor = NotificationCatalogRows.ReadCurrent(connection, null);
         var before = cursor is null ? codec.Persist(NotificationTaskCatalog.Empty) : codec.Read(cursor.Reference);
         if (cursor is not null && before.Catalog.Revision != cursor.Revision) throw new IOException("notification_catalog_cursor_unbound");
@@ -122,7 +122,7 @@ internal sealed class NotificationCatalogPreparation(RuntimeInstance instance, S
             {
                 var key = SecretFieldKey.NotificationTask(instance.InstanceId, request.TaskId!.Value, field);
                 var child = SecretFieldStore.Identity(NotificationPublicationCodec.ChildOperation(operationId, field), key, before.Revision, disposition);
-                using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+                using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
                 proof = SecretReplayProof.Compute(instance, connection, child, edit!.Value!);
             }
             return new NotificationSecretRequest(field, disposition, before, proof);

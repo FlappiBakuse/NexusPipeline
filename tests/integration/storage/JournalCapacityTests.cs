@@ -38,7 +38,7 @@ public sealed class JournalCapacityTests
         var after = new RecoveryJournalRegistry(source.Database).ReadActiveSnapshot();
         Assert.Equal(before.Revision, after.Revision);
         Assert.Equal(before.Isolations, after.Isolations);
-        using var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true);
+        using var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         Assert.Null(OperationRows.ReadOwned(connection, transaction, operation, "capacity-fixture"));
     }

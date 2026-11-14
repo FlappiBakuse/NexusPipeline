@@ -52,12 +52,12 @@ internal sealed class ExecutionNotificationSource
         var routes = ReadRoutes(total, bundle);
         var facts = OrderedFacts(bound.Plan, total, parsed.RootElement, receipt);
         string subject;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var transaction = connection.BeginTransaction(deferred: true))
         {
             RequirePublishedRecord(connection, transaction, receipt);
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT subject_id FROM operations WHERE operation_id=$operation AND operation_kind='execution.start' AND status='completed';";
+            command.CommandText = "SELECT subject_id FROM main.operations WHERE operation_id=$operation AND operation_kind='execution.start' AND status='completed';";
             command.Parameters.AddWithValue("$operation", receipt.OperationId.ToString("D"));
             subject = command.ExecuteScalar() as string ?? throw Invalid();
             transaction.Commit();
@@ -83,7 +83,7 @@ internal sealed class ExecutionNotificationSource
         if (AttemptReceiptStore.ReadInside(connection, transaction, receipt.Facts.AttemptId) != receipt) throw Invalid();
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT attempt_id,attempt_ordinal,engine_outcome,business_outcome,lifecycle_outcome,recovery_outcome,reason_code " +
-            "FROM run_records WHERE run_id=$run;";
+            "FROM records.run_records WHERE run_id=$run;";
         command.Parameters.AddWithValue("$run", receipt.Facts.RunId.ToString("D"));
         using var row = command.ExecuteReader(); var facts = receipt.Facts;
         if (!row.Read() || row.GetString(0) != facts.AttemptId.ToString("D") || row.GetInt32(1) != facts.Ordinal ||

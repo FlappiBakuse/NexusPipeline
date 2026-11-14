@@ -46,6 +46,7 @@ public sealed class SettingsStoreTests
         Assert.Equal(new[] { new ExtensionPreference("retained-extension", false) }, store.Read().Values.Extensions);
         var automatic = store.Read().Values with { Service = values.Service with { WebPort = 0, McpEnabled = true } };
         Save(store, new(2, automatic));
+        lease.Dispose();
         var current = StateDatabase.OpenExisting(fixture.Instance, Path.Combine(fixture.Root, "automatic-reopen"),
             new JournalStartupAdmission(fixture.Instance, new()));
         AssertSame(new(3, automatic), new HostSettingsStore(current).Read());
@@ -100,10 +101,10 @@ public sealed class SettingsStoreTests
         var values = HostSettings.Default with { HistoryRetentionDays = fault == "invalid" ? 0 : 20, AutoStart = fault == "startup-effect" };
         var change = new HostSettingsChange(0, values);
         if (fault == "sql-failure") Sql(fixture.Database,
-            "CREATE TRIGGER reject_settings BEFORE INSERT ON settings_mutations BEGIN SELECT RAISE(ABORT,'fixture-failure'); END;");
+            "CREATE TRIGGER system.reject_settings BEFORE INSERT ON settings_mutations BEGIN SELECT RAISE(ABORT,'fixture-failure'); END;");
         Assert.NotNull(Record.Exception(() => fixture.Store.Commit(HostSettingsStore.Identity(id, "fixture", change), change, DateTimeOffset.UtcNow)));
         AssertSame(new(0, HostSettings.Default), fixture.Store.Read());
-        if (fault == "sql-failure") Sql(fixture.Database, "DROP TRIGGER reject_settings;");
+        if (fault == "sql-failure") Sql(fixture.Database, "DROP TRIGGER system.reject_settings;");
         var corrected = new HostSettingsChange(0, HostSettings.Default with { HistoryRetentionDays = 40 });
         Assert.True(fixture.Store.Commit(HostSettingsStore.Identity(id, "fixture", corrected), corrected, DateTimeOffset.UtcNow).IsNew);
     }
@@ -114,7 +115,7 @@ public sealed class SettingsStoreTests
     public void PreservesUnknownSettings(string fault)
     {
         var fixture = Create();
-        Sql(fixture.Database, fault == "missing-current" ? "DELETE FROM settings_current;" : "UPDATE settings_snapshots SET proxy_url='file:///private';");
+        Sql(fixture.Database, fault == "missing-current" ? "DELETE FROM system.settings_current;" : "UPDATE system.settings_snapshots SET proxy_url='file:///private';");
         var before = Fingerprints(fixture.Database);
         Assert.NotNull(Record.Exception(() => StateDatabase.OpenExisting(fixture.Instance, Path.Combine(fixture.Root, "diagnostics"),
             new JournalStartupAdmission(fixture.Instance, new()))));
@@ -137,7 +138,7 @@ public sealed class SettingsStoreTests
 
     private static void Sql(StateDatabase database, string sql)
     {
-        using var connection = new SqliteConnection($"Data Source={database.DatabasePath};Pooling=False");
+        using var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open($"Data Source={database.DatabasePath};Pooling=False");
         connection.Open();
         using var command = connection.CreateCommand();
         command.CommandText = sql;

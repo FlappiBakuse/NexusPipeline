@@ -86,7 +86,7 @@ public sealed class ManualStoreTests
         fixture.Catalog.Database.Write((connection, transaction) =>
         {
             using var update = connection.CreateCommand(); update.Transaction = transaction;
-            update.CommandText = "UPDATE manual_work_runs SET relative_path=$path,size_bytes=$size,sha256=$sha WHERE operation_id=$id;";
+            update.CommandText = "UPDATE main.manual_work_runs SET relative_path=$path,size_bytes=$size,sha256=$sha WHERE operation_id=$id;";
             update.Parameters.AddWithValue("$path", replacement.RelativePath); update.Parameters.AddWithValue("$size", replacement.SizeBytes);
             update.Parameters.AddWithValue("$sha", replacement.Sha256); update.Parameters.AddWithValue("$id", operation.ToString("D"));
             return update.ExecuteNonQuery();
