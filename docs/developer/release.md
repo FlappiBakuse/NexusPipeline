@@ -107,7 +107,7 @@ production 只接收 production 入口，所有检查直接读取 bundle。
 
 装配根直接包含 `NexusPipeline.exe`、`NexusPipeline.update.exe`、`README.md`、
 `resources/desktop` 和 `resources/payload-manifest.json`。内部程序集身份保持 Host/Maintenance。
-默认插件的原始签名包与分发元数据位于 `plugins/EmulatorSupport`、`plugins/LiveScreenshot`。
+默认插件作为一次性初始化输入单独登记于装配回执的 `initialExtensions`，不属于应用文件清单。Portable 将签名目录、选项及两个包放入 `package-info/initial-extensions`；Setup 仅在安装器内部封装并释放到安装临时区。初始化成功后清理输入，更新包不携带这些材料。唯一插件加载目录为 `runtime/extensions`。
 无参数启动使用装配根下的 `runtime`；本机装配回执与已有用户数据留在该根，公共 ZIP 排除这些内容。
 
 公开清单 schemaVersion=2，installationGeneration=g0180，文件使用 path/sizeBytes/sha256/kind。

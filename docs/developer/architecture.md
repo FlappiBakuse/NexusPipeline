@@ -60,7 +60,7 @@ Host 消费注册的卡片贡献、manifest 元数据、静态图片和 emulator
 
 模拟器 provider 声明枚举参数、安装提示、配置扩展名、安装目录规则，以及选中实例的目录证据和启动/退出命令。Host 校验有界输入、根目录、工具物理身份、安装及授权代次，并将 provider 身份和命令封入执行证据；运行前再次要求相同 provider 解释当前源。旧选择缺少 provider 身份时仅接受唯一已发布 provider。MuMu 由宿主现役 Android 驱动实现。
 
-预装范围由 Plugins 的构建声明决定；包回执传递 `bundledByDefault`，签名本地商店回执携带预装选择，产品装配据此复制已核验包。默认安装器从实际随软件交付的目录读取签名 catalog，并将目录名绑定 catalog artifact；不维护固定插件名单。原生依赖准备由 Plugins 工具提供。
+预装范围由 Plugins 的构建声明决定；包回执传递 `bundledByDefault`，签名本地商店回执携带预装选择，产品装配据此复制已核验包。首次初始化从已核验的签名 catalog 与一次性选择清单安装，输入独立于应用文件归属，完成后清理；不维护固定插件名单。原生依赖准备由 Plugins 工具提供。
 
 编译/AST 边界检查拒绝产品代码按固定 extensionId/providerId 分支。宿主测试保留通用授权、生命周期和显式消费真实插件包的集成场景。插件协议输出与厂商模拟行为位于 Plugins 的 `tests/host-fixtures`，由显式测试输入编译到所属 fixture；不进入 Host 产品。
 

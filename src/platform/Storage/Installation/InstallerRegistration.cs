@@ -141,7 +141,7 @@ internal sealed class InstallerRegistration(InstallerPaths paths, string profile
         new InstallerTransition(paths, profile).Apply(root, transactionId, payloadRoot, workRoot);
     }
 
-    internal InstallationIdentity Register(string root, Guid transactionId)
+    internal InstallationIdentity Register(string root, Guid transactionId, string? initialExtensions = null)
     {
         if (!Directory.Exists(CheckpointRoot))
         {
@@ -169,6 +169,8 @@ internal sealed class InstallerRegistration(InstallerPaths paths, string profile
         if (runtime.InstanceId != identity.RuntimeId || PhysicalObjectIdentity.Read(runtime.RuntimeRoot) != identity.RuntimeIdentity)
             throw InstallationIdentityCodec.Invalid();
         using var lease = InstanceLease.AcquireInstaller(runtime, new ContractReader(), frame.SetupOwner);
+        if (initialExtensions is not null && original is null)
+            InstallerInitialExtensions.InstallAsync(runtime, lease, root, initialExtensions).GetAwaiter().GetResult();
         publication.Publish(frame);
         _store.Observe(root, transactionId);
         var installed = new InstallationAnchor(paths.ManagerRoot, paths.RegistryKey).Read(root);

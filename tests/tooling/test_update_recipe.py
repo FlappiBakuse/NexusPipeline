@@ -39,7 +39,7 @@ class RecipeTests(unittest.TestCase):
     def test_writes_complete(self):
         raw = canonical(self.application)
         (self.root / MANIFEST).write_bytes(raw)
-        bundle_name = 'plugins/EmulatorSupport/EmulatorSupport-0.5.0.zip'
+        bundle_name = 'package-info/initial-extensions/EmulatorSupport-0.5.0.zip'
         path = self.root / bundle_name
         path.parent.mkdir(parents=True)
         path.write_bytes(b'controlled bundle')

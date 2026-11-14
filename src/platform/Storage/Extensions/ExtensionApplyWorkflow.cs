@@ -58,9 +58,26 @@ internal sealed class ExtensionApplyWorkflow(RuntimeInstance instance, StateData
         VerifiedExtensionPackage.Candidate? candidate, Action<PayloadAcceptanceResult> accepted, CancellationToken cancellation)
     {
         using var root = await AcquireAsync(operationId, () => Claims(request, operationId), cancellation).ConfigureAwait(false);
+        return await ApplyReservedAsync(root, subject, request, candidate, accepted, cancellation).ConfigureAwait(false);
+    }
+
+    internal async Task<bool> RemoveMissingAsync(ExtensionApplyRequest request, CancellationToken cancellation)
+    {
+        lease.VerifyHeld(instance); Publish(); cancellation.ThrowIfCancellationRequested();
+        var operation = Guid.NewGuid();
+        using var root = resources.TryAcquire(operation, Claims(request, operation)).Lease;
+        if (root is null) return false;
+        _ = await ApplyReservedAsync(root, "host:external-removal", request, null, _ => { }, cancellation, true).ConfigureAwait(false);
+        return true;
+    }
+
+    private async Task<ExtensionApplyCompletion> ApplyReservedAsync(ResourceOperationLease root, string subject,
+        ExtensionApplyRequest request, VerifiedExtensionPackage.Candidate? candidate,
+        Action<PayloadAcceptanceResult> accepted, CancellationToken cancellation, bool externalRemoval = false)
+    {
         using var prepared = PreparedExtensionPayload.Prepare(instance, database, lease, resources, recovery, root,
             request.Action, request.ExtensionId, request.ExpectedInstalledRevision, request.ExpectedSettingsRevision,
-            candidate, roots, contracts, subject, cancellation);
+            candidate, roots, contracts, subject, cancellation, externalRemoval);
         cancellation.ThrowIfCancellationRequested();
         var acceptance = new PayloadApplyAcceptance(instance, contracts, database, roots, observer)
             .AcceptPrepared(prepared, DateTimeOffset.UtcNow);

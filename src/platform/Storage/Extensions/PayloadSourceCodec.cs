@@ -45,6 +45,15 @@ internal sealed class PayloadSourceCodec(RuntimeInstance instance, ContractReade
             source.OperationId != plan.OperationId || source.JournalId != plan.JournalId ||
             source.ExtensionId != plan.ExtensionId || source.Action != plan.Action ||
             !source.Claims.Select(claim => claim.ResourceKey).SequenceEqual(plan.ResourceKeys)) throw Invalid();
+        if (plan.Action == PayloadAction.Remove && plan.Before.Snapshot.Shape == NexusPipeline.Core.Configuration.FileObjectKind.Missing &&
+            source.RemovalReason != "external-removal") throw Invalid();
+        if (source.RemovalReason == "files-changed" && plan.Before.Snapshot.Shape != NexusPipeline.Core.Configuration.FileObjectKind.Directory)
+            throw Invalid();
+        if (source.RemovalReason == "external-removal")
+        {
+            if (source.Action != PayloadAction.Remove || plan.Before.Snapshot.Shape != NexusPipeline.Core.Configuration.FileObjectKind.Missing)
+                throw Invalid();
+        }
         var targetEntry = PhysicalResourceAdmission.EntryKey(plan.ParentIdentity, Path.GetFileName(plan.TargetPath));
         var workspaceEntry = PhysicalResourceAdmission.EntryKey(plan.ParentIdentity, Path.GetFileName(ExtensionWorkspacePath.For(plan)));
         if (!source.Claims.Any(claim => claim.ResourceKey == targetEntry && claim.Mode == ResourceClaimMode.Mutation) ||
@@ -94,7 +103,7 @@ internal sealed class PayloadSourceCodec(RuntimeInstance instance, ContractReade
 
     internal BlobReference? ReadOriginalArchive(ExtensionPayloadSource source, FrozenPayloadApply plan, PayloadApplyRoots roots)
     {
-        if (plan.Before.Snapshot.Shape == NexusPipeline.Core.Configuration.FileObjectKind.Missing) return null;
+        if (source.RemovalReason == "files-changed" || plan.Before.Snapshot.Shape == NexusPipeline.Core.Configuration.FileObjectKind.Missing) return null;
         var original = new InstalledFootprintCodec(instance, roots, contracts)
             .ReadMetadata(source.OriginalFootprint ?? throw Invalid());
         if (!original.IsInstalled || original.ExtensionId != source.ExtensionId ||
@@ -131,6 +140,8 @@ internal sealed class PayloadSourceCodec(RuntimeInstance instance, ContractReade
             source.ExtensionId[0] is not (>= 'a' and <= 'z') || source.ExtensionId[^1] == '-' ||
             source.ExtensionId.Contains("--", StringComparison.Ordinal) ||
             source.ExtensionId.Any(c => c is not (>= 'a' and <= 'z' or >= '0' and <= '9' or '-'))) throw Invalid();
+        if (source.RemovalReason is not null && (source.Action != PayloadAction.Remove ||
+            source.RemovalReason is not ("external-removal" or "files-changed"))) throw Invalid();
         if (source.Action is PayloadAction.Remove or PayloadAction.Upgrade && source.ExpectedInstalledRevision == 0 ||
             (source.ExpectedInstalledRevision == 0) != (source.OriginalFootprint is null) ||
             (source.Action == PayloadAction.Remove) != (source.Package is null)) throw Invalid();

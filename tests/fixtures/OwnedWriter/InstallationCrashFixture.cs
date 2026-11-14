@@ -17,7 +17,7 @@ internal static class InstallationCrashFixture
         Guid OperationId, byte[] PublicKey, string Point, string AcceptedReport, string BarrierReport,
         string? NextArchive = null, byte[]? NextPointer = null, byte[]? NextCatalog = null, byte[]? NextSignature = null,
         PayloadAction? FollowupAction = null, Guid? InitialOperationId = null, string? PhysicalStage = null,
-        string ExtensionId = "fixture-plugin", bool Media = false);
+        string ExtensionId = "fixture-plugin", bool Media = false, bool ExternalRemoval = false);
 
     internal static async Task<int> RunAsync(string[] args)
     {
@@ -60,6 +60,11 @@ internal static class InstallationCrashFixture
             {
                 if (followup is not (PayloadAction.Upgrade or PayloadAction.Remove) || input.InitialOperationId is null) return 2;
                 original = await Apply(input.InitialOperationId.Value, PayloadAction.Install, input.Archive, false);
+                if (input.ExternalRemoval)
+                {
+                    if (followup != PayloadAction.Remove) return 2;
+                    Directory.Delete(target, recursive: true);
+                }
                 if (followup == PayloadAction.Upgrade)
                     _ = catalog.Accept(Guid.NewGuid(), "local", verifier.Verify(input.NextPointer!,
                         input.NextCatalog!, input.NextSignature!, ExtensionStoreChannel.Stable));
@@ -98,7 +103,8 @@ internal static class InstallationCrashFixture
                 var candidate = package?.CaptureCandidate(root, new ImmutableBlobStore(instance, contracts), default);
                 using var prepared = PreparedExtensionPayload.Prepare(instance, database, lease, resources, index, root,
                     action, input.ExtensionId, action == PayloadAction.Install ? 0 : 1,
-                    new HostSettingsStore(database).Read().Revision, candidate, roots, contracts, "local:installation-owner", default);
+                    new HostSettingsStore(database).Read().Revision, candidate, roots, contracts, "local:installation-owner", default,
+                    input.ExternalRemoval && action == PayloadAction.Remove);
                 var accepted = new PayloadApplyAcceptance(instance, contracts, database, roots).AcceptPrepared(prepared, DateTimeOffset.UtcNow);
                 if (monitored)
                     OwnedFixtureEvidence.WriteReport(input.AcceptedReport, new

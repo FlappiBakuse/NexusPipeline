@@ -117,11 +117,11 @@ internal sealed class PublishedUpdateInputs : IDisposable
     {
         using var zip = ZipFile.OpenRead(_archive);
         var expected = _assembly.RootElement.GetProperty("files").EnumerateArray()
-            .Select(item => item.GetProperty("path").GetString()!).Where(name => !name.StartsWith("plugins/", StringComparison.Ordinal))
+            .Select(item => item.GetProperty("path").GetString()!)
             .Concat(UpdateRecipe.Metadata).Order(StringComparer.Ordinal).ToArray();
         Assert.Equal(expected, zip.Entries.Select(entry => entry.FullName).Order(StringComparer.Ordinal).ToArray());
         zip.ExtractToDirectory(target);
-        VerifyPayload(target, derived: false, bundled: false);
+        VerifyPayload(target, derived: false);
         if (_derived.Count != 0)
         {
             foreach (var (relative, input) in _derived)
@@ -142,12 +142,12 @@ internal sealed class PublishedUpdateInputs : IDisposable
             new(desktop ? UpdateWindowMode.Desktop : UpdateWindowMode.Headless, desktop, desktop ? "/settings" : "/"));
     }
 
-    internal void VerifyPayload(string root, bool derived = true, bool bundled = true)
+    internal void VerifyPayload(string root, bool derived = true)
     {
         var files = _assembly.RootElement.GetProperty("files").EnumerateArray()
-            .Where(item => bundled || !item.GetProperty("path").GetString()!.StartsWith("plugins/", StringComparison.Ordinal)).ToArray();
+            .ToArray();
         var expectedNames = files.Select(item => item.GetProperty("path").GetString()!)
-            .Where(name => !name.StartsWith("plugins/", StringComparison.Ordinal)).Order(StringComparer.Ordinal);
+            .Order(StringComparer.Ordinal);
         Assert.Equal(expectedNames, ApplicationTree.Capture(new(SnapshotBudget.Default), root, default).Entries
             .Where(entry => entry.Kind == FileObjectKind.File).Select(entry => entry.RelativePath).Order(StringComparer.Ordinal));
         foreach (var item in files)

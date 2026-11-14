@@ -1,6 +1,6 @@
 {
   "algorithm": "nexus-sdk-source-manifest-sha256-v1",
-  "sourceFingerprint": "f034beb5e5609c7e3f3f756c71e1a4707306891ac331b7e588e81db9bfe89556",
+  "sourceFingerprint": "2721e9aa536475e8f8b98b0646b60ead043a61c2c59fe14e7099e5c115e4224b",
   "inputs": [
     {
       "path": "Directory.Build.props",
@@ -629,8 +629,8 @@
     },
     {
       "path": "contracts/schemas/payload-apply-plan.schema.json",
-      "sizeBytes": 5355,
-      "sha256": "d1f7c1de1bd50cd36701fcd460bcb6301fc0295ae20b5a8bf032d0c27f6c47eb"
+      "sizeBytes": 5367,
+      "sha256": "f1ebd676709447a7f48051c7030d05a3ecfe94e9834f5f3f17423086ee777d8d"
     },
     {
       "path": "contracts/schemas/run-attempt-plan.schema.json",

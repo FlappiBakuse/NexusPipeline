@@ -59,7 +59,7 @@ internal sealed class PreparedExtensionPayload : IDisposable
         InstanceLease lease, ResourceLeaseManager resources, IRecoveryIndex recovery, ResourceOperationLease root,
         PayloadAction action, string extensionId, long expectedInstalledRevision, long expectedSettingsRevision,
         VerifiedExtensionPackage.Candidate? candidate, PayloadApplyRoots roots, ContractReader contracts,
-        string subject, CancellationToken cancellation)
+        string subject, CancellationToken cancellation, bool externalRemoval = false)
     {
         lease.VerifyHeld(instance);
         if (database.InstanceId != instance.InstanceId ||
@@ -100,9 +100,11 @@ internal sealed class PreparedExtensionPayload : IDisposable
             {
                 parent = StableDirectoryLease.Acquire(parentPath);
                 var parentIdentity = PhysicalObjectIdentity.Read(parentPath);
-                var before = original?.Footprint.Payload ?? Missing();
+                if (externalRemoval && (action != PayloadAction.Remove || original?.Metadata.IsInstalled != true)) throw Invalid();
                 if (original is not null && (original.Footprint.TargetPath != target ||
                     original.Footprint.ParentIdentity != parentIdentity)) throw Invalid();
+                var observation = RemovalObservation.Read(action, externalRemoval, target, original?.Footprint, new(instance, contracts), cancellation);
+                var before = observation.Before;
                 using var held = TreeReadLease.Acquire(target, parentIdentity, before);
                 RequireBefore();
                 var blobs = new ImmutableBlobStore(instance, contracts);
@@ -152,7 +154,8 @@ internal sealed class PreparedExtensionPayload : IDisposable
                     }
                     var source = new ExtensionPayloadSource(PayloadSourceCodec.Format, 1, instance.InstanceId,
                         root.OperationId, Guid.NewGuid(), extensionId, action, expectedInstalledRevision, original?.Metadata.Footprint,
-                        package, settings.SettingsRevision, settings.DesiredEnabled, claims, settings.InitializeEnabledPreference);
+                        package, settings.SettingsRevision, settings.DesiredEnabled, claims, settings.InitializeEnabledPreference)
+                        { RemovalReason = observation.Reason };
                     var sourceReference = new PayloadSourceCodec(instance, contracts).Persist(source);
                     var plan = new FrozenPayloadApply(instance.InstanceId, root.OperationId, source.JournalId,
                         JournalKind.ExtensionApply, action, extensionId, target, parentIdentity, before, tree,

@@ -173,6 +173,7 @@ internal sealed class ExtensionPhysicalJournal(RuntimeInstance instance, StateDa
         switch (stage)
         {
             case "scope-stopped":
+                if (plan.Action == PayloadAction.Remove && plan.Before.Snapshot.Shape == FileObjectKind.Missing) break;
                 Move(plan.Action == PayloadAction.Remove ? "preserve-original" : "install-candidate",
                     FileEffectState.Pending, FileEffectState.Started); break;
             case "original-preservation-started":

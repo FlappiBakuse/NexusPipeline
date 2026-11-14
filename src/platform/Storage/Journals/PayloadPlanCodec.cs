@@ -72,6 +72,7 @@ public sealed class PayloadPlanCodec(RuntimeInstance instance, ContractReader co
     {
         if (plan.Kind != JournalKind.ExtensionApply) return plan.Before.Contents.Concat(plan.Candidate.Contents).Distinct().ToArray();
         var source = new PayloadSourceCodec(instance, contracts).ReadMetadata(plan.ExtensionSource ?? throw new IOException("extension_payload_source_required"));
+        if (source.RemovalReason == "files-changed") return plan.Before.Contents;
         return source.Package is { } package ? [package.Archive] : [];
     }
 

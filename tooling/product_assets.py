@@ -14,6 +14,7 @@ from build_inputs import python_inputs
 from desktop_bundle import require_no_links
 from application_manifest import MANIFEST, kind
 from product_assembly import owned_inventory
+from initial_extensions import from_assembly, records
 from source_snapshot import write_json
 import update_recipe
 from installer_runtime import render_runtime
@@ -108,16 +109,17 @@ def application_manifest(directory, assembly, version):
         raise ValueError('Application manifest differs from its publication')
     manifest = json.loads(manifest_bytes)
     expected = [dict(**item, kind=kind(item['path'])) for item in assembly['files']
-                if item['path'] != MANIFEST and not item['path'].startswith('plugins/')]
+                if item['path'] != MANIFEST]
     if (manifest['schemaVersion'] != 2 or manifest['installationGeneration'] != 'g0180' or
             manifest['productVersion'] != version or manifest['files'] != expected):
         raise ValueError('Public manifest differs from the assembled application')
     return manifest, manifest_bytes
 
 
-def transport(application, manifest, manifest_bytes, package_kind, bundled):
+def transport(application, manifest, manifest_bytes, package_kind, bundled, initial=None):
     recipe = update_recipe.create(manifest, manifest_bytes, package_kind, bundled_files=bundled)
     files = {item['path']: application / item['path'] for item in recipe['includedFiles'] + recipe['bundledFiles']}
+    files.update(initial or {})
     files.update(update_recipe.guides(recipe))
     files[update_recipe.RECIPE] = update_recipe.encode(recipe)
     size = sum(len(value) if isinstance(value, bytes) else value.stat().st_size for value in files.values())
@@ -142,9 +144,14 @@ def installer(root, application, assembly, version, output, compiler):
         source = application / relative
         suffix = '' if relative.parent == Path('.') else '\\' + str(relative.parent)
         rows.append(f'Source: "{source}"; DestDir: "{{app}}{suffix}"; Flags: ignoreversion; Check: NewInstallation')
-        if not item['path'].startswith('plugins/'):
-            rows.append(f'Source: "{source}"; DestDir: "{{tmp}}\\nexus-transition-payload{suffix}"; '
-                        'Flags: ignoreversion; Check: not NewInstallation')
+        rows.append(f'Source: "{source}"; DestDir: "{{tmp}}\\nexus-transition-payload{suffix}"; '
+                    'Flags: ignoreversion; Check: not NewInstallation')
+    for name, value in from_assembly(assembly).items():
+        source = output / Path(name).name if isinstance(value, bytes) else value
+        if isinstance(value, bytes):
+            source.write_bytes(value)
+        rows.append(f'Source: "{source}"; DestDir: "{{tmp}}\\nexus-initial-extensions"; '
+                    'Flags: ignoreversion deleteafterinstall; Check: NewInstallation')
     pointer = assembly['publishReceipt']
     receipt = Path(pointer['receipt'])
     if hash_file(receipt) != pointer['sha256']:
@@ -202,8 +209,8 @@ def build_locked(args):
         application = args.assembly_root
         base = 'NexusPipeline-v' + version + '-win-x64-'
         manifest, manifest_bytes = application_manifest(application, assembly, version)
-        bundled = [item for item in assembly['files'] if item['path'].startswith('plugins/')]
-        write_archive(run / (base + 'Portable.zip'), transport(application, manifest, manifest_bytes, 'portable', bundled))
+        initial = from_assembly(assembly)
+        write_archive(run / (base + 'Portable.zip'), transport(application, manifest, manifest_bytes, 'portable', records(initial), initial))
         write_archive(run / (base + 'Update.zip'), transport(application, manifest, manifest_bytes, 'update', []))
         report['updateManifestSha256'] = hash_file(application / MANIFEST)
         installer(root, application, assembly, version, run, args.compiler)

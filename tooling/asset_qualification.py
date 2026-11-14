@@ -12,6 +12,7 @@ import uuid
 from binary_inputs import hash_file
 from desktop_bundle import require_no_links
 from product_assembly import ordered_inventory, owned_inventory
+from initial_extensions import records, from_assembly
 from source_snapshot import write_json
 import update_recipe
 
@@ -55,6 +56,11 @@ def probe(application, runtime, output, label, environment):
             installed = [item for item in extensions if item['isInstalled']]
             if len(installed) != 2 or any(not item['activationId'] for item in installed):
                 raise ValueError('Default bundled extensions did not activate')
+            if (application / 'plugins').exists() or (application / 'package-info/initial-extensions').exists():
+                raise ValueError('First-install inputs were not consumed')
+            initialized = json.loads((runtime / 'initial-extensions.json').read_bytes())
+            if not initialized['complete'] or initialized['instanceId'] != ready['instanceId']:
+                raise ValueError('First-install completion was not bound to this instance')
             return dict(processId=process.pid, instanceId=ready['instanceId'], extensions=installed)
         finally:
             if process.poll() is None:
@@ -62,11 +68,11 @@ def probe(application, runtime, output, label, environment):
             process.wait(timeout=20)
 
 
-def extract(portable, destination, records):
+def extract(portable, destination, application_records, initial_records):
     destination.mkdir()
     with zipfile.ZipFile(portable) as archive:
         metadata = {update_recipe.RECIPE, *update_recipe.GUIDES}
-        expected = {record['path'] for record in records} | metadata
+        expected = {record['path'] for record in application_records + initial_records} | metadata
         if len(archive.namelist()) != len(expected) or set(archive.namelist()) != expected:
             raise ValueError('Portable contains an unexpected or repeated member')
         for name in archive.namelist():
@@ -75,17 +81,17 @@ def extract(portable, destination, records):
                 raise ValueError('Portable member escapes its destination')
         recipe = update_recipe.parse(archive.read(update_recipe.RECIPE))
         declared = recipe['includedFiles'] + recipe['bundledFiles']
-        if recipe['packageKind'] != 'portable' or sorted(declared, key=lambda item: item['path']) != records:
+        if recipe['packageKind'] != 'portable' or sorted(declared, key=lambda item: item['path']) != sorted(application_records + initial_records, key=lambda item: item['path']):
             raise ValueError('Portable recipe differs from the assembly')
         archive.extractall(destination)
-    if owned_inventory(destination, records) != records:
+    if owned_inventory(destination, application_records) != application_records:
         raise ValueError('Extracted Portable differs from the assembly')
 
 
 def reject_missing_runtime(application, output, environment):
     empty = output / 'empty-dotnet'
     empty.mkdir()
-    missing = dict(environment, DOTNET_ROOT=str(empty), DOTNET_ROOT_X64=str(empty))
+    missing = dict(environment, DOTNET_ROOT=str(empty), DOTNET_ROOT_X64=str(empty), DOTNET_DISABLE_GUI_ERRORS='1')
     results = []
     for entry in ('NexusPipeline.exe', 'NexusPipeline.update.exe'):
         label = Path(entry).stem + '-missing-runtime'
@@ -227,7 +233,7 @@ def run(args):
         assemblyReceiptSha256=hash_file(args.assembly_receipt), results={})
     try:
         portable = output / 'portable'
-        extract(paths['Portable.zip'], portable, assembly['files'])
+        extract(paths['Portable.zip'], portable, assembly['files'], records(from_assembly(assembly)))
         report['results']['missingRuntime'] = reject_missing_runtime(portable, output, environment)
         report['results']['portableHost'] = probe(portable, portable / 'runtime', output, 'portable', environment)
         qualify_setup(paths['Setup.exe'], output, assembly['files'], environment, report['results'], assembly['profile'])

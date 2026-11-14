@@ -97,6 +97,15 @@ internal sealed class ExtensionPayloadBinding(RuntimeInstance instance, StateDat
         var journalId = registered.JournalId;
         var footprintCodec = new InstalledFootprintCodec(instance, roots, contracts);
         var current = RecoveryJournalRegistry.ReadJournalInside(connection, transaction, journalId);
+        if (source.RemovalReason is not null)
+        {
+            var original = footprintCodec.ReadMetadata(source.OriginalFootprint!);
+            var previous = ExtensionInstalledRows.ReadMetadataAt(connection, transaction, source.ExtensionId, source.ExpectedInstalledRevision);
+            if (previous.Footprint != source.OriginalFootprint || !previous.IsInstalled || !original.IsInstalled ||
+                original.ExtensionId != source.ExtensionId || original.Revision != source.ExpectedInstalledRevision ||
+                original.TargetPath != plan.TargetPath || original.ParentIdentity != plan.ParentIdentity ||
+                source.RemovalReason == "files-changed" && original.Payload.OriginalIdentity != plan.Before.OriginalIdentity) throw Invalid();
+        }
         if (current.OperationId != registered.OperationId || current.Kind != registered.Kind ||
             current.Phase != registered.Phase || current.Revision != registered.Revision ||
             current.PlanPath != reference.RelativePath || current.PlanDigest != reference.Sha256 ||
@@ -132,10 +141,10 @@ internal sealed class ExtensionPayloadBinding(RuntimeInstance instance, StateDat
                     original.JournalId != previous.JournalId || original.Package != previous.Package ||
                     original.IsInstalled != previous.IsInstalled ||
                     original.TargetPath != plan.TargetPath || original.ParentIdentity != plan.ParentIdentity ||
-                    original.Payload.Snapshot.Shape != plan.Before.Snapshot.Shape ||
+                    source.RemovalReason is null && (original.Payload.Snapshot.Shape != plan.Before.Snapshot.Shape ||
                     !original.Payload.Snapshot.Entries.SequenceEqual(plan.Before.Snapshot.Entries) ||
                     !original.Payload.Contents.SequenceEqual(plan.Before.Contents) ||
-                    !original.Payload.OriginalObjects.SequenceEqual(plan.Before.OriginalObjects)) throw Invalid();
+                    !original.Payload.OriginalObjects.SequenceEqual(plan.Before.OriginalObjects))) throw Invalid();
             }
         }
     }
@@ -207,7 +216,7 @@ internal sealed class ExtensionPayloadBinding(RuntimeInstance instance, StateDat
                 (history[^1].Phase is JournalPhase.Applied or JournalPhase.Committed) && physical.Length != sequence.Length) throw Invalid();
     }
 
-    private static OperationIdentity RequireSql(SqliteConnection connection, SqliteTransaction transaction,
+    private OperationIdentity RequireSql(SqliteConnection connection, SqliteTransaction transaction,
         RegisteredJournal registered, ExtensionPayloadSource source)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
@@ -235,8 +244,10 @@ internal sealed class ExtensionPayloadBinding(RuntimeInstance instance, StateDat
             }
             if (index != source.Claims.Length) throw Invalid();
         }
+        var gate = new JournalEffectGate(database).ReadInside(connection, transaction, registered.JournalId);
+        if (registered.Phase == JournalPhase.Prepared && gate.State is not (EffectGateState.Unentered or EffectGateState.Entered)) throw Invalid();
         JournalEffectGate.Require(connection, transaction, registered.JournalId,
-            registered.Phase == JournalPhase.Prepared ? EffectGateState.Unentered : EffectGateState.Entered);
+            registered.Phase == JournalPhase.Prepared ? gate.State : EffectGateState.Entered);
         if (source.Package is { } package)
             ExtensionCatalogRows.RequireAcceptedInside(connection, transaction, package.Catalog);
         return identity;

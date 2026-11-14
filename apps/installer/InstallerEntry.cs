@@ -67,6 +67,14 @@ internal static class InstallerEntry
                 Registration(workerPath).Begin(restoredRoot, restoredTransaction, Target(restoredManifest, restoredDigest), Parent(), inspectionRoot);
                 return 0;
             }
+            if (args is ["installer-state", "register", "--root", var initialRoot, "--transaction", var initialId,
+                "--initial-extensions", var initialSource] && Guid.TryParseExact(initialId, "D", out var initialTransaction))
+            {
+                var installed = Registration(workerPath).Register(initialRoot, initialTransaction, initialSource);
+                Console.WriteLine(JsonSerializer.Serialize(new { format = "nexus.installer.registration", version = 1,
+                    installationId = installed.InstallationId, runtimeId = installed.RuntimeId, productVersion = installed.ProductVersion }));
+                return 0;
+            }
             if (args is ["installer-state", "register" or "cancel-prepared", "--root", var targetRoot, "--transaction", var id] &&
                 Guid.TryParseExact(id, "D", out var targetTransaction))
             {

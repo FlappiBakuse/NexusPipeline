@@ -12,8 +12,8 @@ internal sealed class ExtensionControl(ControlAuthentication authority, Extensio
 {
     internal void Map(WebApplication app)
     {
-        app.MapGet("/control/v1/extensions", (HttpContext context) =>
-        { Query(context); return Results.Json(extensions.Read(authority.Require(context, ControlCapability.ExtensionsRead)), NotificationUseCases.Json); });
+        app.MapGet("/control/v1/extensions", async (HttpContext context) =>
+        { Query(context); return Results.Json(await extensions.ReadAsync(authority.Require(context, ControlCapability.ExtensionsRead)), NotificationUseCases.Json); });
         app.MapGet("/control/v1/extensions/catalog/{channel}", (HttpContext context, string channel) =>
         {
             Query(context);

@@ -64,6 +64,32 @@ public sealed class InstallationRecoveryTests
         Assert.Equal(after.Length, fixture.History().Length);
     }
 
+    [Theory]
+    [InlineData("applied")]
+    [InlineData("committed")]
+    public async Task RecoversExternalRemoval(string point)
+    {
+        await using var fixture = new InstallationCrashFixture(point, PayloadAction.Remove, externalRemoval: true);
+        await fixture.StartAsync();
+        Assert.True((await fixture.StopAsync()).CompleteJobStopped);
+        using var lease = InstanceLease.Acquire(fixture.Instance, new());
+        var database = StateDatabase.OpenExisting(fixture.Instance, Path.Combine(fixture.Package.Root, "inspection"),
+            new JournalStartupAdmission(fixture.Instance, new(), fixture.Roots));
+        var index = new StartupJournalRecovery(fixture.Instance, new(), database, fixture.Roots).Recover(lease);
+        Assert.True(index.Current.IsReady);
+        var result = new ExtensionQueryService(fixture.Instance, lease, database, new(), fixture.Roots)
+            .Read(fixture.OperationId, "local:installation-owner")!;
+        Assert.Equal(NexusPipeline.Core.Extensions.ExtensionApplyOutcome.Removed, result.Outcome);
+        Assert.False(result.ResultIsInstalled); Assert.Equal(2, result.ResultInstalledRevision);
+        var source = new ExtensionPayloadBinding(fixture.Instance, database, new(), fixture.Roots).Read(fixture.JournalId).Source;
+        Assert.Equal("external-removal", source.RemovalReason);
+        _ = new StartupJournalRecovery(fixture.Instance, new(), database, fixture.Roots).Recover(lease);
+        var repeated = new ExtensionQueryService(fixture.Instance, lease, database, new(), fixture.Roots)
+            .Read(fixture.OperationId, "local:installation-owner")!;
+        Assert.Equal(result.Outcome, repeated.Outcome);
+        Assert.Equal(result.ResultInstalledRevision, repeated.ResultInstalledRevision);
+    }
+
     [Theory(DisplayName = "A Real Stopped Installation Owner Reconciles Only Its Recorded Commit And Never Replays An Unknown Callback")]
     [InlineData("committed")]
     [InlineData("applied")]

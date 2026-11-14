@@ -1,4 +1,7 @@
 export const errorMessages: Readonly<Record<string, readonly [string, string]>> = {
+  extension_files_removed: ["插件文件已移除，正在等待资源释放后更新安装状态。", "Plugin files were removed. Waiting for resources before updating installation state."],
+  extension_files_changed: ["插件文件缺失或已被修改，请卸载后重新安装。", "Plugin files are missing or changed. Uninstall and reinstall the plugin."],
+  extension_directory_unavailable: ["插件目录不可访问或归属已变化，请检查目录后重试。", "The plugin directory is unavailable or its ownership changed. Check the directory and retry."],
   desktop_exit_in_progress: ["正在准备退出，请等待当前操作结束。", "Exit is being prepared. Wait for the current operation."],
   editor_operation_pending: ["当前保存结果待确认，请先核对原操作。", "Check the original operation before cancelling this draft."],
   access_denied: ["当前操作权限不足。", "You do not have permission for this operation."],

@@ -184,6 +184,7 @@ var
 begin
   if CurStep <> ssPostInstall then Exit;
   Action := 'register --root "' + InstallerRoot + '" --transaction ' + InstallerTransaction;
+  if not InstallerTransition then Action := Action + @@INITIAL_ARGUMENT@@;
   if InstallerTransition then
     Action := 'apply-transition --root "' + InstallerRoot + '" --transaction ' + InstallerTransaction +
       ' --payload-root "' + ExpandConstant('{tmp}\nexus-transition-payload') + '"' + TransitionWork;

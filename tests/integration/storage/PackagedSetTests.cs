@@ -36,7 +36,7 @@ public sealed class PackagedSetTests
     {
         var records = receipt.GetProperty("files").EnumerateArray().ToArray();
         var owned = NexusPipeline.Platform.Storage.ApplicationTree.Capture(new(NexusPipeline.Platform.Storage.SnapshotBudget.Default), application, default);
-        Assert.Equal(records.Count(item => !item.GetProperty("path").GetString()!.StartsWith("plugins/", StringComparison.Ordinal)),
+        Assert.Equal(records.Length,
             owned.Entries.Count(entry => entry.Kind == NexusPipeline.Core.Configuration.FileObjectKind.File));
         foreach (var item in records)
         {

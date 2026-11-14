@@ -86,7 +86,9 @@ def render_lifecycle(root, application, assembly):
             raise ValueError('Installer lifecycle input changed')
     code = (root / SCRIPT).read_text(encoding='utf-8')
     values = dict(CONTEXT_CODE=TEST_CONTEXT if assembly['profile'] == 'test' else CONTEXT,
-        HELPER_SHA256=helper['sha256'], MANIFEST_SHA256=manifest['sha256'], UNINSTALL_SHA256=facade['sha256'])
+        HELPER_SHA256=helper['sha256'], MANIFEST_SHA256=manifest['sha256'], UNINSTALL_SHA256=facade['sha256'],
+        INITIAL_ARGUMENT=("' --initial-extensions \"' + ExpandConstant('{tmp}\\nexus-initial-extensions') + '\"'"
+                          if assembly.get('initialExtensions') else "''"))
     for key, value in values.items():
         code = code.replace('@@' + key + '@@', value)
     if '@@' in code:

@@ -41,7 +41,8 @@ internal static class ApplicationHost
             Path.Combine(instance.RuntimeRoot, "extensions"));
         var runtime = RuntimeReadiness.Verify(instance, contracts, instanceLease, payloadRoots,
             stage => startup?.Advance(stage));
-        Directory.CreateDirectory(PhysicalPathPolicy.NormalizeWithoutLinks(payloadRoots.ExtensionPayloadRoot));
+        if (!NexusPipeline.Platform.Storage.Sqlite.ExtensionInstalledRows.ReadIds(runtime.Database).Any())
+            Directory.CreateDirectory(PhysicalPathPolicy.NormalizeWithoutLinks(payloadRoots.ExtensionPayloadRoot));
         var lifecycle = new HostLifecycle(runtime.Recovery, TimeProvider.System);
         var resources = new ResourceLeaseManager(lifecycle);
         var controlSettings = new NexusPipeline.Platform.Storage.Sqlite.HostSettingsStore(runtime.Database);
@@ -314,9 +315,10 @@ internal static class ApplicationHost
         try
         {
             startup?.Advance(StartupStage.InstallingExtensions);
-            var bundle = installationBundle ?? Path.Combine(payloadRoots.HostPayloadRoot, "plugins");
-            if (installationBundle is not null || Directory.Exists(bundle))
-                await packages.InstallBundledAsync(bundle, allPackages: installationBundle is not null);
+            if (installationBundle is not null) await packages.InstallLocalAsync(installationBundle);
+            else await new InitialExtensionInstaller(instance, runtime.Database, instanceLease, contracts, payloadRoots,
+                resources, runtime.Recovery, extensions).InitializeAsync(
+                    Path.Combine(payloadRoots.HostPayloadRoot, "package-info", "initial-extensions"), CancellationToken.None);
             if (installationBundle is not null) return 0;
             startup?.Advance(StartupStage.StartingExtensions);
             await extensions.StartAsync(CancellationToken.None);

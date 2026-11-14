@@ -57,9 +57,9 @@ public sealed class PreparedPayloadHandler : IJournalRecoveryHandler
                 if (!current.Restoration.IsEmpty || current.Latest.Phase == JournalPhase.Applying)
                     return new ExtensionPayloadRestoration(_instance, _database, _contracts, _roots,
                         _executionLease, _recoveryOwnership, _observer).Recover(frozen.JournalId);
-                if (current.Plan.Action == PayloadAction.Remove && current.Latest.Phase == JournalPhase.Applied)
+                if ((current.Plan.Action == PayloadAction.Remove || !current.Source.DesiredEnabled) && current.Latest.Phase == JournalPhase.Applied)
                     return new PayloadCommitStore(_instance, _database, _contracts, _roots, _observer)
-                        .RecoverRemoved(_executionLease, _recoveryOwnership, frozen.JournalId);
+                        .RecoverWithoutActivation(_executionLease, _recoveryOwnership, frozen.JournalId);
                 return new ExtensionCommittedReconciliation(_instance, _database, _contracts, _roots,
                     _executionLease, _recoveryOwnership).Reconcile(frozen.JournalId);
             });
@@ -153,7 +153,7 @@ public sealed class PreparedPayloadHandler : IJournalRecoveryHandler
                 bound.Latest.Phase == JournalPhase.Committed && bound.Registered.Revision == bound.Latest.Revision &&
                 bound.Restoration[^1].Record.Stage == "committed") return JournalRecoveryResult.AlreadyCompleted;
             if (bound.Latest.Phase is JournalPhase.Committed or JournalPhase.Applying || !bound.Restoration.IsEmpty ||
-                bound.Plan.Action == PayloadAction.Remove && bound.Latest.Phase == JournalPhase.Applied)
+                (bound.Plan.Action == PayloadAction.Remove || !bound.Source.DesiredEnabled) && bound.Latest.Phase == JournalPhase.Applied)
                 return reconcile();
             throw new IOException("extension_payload_entered_recovery_pending");
         }

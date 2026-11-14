@@ -12,4 +12,8 @@ internal sealed record CatalogPackageSource(ExtensionCatalogSaved Catalog, Exten
 internal sealed record ExtensionPayloadSource(string Format, int Version, Guid InstanceId, Guid OperationId, Guid JournalId,
     string ExtensionId, PayloadAction Action, long ExpectedInstalledRevision, BlobReference? OriginalFootprint,
     CatalogPackageSource? Package, long SettingsRevision, bool DesiredEnabled, ImmutableArray<ResourceClaim> Claims,
-    bool InitializeEnabledPreference);
+    bool InitializeEnabledPreference)
+{
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public string? RemovalReason { get; init; }
+}

@@ -48,7 +48,6 @@ internal sealed class InstallerRetainedFixture : IDisposable
         if (initialized)
         {
             Directory.CreateDirectory(Path.Combine(Product.Application, "uninstall"));
-            Directory.CreateDirectory(Path.Combine(Product.Application, "plugins"));
         }
         Registry.CurrentUser.DeleteSubKeyTree(Product.Paths.UninstallRegistryKey);
     }

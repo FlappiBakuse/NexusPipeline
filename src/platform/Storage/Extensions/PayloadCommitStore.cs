@@ -97,7 +97,7 @@ internal sealed class PayloadCommitStore(RuntimeInstance instance, StateDatabase
         });
     }
 
-    internal JournalRecoveryResult RecoverRemoved(InstanceLease lease, JournalRecoveryOwnership ownership, Guid journalId)
+    internal JournalRecoveryResult RecoverWithoutActivation(InstanceLease lease, JournalRecoveryOwnership ownership, Guid journalId)
     {
         lease.VerifyHeld(instance);
         var stop = ownership.CaptureExtensionWriters(instance, database, lease, journalId);
@@ -105,18 +105,18 @@ internal sealed class PayloadCommitStore(RuntimeInstance instance, StateDatabase
         {
             var bound = _binding.Read(journalId);
             RequireApplied(bound); RequireActivation(bound, null);
-            if (bound.Plan.Action != PayloadAction.Remove || bound.Latest.Phase != JournalPhase.Applied ||
+            if (bound.Plan.Action != PayloadAction.Remove && bound.Source.DesiredEnabled || bound.Latest.Phase != JournalPhase.Applied ||
                 bound.Registered.Revision != bound.Latest.Revision || bound.Commit is not null ||
                 !bound.Restoration.IsEmpty) throw Invalid();
             using var held = new ExtensionTreeEffects(new(new(4096, 268435456)),
                 new(new(new(4096, 268435456)), _blobs)).HoldInstalled(bound.Plan, bound.Physical[^1].Record);
-            // Removal has no activation callback whose unknown effects could be replayed.
-            _ = RecordCommit(bound, null, () => RequireStoppedRemoval(bound, stop));
+            // Removal and disabled installations have no activation callback to replay.
+            _ = RecordCommit(bound, null, () => RequireStoppedCommit(bound, stop));
         });
         return new ExtensionCommittedReconciliation(instance, database, contracts, roots, lease, ownership).Reconcile(journalId);
     }
 
-    private void RequireStoppedRemoval(BoundExtensionPayload bound, JournalRecoveryOwnership.ExtensionStopProof stop) =>
+    private void RequireStoppedCommit(BoundExtensionPayload bound, JournalRecoveryOwnership.ExtensionStopProof stop) =>
         database.Write((connection, transaction) =>
         {
             var journalId = bound.Plan.JournalId;

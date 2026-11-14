@@ -26,7 +26,7 @@ public sealed class ExtensionPackageService : IExtensionPackages, IAsyncDisposab
     private readonly ExtensionCatalogStore? _catalog;
     private readonly StoreHttpTransport? _transport;
     private readonly ExtensionApplyCoordinator _applies;
-    private readonly BundledExtensionInstaller _bundled;
+    private readonly LocalExtensionInstaller _local;
     private readonly ExtensionWorkSweep _workCleanup;
     private readonly ExtensionArchiveCleanup _archiveCleanup;
     private readonly SemaphoreSlim _refresh = new(1, 1);
@@ -56,7 +56,7 @@ public sealed class ExtensionPackageService : IExtensionPackages, IAsyncDisposab
         else if (createClient is not null) throw new IOException("extension_release_trust_unprovisioned");
         _applies = new(new(instance, database, lease, contracts, roots, resources, recovery,
             _catalog, runtime.Activator, _transport));
-        _bundled = new(instance, database, lease, contracts, roots, resources, recovery, runtime);
+        _local = new(instance, database, lease, contracts, roots, resources, recovery, runtime);
         _workCleanup = new(database, roots, recovery, runtime.Activator,
             new(instance, database, lease, contracts, roots, resources, recovery, runtime.Activator));
         _archiveCleanup = new(instance, database, lease, contracts, roots, resources, recovery);
@@ -79,14 +79,13 @@ public sealed class ExtensionPackageService : IExtensionPackages, IAsyncDisposab
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
     }
 
-    internal async Task InstallBundledAsync(string directory, bool allPackages)
+    internal async Task InstallLocalAsync(string directory)
     {
         RequireAvailable();
         await _refresh.WaitAsync(_stopping.Token).ConfigureAwait(false);
         try
         {
-            if (allPackages) await _bundled.InstallAllAsync(directory, _stopping.Token).ConfigureAwait(false);
-            else await _bundled.InstallDefaultsAsync(directory, _stopping.Token).ConfigureAwait(false);
+            await _local.InstallAllAsync(directory, _stopping.Token).ConfigureAwait(false);
         }
         finally { _refresh.Release(); }
     }

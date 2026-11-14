@@ -29,7 +29,8 @@ internal sealed class FrontendHostFixture : IAsyncDisposable
     internal async Task StartAsync(BuiltExtensionInputs inputs, Uri? deniedProxy = null,
         IReadOnlyList<BuiltExtensionInputs>? additional = null, Action<ExtensionCatalogFixture>? seed = null,
         string? application = null, bool bundleInstall = false, bool defaultBundle = false, bool remoteAccess = false,
-        Func<ExtensionCatalogFixture, BoundPackageFixture>? controlledPackage = null, bool interruptible = false)
+        Func<ExtensionCatalogFixture, BoundPackageFixture>? controlledPackage = null, bool interruptible = false,
+        Action<string>? changeInitial = null)
     {
         if (remoteAccess && Environment.GetEnvironmentVariable("NEXUS_TEST_REMOTE_ACCESS") != "1")
             throw new IOException("NEXUS_TEST_REMOTE_ACCESS_required_for_lan_test");
@@ -59,7 +60,12 @@ internal sealed class FrontendHostFixture : IAsyncDisposable
             {
                 var bundle = Path.Combine(Root, "installation-bundle");
                 packages.WriteBundle(bundle);
-                if (defaultBundle) packages.WriteDefaults(Path.Combine(software, "plugins"));
+                if (defaultBundle)
+                {
+                    var initial = Path.Combine(software, "package-info", "initial-extensions");
+                    packages.WriteDefaults(initial);
+                    changeInitial?.Invoke(initial);
+                }
                 catalog.Lease.Dispose();
                 if (bundleInstall) await InstallBundleAsync(executable, instance.RuntimeRoot, bundle);
             }
@@ -82,6 +88,13 @@ internal sealed class FrontendHostFixture : IAsyncDisposable
     {
         await DisposeAsync(); _host = null; _errors = null;
         await InstallBundleAsync(_executable, _runtimeRoot, Path.Combine(Root, "installation-bundle"));
+        await StartExistingAsync(_executable, _runtimeRoot);
+    }
+
+    internal async Task ChangeStoppedAsync(Action<string> change)
+    {
+        await DisposeAsync(); _host = null; _errors = null;
+        change(_runtimeRoot);
         await StartExistingAsync(_executable, _runtimeRoot);
     }
 

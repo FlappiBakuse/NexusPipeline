@@ -13,6 +13,31 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class OfflineRemovalTests
 {
+    [Fact]
+    public async Task WaitsForMissingPluginResources()
+    {
+        await using var fixture = new InstallationCrashFixture("committed");
+        await fixture.StartAsync(); Assert.True((await fixture.StopAsync()).CompleteJobStopped);
+        using var lease = InstanceLease.Acquire(fixture.Instance, new());
+        var database = StateDatabase.OpenExisting(fixture.Instance, Path.Combine(fixture.Package.Root, "inspection"),
+            new JournalStartupAdmission(fixture.Instance, new(), fixture.Roots));
+        var index = new StartupJournalRecovery(fixture.Instance, new(), database, fixture.Roots).Recover(lease);
+        var resources = new ResourceLeaseManager(new HostLifecycle(index, TimeProvider.System));
+        await using var runtime = new ExtensionRuntimeLifecycle(fixture.Instance, database, lease, new(),
+            fixture.Roots, resources, index, new());
+        using (resources.TryAcquire(Guid.NewGuid(), [new("extension:fixture-plugin", ResourceClaimMode.Reference)]).Lease!)
+        {
+            Directory.Delete(Path.Combine(fixture.Roots.ExtensionPayloadRoot, "fixture-plugin"), recursive: true);
+            await runtime.ReconcileFilesAsync(default);
+            var waiting = Assert.Single(runtime.ReadStates());
+            Assert.True(waiting.IsInstalled); Assert.Equal("extension_files_removed", waiting.UnavailableReason);
+        }
+        await runtime.ReconcileFilesAsync(default);
+        Assert.False(Assert.Single(runtime.ReadStates()).IsInstalled);
+        await runtime.ReconcileFilesAsync(default);
+        Assert.Equal(2, Assert.Single(runtime.ReadStates()).InstalledRevision);
+    }
+
     [Fact(DisplayName = "A Real Cold Installation Can Be Removed Without Provisioning New Package Trust Or Contacting A Network")]
     public async Task RemovesWithoutNetwork()
     {

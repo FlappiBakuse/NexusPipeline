@@ -28,9 +28,6 @@ internal sealed class InstallerRetainedRuntime(InstallerPaths paths)
         var metadata = InstallerMetadataInventory.Capture(destination.Root, paths);
         if (metadata.Uninstall.Exists || metadata.Files.Length != 2 || metadata.Files.Any(file => file.Role != "manager"))
             throw InstallationIdentityCodec.Invalid();
-        var bundled = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(destination.Root, "plugins"));
-        if (File.Exists(bundled) || Directory.Exists(bundled) && Directory.EnumerateFileSystemEntries(bundled).Any())
-            throw InstallationIdentityCodec.Invalid();
         RequireManager(checkpoint);
         RequireRuntime(identity);
     }

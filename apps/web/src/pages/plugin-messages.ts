@@ -1,5 +1,8 @@
 import { registerMessages } from '../app/locale';
 registerMessages({
+  插件文件损坏: 'Plugin files damaged',
+  插件目录不可用: 'Plugin directory unavailable',
+  等待移除: 'Waiting for removal',
   '正在加载插件…': 'Loading plugins…',
   返回插件列表: 'Back to plugin list',
   通用: 'General',

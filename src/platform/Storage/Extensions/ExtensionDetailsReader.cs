@@ -46,6 +46,18 @@ public sealed class ExtensionDetailsReader(RuntimeInstance instance, StateDataba
         return ReadHeldListing(installed, contracts);
     }
 
+    internal static NexusPipeline.Extensibility.Protocol.ExtensionManifest ReadArchivedListing(RuntimeInstance instance,
+        BoundExtensionInstallation installed, ContractReader contracts)
+    {
+        var package = installed.Operation.Source.Package ?? throw new IOException("extension_original_package_missing");
+        using var input = new ImmutableBlobStore(instance, contracts).OpenVerified(package.Archive);
+        using var zip = NexusPipeline.Platform.Extensions.ExtensionPackageArchive.Open(input, CancellationToken.None);
+        var bytes = zip.ReadManifest(CancellationToken.None);
+        if (Convert.ToHexStringLower(SHA256.HashData(bytes)) != installed.Metadata.Package.ManifestSha256)
+            throw new IOException("extension_manifest_changed");
+        return new NexusPipeline.Platform.Extensions.ExtensionManifestAdmission(contracts).ReadCurrent(bytes, installed.Metadata.ExtensionId);
+    }
+
     private static NexusPipeline.Extensibility.Protocol.ExtensionManifest ReadHeldListing(BoundExtensionInstallation installed, ContractReader contracts)
     {
         var file = installed.Footprint.Payload.Snapshot.Entries.Single(item => item.RelativePath == "manifest.json");

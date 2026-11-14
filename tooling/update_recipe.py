@@ -5,6 +5,7 @@ import re
 
 from application_manifest import ASAR, ENTRY, HELPER, HOST, MANIFEST, canonical, kind
 from desktop_bundle import safe_name
+from initial_extensions import valid_name
 
 
 RECIPE = 'package-info/recipe.json'
@@ -44,7 +45,7 @@ def file_map(items, bundled=False):
         name = safe_name(item['path'])
         require(len(name) <= 240, 'path bound')
         if bundled:
-            require(any(name.startswith('plugins/' + artifact + '/') for artifact in ('EmulatorSupport', 'LiveScreenshot')), 'bundled path')
+            require(valid_name(name), 'initial extension path')
         elif name != MANIFEST:
             kind(name)
         require(name.casefold() not in folded and type(item['sizeBytes']) is int and 0 <= item['sizeBytes'] <= 268435456 and digest(item['sha256']), 'file identity')

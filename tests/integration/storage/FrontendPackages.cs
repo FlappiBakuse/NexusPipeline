@@ -78,18 +78,23 @@ internal sealed class FrontendPackages : IDisposable
     internal void WriteDefaults(string directory)
     {
         var catalog = _catalog.Store.ReadCached(ExtensionStoreChannel.Stable) ?? throw new IOException("bundle_catalog_missing");
+        Directory.CreateDirectory(directory);
+        File.WriteAllBytes(Path.Combine(directory, "index.json"), catalog.PointerBytes());
+        File.WriteAllBytes(Path.Combine(directory, "catalog.json"), catalog.CatalogBytes());
+        File.WriteAllBytes(Path.Combine(directory, "catalog.sig.json"), catalog.SignatureBytes());
+        var ids = new List<string>();
         foreach (var package in _packages)
         {
             using var manifest = JsonDocument.Parse(package.ManifestBytes);
             var root = manifest.RootElement;
-            if (root.GetProperty("extensionId").GetString() is not ("emulator-support" or "live-screenshot")) continue;
-            var artifact = root.GetProperty("artifactName").GetString()!;
-            var target = Path.Combine(directory, artifact); Directory.CreateDirectory(target);
-            File.WriteAllBytes(Path.Combine(target, "index.json"), catalog.PointerBytes());
-            File.WriteAllBytes(Path.Combine(target, "catalog.json"), catalog.CatalogBytes());
-            File.WriteAllBytes(Path.Combine(target, "catalog.sig.json"), catalog.SignatureBytes());
-            File.Copy(package.Archive, Path.Combine(target, artifact + "-" + root.GetProperty("packageVersion").GetString()! + ".zip"));
+            var id = root.GetProperty("extensionId").GetString()!;
+            if (id is not ("emulator-support" or "live-screenshot")) continue;
+            ids.Add(id);
+            File.Copy(package.Archive, Path.Combine(directory, root.GetProperty("artifactName").GetString()! + "-" +
+                root.GetProperty("packageVersion").GetString()! + ".zip"));
         }
+        File.WriteAllBytes(Path.Combine(directory, "selection.json"), JsonSerializer.SerializeToUtf8Bytes(new
+            { format = "nexus.extensions.initial-selection", version = 1, extensionIds = ids.Order(StringComparer.Ordinal).ToArray() }));
     }
 
     public void Dispose() { foreach (var package in _packages) package.Dispose(); }

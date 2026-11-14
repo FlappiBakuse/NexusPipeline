@@ -50,6 +50,11 @@ const compatible = (row: PluginRow) =>
   compatiblePlugin(row, props.store.state.capabilities?.hostVersion || '0.0.0');
 function status(row: PluginRow): string {
   if (session.pending?.extensionId === row.extensionId) return t('待应用');
+  if (view.value === 'installed') {
+    if (row.installed?.unavailableReason === 'extension_files_changed') return t('插件文件损坏');
+    if (row.installed?.unavailableReason === 'extension_directory_unavailable') return t('插件目录不可用');
+    if (row.installed?.unavailableReason === 'extension_files_removed') return t('等待移除');
+  }
   if (view.value === 'store')
     return t(!compatible(row) ? '需要更新宿主' : row.update ? '可更新' : row.installed ? '已安装' : '未安装');
   return t(
@@ -210,6 +215,13 @@ function select(id: string): void {
         :kind-label="kindLabel(selected)"
       >
         <template #actions>
+          <button
+            v-if="view === 'installed' && selected.installed?.unavailableReason === 'extension_files_changed'"
+            :disabled="locked || !canManage"
+            @click="apply(selected, 'remove')"
+          >
+            {{ t('卸载插件') }}
+          </button>
           <button
             v-if="view === 'installed'"
             :disabled="locked || !canManage || !store.can('settings.write')"

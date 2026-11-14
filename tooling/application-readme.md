@@ -12,7 +12,7 @@ Setup 安装版可从开始菜单或 `NexusPipeline.uninstall.exe` 打开卸载�
 
 从 0.17 升级时，请使用新目录安装 0.18。两代使用独立实例，不复制或原位覆盖旧数据。
 
-默认提供模拟器支持与实时截图两个插件。其他插件可在插件中心安装。
+默认提供模拟器支持与实时截图两个插件。首次初始化完成后删除随包安装材料；已安装插件统一位于 `runtime/extensions`。其他插件可在插件中心安装。
 卸载或重新安装插件会保留账号与配置；数据清理需要显式选择。
 
 ---
@@ -26,4 +26,4 @@ For Setup installations, open Uninstall from the Start menu or `NexusPipeline.un
 Exit the instance's Host, desktop, tray and task processes before moving, backing up or maintaining its directory.
 
 Install 0.18 in a new directory when upgrading from 0.17. Keep the generations in separate instances.
-Emulator Support and Live Screenshot are provided by default; install other plugins from the plugin centre.
+Emulator Support and Live Screenshot are installed during initialization. One-time package inputs are removed after success; installed plugins are stored under `runtime/extensions`. Install other plugins from the plugin centre.

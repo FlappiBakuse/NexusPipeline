@@ -8,14 +8,19 @@ using NexusPipeline.Host.Control.Http;
 namespace NexusPipeline.Host.Control.Extensions;
 
 [SupportedOSPlatform("windows")]
-internal sealed class ExtensionUseCases(IExtensionPackages packages, IExtensionRuntimeLifecycle runtime, IExtensionOperationQueries operations,
+internal sealed class ExtensionUseCases(IExtensionPackages packages, NexusPipeline.Platform.Storage.Extensions.ExtensionRuntimeLifecycle runtime, IExtensionOperationQueries operations,
     CancellationToken hostStopping)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     { PropertyNameCaseInsensitive = false, UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, false) } };
-    internal object Read(AuthenticatedControlRequest request)
-    { request.Require(ControlCapability.ExtensionsRead); return new { packages.HasReleaseTrust, items = runtime.ReadStates() }; }
+    internal async Task<object> ReadAsync(AuthenticatedControlRequest request)
+    {
+        request.Require(ControlCapability.ExtensionsRead);
+        await runtime.ReconcileFilesAsync(hostStopping);
+        request.Require(ControlCapability.ExtensionsRead);
+        return new { packages.HasReleaseTrust, items = runtime.ReadStates() };
+    }
     internal ExtensionCatalogView? Catalog(AuthenticatedControlRequest request, ExtensionStoreChannel channel)
     { request.Require(ControlCapability.ExtensionsRead); return packages.ReadCached(channel); }
     internal async Task<ExtensionCatalogDetails?> CatalogDetailsAsync(AuthenticatedControlRequest request,

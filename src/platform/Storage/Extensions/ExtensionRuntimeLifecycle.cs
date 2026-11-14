@@ -21,6 +21,7 @@ public sealed class ExtensionRuntimeLifecycle : IExtensionRuntimeLifecycle, IAsy
     private readonly ResourceLeaseManager _resources;
     private readonly RecoveryIndex _recovery;
     private readonly InstalledActivationService? _activation;
+    private readonly ExtensionFileReconciliation _files;
     private readonly Dictionary<string, string> _failures = new(StringComparer.Ordinal);
     private Task? _start;
     private bool _stopping;
@@ -40,6 +41,7 @@ public sealed class ExtensionRuntimeLifecycle : IExtensionRuntimeLifecycle, IAsy
         _instance = instance; _database = database; _lease = lease; _contracts = contracts;
         _roots = roots; _resources = resources; _recovery = recovery;
         Activator = new(contracts, lease, resources, providers);
+        _files = new(instance, database, lease, contracts, roots, resources, recovery, Activator);
         ReleaseTrust = releaseTrust;
         if (releaseTrust is not null)
         {
@@ -78,7 +80,7 @@ public sealed class ExtensionRuntimeLifecycle : IExtensionRuntimeLifecycle, IAsy
         var settings = new HostSettingsStore(_database).Read();
         var active = Activator.ReadPublishedScopes().ToDictionary(item => item.ExtensionId, StringComparer.Ordinal);
         var result = new List<ExtensionRuntimeState>();
-        foreach (var id in ReadInstallationIds())
+        foreach (var id in ExtensionInstalledRows.ReadIds(_database))
         {
             var saved = new ExtensionInstalledEvidence(_instance, _database, _contracts, _roots).ReadCurrent(id)
                 ?? throw new IOException("extension_runtime_installation_missing");
@@ -86,7 +88,23 @@ public sealed class ExtensionRuntimeLifecycle : IExtensionRuntimeLifecycle, IAsy
             string? failure;
             lock (_gate) _failures.TryGetValue(id, out failure);
             if (desired && saved.Metadata.IsInstalled && !HasReleaseTrust) failure = "extension_release_trust_unprovisioned";
-            var manifest = saved.Metadata.IsInstalled ? ExtensionDetailsReader.ReadListing(saved, _contracts) : null;
+            var physicalFailure = ExtensionFileReconciliation.Observe(saved);
+            NexusPipeline.Extensibility.Protocol.ExtensionManifest? manifest = null;
+            if (saved.Metadata.IsInstalled)
+            {
+                try
+                {
+                    manifest = physicalFailure is null ? ExtensionDetailsReader.ReadListing(saved, _contracts) :
+                        ExtensionDetailsReader.ReadArchivedListing(_instance, saved, _contracts);
+                }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                {
+                    physicalFailure ??= "extension_files_changed";
+                    manifest = ExtensionDetailsReader.ReadArchivedListing(_instance, saved, _contracts);
+                }
+            }
+            failure = physicalFailure ?? failure;
+            if (!saved.Metadata.IsInstalled) failure = null;
             result.Add(new(id, saved.Metadata.Revision, saved.Metadata.IsInstalled, desired,
                 active.TryGetValue(id, out var scope) ? scope.ActivationId : null, failure)
                 { PackageVersion = manifest?.PackageVersion, Kind = manifest?.Kind, ArtifactName = manifest?.ArtifactName,
@@ -95,6 +113,8 @@ public sealed class ExtensionRuntimeLifecycle : IExtensionRuntimeLifecycle, IAsy
         }
         return result.AsReadOnly();
     }
+
+    public Task ReconcileFilesAsync(CancellationToken cancellation) => _files.ReconcileAsync(cancellation);
 
     public async Task<ExtensionRuntimeState> ReconcileAsync(ExtensionRuntimeSelection selection,
         CancellationToken acceptedHostCancellation)
@@ -105,6 +125,7 @@ public sealed class ExtensionRuntimeLifecycle : IExtensionRuntimeLifecycle, IAsy
             throw new ArgumentException("extension_runtime_selection_invalid");
         _lease.VerifyHeld(_instance); acceptedHostCancellation.ThrowIfCancellationRequested();
         lock (_gate) if (_stopping) throw new IOException("extension_runtime_stopping");
+        await ReconcileFilesAsync(acceptedHostCancellation).ConfigureAwait(false);
         ExtensionProjectionPublication.PublishIfDirty(_instance, _database, _lease, _contracts, _roots, _resources, _recovery);
         var installed = new ExtensionInstalledEvidence(_instance, _database, _contracts, _roots).ReadCurrent(selection.ExtensionId)
             ?? throw new IOException("extension_not_installed");
@@ -163,6 +184,7 @@ public sealed class ExtensionRuntimeLifecycle : IExtensionRuntimeLifecycle, IAsy
         await Task.Yield();
         cancellationToken.ThrowIfCancellationRequested();
         ExtensionProjectionPublication.PublishIfDirty(_instance, _database, _lease, _contracts, _roots, _resources, _recovery);
+        await ReconcileFilesAsync(cancellationToken).ConfigureAwait(false);
         if (_activation is null) return;
         var selected = ReadEnabledInstallations();
         var executor = _lease.ExecutorIdentity;
@@ -202,17 +224,6 @@ public sealed class ExtensionRuntimeLifecycle : IExtensionRuntimeLifecycle, IAsy
         lock (_gate) { _stopping = true; start = _start ?? Task.CompletedTask; }
         var close = Activator.StopAllAsync(timeout);
         await Task.WhenAll(start, close).WaitAsync(timeout).ConfigureAwait(false);
-    }
-
-    private IReadOnlyList<string> ReadInstallationIds()
-    {
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions);
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT extension_id FROM extensions.extension_installations ORDER BY extension_id LIMIT 257;";
-        using var row = command.ExecuteReader(); var result = new List<string>();
-        while (row.Read()) result.Add(row.GetString(0));
-        if (result.Count > 256) throw new IOException("extension_runtime_installation_capacity");
-        return result.AsReadOnly();
     }
 
     public ValueTask DisposeAsync() => new(StopAsync(TimeSpan.FromSeconds(10)));

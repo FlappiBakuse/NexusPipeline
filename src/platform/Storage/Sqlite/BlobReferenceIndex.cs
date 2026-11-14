@@ -69,6 +69,7 @@ public sealed class BlobReferenceIndex
             }
             if (content.Count == 0) return referenced;
             referenced.UnionWith(MaintenancePendingInventory.ReadReferenced(_instance, _database, _contracts, _payloadRoots, content));
+            referenced.UnionWith(InitialExtensionStateStore.PendingContent(_instance).Where(content.Contains));
             var digests = content.GroupBy(item => item.Sha256).ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
             foreach (var digest in ExtensionInstalledRows.ReadContentDigests(_database))
                 if (digests.TryGetValue(digest, out var installed)) referenced.UnionWith(installed);

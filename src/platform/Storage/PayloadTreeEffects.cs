@@ -71,7 +71,8 @@ internal sealed class PayloadTreeEffects(FileTreeScanner scanner, FileTreeArchiv
 
     internal void RequireRemoved(FrozenPayloadApply plan, PayloadTreeScene previous)
     {
-        if (plan.Action != PayloadAction.Remove || previous.Stage != "original-preserved") throw Invalid();
+        if (plan.Action != PayloadAction.Remove || previous.Stage !=
+            (plan.Before.Snapshot.Shape == FileObjectKind.Missing ? "workspace-created" : "original-preserved")) throw Invalid();
         var work = PayloadWorkspacePath.For(plan);
         using var held = StableDirectoryLease.Acquire(work);
         RequireWorkspace(plan, previous, ["before"]);

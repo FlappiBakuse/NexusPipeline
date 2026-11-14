@@ -8,6 +8,20 @@ internal sealed record ExtensionInstalledMetadata(string ExtensionId, long Revis
 
 internal static class ExtensionInstalledRows
 {
+    internal static string[] ReadIds(StateDatabase database, bool installedOnly = false)
+    {
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Extensions);
+        using var command = connection.CreateCommand();
+        command.CommandText = installedOnly
+            ? "SELECT h.extension_id FROM extensions.extension_installations h JOIN extensions.extension_installation_revisions r " +
+                "ON r.extension_id=h.extension_id AND r.revision=h.revision WHERE r.is_installed=1 ORDER BY h.extension_id LIMIT 257;"
+            : "SELECT extension_id FROM extensions.extension_installations ORDER BY extension_id LIMIT 257;";
+        using var rows = command.ExecuteReader(); var result = new List<string>();
+        while (rows.Read()) result.Add(rows.GetString(0));
+        if (result.Count > 256) throw new IOException("extension_runtime_installation_capacity");
+        return result.ToArray();
+    }
+
     internal static HashSet<string> ReadContentDigests(StateDatabase database)
         => ReadDigests(database, includeManifest: true);
 

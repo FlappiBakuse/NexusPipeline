@@ -1,14 +1,13 @@
 """Merge verified Host and maintenance publications into the application layout."""
 import json
 from pathlib import Path
-import re
 import shutil
 
 from binary_inputs import hash_file
 from desktop_bundle import require_no_links, safe_name
 from product_publish import inventory
 from source_snapshot import write_json, external_directory, ordinary_path
-from store_workspace import verify_store
+from initial_extensions import collect_initial
 
 
 def assemble_product(workspace, output, bundle_root=None, replace_application=False):
@@ -27,7 +26,7 @@ def assemble_product(workspace, output, bundle_root=None, replace_application=Fa
     if published['status'] != 'PASS_PUBLISHED_NOT_ASSEMBLED':
         raise ValueError('Publication did not complete')
     sources = collect_inputs(workspace, published)
-    bundle_receipt = collect_bundle(bundle_root, published['profile'], sources) if bundle_root is not None else None
+    initial, initial_receipt = collect_initial(bundle_root, published['profile']) if bundle_root is not None else ({}, None)
     expected = [dict(path=name, sizeBytes=path.stat().st_size, sha256=hash_file(path))
                 for name, path in sorted(sources.items())]
     ownership = output / 'assembly.json'
@@ -46,12 +45,14 @@ def assemble_product(workspace, output, bundle_root=None, replace_application=Fa
     application.mkdir(parents=True, exist_ok=True)
     record = dict(format='nexus.product.assembly', version=1, status='ASSEMBLY_INCOMPLETE',
         profile=published['profile'], source=published['source'], publicationWorkspace=str(workspace),
-        publishReceipt=pointer, bundleReceipt=bundle_receipt, toolSha256=hash_file(Path(__file__)),
+        publishReceipt=pointer, initialExtensions=initial_receipt, toolSha256=hash_file(Path(__file__)),
         scope='Host, GUI launcher, maintenance runtime, desktop shell and declared default bundle. Runtime acceptance is separate.')
     known_files = expected + previous['files']
     known = {(item['path'], item['sizeBytes'], item['sha256']) for item in known_files}
     try:
         copy_application(application, sources, expected, previous['files'])
+        if not (application / 'runtime/instance.json').exists():
+            copy_initial(application, initial)
         record['status'] = 'PASS_APPLICATION_ASSEMBLED'
     finally:
         record['files'] = [item for item in owned_inventory(application, known_files)
@@ -69,18 +70,7 @@ def owned_inventory(directory, records):
     for record in records:
         name = safe_name(record['path'])
         parts = name.split('/')
-        if parts[0] == 'plugins':
-            if len(parts) != 3 or parts[1] not in ('EmulatorSupport', 'LiveScreenshot') or not (
-                    parts[2] in ('index.json', 'catalog.json', 'catalog.sig.json') or
-                    re.fullmatch(re.escape(parts[1]) + r'-[0-9]+\.[0-9]+\.[0-9]+(?:-(?:beta|rc)\.[1-9][0-9]*)?\.zip', parts[2])):
-                raise ValueError('Unknown public bundled package ownership')
-            path = directory / name
-            require_no_links(path)
-            if path.exists():
-                if not path.is_file():
-                    raise ValueError('Bundled package file changed shape')
-                paths[name] = path
-        elif parts[0] not in ('NexusPipeline.exe', 'NexusPipeline.update.exe', 'README.md', 'resources'):
+        if parts[0] not in ('NexusPipeline.exe', 'NexusPipeline.update.exe', 'README.md', 'resources'):
             raise ValueError('Unknown public application ownership')
     for name in ('NexusPipeline.exe', 'NexusPipeline.update.exe', 'README.md', 'resources'):
         path = directory / name
@@ -127,28 +117,16 @@ def copy_application(application, sources, expected, previous):
         raise ValueError('Assembly changed while copying verified inputs')
 
 
-def collect_bundle(directory, profile, sources):
-    directory = Path(directory).absolute()
-    require_no_links(directory)
-    receipt = directory / 'store-receipt.json'
-    stored = json.loads(receipt.read_bytes())
-    if stored.get('status') != 'PASS_LOCAL_SIGNED_STORE' or stored['profile'] != profile:
-        raise ValueError('Bundled catalog profile does not match the product')
-    bundle = verify_store(directory, stored)
-    catalog = json.loads((bundle / 'catalog.json').read_bytes())
-    if hash_file(bundle / 'catalog.json') != stored['pointer']['catalogSha256']:
-        raise ValueError('Signed bundle catalog changed')
-    ids = stored['bundledExtensions']
-    selected = [item for item in catalog['entries'] if item['extensionId'] in ids]
-    if len(set(ids)) != len(ids) or len(selected) != len(ids) or not 1 <= len(ids) <= 64:
-        raise ValueError('Declared bundled extensions are incomplete')
-    for item in selected:
-        names = ['index.json', 'catalog.json', 'catalog.sig.json', item['artifactName'] + '-' + item['packageVersion'] + '.zip']
-        for name in names:
-            if name not in {record['path'] for record in stored['files']}:
-                raise ValueError('Default bundle package missing')
-            sources['plugins/' + item['artifactName'] + '/' + name] = bundle / name
-    return dict(path=str(receipt), sha256=hash_file(receipt))
+def copy_initial(application, inputs):
+    for name, value in inputs.items():
+        destination = application / name
+        require_no_links(destination)
+        content = value if isinstance(value, bytes) else value.read_bytes()
+        if destination.exists() and (not destination.is_file() or destination.read_bytes() != content):
+            raise ValueError('Initial extension destination contains unowned bytes')
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if not destination.exists():
+            destination.write_bytes(content)
 
 
 def collect_inputs(workspace, published):

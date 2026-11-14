@@ -11,7 +11,8 @@ internal static class PayloadFileIntents
         {
             PayloadAction.Install => [Effect("install-candidate", FileEffectAction.InstallCandidate)],
             PayloadAction.Upgrade => [Effect("preserve-original", FileEffectAction.PreserveOriginal), Effect("install-candidate", FileEffectAction.InstallCandidate)],
-            PayloadAction.Remove when plan.Kind == JournalKind.ExtensionApply => [Effect("preserve-original", FileEffectAction.PreserveOriginal)],
+            PayloadAction.Remove when plan.Kind == JournalKind.ExtensionApply && plan.Before.Snapshot.Shape != FileObjectKind.Missing =>
+                [Effect("preserve-original", FileEffectAction.PreserveOriginal)],
             PayloadAction.Remove => [],
             _ => throw new IOException("payload_action_unrecognized")
         };

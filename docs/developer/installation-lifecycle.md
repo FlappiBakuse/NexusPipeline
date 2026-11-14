@@ -16,6 +16,9 @@ Setup 在调用安装 worker 或写入应用前，检查 x64 注册位置或标�
 
 部分发布只续接已记录的对象与注册表值，旧归属保全到提交完成。`cancel-prepared` 清理仍符合原证据且尚未写入应用的检查点。首次捕获快捷方式时以 Windows Shell Link 只读核对目标、空参数、摘要及对象身份，接续时复核原字节、文件和父目录身份。Test 入口和 Setup 共用显式 fixture、隔离注册表及快捷方式目录。
 
+新装 register 接收安装器临时区的 `--initial-extensions`，在原 Setup 与实例租约内完成默认插件初始化后发布安装归属。
+初始化原包先按摘要进入内容存储，中断恢复不依赖安装临时目录仍在；现有实例重装不重新初始化插件。
+
 ## 同代覆盖与中断恢复
 
 覆盖准备在启动门禁、实例独占和原应用读取租约内核对原清单、程序 profile、物理身份、原生登记及完整恢复准入。事务冻结原安装和完整目标，重入核对两者及 worker 原字节。保全前检查暂存与安装卷的可用空间，同卷预留两份展开载荷，跨卷各预留一份。
@@ -46,7 +49,7 @@ Setup 和登记的卸载引擎按阶段调用 worker，诊断可使用其中的�
 installer-state inspect|check-new|check-install --root <目录>
 installer-state check-transition --root <目录> --work-root <诊断目录>
 installer-state begin --root <目录> --transaction <GUID> --manifest <SHA256> --manifest-file <目标清单> [--work-root <诊断目录>]
-installer-state register|cancel-prepared --root <目录> --transaction <GUID>
+installer-state register --root <目录> --transaction <GUID> [--initial-extensions <安装临时目录>]\ninstaller-state cancel-prepared --root <目录> --transaction <GUID>
 installer-state begin-transition --root <目录> --transaction <GUID> --manifest <SHA256> --manifest-file <目标清单> --work-root <诊断目录>
 installer-state preserve-transition|cancel-transition --root <目录> --transaction <GUID> --work-root <诊断目录>
 installer-state apply-transition --root <目录> --transaction <GUID> --payload-root <Setup 暂存树> --work-root <诊断目录>

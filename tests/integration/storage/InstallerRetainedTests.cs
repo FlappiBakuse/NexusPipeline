@@ -56,18 +56,11 @@ public sealed class InstallerRetainedTests
     [InlineData("ownership")]
     [InlineData("application")]
     [InlineData("native")]
-    [InlineData("bundled")]
     [InlineData("inspection")]
     public void PreservesUnsafeRetained(string fault)
     {
         using var fixture = new InstallerRetainedFixture();
         var product = fixture.Product;
-        var bundled = Path.Combine(product.Application, "plugins/EmulatorSupport/index.json");
-        if (fault == "bundled")
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(bundled)!);
-            File.WriteAllText(bundled, "Retained public bundle data");
-        }
         if (fault == "database") File.WriteAllText(Path.Combine(fixture.Runtime.RuntimeRoot, "state/runtime.db"), "Retained unknown database");
         if (fault == "manager") File.WriteAllText(Path.Combine(product.Paths.ManagerRoot, "foreign.txt"), "Retained unknown manager");
         if (fault == "ownership")
@@ -85,17 +78,11 @@ public sealed class InstallerRetainedTests
         using var guard = fault == "guard" ? null : InstallerRuntimeGate.Acquire(product.Application);
         var runtime = File.ReadAllBytes(fixture.Marker);
         var identity = File.ReadAllBytes(Path.Combine(product.Paths.ManagerRoot, InstallationAnchor.IdentityFile));
-        var bundledIdentity = fault == "bundled" ? PhysicalObjectIdentity.Read(bundled) : null;
         Assert.ThrowsAny<IOException>(() => product.Owner.Begin(product.Application, fixture.Transaction, product.Target,
             InstallerRetainedFixture.Parent(), fault == "inspection" ? null : fixture.WorkRoot));
         Assert.Equal(runtime, File.ReadAllBytes(fixture.Marker));
         Assert.Equal(identity, File.ReadAllBytes(Path.Combine(product.Paths.ManagerRoot, InstallationAnchor.IdentityFile)));
         Assert.False(Directory.Exists(product.Checkpoint));
-        if (fault == "bundled")
-        {
-            Assert.Equal("Retained public bundle data", File.ReadAllText(bundled));
-            Assert.Equal(bundledIdentity, PhysicalObjectIdentity.Read(bundled));
-        }
     }
 
     [Theory(DisplayName = "Retained Registration Resumes Only Recorded Identity Worker And Registry Publication Prefixes")]

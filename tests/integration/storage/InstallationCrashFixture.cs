@@ -24,7 +24,8 @@ internal sealed class InstallationCrashFixture : IAsyncDisposable
     internal Guid JournalId => Accepted.GetProperty("JournalId").GetGuid();
     internal BlobReference Plan => Accepted.GetProperty("Plan").Deserialize<BlobReference>()!;
 
-    internal InstallationCrashFixture(string point, PayloadAction? followup = null, string? physicalStage = null, bool hostMedia = false)
+    internal InstallationCrashFixture(string point, PayloadAction? followup = null, string? physicalStage = null, bool hostMedia = false,
+        bool externalRemoval = false)
     {
         Point = point;
         ActivationDirectory = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!,
@@ -49,7 +50,7 @@ internal sealed class InstallationCrashFixture : IAsyncDisposable
                             Nonce = Guid.NewGuid().ToString("N"), Mode = hostMedia ? "media-frame" : point == "callback" ? "late" : "return" }));
                 }, catalog: hostMedia ? new ExtensionCatalogFixture(useHostTestTrust: true) : null);
             Package.Publish();
-            if (hostMedia)
+            if (hostMedia || externalRemoval)
             {
                 var settings = new HostSettingsStore(Package.Catalog.Database); var before = settings.Read();
                 var change = new NexusPipeline.Core.Settings.HostSettingsChange(before.Revision,
@@ -90,7 +91,7 @@ internal sealed class InstallationCrashFixture : IAsyncDisposable
                 PublicKey = Package.Catalog.Signer.ExportSubjectPublicKeyInfo(), Point = point, AcceptedReport, BarrierReport,
                 NextArchive = next?.Archive, NextPointer = signed?.Pointer, NextCatalog = signed?.Catalog, NextSignature = signed?.Signature,
                 FollowupAction = followup, InitialOperationId = followup.HasValue ? Package.OperationId : (Guid?)null,
-                PhysicalStage = physicalStage
+                PhysicalStage = physicalStage, ExternalRemoval = externalRemoval
             }));
             Package.Catalog.Lease.Dispose();
         }

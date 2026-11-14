@@ -77,6 +77,7 @@ internal static class PayloadEffectCursor
         foreach (var entry in entries.Where(item => item.Intent.BeforeRevision < registered.Revision))
         {
             var stage = entry.Record.Stage;
+            if (stage == "scope-stopped" && plan.Action == PayloadAction.Remove && plan.Before.Snapshot.Shape == FileObjectKind.Missing) continue;
             var step = stage == "scope-stopped" ? plan.Action == PayloadAction.Remove ? "preserve-original" : "install-candidate" :
                 stage is "original-preservation-started" or "original-preserved" ? "preserve-original" :
                 stage == "candidate-installed" ? "install-candidate" : null;

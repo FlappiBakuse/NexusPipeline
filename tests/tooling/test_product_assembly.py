@@ -9,7 +9,7 @@ import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tooling'))
 from binary_inputs import hash_file
-from product_assembly import assemble_product
+from product_assembly import assemble_product, copy_initial
 from product_publish import inventory
 from product_assets import build_assets, prepare_output, write_archive
 from artifact_lock import artifact_lock
@@ -57,6 +57,20 @@ class ProductAssemblyTests(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             build_assets(args)
         self.assertFalse(self.output.exists())
+
+    def test_separates_initial_inputs(self):
+        assemble_product(self.workspace, self.output)
+        initial = self.output / 'package-info/initial-extensions/selection.json'
+        copy_initial(self.output, {'package-info/initial-extensions/selection.json': b'initial input'})
+        self.assertTrue(initial.is_file())
+        initial.unlink()
+        runtime = self.output / 'runtime'
+        runtime.mkdir()
+        (runtime / 'instance.json').write_bytes(b'owned runtime')
+        assemble_product(self.workspace, self.output, replace_application=True)
+        self.assertFalse(initial.exists())
+        self.assertFalse((self.output / 'plugins').exists())
+        self.assertEqual(b'owned runtime', (runtime / 'instance.json').read_bytes())
 
     def test_writes_zip(self):
         original = self.root / 'original.bin'
