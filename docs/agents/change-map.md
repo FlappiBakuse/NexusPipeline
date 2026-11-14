@@ -7,6 +7,10 @@
 | 普通重试与无标记退出 | [状态与重试](../developer/state-and-retry.md) | Core.Execution；Storage.Execution 的实际调用/证据入口 | 已授权旧结果与重试恢复，不放宽真实 Unknown/冷恢复 | 独立输入向量＋一条确实消费该规则的执行链 |
 | 首次快照、重试输入、同步缩减 | [配置](../developer/configuration.md) | Configuration use case、run preparation/progress、SQL 与文件适配 | 初始来源可验证、0→1→2 接续、原现场和旧快照保全 | 已有配置夹具中合并证明相关变化 |
 | 专项修复被 blocking 诊断阻止 | [配置](../developer/configuration.md)与 Plugins 对应专项页 | TaskAdapterService、AdapterUseCases、插件 configuration | 合法修复可完成；运行阻断和写授权分别判断 | 真实提案→预览→应用；保留权限负例 |
+| 业务分库、事务与冷恢复 | [存储](../developer/storage.md) | StateDatabase、DatabaseLayout、DatabaseRelations、DatabaseBackupStore | 八库身份一致、跨库原子提交、缺库保全 | 受影响的跨库回滚、冷恢复与完整备份 |
+| 草稿与即时设置 | [Web 状态](../developer/frontend-state.md#编辑草稿)、[设置](../developer/settings.md#即时设置与界面偏好) | EditorDraftStore、配置 owner、SettingsWrites、InterfaceSettings | 实际修改才保留；恢复提示；设置取消还原；未知操作不重发 | 真实编辑入口及相关插件消费者 |
+| 托盘退出与唤回 | [桌面授权](../developer/desktop-authorization.md#退出与维护许可) | native-bridge、tray-lifecycle、exit-preparation | 隐藏携带草稿可退出，等待时仍能唤回和开菜单 | 原生退出、失败、超时和重复请求 |
+| 默认插件与目录变化 | [扩展](../developer/extensions.md#首次初始化与目录变更) | InitialExtensionInstaller、ExtensionFileReconciliation、产品装配 | 一次性初始化、卸载不复活、异常目录保全 | 原安装与便携包、离线恢复、外部删除 |
 | 超过 1 GiB 数据库启动 | [启动与容量](../developer/startup-and-capacity.md) | StateDatabase、DatabaseCopy、owned cleanup | 大库可用且不误删用户对象 | 触达边界的有效大库和相应拥有权证明 |
 | 启动阶段进度／无控制台入口 | [启动与容量](../developer/startup-and-capacity.md) | Host lifecycle/StartupProgress、GUI launcher、受影响装配入口 | 进度早且真实，隐藏不取消恢复，CLI 保留 | 同源实际 Windows GUI 与必要自启/打包路径 |
 | 历史筛选和账号深链 | [前端](../developer/frontend.md) | Records query、record-window、history-link、账号摘要 | 筛选不漏重，请求有界，run/user 归属稳定 | 同一多账号记录与混合历史夹具 |

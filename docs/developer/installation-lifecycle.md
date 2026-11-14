@@ -49,7 +49,8 @@ Setup 和登记的卸载引擎按阶段调用 worker，诊断可使用其中的�
 installer-state inspect|check-new|check-install --root <目录>
 installer-state check-transition --root <目录> --work-root <诊断目录>
 installer-state begin --root <目录> --transaction <GUID> --manifest <SHA256> --manifest-file <目标清单> [--work-root <诊断目录>]
-installer-state register --root <目录> --transaction <GUID> [--initial-extensions <安装临时目录>]\ninstaller-state cancel-prepared --root <目录> --transaction <GUID>
+installer-state register --root <目录> --transaction <GUID> [--initial-extensions <安装临时目录>]
+installer-state cancel-prepared --root <目录> --transaction <GUID>
 installer-state begin-transition --root <目录> --transaction <GUID> --manifest <SHA256> --manifest-file <目标清单> --work-root <诊断目录>
 installer-state preserve-transition|cancel-transition --root <目录> --transaction <GUID> --work-root <诊断目录>
 installer-state apply-transition --root <目录> --transaction <GUID> --payload-root <Setup 暂存树> --work-root <诊断目录>

@@ -1,8 +1,6 @@
 # 文档导航与适用状态
 
-文档日期：2026-11-06，Asia/Singapore。
-
-本目录用于本地 Codex 开发交接。用户页写本轮完成后应有的操作路径；开发页明确当前实现、恢复目标和保留约束。所有尚未完成或尚未验证的差异集中在[当前状态](status.md)，不能因教程已经写好就标为已交付。
+本目录说明当前用户操作、领域实现和验证边界。用户步骤、开发契约与任务地图分别维护；未完成事项集中在[当前状态](status.md)，实际执行结果保存于对应验收回执。
 
 ## 三类入口
 
@@ -21,7 +19,12 @@
 | 普通重试、结果判定、冷恢复 | [状态与重试](developer/state-and-retry.md) |
 | 初始快照、编辑、同步、现场恢复 | [配置生命周期](developer/configuration.md) |
 | 阶段进度、启动成本与容量范围 | [启动与容量](developer/startup-and-capacity.md) |
-| 页面状态、公共组件、集合与插件交互 | [前端行为](developer/frontend.md) |
+| 页面与公共组件 | [前端行为](developer/frontend.md) |
+| 编辑草稿、恢复提示与敏感输入 | [Web 状态](developer/frontend-state.md#编辑草稿) |
+| 即时设置与取消还原 | [宿主设置](developer/settings.md#即时设置与界面偏好) |
+| 八库身份、事务、连接与备份 | [状态存储](developer/storage.md) |
+| 默认插件初始化与外部目录变化 | [扩展](developer/extensions.md#首次初始化与目录变更) |
+| 托盘退出、写入准备与签名许可 | [桌面授权](developer/desktop-authorization.md#退出与维护许可) |
 | 先实现后验证、四类职责、失败后的最小补验 | [验证规范](developer/validation.md) |
 | HTTP 字段与限额 | 仓库 contracts 中的现役 schema / OpenAPI |
 | SDK 导出表面 | 仓库 sdk 与 contracts 中的现役定义 |
@@ -32,5 +35,3 @@
 完成一个代码批次时，只修改实际受影响的用户步骤、对应开发规则和状态行。参数名或协议变化需要同步生成参考；界面文字变化只校正相关操作说明。没有新行为依据，不新增概念、教程分支或另一份字段清单。
 
 有效命令、格式与恢复约束保留在对应现役参考；固定 Git 提交保存历史原文。其余精确技术参考继续使用。
-
-固定审查版本：Host main `3fa803f3cb3ab59564bfad6fcf19c512dbfcd45d`，Host next `0bb4d144d92805a2d489c65d0be3b7527c7810fd`。引用解释审查依据，不表示本地候选已有该 commit。

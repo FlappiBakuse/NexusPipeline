@@ -50,7 +50,9 @@ Desktop 插件调用的 HTTP 上限为六分钟，采集等待上限为五分钟
 再签发绑定当前会话、请求和恢复修订的 30 秒许可。原生进程退出后再次核对许可条件，Host 才结束。
 启动时先验证新 SQLite 与物理 journal 的一致性并执行已登记恢复，再发布就绪。
 
-生产桌面已选择 [Electron](../decisions/desktop-shell.md)，源码和锁定运行时的装配入口见 [桌面入口](../../apps/desktop/README.md)。
+## 退出与维护许可
+
+生产桌面使用 [Electron](../decisions/desktop-shell.md)，源码和锁定运行时的装配入口见 [桌面入口](../../apps/desktop/README.md)。
 Host 向自己创建的壳传入本次启动公钥，原生动作仍核验真实 TCP 连接，不能从 HTTP 自取信任锚。
 `GET /control/v1/desktop/maintenance` 只向当前原生会话签发已准备的维护退出许可；空轮询不占用动作关联标识额度。
 壳须先收到 renderer 的写入准备答复，再自然退出；缺答复不强杀窗口以执行更新。普通草稿不触发确认，退出成功随界面会话释放。
