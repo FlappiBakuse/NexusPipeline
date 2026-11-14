@@ -8,9 +8,6 @@ internal sealed record ExtensionInstalledMetadata(string ExtensionId, long Revis
 
 internal static class ExtensionInstalledRows
 {
-    internal static HashSet<string> ReadArchiveDigests(StateDatabase database)
-        => ReadDigests(database, includeManifest: false);
-
     internal static HashSet<string> ReadContentDigests(StateDatabase database)
         => ReadDigests(database, includeManifest: true);
 

@@ -1,6 +1,5 @@
 import { NexusElement, elementAttributes } from './element-base.js';
 import type { UiElement } from '@nexuspipeline/extension-sdk';
-import { controlStyles } from './control-styles.js';
 import { iconPaths } from './icon-paths.js';
 
 

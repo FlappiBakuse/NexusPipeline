@@ -310,7 +310,7 @@ internal static class ApplicationHost
                 new NexusPipeline.Host.Control.Mcp.McpOperationTools(operations, availableCapabilities))).Map(app);
         desktop?.Map(app);
         secrets.Map(app);
-        new CompletionLocalControl(services.Authorization, services.Admission, services.Completion, controlAuthority).Map(app);
+        new CompletionLocalControl(services.Completion, controlAuthority).Map(app);
         try
         {
             startup?.Advance(StartupStage.InstallingExtensions);

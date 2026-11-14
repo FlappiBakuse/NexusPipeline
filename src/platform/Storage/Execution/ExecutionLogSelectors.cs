@@ -92,13 +92,6 @@ internal static class ExecutionLogSelectors
         return NormalizePattern(root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar + relative);
     }
 
-    internal static void RequireContained(string scope, string path)
-    {
-        var canonical = PhysicalPathPolicy.NormalizeWithoutLinks(path);
-        if (!StringComparer.OrdinalIgnoreCase.Equals(scope, canonical) &&
-            !canonical.StartsWith(scope.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) throw Invalid();
-    }
-
     private static (string Declaration, string Scope, bool Dynamic, bool Dates) Parse(string declaration)
     {
         if (!Path.IsPathFullyQualified(declaration) || declaration.Length > 32767 || declaration.Contains('?')) throw Invalid();

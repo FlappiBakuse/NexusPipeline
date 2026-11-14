@@ -77,9 +77,6 @@ public sealed class ExecutionAdmissionService
             .ContinueAcceptedRun(origin.AcceptedRun, origin.Frozen.NextOperationId, origin.Intent.SubjectId, origin.Request, createdAt);
     }
 
-    internal ExecutionPlanDraft PreviewWithDiscoveries(ExecutionSelectionRequest request, DateTimeOffset createdAt,
-        IReadOnlyDictionary<Guid, PreparedMuMuDiscovery> discoveries) => _builder.PrepareWithDiscoveries(request, createdAt, discoveries);
-
     internal AttemptAcceptanceResult StartWithDiscoveries(Guid operationId, string subject, ExecutionSelectionRequest request,
         DateTimeOffset createdAt, IReadOnlyDictionary<Guid, PreparedMuMuDiscovery> discoveries) =>
         (AttemptAcceptanceResult)new AdmissionCoordinator(_resources, _port.WithTargetDiscoveries(discoveries))

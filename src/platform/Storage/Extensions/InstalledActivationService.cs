@@ -58,27 +58,4 @@ internal sealed class InstalledActivationService(RuntimeInstance instance, State
         return new(extensionId, origin.InstalledRevision, activation.ActivationId);
     }
 
-    internal async ValueTask<IReadOnlyList<InstalledActivationResult>> ActivateEnabledAsync(
-        CancellationToken acceptedHostCancellation)
-    {
-        lease.VerifyHeld(instance);
-        lease.RequireExtensionActivator(activator, resources);
-        acceptedHostCancellation.ThrowIfCancellationRequested();
-        string[] ids;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
-        using (var transaction = connection.BeginTransaction(deferred: true))
-        {
-            ids = HostSettingsRows.ReadCurrent(connection, transaction).Values.Extensions.Where(item => item.Enabled)
-                .Where(item => ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, item.ExtensionId)
-                    is { IsInstalled: true }).Select(item => item.ExtensionId).ToArray();
-            transaction.Commit();
-        }
-        var result = new List<InstalledActivationResult>(ids.Length);
-        foreach (var id in ids)
-        {
-            acceptedHostCancellation.ThrowIfCancellationRequested();
-            result.Add(await ActivateAsync(id, acceptedHostCancellation).ConfigureAwait(false));
-        }
-        return result.AsReadOnly();
-    }
 }

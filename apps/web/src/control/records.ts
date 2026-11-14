@@ -1,4 +1,4 @@
-import { arrayValue, boundedInteger, dateValue, enumValue, integerValue, objectValue, stringValue, uuidValue } from './client';
+import { arrayValue, boundedInteger, dateValue, enumValue, objectValue, stringValue, uuidValue } from './client';
 
 export interface AttemptFacts {
   runId: string;

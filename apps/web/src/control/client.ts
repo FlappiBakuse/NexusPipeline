@@ -17,7 +17,6 @@ export type Decoder<T> = (value: unknown) => T;
 
 export class ControlClient {
   private readonly reads = new ControlReads((path, signal) => this.request(path, undefined, signal));
-  settledReads(signal: AbortSignal): Promise<void> { return this.reads.settled(signal); }
   clearPrepared(): void { this.reads.clear(); }
   invalidatePrepared(): void { this.reads.invalidatePrepared(); }
   prepareRead<T = unknown>(path: string, signal: AbortSignal, decode?: Decoder<T>): Promise<T> {

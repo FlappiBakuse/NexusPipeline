@@ -38,14 +38,6 @@ internal sealed class RecordRetirementContents(RuntimeInstance instance, StateDa
         return result;
     }
 
-    internal RecordContentAvailability Availability(RawOutputManifest raw)
-    {
-        var candidates = raw.Parts.Select(item => item.Content).Distinct().ToArray();
-        var retired = Read(candidates);
-        return retired.Count == 0 ? RecordContentAvailability.Available :
-            retired.Count == candidates.Length ? RecordContentAvailability.Retired : RecordContentAvailability.PartiallyRetired;
-    }
-
     internal void RequireAvailable(IReadOnlyList<BlobReference> contents)
     {
         if (Read(contents).Count != 0) throw new RetiredContentException();

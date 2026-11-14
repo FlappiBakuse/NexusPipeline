@@ -14,15 +14,6 @@ internal sealed class NotificationRuntimeQueue(RuntimeInstance instance, StateDa
         return (long)command.ExecuteScalar()! != 0;
     }
 
-    internal bool ReadVerifiedPending()
-    {
-        var pending = false;
-        NotificationReferenceInventory.Visit(instance, database, contracts,
-            (_, expanded, _) => pending |= !expanded,
-            (_, transition) => pending |= !NotificationDeliveryStates.ReleasesReferences(transition.State));
-        return pending;
-    }
-
     internal void VerifyProjection()
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications);

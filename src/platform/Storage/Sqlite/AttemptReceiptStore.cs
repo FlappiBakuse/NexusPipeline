@@ -9,20 +9,6 @@ namespace NexusPipeline.Platform.Storage.Sqlite;
 
 public sealed class AttemptReceiptStore(StateDatabase database) : IAttemptReceiptReader
 {
-    internal void ProjectNoEffect(RunAttemptPlan plan, JournalDocument document)
-    {
-        if (document.Kind != JournalKind.RunAttempt || document.Phase != JournalPhase.Committed || !NoEffectReceipt.Recorded(document.Root) ||
-            document.InstanceId != database.InstanceId || document.JournalId != Guid.Parse(plan.JournalId) ||
-            document.Root.GetProperty("operationId").GetString() != plan.OperationId || document.Root.GetProperty("runId").GetString() != plan.RunId ||
-            document.Root.GetProperty("attemptId").GetString() != plan.AttemptId) throw new IOException("attempt_receipt_unbound");
-        database.Write((connection, transaction) =>
-        {
-            JournalEffectGate.Require(connection, transaction, document.JournalId, EffectGateState.Sealed);
-            ProjectInside(connection, transaction, plan, document, NoEffectReceipt.Facts(plan));
-            return true;
-        });
-    }
-
     internal static void ProjectInside(SqliteConnection connection, SqliteTransaction transaction, RunAttemptPlan plan,
         JournalDocument document, AttemptFacts facts)
     {

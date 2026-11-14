@@ -2,7 +2,7 @@ import { createIdentity } from '../control/identity';
 import { computed, onBeforeUnmount, reactive, watch } from 'vue';
 import type { AppStore } from '../app/store';
 import { ControlFailure } from '../control/client';
-import { interfaceSnapshot, type InterfaceCategory, type InterfaceValues } from '../control/interface';
+import { type InterfaceCategory, type InterfaceValues } from '../control/interface';
 import { copyDraft } from '../app/draft-copy';
 
 interface ViewDraft {

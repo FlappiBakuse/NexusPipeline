@@ -89,16 +89,6 @@ internal static class ScheduledProviderRows
         }
     }
 
-    internal static IReadOnlyList<BlobReference> ReadUnfinished(SqliteConnection connection, SqliteTransaction transaction, int maximum)
-    {
-        if (maximum is < 1 or > 64) throw new ArgumentOutOfRangeException(nameof(maximum));
-        using var command = DatabaseConnections.Command(connection, transaction,
-            "SELECT c.relative_path,c.size_bytes,c.sha256 FROM main.scheduled_provider_pending p JOIN main.scheduled_provider_occurrences c ON c.occurrence_id=p.occurrence_id ORDER BY p.trigger_utc_minute,p.occurrence_id LIMIT $0;", maximum);
-        using var rows = command.ExecuteReader(); var result = new List<BlobReference>();
-        while (rows.Read()) result.Add(new(rows.GetString(0), rows.GetInt64(1), rows.GetString(2)));
-        return result;
-    }
-
     internal static void RequireCapacity(SqliteConnection connection, SqliteTransaction transaction, int additions)
     {
         if (additions is < 0 or > 4096) throw ScheduledProviderCodec.Invalid();

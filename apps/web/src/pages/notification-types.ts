@@ -30,10 +30,6 @@ export const notificationChannels: readonly { id: NotificationChannel; label: st
   { id: 'discord', label: 'Discord Webhook' },
   { id: 'generic', label: '通用 Webhook' }
 ];
-export function channelLabel(task: ControlNotificationCommandInput): string {
-  const id = task.kind === 'smtp' ? 'smtp' : task.configuration.webhookKind;
-  return notificationChannels.find((channel) => channel.id === id)?.label ?? id;
-}
 export type SecretField =
   | 'webhook-url'
   | 'webhook-secret'

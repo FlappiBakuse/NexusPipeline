@@ -9,9 +9,6 @@ const durationFormats = computed(() => [
 ]);
 const rangeFormat = computed(() => new Intl.DateTimeFormat(locale.value, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' }));
 
-export const historyMinutes = (milliseconds: number, minimumFractionDigits: 0 | 1): string =>
-  durationFormats.value[minimumFractionDigits]!.format(milliseconds / 60000);
-
 export function historyElapsed(value: unknown, kind?: unknown): string {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return t('未知');
   const milliseconds = Math.round(value);

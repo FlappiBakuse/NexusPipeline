@@ -1,15 +1,12 @@
 using System.Runtime.Versioning;
-using System.Security.Principal;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Control;
-using NexusPipeline.Core.Automation;
 using NexusPipeline.Platform.Storage.Execution;
 
 namespace NexusPipeline.Host.Control.Http;
 
 [SupportedOSPlatform("windows")]
-internal sealed class CompletionLocalControl(LocalCompletionAuthorization authorization,
-    ExecutionAdmissionService admission, CompletionActionService completion, ControlAuthentication authority)
+internal sealed class CompletionLocalControl(CompletionActionService completion, ControlAuthentication authority)
 {
     internal void Map(WebApplication app)
     {
@@ -41,16 +38,5 @@ internal sealed class CompletionLocalControl(LocalCompletionAuthorization author
             if (await context.Request.Body.ReadAsync(extra, context.RequestAborted) != 0) return Results.StatusCode(400);
             return Results.Json(new { revoked = completion.RevokeLocalAuthorization() });
         });
-    }
-
-    internal AttemptAcceptanceResult StartLocalQueue(HttpContext context, Guid operationId, Guid queueId,
-        long expectedCatalogRevision, long expectedSettingsRevision)
-    {
-        if (context.Request.Path != "/control/v1/local/execution/queue" || !RequestAuthority.IsAllowed(context))
-            throw new UnauthorizedAccessException("completion_local_start_origin_required");
-        using var user = WindowsIdentity.GetCurrent();
-        var sid = user.User?.Value ?? throw new UnauthorizedAccessException("local_windows_user_unavailable");
-        return authorization.StartLocal(admission, operationId, "local:" + sid,
-            new(new QueueTarget(queueId), expectedCatalogRevision, expectedSettingsRevision), DateTimeOffset.UtcNow);
     }
 }

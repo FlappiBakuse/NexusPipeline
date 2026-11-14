@@ -6,7 +6,7 @@ import { extensionList, extensionDetails, type ExtensionDetails } from '../contr
 import { createIdentity } from '../control/identity';
 import { scriptPaths } from './script-paths';
 import { readSource, selectSource, scriptSourceKey } from './script-source';
-import { t, locale, registerMessages } from '../app/locale';
+import { t, registerMessages } from '../app/locale';
 registerMessages({
   '请在 Host 本机创建专项脚本实例。': 'Create specialized script instances on the Host machine.',
   '读取脚本配置': 'Read script configurations', '选择脚本配置': 'Select script configuration',
@@ -24,8 +24,6 @@ const emit = defineEmits<{ 'update:modelValue': [value: Script] }>();
 const paths = computed(() => scriptPaths(props.store, props.modelValue));
 const candidates = ref<readonly ScriptSourceCandidate[]>([]), selected = ref(''), busy = ref(false), note = ref('');
 const diagnostics = ref<readonly string[]>([]), details = ref<ExtensionDetails>();
-const diagnosticTitle = (code: string): string => details.value?.diagnosticLocales[locale.value]?.[code]
-  || details.value?.diagnosticLocales[details.value.metadata?.defaultLocale || 'zh-CN']?.[code] || code;
 let owner: AbortController | undefined;
 const identity = () => [props.store.state.capabilities?.instanceId, props.modelValue.id,
   props.modelValue.extensionId, paths.value.root].join('\n');

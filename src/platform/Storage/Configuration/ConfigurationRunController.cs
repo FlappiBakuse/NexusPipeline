@@ -149,20 +149,6 @@ public sealed class ConfigurationRunController : IDisposable
         finally { _gate.Release(); }
     }
 
-    internal T UseCollectedWriter<T>(StoppedConfigurationEditor stopped, Func<T> callback)
-    {
-        ArgumentNullException.ThrowIfNull(stopped); ArgumentNullException.ThrowIfNull(callback);
-        _gate.Wait();
-        try
-        {
-            Verify();
-            if (!_closing || !_monitor.IsCompletedSuccessfully || !ReferenceEquals(stopped, _collectedForParent))
-                throw new IOException("configuration_parent_collection_unverified");
-            return callback();
-        }
-        finally { _gate.Release(); }
-    }
-
     internal Task AdmitProviderBootstrap(StepEvidenceBinding binding, OwnedProcessOutput output,
         Func<CancellationToken, Task> write, TimeSpan timeout)
     {

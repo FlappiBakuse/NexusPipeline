@@ -62,17 +62,6 @@ internal static class PcStageCodec
         _ => throw Invalid()
     };
 
-    internal static TargetStageOutcome CleanupOutcome(TargetExecutionOutcome? outcome) => outcome switch
-    {
-        TargetExecutionOutcome.LaunchFailed => TargetStageOutcome.LaunchFailed,
-        TargetExecutionOutcome.ReadinessTimedOut => TargetStageOutcome.ReadinessTimedOut,
-        TargetExecutionOutcome.ExternalReady or TargetExecutionOutcome.OwnedReady => TargetStageOutcome.Ready,
-        _ => TargetStageOutcome.NotAttempted
-    };
-
-    internal static bool SuppressesMain(TargetExecutionOutcome outcome) =>
-        outcome is TargetExecutionOutcome.LaunchFailed or TargetExecutionOutcome.ReadinessTimedOut or TargetExecutionOutcome.Blocked or TargetExecutionOutcome.ReadinessUnknown;
-
     internal static JsonObject Participant(PcStageIntent item, string scriptId) => new()
     {
         ["participantId"] = Guid.NewGuid().ToString("D"), ["kind"] = "process", ["resourceKey"] = "automation:" + scriptId,

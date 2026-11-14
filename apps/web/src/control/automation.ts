@@ -1,5 +1,5 @@
 import type { AutomationBundle, AutomationTarget, AutomationBindingPolicyOverrides,
-  AutomationPathsPortablePath, AutomationRelationsBinding, ConfigurationSelectorAccess } from './wire.generated';
+  AutomationPathsPortablePath, ConfigurationSelectorAccess } from './wire.generated';
 import { arrayValue, booleanValue, boundedInteger, dateValue, enumValue, integerValue, objectValue, stringValue } from './client';
 
 type Script = AutomationBundle['scripts'][number];
@@ -143,22 +143,3 @@ export function automationBundle(value: unknown): AutomationBundle {
     }) };
 }
 
-export interface BindingEffective {
-  catalogRevision: number;
-  bindingId: string;
-  userId: string;
-  raw: Record<string, unknown>;
-  effective: { isEnabled: boolean; runDays: number; maximumSuccessfulRunsPerDay: number;
-    notifyEnabled: boolean; notificationTaskIds: string[]; preHook: unknown; postHook: unknown;
-    preOnceAfterSuccess: boolean; postFinalOnly: boolean };
-  sources: Record<string, 'user' | 'binding'>;
-}
-export function bindingEffective(value: unknown): BindingEffective {
-  const row = objectValue(value), effective = objectValue(row.effective), sources = objectValue(row.sources);
-  return { catalogRevision: integerValue(row.catalogRevision), bindingId: stringValue(row.bindingId), userId: stringValue(row.userId),
-    raw: objectValue(row.raw), effective: { isEnabled: booleanValue(effective.isEnabled), runDays: days(effective.runDays),
-      maximumSuccessfulRunsPerDay: daily(effective.maximumSuccessfulRunsPerDay), notifyEnabled: booleanValue(effective.notifyEnabled),
-      notificationTaskIds: strings(effective.notificationTaskIds), preHook: effective.preHook, postHook: effective.postHook,
-      preOnceAfterSuccess: booleanValue(effective.preOnceAfterSuccess), postFinalOnly: booleanValue(effective.postFinalOnly) },
-    sources: Object.fromEntries(Object.entries(sources).map(([key, value]) => [key, enumValue(value, ['user', 'binding'])])) };
-}

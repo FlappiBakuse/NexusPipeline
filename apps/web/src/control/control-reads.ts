@@ -20,9 +20,6 @@ export class ControlReads {
 
   constructor(private readonly request: (path: string, signal?: AbortSignal) => Promise<unknown>) {}
 
-  async settled(signal: AbortSignal): Promise<void> {
-    while (this.reading.size) await abortable(Promise.allSettled([...this.reading]).then(() => {}), signal);
-  }
   clear(): void {
     this.generation++;
     this.invalidatePrepared();
