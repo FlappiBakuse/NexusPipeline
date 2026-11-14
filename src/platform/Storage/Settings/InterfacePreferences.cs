@@ -13,6 +13,7 @@ public sealed class InterfaceConflictException() : Exception("interface_revision
 
 public sealed class InterfacePreferences
 {
+    internal const string FileName = "interface.json";
     private sealed record Saved(string Format, int Version, Guid InstanceId, long Revision, InterfaceValues Values,
         Guid OperationId, string Subject, string RequestSha256);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
@@ -33,7 +34,7 @@ public sealed class InterfacePreferences
     public InterfacePreferences(InstanceLease owner, ResourceLeaseManager resources)
     {
         owner.VerifyHeld(owner.Instance); _owner = owner; _resources = resources;
-        _path = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(owner.Instance.RuntimeRoot, "state", "interface.json"));
+        _path = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(owner.Instance.RuntimeRoot, "state", FileName));
         _ = Read();
     }
 

@@ -31,6 +31,8 @@ SQL 显式限定领域，`main` 对应 `runtime.db`，其他别名与文件名�
 
 普通启动使用 `StateDatabase.OpenCurrent`，在实例租约内验证初始化 guard、实例、格式和精确 catalog，补齐已登记的派生读取索引。恢复验证活动候选及其绑定；完成历史由对应访问和显式诊断读取。
 
+同目录的 `interface.json` 归 `InterfacePreferences` 独立校验和原子保存，数据库库组清单、诊断副本及八库备份均排除该文件并保留原字节。其他未知成员继续保全阻断。
+
 显式完整诊断和维护准入冻结八库、回滚日志及 super-journal 的完整文件组，在隔离副本上识别。
 恢复前核对格式、实例、catalog 及 journal 路径；super-journal 和成员引用必须留在同一已确认的库组。
 副本中的绝对 journal 引用重绑定到副本，再由 SQLite 原生恢复；原组保持不变。

@@ -1,7 +1,9 @@
 using System.Runtime.Versioning;
 using System.Text.Json;
 using NexusPipeline.Platform.Storage;
+using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Settings;
+using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
 
 namespace NexusPipeline.StorageTests;
@@ -34,12 +36,30 @@ public sealed class InterfacePreferenceTests
         Assert.Equal(2, next.Revision);
         AssertSnapshot(next, preferences.Save(nextOperation, "local:interface-test", 1, nextValues));
 
+        var path = Path.Combine(source.Instance.RuntimeRoot, "state", "interface.json");
+        var savedBytes = File.ReadAllBytes(path);
         source.Lease.Dispose();
         using var reopenedLease = InstanceLease.Acquire(source.Instance, new());
+        var unexpected = Path.Combine(source.Instance.RuntimeRoot, "state", "unexpected.db");
+        File.WriteAllBytes(unexpected, [9, 7, 5]);
+        try
+        {
+            Assert.Equal("database_group_unknown_entry", Assert.Throws<IOException>(() =>
+                StateDatabase.OpenCurrent(source.Instance, reopenedLease)).Message);
+            Assert.Equal("database_group_unknown_entry", Assert.Throws<IOException>(() =>
+                StateDatabase.OpenExisting(source.Instance, Path.Combine(source.Root, "interface-unknown"),
+                    new JournalStartupAdmission(source.Instance, new()), reopenedLease)).Message);
+            Assert.Equal(new byte[] { 9, 7, 5 }, File.ReadAllBytes(unexpected));
+        }
+        finally { File.Delete(unexpected); }
+
+        Assert.Equal(source.Instance.InstanceId, StateDatabase.OpenCurrent(source.Instance, reopenedLease).InstanceId);
+        Assert.Equal(source.Instance.InstanceId, StateDatabase.OpenExisting(source.Instance, Path.Combine(source.Root, "interface-reopen"),
+            new JournalStartupAdmission(source.Instance, new()), reopenedLease).InstanceId);
         var reopened = new InterfacePreferences(reopenedLease, fixture.Resources);
         AssertSnapshot(next, reopened.Read());
+        Assert.Equal(savedBytes, File.ReadAllBytes(path));
 
-        var path = Path.Combine(source.Instance.RuntimeRoot, "state", "interface.json");
         var invalid = JsonSerializer.SerializeToUtf8Bytes(new
         {
             format = "foreign.interface.preferences", version = 1, instanceId = source.Instance.InstanceId,

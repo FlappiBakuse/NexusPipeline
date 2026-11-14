@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Text;
+using NexusPipeline.Platform.Storage.Settings;
 
 namespace NexusPipeline.Platform.Storage.Sqlite;
 
@@ -17,7 +18,11 @@ internal static class DatabaseJournals
     internal static IReadOnlyList<string> Inventory(string coordinator)
     {
         DatabaseLayout.RequireFiles(coordinator);
-        var names = Directory.EnumerateFileSystemEntries(Path.GetDirectoryName(coordinator)!).Select(Path.GetFileName).ToArray();
+        var root = Path.GetDirectoryName(coordinator)!;
+        var preferences = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(root, InterfacePreferences.FileName));
+        if (Directory.Exists(preferences)) throw new IOException("database_group_unknown_entry");
+        var names = Directory.EnumerateFileSystemEntries(root).Select(Path.GetFileName)
+            .Where(name => name != InterfacePreferences.FileName).ToArray();
         if (names.Any(name => name is null || !Known(name))) throw new IOException("database_group_unknown_entry");
         return names.Select(name => name!).Order(StringComparer.Ordinal).ToArray();
     }
