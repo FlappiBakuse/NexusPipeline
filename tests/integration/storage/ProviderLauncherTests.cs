@@ -169,7 +169,16 @@ public sealed class ProviderLauncherTests
         Assert.Equal(expected, evidence.RequireAll(fixture.State, verifyContents: true));
         var closure = new PlanReferenceClosure(fixture.Source.Instance, new(), new(fixture.Source.Instance, new()), fixture.Source.Database)
             .Read(state.Journal, fixture.Accepted.Plan);
-        Assert.All(expected, reference => Assert.Contains(reference, closure));
+        Assert.All(expected, reference =>
+        {
+            if (reference.RelativePath.StartsWith("blobs/content/", StringComparison.Ordinal))
+                Assert.Contains(reference, closure);
+            else
+            {
+                using var input = new ImmutableBlobStore(fixture.Source.Instance, new()).OpenVerified(reference);
+                Assert.Equal(reference.SizeBytes, input.Length);
+            }
+        });
     }
 
     private static FrozenJobClosure RequireWorkerStopped(ProviderRuntimeFixture fixture)

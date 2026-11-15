@@ -45,11 +45,4 @@ internal static class ScheduledProviderInventory
         ScheduledProviderRows.RequireCapacity(connection, transaction, 0);
     }
 
-    internal static bool IsBlobReferenced(RuntimeInstance instance, StateDatabase database, ContractReader contracts, BlobReference candidate)
-    {
-        var found = false;
-        var evidence = new ScheduledProviderEvidence(instance, contracts);
-        Visit(instance, database, contracts, state => found |= evidence.References(state).Contains(candidate));
-        return found;
-    }
 }

@@ -1,6 +1,5 @@
 """Publish immutable Host assets after server provenance and byte readback."""
 import hashlib
-from pathlib import Path
 import re
 import urllib.error
 import urllib.parse

@@ -6,6 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../fixtures/RecordStoreFixture.cs" Link="RecordStoreFixture.cs" />
+    <Compile Include="../../fixtures/StorageSeed/DatabaseFixtureConnection.cs" Link="DatabaseFixtureConnection.cs" />
     <Using Include="NexusPipeline.Platform.Serialization.Protocol" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="xunit" Version="2.9.2" />

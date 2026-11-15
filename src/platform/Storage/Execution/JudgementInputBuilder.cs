@@ -13,9 +13,6 @@ internal sealed class JudgementInputBuilder(RuntimeInstance instance, StateDatab
     JudgementLogReader? liveLog = null)
 {
     private static readonly JsonSerializerOptions Options = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-    internal JudgementWorkerInvocation Build(ExecutionPlan total, JudgementWorkerIdentity identity, JudgementInvocation invocation, BlobReference rawOutput)
-        => Prepare(total, identity, rawOutput, invocation.IsFinal).Bind(invocation);
-
     internal JudgementInputDraft Prepare(ExecutionPlan total, JudgementWorkerIdentity identity, BlobReference rawOutput, bool final = false)
     {
         if (total.InstanceId != instance.InstanceId.ToString("D") || total.RunId != identity.Primary.RunId.ToString("D"))

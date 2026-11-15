@@ -29,7 +29,6 @@ internal sealed class InstalledNativeSlot
 {
     private readonly object _gate = new();
     private Residency? _resident;
-    internal bool HasResidency { get { lock (_gate) return _resident is not null; } }
 
     internal void RequireSource(InstalledNativeSource source)
     {

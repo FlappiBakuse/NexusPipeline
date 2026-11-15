@@ -1,6 +1,5 @@
 """Verify strict authoritative inputs and their generated SDK projections."""
 import json
-from pathlib import Path
 from urllib.parse import urldefrag, urljoin
 
 from contract_codegen import expected_outputs

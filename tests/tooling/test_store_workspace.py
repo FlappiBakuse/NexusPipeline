@@ -8,7 +8,6 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tooling'))
 from binary_inputs import hash_file
-from source_snapshot import write_json
 from store_workspace import prepare_generation, publish_generation, verify_store
 
 

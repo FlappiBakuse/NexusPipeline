@@ -1,8 +1,6 @@
 import base64
 from copy import deepcopy
 import hashlib
-import json
-import shutil
 import urllib.error
 from unittest.mock import patch
 import zipfile

@@ -1,7 +1,6 @@
 """Prepare pinned binary inputs for the existing production assemblers."""
 import hashlib
 import json
-from pathlib import Path
 import urllib.request
 
 

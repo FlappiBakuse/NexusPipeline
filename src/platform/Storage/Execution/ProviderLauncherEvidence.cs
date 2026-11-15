@@ -173,9 +173,6 @@ internal sealed class ProviderLauncherEvidence(RuntimeInstance instance, StateDa
         }
     }
 
-    internal void RequireResolved(AttemptWriterState state, string? stepId = null) =>
-        RequireResolved(state.Latest.Root, state.Total, state.Attempt.ExecutionPlan.Sha256, stepId);
-
     internal void RequireResolved(JsonElement journal, ExecutionPlan total, string sha, string? stepId = null)
     {
         _ = RequireAll(journal, total, sha, verifyContents: true);

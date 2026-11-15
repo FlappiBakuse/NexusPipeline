@@ -2,6 +2,7 @@ using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Core.Secrets;
 using NexusPipeline.Platform.Storage.Secrets;
+using Sqlite = NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
 
 namespace NexusPipeline.WindowsTests;

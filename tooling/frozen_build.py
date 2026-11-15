@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 from binary_inputs import hash_file, PROJECTS
-from source_snapshot import digest, source_files, write_json
+from source_snapshot import digest, write_json
 from build_inputs import solution_inputs, web_inputs, project_inputs
 from sdk_locks import lock_arguments
 

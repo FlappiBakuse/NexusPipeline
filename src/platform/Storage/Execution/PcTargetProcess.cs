@@ -17,7 +17,6 @@ internal sealed class PcTargetProcess : IDisposable
     private OwnedTargetHandoff? _handoff;
     private Task? _stopping;
     private bool _startAttempted, _startReturned, _closing, _resolved, _disposed;
-    internal string JobName => _job.Name;
 
     internal PcTargetProcess(TargetJobStore store, string stepId)
     {
@@ -53,15 +52,6 @@ internal sealed class PcTargetProcess : IDisposable
                 facts.Launch.Arguments, facts.Launch.WorkingDirectory, facts.Binding.InstanceId, facts.Binding.AttemptId,
                 root => _store.RecordRoot(authority, _job, root), null, facts.CommandLineSyntax));
             _startReturned = true; return result;
-        }
-    }
-
-    internal PcTargetReadiness Observe(CancellationToken cancellation)
-    {
-        lock (_gate)
-        {
-            RequireStarted(); var authority = Authority();
-            return authority.Use(_job, authority.Binding, facts => PcTargetReadiness.Capture(facts.ReadyImage, cancellation, facts.ReadinessMode));
         }
     }
 

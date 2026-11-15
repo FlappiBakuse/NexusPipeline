@@ -42,7 +42,6 @@ internal sealed class BindingRawAllowance
             _used -= bytes;
         }
     }
-    internal long Used { get { lock (_gate) return _used; } }
 }
 
 internal sealed class AndroidObservationAllowance

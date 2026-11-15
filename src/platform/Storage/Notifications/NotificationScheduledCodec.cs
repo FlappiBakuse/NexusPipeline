@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Operations;
 using NexusPipeline.Platform.Serialization;
@@ -40,9 +39,6 @@ internal sealed class NotificationScheduledCodec(RuntimeInstance instance, Contr
     internal static OperationIdentity Identity(NotificationWorkSnapshot source) =>
         new(source.Document.OperationId, Subject, source.Reference.Sha256, Kind);
     internal static Guid DeliveryId(Guid operation, Guid task) => ReceiptRouteCodec.DeliveryId(operation, 0, task);
-    internal static string RequestDigest(BlobReference invocation, IReadOnlyList<Guid> ids, string title, string body) =>
-        Convert.ToHexStringLower(SHA256.HashData(NotificationCatalogCodec.Encode(new { invocation, ids, title, body })));
-
     private void RequireShape(NotificationWorkDocument document) => NotificationWorkShape.Require(document, Format, instance.InstanceId);
 
     internal static IOException Invalid() => new("notification_scheduled_source_unbound");

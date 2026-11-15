@@ -124,10 +124,6 @@ internal sealed class NotificationDeliveryEvidence(RuntimeInstance instance, Sta
         var bytes = new byte[checked((int)input.Length)]; input.ReadExactly(bytes); return bytes;
     }
 
-    private static NotificationDeliveryState State(Microsoft.Data.Sqlite.SqliteConnection connection,
-        Microsoft.Data.Sqlite.SqliteTransaction transaction, Guid operationId) =>
-        NotificationDeliveryRows.ReadState(connection, transaction, operationId).State;
-
     private static void RequireReferenceRows(Microsoft.Data.Sqlite.SqliteConnection connection,
         Microsoft.Data.Sqlite.SqliteTransaction transaction, NotificationDeliveryDocument document)
     {

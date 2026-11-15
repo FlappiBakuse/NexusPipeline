@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 
 from build_product import build_environment, build_product, update_export
 from source_snapshot import digest, write_json, external_directory
-from binary_inputs import capture_binary_inputs, verify_binary_inputs, hash_file, PROJECTS
+from binary_inputs import capture_binary_inputs, verify_binary_inputs, hash_file
 from test_expectations import suite_classes
 from test_registry import suite_filter
 from desktop_bundle import require_no_links, read_desktop_bundle

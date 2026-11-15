@@ -29,7 +29,6 @@ internal sealed class ProviderLauncherLifetime
     internal ProviderLauncherBinding Binding { get; }
     internal BlobReference Retained { get; }
     internal Exception? LastObservationFailure { get; private set; }
-    internal bool IsEnded => _ended;
 
     internal ProviderLauncherLifetime(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
         InstanceLease lease, ResourceLeaseManager resources, ProviderLauncherBinding binding, string subject,

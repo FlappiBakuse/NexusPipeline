@@ -35,9 +35,6 @@ internal sealed class AndroidControlEvidence(RuntimeInstance instance, StateData
         return request;
     }
 
-    internal IReadOnlyList<BlobReference> References(AttemptWriterState state) =>
-        ReadReferences(state.Latest.Root, state.Total, state.Attempt.ExecutionPlan.Sha256);
-
     [SupportedOSPlatform("windows")]
     internal void RequireStopped(JsonElement journal, ExecutionPlan total, string totalSha256, string stepId)
     {

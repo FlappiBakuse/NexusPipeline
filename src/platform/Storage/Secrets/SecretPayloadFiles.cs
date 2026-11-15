@@ -35,22 +35,6 @@ internal sealed class SecretPayloadLease : IDisposable
 [SupportedOSPlatform("windows")]
 internal sealed class SecretPayloadFiles(RuntimeInstance instance, UserSecretProtector protector)
 {
-    internal SecretPayloadLease Create(SecretPayloadIdentity identity, ProtectedSecretPayload payload)
-    {
-        Verify(identity);
-        var bytes = payload.Ciphertext.ToArray();
-        if (bytes.Length != identity.SizeBytes || payload.ProtectionScheme != identity.Scheme || payload.OwnerSid != identity.OwnerSid
-            || Convert.ToHexStringLower(SHA256.HashData(bytes)) != identity.Digest) throw new IOException("secret_payload_identity_changed");
-        var path = PathFor(identity);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        using (var output = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
-        {
-            output.Write(bytes);
-            output.Flush(flushToDisk: true);
-        }
-        return new(identity, OpenVerified(identity));
-    }
-
     internal SecretPayloadLease HoldVerified(SecretPayloadIdentity identity, bool trackPath = false)
         => new(identity, OpenVerified(identity), trackPath ? PathFor(identity) : null);
 

@@ -94,20 +94,6 @@ internal sealed class ProjectCompilationService
             { ProtectedInputs = readSelection ? ProjectInputStates.Read(_instance, _database, _contracts, use.ExtensionId, binding.Id) : [] };
     }
 
-    internal ConfigurationSaveResult? ReadAccepted(Guid operationId, string subject, Guid bindingId, long bindingRevision,
-        long expectedRevision, string extensionId, JsonElement selection, Action requireCaller, IReadOnlyList<ProjectInputIntent>? intents = null,
-        string? providerId = null)
-    {
-        requireCaller(); _lease.VerifyHeld(_instance);
-        var provider = providerId ?? ProviderId(extensionId);
-        if (ProjectSaveClosure.IsClosed(_database, operationId, subject,
-            ProjectSaveClosure.Digest(bindingId, bindingRevision, expectedRevision, extensionId, provider, selection, intents))) return null;
-        var result = new ProjectChoiceStore(_instance, _database, _contracts).Replay(operationId, subject, bindingId,
-            bindingRevision, expectedRevision, extensionId, selection, intents, provider);
-        requireCaller();
-        return result;
-    }
-
     internal async ValueTask<ProjectSaveOutcome> FinishAsync(Guid operationId, string subject, Guid bindingId, long bindingRevision,
         long expectedRevision, string extensionId, string providerId, JsonElement selection, IReadOnlyList<ProjectInputIntent> intents,
         Action requireCaller, CancellationToken cancellation)

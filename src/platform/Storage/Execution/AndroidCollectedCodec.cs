@@ -53,10 +53,6 @@ internal static class AndroidCollectedCodec
         return result.ToImmutable();
     }
 
-    internal static IReadOnlyList<BlobReference> References(AttemptWriterState state, AndroidControlEvidence reader,
-        AndroidCollectedIntent intent, bool verifyContent) =>
-        References(state.Latest.Root, state.Total, state.Attempt.ExecutionPlan.Sha256, reader, intent, verifyContent);
-
     internal static IReadOnlyList<BlobReference> References(JsonElement journal, ExecutionPlan total, string totalSha256,
         AndroidControlEvidence reader, AndroidCollectedIntent intent, bool verifyContent)
     {

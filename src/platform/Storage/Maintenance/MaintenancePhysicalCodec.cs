@@ -18,24 +18,6 @@ internal sealed class MaintenancePhysicalCodec(RuntimeInstance instance, Contrac
         RespectRequiredConstructorParameters = true
     };
 
-    internal static void RequireCapacity(FrozenPayloadApply plan)
-    {
-        var identity = new { VolumeSerial = new string('f', 16), FileId = new string('f', 32) };
-        var measurement = new
-        {
-            Format, Version = 1, plan.InstanceId, plan.OperationId, plan.JournalId,
-            PlanDigest = new string('f', 64), Source = plan.MaintenanceSource,
-            BeforeRevision = long.MaxValue, Stage = Sequence(plan).MaxBy(value => value.Length)!,
-                        WorkspaceIdentity = identity,
-            CandidateObjects = plan.Candidate.Snapshot.Entries.Select(item => new
-            {
-                item.RelativePath, Identity = identity
-            }).ToArray()
-        };
-        try { _ = BoundedJson.Serialize(measurement, Options); }
-        catch (JsonException exception) { throw new IOException("maintenance_payload_metadata_capacity", exception); }
-    }
-
     internal BlobReference Persist(MaintenancePhysicalRecord value, FrozenPayloadApply plan)
     {
         RequireRecord(value, plan);

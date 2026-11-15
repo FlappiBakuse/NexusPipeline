@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Platform.Serialization;
@@ -72,10 +71,6 @@ internal sealed class ScheduledProviderEvidence(RuntimeInstance instance, Contra
                 break;
         }
     }
-
-    internal ImmutableArray<BlobReference> References(ScheduledProviderState state) =>
-        new BlobReference?[] { state.Source.Reference, state.Source.Document.Plans, state.BeginReference,
-            state.CloseReference, state.ResultReference }.OfType<BlobReference>().Distinct().ToImmutableArray();
 
     private static bool Reason(string value) => !string.IsNullOrEmpty(value) && value.Length <= 80 &&
         value[0] is >= 'a' and <= 'z' && value.All(c => c is >= 'a' and <= 'z' or >= '0' and <= '9' or '_' or '-');

@@ -1,6 +1,5 @@
 """Bind Setup prerequisites to the actual single-file framework declarations."""
 import json
-from pathlib import Path
 import re
 
 from dotnet_bundle import read_bundle, read_member

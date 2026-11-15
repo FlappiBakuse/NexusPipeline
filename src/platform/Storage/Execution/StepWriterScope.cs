@@ -37,7 +37,6 @@ internal sealed class StepWriterScope : IConfigurationWriterScope
     public CommandLineSyntax CommandLineSyntax { get; }
     internal string Role => _role;
     internal string StepId => _stepId;
-    internal Guid? JudgementOwnerId => _judgementOwnerId;
 
     internal StepWriterScope(RuntimeInstance instance, StateDatabase database, ContractReader contracts, InstanceLease lease,
         Guid parentJournalId, string stepId, string role = "process", Guid? judgementOwnerId = null, ExecutionProviderRegistry.PreparedExecutionProvider? provider = null)

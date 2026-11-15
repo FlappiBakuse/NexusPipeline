@@ -41,9 +41,6 @@ internal static class ExecutionRetryAuthority
             System.Text.Json.JsonSerializer.SerializeToElement(plan.RetryPolicy))) throw new IOException("execution_retry_authority_unbound");
     }
 
-    internal static RetryAuthorityDescription Describe(ExecutionPlan plan) => RetryHookPolicy.Describe(
-        plan.Steps.Select(step => Surface(step, checked((int)plan.RetryPolicy.MaximumAttempts))).ToArray());
-
     private static ExecutionRetrySurface Surface(ExecutionPlanStep step, int maximumAttempts) =>
         new(step.Purpose == "initialization" ? null : step.Provider?.Retry is { } retry ? Read(retry) : null,
             step.Purpose == "initialization" ? 1 : maximumAttempts, step.Hooks is { Count: > 0 },

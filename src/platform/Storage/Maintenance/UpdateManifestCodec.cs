@@ -1,7 +1,6 @@
 using System.Collections.Immutable;
 using System.Security.Cryptography;
 using NexusPipeline.Core.Maintenance;
-using NexusPipeline.Extensibility;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Archives;
 
@@ -11,11 +10,9 @@ internal sealed record UpdatePayloadFile(string RelativePath, long SizeBytes, st
 internal sealed record UpdatePayloadManifest(ApplicationManifest Application, UpdateStoreBinding StoreBinding, string Profile)
 {
     internal string HostVersion => Application.HostVersion;
-    internal string SdkVersion => SdkIdentity.Version;
     internal string HostEntry => ApplicationTree.HostEntry;
     internal string LauncherEntry => ApplicationTree.LauncherEntry;
     internal string MaintenanceEntry => ApplicationTree.MaintenanceEntry;
-    internal string DesktopEntry => ApplicationTree.DesktopEntry;
     internal ImmutableArray<UpdatePayloadFile> Files => Application.Files;
 }
 

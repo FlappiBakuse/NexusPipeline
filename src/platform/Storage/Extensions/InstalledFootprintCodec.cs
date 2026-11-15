@@ -75,9 +75,6 @@ internal sealed class InstalledFootprintCodec(RuntimeInstance instance, PayloadA
         }
     }
 
-    internal static IReadOnlyList<BlobReference> References(ExtensionInstalledFootprint value) =>
-        Array.AsReadOnly(value.Payload.Contents.Prepend(value.Source).Prepend(value.PhysicalResult).Distinct().ToArray());
-
     internal byte[] EncodeMetadata(ExtensionInstalledFootprint value)
     {
         Validate(value);

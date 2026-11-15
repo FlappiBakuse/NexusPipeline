@@ -9,24 +9,6 @@ internal sealed class VerifiedImageRetirement
 {
     private VerifiedImageRetirement() { }
 
-    internal static VerifiedImageRetirement? ForCapture(RuntimeInstance instance, StateDatabase database,
-        ContractReader contracts, CaptureSavedEvidence saved)
-    {
-        if (saved.Result is not { Outcome: "captured", Png: not null } result || saved.State.Result is null) return null;
-        return Read(instance, database, contracts, saved.State.Binding.Primary.RunId, result.Png,
-            image => image.Binding == saved.State.Binding && image.Source == saved.State.Source &&
-                image.Root == saved.State.Root && image.Result == saved.State.Result &&
-                image.ParentClosure == result.ParentClosure, null);
-    }
-
-    internal static VerifiedImageRetirement? ForEntry(RuntimeInstance instance, StateDatabase database,
-        ContractReader contracts, ExecutionCaptureBinding binding, ImageCatalogEntry entry)
-    {
-        if (entry.Png is null) return null;
-        return Read(instance, database, contracts, binding.Primary.RunId, entry.Png,
-            image => image.Binding == binding && image.ToEntry() == entry, null);
-    }
-
     internal static VerifiedImageRetirement? ForAsset(RuntimeInstance instance, StateDatabase database,
         ContractReader contracts, Guid runId, BlobReference png) =>
         Read(instance, database, contracts, runId, png, _ => true, null);
@@ -60,16 +42,6 @@ internal sealed class VerifiedImageRetirement
         private RecordRetirementFamily? _family;
         private readonly Dictionary<BlobReference, RecordRetirementDocument> _proofs = [];
 
-        internal VerifiedImageRetirement? ForCapture(CaptureSavedEvidence saved)
-        {
-            if (saved.State.Binding.Primary.RunId != runId) throw RecordRetirementCodec.Invalid();
-            if (saved.Result is not { Outcome: "captured", Png: not null } result || saved.State.Result is null) return null;
-            return Read(instance, database, contracts, runId, result.Png, image =>
-                image.Binding == saved.State.Binding && image.Source == saved.State.Source &&
-                image.Root == saved.State.Root && image.Result == saved.State.Result &&
-                image.ParentClosure == result.ParentClosure, this);
-        }
-
         internal VerifiedImageRetirement? ForFrame(CaptureSavedEvidence saved, CaptureFrameRecord frame)
         {
             if (saved.State.Binding.Primary.RunId != runId || saved.State.Result is null ||
@@ -88,9 +60,6 @@ internal sealed class VerifiedImageRetirement
             return entry.Png is null ? null : Read(instance, database, contracts, runId, entry.Png,
                 image => image.Binding == binding && image.ToEntry() == entry, this);
         }
-
-        internal VerifiedImageRetirement? ForAsset(BlobReference png) =>
-            Read(instance, database, contracts, runId, png, _ => true, this);
 
         internal RecordRetirementFamily Family() =>
             _family ??= new RetirementFamilyReader(instance, database, contracts).CaptureMetadata(runId);

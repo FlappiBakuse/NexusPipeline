@@ -7,9 +7,6 @@ namespace NexusPipeline.Platform.Storage.Maintenance;
 
 internal static class UpdateBuildProfile
 {
-    internal static void RequireProduction(UpdatePayloadManifest manifest, ArchivedFileTree contents, ImmutableBlobStore blobs)
-        => Require(manifest, contents, blobs, "production");
-
     internal static void Require(UpdatePayloadManifest manifest, ArchivedFileTree contents, ImmutableBlobStore blobs, string profile)
     {
         if (manifest.Profile != profile) throw Invalid();

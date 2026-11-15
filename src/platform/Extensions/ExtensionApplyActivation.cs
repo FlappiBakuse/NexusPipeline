@@ -84,13 +84,6 @@ internal sealed class ExtensionApplyActivation : IAsyncDisposable
         }
     }
 
-    internal void RequirePrepared()
-    {
-        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
-        _inventory.RequireCallbackReturned(_scope); _source.RequireForPreparation(ActivationId);
-        if (_published || _scope.Activation.IsPublished) throw new IOException("extension_candidate_already_published");
-    }
-
     internal void RequirePreparedInsidePublication()
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);

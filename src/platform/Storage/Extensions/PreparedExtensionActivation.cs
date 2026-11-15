@@ -40,12 +40,10 @@ internal sealed class PreparedExtensionActivation : IAsyncDisposable
     private Task? _dispose;
     internal string ExtensionId { get; }
     internal string TargetPath { get; }
-    internal Guid OperationId => _root.OperationId;
     internal Guid JournalId { get; }
     internal BlobReference Source { get; }
     internal BlobReference PhysicalResult => _physical;
     internal ResourceOperationLease Root => _root;
-    internal ContractReader Contracts => _contracts;
     internal CancellationToken AcceptedCancellation => _acceptedCancellation;
     internal void RequireReservation(ExtensionActivator.ApplyReservation inventory)
     { if (!ReferenceEquals(_inventory, inventory)) throw Invalid(); }

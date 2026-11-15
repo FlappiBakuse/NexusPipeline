@@ -1,4 +1,3 @@
-import json
 from unittest.mock import patch
 
 from ci_fixture import GitFixture, HOST, production_tools

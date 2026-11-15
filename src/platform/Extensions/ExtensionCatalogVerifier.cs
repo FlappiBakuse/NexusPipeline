@@ -10,7 +10,6 @@ namespace NexusPipeline.Platform.Extensions;
 
 internal sealed class ExtensionCatalogVerifier(ContractReader contracts, StoreTrustPolicy trust)
 {
-    internal const string Format = "nexus.store.catalog";
     internal VerifiedExtensionCatalog Verify(ReadOnlyMemory<byte> pointer, ReadOnlyMemory<byte> catalog,
         ReadOnlyMemory<byte> signature, ExtensionStoreChannel expectedChannel)
     {

@@ -30,7 +30,6 @@ internal sealed class AndroidControlProcess : IDisposable
     private long? _startedTimestamp, _elapsedMilliseconds;
     private bool _attempted, _closing, _disposed, _releasedEmpty;
     private Task? _stopping;
-    internal string JobName => _job.Name;
     internal bool WasReleasedUnregistered { get { lock (_gate) return _releasedEmpty; } }
     internal AndroidCommandRequest Request => Authority().Request;
 

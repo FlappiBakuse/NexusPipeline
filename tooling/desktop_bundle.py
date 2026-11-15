@@ -1,7 +1,7 @@
 """Assemble the selected, pinned Electron runtime and this source's desktop shell."""
 import hashlib
 import json
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 import re
 import stat
 import zipfile

@@ -6,9 +6,6 @@ namespace NexusPipeline.Platform.Storage.Notifications;
 
 internal static class DeliveryReferenceIndex
 {
-    internal static bool IsBlobReferenced(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
-        BlobReference candidate) => ReadReferenced(instance, database, contracts, new HashSet<BlobReference> { candidate }).Contains(candidate);
-
     internal static HashSet<BlobReference> ReadReferenced(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
         IReadOnlySet<BlobReference> candidates)
     {

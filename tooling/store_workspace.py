@@ -1,6 +1,5 @@
 """Keep signed generations and their receipt identities within one owned workspace."""
 import json
-from pathlib import Path
 
 from binary_inputs import hash_file
 from desktop_bundle import require_no_links, safe_name

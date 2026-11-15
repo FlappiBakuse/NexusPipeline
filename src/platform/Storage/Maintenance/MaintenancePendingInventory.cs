@@ -10,9 +10,6 @@ internal static class MaintenancePendingInventory
     internal static void VerifyReadOnly(RuntimeInstance instance, StateDatabase database, ContractReader contracts, PayloadApplyRoots roots) =>
         Visit(instance, database, contracts, roots, verifyContents: true, (_, _) => false);
 
-    internal static bool IsReferenced(RuntimeInstance instance, StateDatabase database, ContractReader contracts, PayloadApplyRoots? roots, BlobReference blob)
-        => ReadReferenced(instance, database, contracts, roots, new HashSet<BlobReference> { blob }).Contains(blob);
-
     internal static HashSet<BlobReference> ReadReferenced(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
         PayloadApplyRoots? roots, IReadOnlySet<BlobReference> candidates)
     {

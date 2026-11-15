@@ -21,8 +21,6 @@ internal sealed class ScriptSourceDirectory : IDisposable
     private long bytes;
     private bool disposed;
 
-    internal string Root => root;
-
     internal ScriptSourceDirectory(string path, ResourceLeaseManager resources, Action current, CancellationToken cancellation)
     {
         this.resources = resources; this.current = current; this.cancellation = cancellation;
@@ -65,12 +63,6 @@ internal sealed class ScriptSourceDirectory : IDisposable
     {
         Check(); PhysicalPathPolicy.ValidateRelativePath(relative);
         if (Find(relative) is not { Kind: "file" }) throw new IOException("script_source_file_missing");
-    }
-
-    internal void RequirePath(string relative)
-    {
-        Check(); PhysicalPathPolicy.ValidateRelativePath(relative);
-        if (Find(relative) is null) throw new IOException("script_source_path_missing");
     }
 
     private Entry? Find(string relative)

@@ -8,7 +8,7 @@ import sys
 import time
 
 from ci_assets import desktop_archive
-from ci_plan import REPOSITORIES, full_sha, plugins, source_identity, verify_plan
+from ci_plan import REPOSITORIES, full_sha, source_identity, verify_plan
 
 
 def external(root, partner, output):

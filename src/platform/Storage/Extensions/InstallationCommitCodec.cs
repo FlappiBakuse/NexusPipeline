@@ -99,11 +99,6 @@ internal sealed class InstallationCommitCodec(RuntimeInstance instance, Contract
         ["identity"] = JsonSerializer.SerializeToNode(intent, Options)
     };
 
-    internal static ImmutableArray<BlobReference> References(ExtensionInstallationCommit value) =>
-        value.ActivationPreparation is { } preparation
-            ? [value.Source, value.PhysicalResult, value.Footprint, preparation]
-            : [value.Source, value.PhysicalResult, value.Footprint];
-
     private void Validate(ExtensionInstallationCommit value)
     {
         if (value is null || value.Format != Format || value.Version != 1 || value.InstanceId != instance.InstanceId ||
