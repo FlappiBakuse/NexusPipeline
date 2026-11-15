@@ -2,7 +2,7 @@
 
 **执行时机：本次选定任务在两仓的代码、必要断言和文档先统一完成，再执行本页定义的验证计划。** 不在每张任务卡后运行一次 lint/typecheck/test/build，也不以“保险”为理由默认跑全仓或全部插件。
 
-本页定义职责与当前可用命令。任务卡决定本次选择；以下命令是语法与路径示例，不是要求整页逐条执行的清单。工具分层任务完成后，只微调实际变化的入口，不提前把不存在的 `nexus lint` 或 `nexus typecheck` 写成可用命令。
+本页维护验证职责、选择和当前命令。共同实现顺序由 [CONTRIBUTING](../../CONTRIBUTING.md)维护；以下命令按本次任务选择，不要求整页逐条执行。
 
 ## 四类结果
 
@@ -53,7 +53,7 @@ python -B tooling/nexus.py check --scope contracts
 
 按改动选择，契约完全未变不为了凑四项而重复跑契约生成检查。schema 或生成权威确实变更时，代码阶段使用 canonical generator 更新必要源文件，再在统一阶段检查一致性。不能通过修改生成物或旧指纹让验证阶段悄悄改变源码。
 
-现役 AST/程序集边界与生成检查需要的工具可复用一次编译。旧 build 中耦合的检查按本轮分层任务迁出或分别报告；不临时禁掉真实依赖保护来获得绿色构建。
+现役 AST/程序集边界与生成检查需要的工具可复用一次编译。现役 build 中组合执行的职责分别报告，保留实际依赖和边界检查。
 
 ### typecheck 与必要准备
 
@@ -70,7 +70,7 @@ try {
 }
 ```
 
-只在本次需要 Web 类型或组件依赖时选择。工作区属于当前冻结源码，不能借用另一个 checkout 的 node_modules 后冒称同源。前端 AST 命令和浏览器参数可查[现有参数参考](frontend-testing.md)；其旧“完整验收”段落不扩大本页选定范围。
+只在本次需要 Web 类型或组件依赖时选择。工作区属于当前冻结源码，不能借用另一个 checkout 的 node_modules 后冒称同源。前端 AST 命令和浏览器参数可查[现有参数参考](frontend-testing.md)；按所改产品边界选择原生和完整验收范围。
 
 Web 回执的 `preparation` 记录本次依赖命令的 `PASS`、`FAIL` 或 `NOT_RUN`。复用浏览器产物时，职责结果沿用 `originalReceipt` 中的编译证据。
 
@@ -82,7 +82,7 @@ python -B tooling/nexus.py build --profile test --project NexusPipeline.Core --o
 
 `--project` 接受项目名，不是 csproj 路径。若后面的已选原生 test 会准备同一闭包，就由它准备一次，不先重复执行此示例。公开 SDK 未变时，不默认重建所有独立消费者。
 
-只需 SDK 编译/打包输入时，现有 `sdk-packages --compile-only` 会产生真实 SDK 和独立消费者的编译结果，可供 Plugins 的现役导入流程使用。它的 `status=PASS` 只表示该已选范围通过；`validationMode=compile-only` 下 runtimeConsumers 与 lifecycle 仍为 NOT_RUN。不要为取得导入资格无条件补运行时消费者或插件生命周期；只有选中了相应产品假设才执行。依据：[SDK 输出范围](https://github.com/FlappiBakuse/NexusPipeline/blob/0bb4d144d92805a2d489c65d0be3b7527c7810fd/tooling/sdk_packages.py#L129-L146)、[现役 Plugins 导入](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/5f88763ca4f49836b0bead262dad4acfacaebb63/tooling/import_sdk.py#L18-L40)。
+只需 SDK 编译/打包输入时，现有 `sdk-packages --compile-only` 会产生真实 SDK 和独立消费者的编译结果，可供 Plugins 的现役导入流程使用。它的 `status=PASS` 只表示该已选范围通过；`validationMode=compile-only` 下 runtimeConsumers 与 lifecycle 仍为 NOT_RUN。不要为取得导入资格无条件补运行时消费者或插件生命周期；只有选中了相应产品假设才执行。依据：[SDK 输出范围](../../tooling/sdk_packages.py)、[现役 Plugins 导入](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/5f88763ca4f49836b0bead262dad4acfacaebb63/tooling/import_sdk.py#L18-L40)。
 
 ### test
 
@@ -121,7 +121,7 @@ python -B tooling/nexus.py product-assemble --publication-root '<本次实际 pu
 
 ## 发布产物与工具链验证
 
-先按[成品要求](release.md#发布验收)核对实际源码、装配与资产回执。原生场景使用这些回执绑定的同源成品，记录实际进程退出、运行时与应用归属。按本次触达的边界选场景。
+先按[成品要求](../operations/release.md#发布验收)核对实际源码、装配与资产回执。原生场景使用这些回执绑定的同源成品，记录实际进程退出、运行时与应用归属。按本次触达的边界选场景。
 
 | 改动范围 | 验证方向 |
 |---|---|
@@ -144,14 +144,13 @@ python -B tooling/asset_qualification.py --assets-receipt <assets-receipt.json> 
 
 失败保留原始结果，修根因后只补失败项及本次修复真正影响的依赖；已验证且输入未变的无关范围不重复跑。任务卡目标已被最低有效证据覆盖后停止，不追加“再保险”测试、长压力或真实游戏。
 
-本轮文档中的 5,296 是审查时静态声明用例数，历史 1,298 是当时专项局部执行结果；它们都不能成为新代码的验收计数或本轮 PASS。
 
 源码快照也包含docs。代码阶段先定稿业务说明，统一验证结果默认写仓外；若随后只改文档，单列docs-only delta并保留实际产物的冻结身份，不把旧回执说成新全树通过。纯文档修订不触发无理由的业务重跑；需要纳入新产物时只准备实际必要的产物闭包，并按真实工具规则复用可用证据。
 
-命令依据：[nexus.py](https://github.com/FlappiBakuse/NexusPipeline/blob/0bb4d144d92805a2d489c65d0be3b7527c7810fd/tooling/nexus.py)、[项目选择](https://github.com/FlappiBakuse/NexusPipeline/blob/0bb4d144d92805a2d489c65d0be3b7527c7810fd/tooling/build_product.py#L99-L132)、[Web 准备与类型检查](https://github.com/FlappiBakuse/NexusPipeline/blob/0bb4d144d92805a2d489c65d0be3b7527c7810fd/tooling/web_build.py#L73-L113)。
+命令依据：[nexus.py](../../tooling/nexus.py)、[项目选择](../../tooling/build_product.py)、[Web 准备与类型检查](../../tooling/web_build.py)。
 
 ## SDK 消费者与命名职责
 
 SDK 独立消费者只编译真实公开类型及调用，归 typecheck；不执行自造 DTO 往返或反射方法存在性断言。SDK 默认打包入口另执行前端生命周期行为测试；`--compile-only` 跳过该行为测试。回执的 `runtimeConsumers` 固定为 NOT_RUN，`lifecycle` 按实际执行记录，`validationMode` 为 compile-only 或 lifecycle。包内容、来源与消费者使用的实际 SDK 身份继续核验。
 
-命名检查属于 lint：最多四个单词，含完整介词词元时允许五个；六词始终超限。接口 I 前缀及现有缩写拆分保持原规则。介词按检查器显式词表匹配，`within` 可匹配，`input` 中的 `in` 不匹配。Python 文件与声明、C# 类型与方法、前端 AST 声明沿用各自现有检查范围。固定平台 API 超限仍保留逐项例外。
+命名检查归 lint，规则与逐项例外见[命名规范](naming.md)。

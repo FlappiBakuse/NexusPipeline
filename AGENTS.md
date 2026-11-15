@@ -1,74 +1,45 @@
-# NexusPipeline：本地开发约定
+# NexusPipeline Agent 指令
 
-## 本轮目标
+本仓拥有 Host、Web、Windows 桌面与维护入口，以及插件公共 SDK。先读当前任务，再按[任务地图](docs/agents/README.md)选择领域页和直接调用者；[文档导航](docs/README.md)列出各主题的唯一维护位置。
 
-优先恢复已确认的 main 产品逻辑，保留 next 的架构、类型、当前协议和代码风格。先完成本批次全部选定代码，再统一定向验证。只做任务证据要求的最小实现和最小验证。
+## 开工与边界
 
-本文件规定本仓当前开发约定。当前任务与目标见 docs/agents/README.md；日常操作见 docs/developer/workflow.md。
+- 核对分支、HEAD、工作树、暂存区和远端；保护已有修改，未知来源只暂停依赖它的操作。
+- 本机开发遵守适用的 Workspace 规则，使用 `develop`。提交、推送、PR、tag、合并和发布按当前聊天授权执行。
+- 禁止 reset、clean、自动 stash、force push 或覆盖未知用户内容。真实账号发送、游戏/脚本执行、生产数据变更需要对应授权。
+- 仅为确有独立规则的模块增加子 AGENTS。Codex 沿工作路径合并指令，同目录优先 AGENTS.override.md，较深规则在适用范围覆盖冲突项；见[官方说明](https://learn.chatgpt.com/docs/agent-configuration/agents-md)。
 
-## 开工与范围
+## 模块导航
 
-- 只读确认分支、HEAD、status、暂存区和已有修改归属；遵守本地 develop 约定。
-- 不执行 reset、clean、自动 stash、force push，不覆盖未知修改。
-- 按任务读取 owner 和直接调用者，不先全仓审查、全量测试或完整产品构建。
-- 一次选定的跨仓任务集合构成一个代码批次；不得每张卡另开批次来边做边测。
-- 本轮已明确的旧行为恢复无需再次要求产品裁决；新目标歧义才询问。
-- 任务内可逆操作沿已有授权完成；Git commit、推送、发布按实际会话授权分别处理。
+| 模块 | 代码 | 先读 |
+|---|---|---|
+| 领域规则与 ports | `src/core` | [架构](docs/architecture/overview.md) |
+| SQL、文件、恢复与效果 | `src/platform/Storage` | [用例归属](docs/architecture/storage-owners.md)、[存储](docs/reference/storage.md) |
+| 组合、HTTP、CLI、MCP | `apps/host` | [控制面](docs/reference/control-http.md) |
+| Web / Electron | `apps/web`、`apps/desktop` | [前端](docs/architecture/frontend.md)、[桌面启动](docs/architecture/desktop-startup.md) |
+| 安装、更新、卸载 | `apps/installer`、`apps/maintenance`、`apps/uninstaller` | [维护生命周期](docs/operations/installation.md) |
+| 公共契约与 SDK | `contracts`、`sdk` | [SDK](docs/reference/sdk.md) |
 
-## 架构与代码
+## 必须保持
 
-- 一个业务事实只有一个 owner；Core 不引用 Host、Platform、SDK DTO、数据库或 UI。
-- Platform 实现 Core ports，在边界转换 DTO；Host 组合服务、处理入口与生命周期。
-- Web、CLI 和 MCP 使用同一用例与权限；Test/Production 保持同源业务和 HTTP。
-- 不建立泛型服务定位器、无消费者接口、备用配置系统或万能表单框架。
-- 恢复 main 行为不引入 main 的旧协议 reader、别名或失败后 fallback。
-- Storage 的结构调整限定到有证据的领域闭环，保持单一事务、租约和恢复 owner。
-- 公共 UI 负责真实共同行为；页面依赖所属业务的窄能力，不暴露整个应用写权限。
-- 新分支的格式、命名和职责风格保持；不借本轮进行无关重命名、版本 bump 或依赖升级。
+- 一个业务事实只有一个 owner。Core 不引用 Host、Platform、SDK wire DTO、数据库或 UI；Platform 实现 ports；Host 组合服务和入口。
+- Test/Production 使用同源业务与 HTTP；Web、CLI、MCP 共用用例和权限。新格式按当前 schema 校验；未知字节保全拒绝，不补空库或旧协议兜底。
+- 恢复与配置还原先核验 writer 完整停止、资源和实例身份；未知外部副作用只读核对，禁止自动重放。
+- 普通重试、冷恢复后继和原操作查询保持各自身份；配置来源、调用输入、活动输出与长期发布分开处理。
+- 秘密仅经专用能力和内存保护区处理；不写普通 DTO、草稿、浏览器存储、日志或回执。keep/set/clear 使用明确意图。
+- 手写文本 UTF-8、LF；命名以[命名规范](docs/development/naming.md)和现役检查器为准。文件上限：C#450、TS/JS350、Vue300、CSS350、工具400、测试500、JSON/YAML350、文档400行。函数目标60行，超过100行审查职责。
+- 生成文件通过 canonical producer 更新；不手填指纹、SDK 身份或 PASS。依赖、构建、实例、报告写显式仓外根；本机临时材料放 Temp。
+- 删除代码先核对符号引用、全部编译上下文和[加载入口](docs/architecture/overview.md#从运行入口定位)；公开 SDK、序列化类型、原生 ABI 与动态注册须有独立的保留或删除依据。
 
-## 数据与副作用
+## 实现与验证
 
-- 未知格式只读拒绝，保留原字节；不读坏数据后创建空库冒充正常。
-- 恢复前证明旧 writer 已停止，无法确权的资源隔离而不猜测。
-- 普通失败重试、专项部分任务重试、冷恢复/新 attempt 分开建模。
-- 同一运行的配置进度接续与长期自动同步开关是不同语义。
-- 未知外部副作用不自动重放；本地明确未发送与网络已进入未知阶段分开归因。
-- 配置修复继续校验权限、revision、digest 和受保护字段；运行 blocking 不一概阻止消除它的合法修复。
-- 秘密草稿驻留专用内存；不写普通 DTO、日志或任务回执。
-- keep/set/clear 语义明确，不靠空字符串猜测。
+- 按 [CONTRIBUTING](CONTRIBUTING.md)集中完成本次选定代码、必要断言和文档，再汇总去重的定向验证；失败后只补受影响项。
+- 文本与源码规则：`python -B tooling/nexus.py check --scope source`；契约改变再选 `check --scope contracts`。
+- C# 定向编译：`python -B tooling/nexus.py build --profile test --project NexusPipeline.Core --output <仓外构建槽>`。
+- 产品假设按[验证规范](docs/development/validation.md)选择现役 group/method；Web 参数见[前端验证](docs/development/frontend-testing.md)。文档修改运行链接/路径检查及 `git diff --check`。
+- PASS、FAIL、NOT_RUN、BLOCKED 按实际范围记录。未提交输入记 local-uncommitted、commit/tree 为 null；原产物保留自己的冻结身份。
+- 原生功能交付须形成真实软件；纯文档修改执行适用文档检查。版本选择按当前目标，不因修复或重建重复 bump。
 
-- 驼峰/Pascal 命名最多 4 个单词，包含完整介词单词时最多 5 个；沿用检查器现有声明与文件范围、缩写分词及固定外部 API 例外。
+## 文档联动
 
-## 文件与输出
-
-- 手写文本 UTF-8、LF；标识符表达领域、单位和所有权；注释解释原因。
-- 保留现役文件/函数大小规则：C#450，TS/JS350，Vue300，CSS350，工具400，测试500，JSON/YAML350，长期文档400行。
-- 函数目标60行，超过100行审查职责；不以压行、partial 或无主容器绕过边界。
-- 生成文件使用 canonical producer，不手填源码指纹、SDK身份或PASS回执。
-- 依赖、构建、fixture、用户数据、截图和报告均进入命令显式指定的仓外输出根。
-- 产品构建不依赖本开发包、父目录聊天材料或隐藏脚本。
-
-## 统一验证
-
-- CODE 阶段可写测试和必要生成源码，只做静态差异自查，不运行 check/lint/typecheck/test/build/smoke。
-- 所有选定代码、消费者和文档就绪后，统一汇总最低有效层验证，去掉重复命令。
-- lint 管源码/依赖规则；typecheck 管类型与消费者；test 管产品假设；build 管完整可运行产物。
-- 四种职责可复用一次编译与产物，不强制四个新CLI或CI job。
-- 产品测试在实现替换但业务结果不变时仍应通过；去除私有类型名、索引名、连接身份、内部写次数和DOM身份约束。
-- 外部副作用不重复、容量有界、配置恢复、历史归属、草稿和权限属于产品假设，保留最低有效验证。
-- 不用源码字符串匹配证明业务；架构规则用编译/AST。
-- 不再维护第二份全部测试方法/参数数量清单；保留非空选择、失败、异常skip、缺报告、取消与超时可见性。
-- 现役工具粒度较粗时选最小可达suite，不虚构filter参数；父入口包含子套件时不再重复执行子套件。
-- 必要编译/SDK生成在统一阶段准备一次；没有源码/产物变化就复用同一证据。
-- 真实失败只触发最小修复增量和受影响复验，不无条件重试，不随意扩大到全仓。
-- NOT_RUN/BLOCKED/条件延期不等于通过；旧候选验证不能冒充新源码验证。
-
-## 文档与交付
-
-- 用户说明用真实界面与结果；开发说明给 owner、业务流程和必要命令；Agents 文档给任务地图。
-- 目标稿转现役事实以真实实现和必要验证为准；保留尚未完成部分的明确状态。
-- 状态页只列未完成项；历史报告与决策归档，当前规则保持唯一事实源。
-- 交付记录实际命令、退出码、最小场景、源码与产物身份及未运行项。
-- 未提交源码记 local-uncommitted，commit/tree 为 null，不用参考SHA代替候选。
-- 原生功能交付需要真实产物；环境不足时如实报告，不以文档或命令冒充客户端。
-- 不因同版本修复或重建重复 bump Host/SDK 版本。
+公共接口变动检查对应参考和生成物；模块边界变动检查架构；构建/验证变动检查开发指南；安装与发布变动检查维护文档。重要且长期的边界选择记录 ADR，保留可核对背景。用户行为变化只更新对应用户步骤；未完成项归 [status](docs/status.md)。新文档归属和维护规则见[文档维护](docs/README.md#维护规则)。

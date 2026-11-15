@@ -10,14 +10,11 @@ python tooling/contract_codegen.py --check
 python tooling/nexus.py check --scope contracts
 ```
 
-生成器产生 C#/TS 消息形状及两种 SDK 的相同契约指纹。
-`contracts/fingerprint.json` 摘要 schema、能力/API、UI ABI、手写公共 SDK 源码与生成器，
-排除自身、生成文件和测试样例。公共方法变化也必须改变握手身份。
-相同版本字符串不能替代实际源码、契约和二进制身份。
+生成器产生 C#/TS 消息形状。公共语义兼容身份与完整源码来源分别由 `contracts/fingerprint.json` 和 `contracts/source-fingerprint.json` 维护，计算规则与更新流程统一见[SDK 导出与身份](sdk.md)。
 
 生成类型不替代运行时校验。输入先复制为独立、有界字节并严格解析，拒绝重复成员和超深结构，
 再按嵌入 schema 验证；引用离线解析，UUID、日期和绝对 URI 使用明确格式检查。
-固定 schema 的成功校验最多保留 256 个 schema 名称、长度及 SHA-256 键，不保留输入 JSON、DTO 或明文。
+固定 schema 的成功校验最多保留 8192 个 schema 名称、长度及 SHA-256 键，不保留输入 JSON、DTO 或明文。
 每次读取仍独立执行严格解析；该缓存不授权领域关系、SQL、物理输入、恢复或副作用。
 
 ## 扩展生命周期与权限

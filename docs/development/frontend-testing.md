@@ -47,13 +47,14 @@ node tooling/web_contracts.mjs --root <源码根> --modules <上述modules> --su
 | 增量日志 | 完整接收 500 帧并合并刷新；切换身份、隐藏、离开视口及卸载释放旧流，晚到回调保持原归属 |
 | 依赖边界 | 现役 TS/Vue AST 门禁拒绝面板导入应用 store、宽端口、原始 Control client 和日志服务值，保留日志类型及页面组装 |
 
-配置读取另按[配置存储](configuration-storage.md#配置读取验收)核对，前端通过结果不替代真实专项与原始配置字节验收。
+配置读取另按[配置存储](../reference/configuration-storage.md#配置读取验收)核对，前端通过结果不替代真实专项与原始配置字节验收。
 
 ```text
 node tooling/web_browser.mjs --root <源码根> --modules <上述modules> --browser <实际浏览器exe> --scenario controls --runtime <构建槽> --output <新空报告目录>
 ```
 
 `controls` 使用真实控件、键盘、IME 和 AX 夹具；`controls-painted` 选择绘制控件。
+`controls-help` 选择实际表单的占位符、帮助气泡、语言切换、真实鼠标/键盘、AX 描述和卸载清理，保留独立回执。
 测试依赖仅来自 `tests/browser-tools/package.json` 及其原生 lock，安装进 runtime/browser-tools。
 不会进入产品依赖。浏览器路径必须显式传入；不扫描个人 profile 或接管已有实例。
 

@@ -1,6 +1,6 @@
 # 状态、普通重试与冷恢复
 
-本轮恢复 main 已确认的产品逻辑，同时保留 next 的 engine、business、lifecycle、recovery 事实分离。具体恢复目标已由用户确定；不要通过扩大 Unknown 范围或把全部 Unverified 改成 Failed 来省略真正的条件判断。
+当前结果保留 engine、business、lifecycle、recovery 四维事实。普通失败、无标记退出和冷恢复分别按实际证据分类，规则由 [RetryDecision](../../src/core/Execution/RetryDecision.cs) 与执行消费链维护。
 
 ## 三种后续动作
 
@@ -12,20 +12,20 @@
 
 普通失败重试不要求脚本声明自己能在 Host 崩溃后安全重放。冷恢复的安全规则也不因恢复普通重试而放宽。两者的模型和编号不能互相借用。
 
-## 本轮普通执行结果表
+## 普通执行结果表
 
-| 已观察条件 | 目标产品结果与后续 |
+| 已观察条件 | 产品结果与后续 |
 |---|---|
 | 明确业务成功 | 保留成功事实，进入原收尾；不因之后展示或通知失败改为脚本失败 |
 | 明确普通失败且额度允许 | 按原绑定策略重试；从上一调用有效活动配置继续 |
-| 已配置判定规则，普通进程正常 exit 0，完整收集后仍没有完成或失败终态 | 恢复 main 的 Failed 结果与普通重试资格；原始“无业务完成证据”仍如实保留 |
+| 已配置判定规则，普通进程正常 exit 0，完整收集后仍没有完成或失败终态 | 记录 Failed 并按规则判断普通重试资格；原始“无业务完成证据”仍如实保留 |
 | 没有配置判定规则 | 保留 main 与 next 已对应的按退出结束语义，不只凭 Engine.Failed 再增一条业务失败规则 |
 | 取消、致命总超时、未确认停止或未完成恢复 | 不增加普通调用 |
 | 受控 provider worker 缺有效终态、中断，或已有真实 Unknown 外部副作用 | 沿其现有 Interrupted/Unknown 路径处理，不把它们当成上述普通无标记退出 |
 
 无标记分支只处理审查已证的适用普通执行。不能仅用 `Business == Unverified` 一个条件扩大重试；也不能为了通过测试伪造已经观察到业务成功或业务失败标记。结果分类、原始证据与重试资格分别表达，并在真实消费链中接通。
 
-依据：[main 无标记退出](https://github.com/FlappiBakuse/NexusPipeline/blob/3fa803f3cb3ab59564bfad6fcf19c512dbfcd45d/src/Modules/Execution/AttemptTerminator.cs#L107-L133)、[main 普通重试](https://github.com/FlappiBakuse/NexusPipeline/blob/3fa803f3cb3ab59564bfad6fcf19c512dbfcd45d/src/Modules/Execution/RetryPolicy.cs#L1-L17)、[next 证据构建](https://github.com/FlappiBakuse/NexusPipeline/blob/0bb4d144d92805a2d489c65d0be3b7527c7810fd/src/platform/Storage/Execution/StepEvidenceFactory.cs#L63-L99)、[next 分类](https://github.com/FlappiBakuse/NexusPipeline/blob/0bb4d144d92805a2d489c65d0be3b7527c7810fd/src/core/Execution/RetryDecision.cs#L39-L65)。
+依据：[main 无标记退出](https://github.com/FlappiBakuse/NexusPipeline/blob/3fa803f3cb3ab59564bfad6fcf19c512dbfcd45d/src/Modules/Execution/AttemptTerminator.cs#L107-L133)、[main 普通重试](https://github.com/FlappiBakuse/NexusPipeline/blob/3fa803f3cb3ab59564bfad6fcf19c512dbfcd45d/src/Modules/Execution/RetryPolicy.cs#L1-L17)、[当前证据构建](../../src/platform/Storage/Execution/StepEvidenceFactory.cs)、[当前分类](../../src/core/Execution/RetryDecision.cs)。
 
 ## 普通重试的执行顺序
 
@@ -51,4 +51,4 @@ Host 丢失后，先证明旧 creator 与 writer 停止，再恢复或隔离对�
 
 统一验证只选本次改变的判据及其消费链：无标记普通执行确实按额度再调用、未知真实效果不重放、进度接续但不增预算、已成功前序不重复。已有冷恢复或 hook 用例仅在相应行为被触及时补验。私有方法调用顺序、对象引用相同或枚举字符串数量不作为这些假设的替代。
 
-精确协议仍见 [execution-outcomes](../../contracts/schemas/execution-outcomes.schema.json)、[执行](execution.md)及[调度](scheduling.md)。旧调度参考中涉及本轮已授权恢复的部分，以本页目标和最终实际证据更新；其他字段和副作用边界不变。
+精确协议见 [execution-outcomes](../../contracts/schemas/execution-outcomes.schema.json)、[执行](../reference/execution.md)及[调度](../reference/scheduling.md)。本页维护结果分类和重试语义，调度页维护 occurrence、持久预算和完成动作。

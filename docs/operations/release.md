@@ -90,7 +90,7 @@ uploaded、size、digest 并下载回读，全组复核后才公开 Release。wr
 ## 插件目录元数据
 
 插件的 i18n 字典投影成 manifest metadata，签名 catalog 和 Host 列表消费同一文本及语言集合。
-正式 catalog 的日期来自实际发行事实，缺少发行日期时保留空值。 [插件列表时间](extensions.md#插件列表时间)
+正式 catalog 的日期来自实际发行事实，缺少发行日期时保留空值。 [插件列表时间](../reference/extensions.md#插件列表时间)
 
 ## 单文件发布
 
@@ -101,7 +101,7 @@ Host 需要 .NET 10 Core 与 ASP.NET Core x64 共享框架，更新窗口需要 
 发布者核对实际 bundle 的框架声明、适用的 SDK 原字节与独立入口成员，再记录单文件输出。
 更新准入读取 Host 和更新窗口的托管 profile，核对 Host 的 SDK 身份及窗口绑定的 Host 摘要。
 production 只接收 production 入口，所有检查直接读取 bundle。
-发布回执记录实际解析到的 .NET 10.0 稳定 SDK。生产者校验未压缩 bundle 6.0 的成员与原字节。 [.NET SDK 与依赖锁](command-reference.md#net-sdk-与依赖锁) · [.NET 单文件部署](https://learn.microsoft.com/en-us/dotnet/core/deploying/single-file/overview)
+发布回执记录实际解析到的 .NET 10.0 稳定 SDK。生产者校验未压缩 bundle 6.0 的成员与原字节。 [.NET SDK 与依赖锁](../reference/commands.md#工具链与依赖锁) · [.NET 单文件部署](https://learn.microsoft.com/en-us/dotnet/core/deploying/single-file/overview)
 
 ## 公开应用与更新包
 
@@ -124,10 +124,10 @@ Portable 与 Update 都携带 `package-info/recipe.json` 及中英文说明。
 
 `product_assets.py` 用同一装配回执生成 Portable、Setup 与 Update。Setup 与 Portable 的共同应用文件及载荷清单逐字节一致。安装 worker、目标清单与公开卸载入口由 Setup 单独封装，卸载入口绑定同次发布的 worker 摘要。
 
-新装及保留数据后重装的 Inno 目标为 `{app}`，同代覆盖的暂存目标为 `{tmp}\nexus-transition-payload`。两条安装分支引用同一 `Source`，由 `MergeDuplicateFiles=yes` 为每个共同文件保存一份物理载荷。0.18.0 候选验收时，Setup 须在 145 MiB 以内。 [安装与维护生命周期](installation-lifecycle.md)
+新装及保留数据后重装的 Inno 目标为 `{app}`，同代覆盖的暂存目标为 `{tmp}\nexus-transition-payload`。两条安装分支引用同一 `Source`，由 `MergeDuplicateFiles=yes` 为每个共同文件保存一份物理载荷。0.18.0 候选验收时，Setup 须在 145 MiB 以内。 [安装与维护生命周期](installation.md)
 
 打包器从本次发布的五个单文件读取实际框架声明，核对 `Microsoft.NETCore.App` 与 `Microsoft.AspNetCore.App` 的最低版本。`tooling/runtime-dependencies.json` 固定 x64 下载包的官方 URL、长度和摘要。 [微软 .NET 10 发行元数据](https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/10.0/releases.json)
 
 ## 发布验收
 
-正式发布核对同源三资产的完整清单、原字节、成品运行证据及相应 stable/preview 通道。Test 资产的运行结果按实际源码和包摘要记录，正式候选使用生产信任及服务端来源证明。 [发布产物与工具链验证](validation.md#发布产物与工具链验证)
+正式发布核对同源三资产的完整清单、原字节、成品运行证据及相应 stable/preview 通道。Test 资产的运行结果按实际源码和包摘要记录，正式候选使用生产信任及服务端来源证明。 [发布产物与工具链验证](../development/validation.md#发布产物与工具链验证)

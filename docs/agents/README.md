@@ -1,32 +1,24 @@
-# 给 Codex 与其他 Agent 的入口
+# Agent 任务地图
 
-用户已明确本轮工作方式：**先完成选定任务集合的全部代码，再统一执行最小定向验证；优先恢复 main 的已确认业务逻辑，保留 next 架构和代码风格。** 本页是任务路由，不是另一份完整工程规范。
+读取顺序：[根指令](../../AGENTS.md) → 本表相关行 → 领域文档 → 生产 owner、直接调用者及相关测试。共同开发流程归 [CONTRIBUTING](../../CONTRIBUTING.md)，验证命令归[验证规范](../development/validation.md)。不要求一次读取全部 docs。
 
-## 开始时只读这些
+| 任务 | 首读 | 代码起点 | 验证方向 |
+|---|---|---|---|
+| 定义、账号、绑定、队列 | [自动化](../reference/automation.md) | `src/core/Automation`、`Storage/Automation`、`apps/host/Control/Automation` | 顺序、修订、引用及真实控制入口 |
+| 首次快照、进度、同步与编辑 | [配置](../architecture/configuration.md)、[配置存储](../reference/configuration-storage.md) | `Storage/Configuration`、`Storage/Execution/ExecutionAdmissionPort.cs` | 首次建立、重试接续、CAS、原现场恢复 |
+| 普通失败、冷恢复或预算 | [状态与重试](../architecture/state-and-retry.md) | `src/core/Execution`、`Storage/Execution` | 所改分类与一条实际消费链 |
+| 数据库、备份与回收 | [存储](../reference/storage.md) | `Storage/Sqlite`、`Storage/Journals` | 跨库回滚、身份、完整备份及引用保护 |
+| 日程、通知或系统完成动作 | [调度](../reference/scheduling.md) | `Storage/Scheduling`、`Storage/Notifications` | occurrence 去重、Unknown 核对与授权效果 |
+| HTTP、CLI、MCP | [控制面](../reference/control-http.md) | `apps/host/Control` | 同一用例、权限、错误和 operation 身份 |
+| 页面、草稿与即时设置 | [前端](../architecture/frontend.md)、[Web 状态](../reference/frontend-state.md) | `apps/web/src/app`、`pages`、`control`、`components` | 真实表单、原操作、可见性与资源释放 |
+| 公共控件和插件 UI | [前端 ABI](../reference/frontend-abi.md)、[扩展前端](../reference/extension-frontend.md) | `apps/web/src/ui`、`sdk/frontend` | AST/类型与实际插件消费者 |
+| GUI、托盘、退出与重启 | [桌面启动](../architecture/desktop-startup.md)、[桌面授权](../reference/desktop-authorization.md) | `apps/host/Desktop`、`apps/desktop` | 同源原生入口、失败与超时释放 |
+| 安装、更新和卸载 | [维护](../operations/installation.md) | `apps/installer`、`apps/maintenance`、`apps/uninstaller` | 受影响实际成品事务 |
+| 插件目录和激活 | [扩展](../reference/extensions.md) | `Storage/Extensions`、`src/platform/Extensions` | 初始化、撤销、离线恢复与目录变化 |
+| SDK 和项目编译 | [SDK](../reference/sdk.md)、[编译](../reference/compilation.md) | `contracts`、`sdk`、Host producer → Plugins import | 生成一致性、独立消费者与必要运行边界 |
+| 性能与读写归因 | [性能](../development/performance.md)、[诊断](../operations/diagnostics.md) | 实际热点所属 owner | 同源输入、绝对读写、CPU/内存及回退 |
+| 文档 | [文档导航](../README.md) | 对应主题的唯一维护位置 | 链接、锚点、源码路径、命令和状态 |
 
-1. 根 AGENTS.md、当前选定任务卡和[状态表](../status.md)。
-2. [任务地图](change-map.md)指向的领域页。
-3. 对应 main/next 代码与必要调用者；用实际生产消费链确认问题。
-4. [开发流程](../developer/workflow.md)和[验证规范](../developer/validation.md)。
+表中的 `Storage/` 位于 `src/platform/Storage`。测试入口分布于 `tests/unit`、`tests/integration`、`tests/frontend`、`tests/windows` 和 `tests/tooling`；以 runner 实际选择能力确定范围。
 
-不要默认通读全部 docs、全部测试、两个仓库的全部历史提交。未知用户修改只影响依赖它的任务，不成为覆盖或重置整个工作区的理由。
-
-## 明确采用的决策
-
-普通重试继承上一调用的有效活动配置；适用普通无标记退出恢复 main Failed 与普通重试；首次无快照自动从已验证来源建立；目录文件数缩减恢复 main 判据，取消无依据字节比例门槛。这些不再作为待用户裁决项。
-
-保留 next 的新格式、权限、实例独占、停止证明、恢复事实、秘密隔离和未知真实副作用不盲重。不要把普通失败与冷恢复混为一类，也不要用 main 的旧协议/旧类型取代当前模型。
-
-## 执行纪律
-
-代码阶段可以读取、编辑、审查 diff、准备必要断言与生成源文件；不运行产品 lint/typecheck/test/build/benchmark。选定任务的所有代码与文档就绪后，冻结实际输入，一次合并执行定向计划。
-
-诊断条件任务先完成支持观测的最小代码；统一观察后才能对真实原因补有限实现。失败修复回到代码阶段，随后只补受影响验证，不重跑与变化无关的整套工具。
-
-新增分支、接口、测试或验证场景必须能指出当前消费者、已证问题或产品假设。没有这个依据就不增加。不要按目录名、覆盖率、测试数量或行数“完成度”推进重构。
-
-## 交付说明模板
-
-回答“改了什么行为、为什么、涉及哪些 owner、实际运行哪些验证、哪些没运行、产物/源码是什么身份”。把阻塞与未运行如实记录到状态表；不以旧 SHA、旧结果或未验证截图替代当前源码。
-
-本地未提交源码使用 local-uncommitted；参考提交单列。提交、推送和发布按本轮用户授权，不自行扩大。完成约定范围后交接，不自动开启下一轮架构重写或全量回归。
+Host 拥有公共契约与权限，Plugins 拥有上游参数、任务和日志语义。只有实际契约改变或直接消费者受影响时才扩大跨仓范围。同源 SDK 使用真实 producer 回执；固定上游规则从 Plugins 对应项目页和锁读取。

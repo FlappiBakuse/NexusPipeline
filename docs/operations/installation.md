@@ -1,6 +1,6 @@
 # Windows 安装与维护生命周期
 
-Inno 负责 Setup 的先决条件、原生安装登记和卸载交互。`apps/installer` 的 worker 调用 Platform Installation 处理应用载荷、实例归属和恢复。Host 负责签名更新的事务和重启交接。 [发布成品](release.md#setup-打包) · [验证入口](validation.md#发布产物与工具链验证)
+Inno 负责 Setup 的先决条件、原生安装登记和卸载交互。`apps/installer` 的 worker 调用 Platform Installation 处理应用载荷、实例归属和恢复。Host 负责签名更新的事务和重启交接。 [发布成品](release.md#setup-打包) · [验证入口](../development/validation.md#发布产物与工具链验证)
 
 ## Setup 的运行时准入
 
@@ -33,7 +33,7 @@ Setup 在目的地检查前尝试恢复。恢复者取得安装门禁，核对�
 
 交互应用等待实际窗口退出，再从签名候选暂存已核验的 Host 映像，以 `maintenance-apply` 接管事务。Job、writer 与管道绑定到该进程。交换前核对旧 Host 与 writer 的停止证据。更新保持安装根身份，交换两个入口、README 与 resources，并保留 runtime、已安装插件和其他根目录材料。
 
-已安装版更新的准备阶段冻结安装归属、原生登记和文件身份。新 Host 通过启动交接后，提交回执冻结新归属，再发布清单摘要、版本和原生登记。Portable 更新只发布应用载荷。已记录提交按冻结对象续做，启动失败按原归属恢复旧载荷并清理已确权的暂存。维护诊断记录在 `runtime/diagnostics`，包含阶段、拒绝码、HRESULT 和调用位置。 [进程归属](process-ownership.md)
+已安装版更新的准备阶段冻结安装归属、原生登记和文件身份。新 Host 通过启动交接后，提交回执冻结新归属，再发布清单摘要、版本和原生登记。Portable 更新只发布应用载荷。已记录提交按冻结对象续做，启动失败按原归属恢复旧载荷并清理已确权的暂存。维护诊断记录在 `runtime/diagnostics`，包含阶段、拒绝码、HRESULT 和调用位置。 [进程归属](../architecture/process-ownership.md)
 
 ## 卸载与数据选择
 
@@ -64,14 +64,14 @@ installer-state uninstall-finish --root <目录> --transaction <GUID>
 ## 已提交插件事务的工作区
 
 已提交插件旧树由服务就绪后的分页清理回收，当前载荷、活跃 scope、未决事务与未知对象保留。
-安装/移除回执在工作区回收后仍可读取；分页、中断和删除证明统一见[扩展清理](extensions.md#废弃工作目录清理)。
+安装/移除回执在工作区回收后仍可读取；分页、中断和删除证明统一见[扩展清理](../reference/extensions.md#废弃工作目录清理)。
 
 ## 历史插件 ZIP 退役
 
 历史 ZIP 只从已知提交来源选取，保留现役安装、回滚、执行及共享引用。
-候选、持有期与回执重放规则见[历史包退役](extensions.md#历史包与展开内容退役)。
+候选、持有期与回执重放规则见[历史包退役](../reference/extensions.md#历史包与展开内容退役)。
 
 ## 插件展开内容与包输入
 
 插件从持续受保护的已验证 ZIP 直接物化候选树，展开成员不另写 CAS 副本。
-配置交换和宿主更新保留各自内容来源；完整包输入与交接规则见[下载与包验证](extensions.md#独占下载与包验证)。
+配置交换和宿主更新保留各自内容来源；完整包输入与交接规则见[下载与包验证](../reference/extensions.md#独占下载与包验证)。

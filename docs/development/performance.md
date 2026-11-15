@@ -7,14 +7,14 @@
 
 | 主题 | 现役事实源 |
 |---|---|
-| 普通启动、当前恢复候选和历史投影 | [启动与容量](startup-and-capacity.md) |
-| 数据库连接、不可变证据与回收引用 | [状态存储](storage.md) |
-| 插件包、旧树、历史 ZIP、编译预览和 activation | [扩展生命周期](extensions.md) |
-| 当前 attempt、判定日志和截图缓冲 | [执行](execution.md) |
-| 空分钟、重试候选及通知收尾 | [调度与通知](scheduling.md) |
-| 历史分页、详情和媒体资源 | [前端状态](frontend-state.md) |
-| 映像证明及进程族 | [进程拥有权](process-ownership.md) |
-| 计时、FileIO 和查询计划 | [诊断](diagnostics.md) |
+| 普通启动、当前恢复候选和历史投影 | [启动与容量](../architecture/startup.md) |
+| 数据库连接、不可变证据与回收引用 | [状态存储](../reference/storage.md) |
+| 插件包、旧树、历史 ZIP、编译预览和 activation | [扩展生命周期](../reference/extensions.md) |
+| 当前 attempt、判定日志和截图缓冲 | [执行](../reference/execution.md) |
+| 空分钟、重试候选及通知收尾 | [调度与通知](../reference/scheduling.md) |
+| 历史分页、详情和媒体资源 | [前端状态](../reference/frontend-state.md) |
+| 映像证明及进程族 | [进程拥有权](../architecture/process-ownership.md) |
+| 计时、FileIO 和查询计划 | [诊断](../operations/diagnostics.md) |
 
 ## 资源口径
 
@@ -106,5 +106,5 @@ P0 原型的目标制定依据保留在[桌面 ADR](../decisions/desktop-shell.m
 | 无变化后台 | 无到期工作不做业务持久写入；真实事件、重连、取消、到期与恢复仍生效 |
 | 历史页面 | 容量内 1→2→1 复用；权限、筛选、实例及明确刷新失效，旧详情按用户访问读取 |
 
-源码、依赖、运行时、数据和软件绑定摘要；纯文档收尾按[工作流](workflow.md)记录 docs-only delta。
+源码、依赖、运行时、数据和软件绑定摘要；纯文档收尾按[工作流](../../CONTRIBUTING.md)记录 docs-only delta。
 每次复测同时保留收益、回退、未运行项和归因缺口。新增修改只由实际调用、读取内容及定向反例支持。

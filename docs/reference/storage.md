@@ -111,7 +111,7 @@ prepared/revision 1 的登记缺少物理 journal 时，只有 typed plan、完�
 每个文件副作用引用自己的冻结 planPath/planDigest，不能借用总执行计划。
 跨卷先建立可验证备份和同卷候选，再以禁止覆盖的移动安装、退役和还原对象。
 配置还原不修改用户当前保存的快照；未知字节、物理形态或未停 writer 保全隔离。
-详细规则见[配置](configuration.md)与[执行](execution.md)。
+详细规则见[配置](../architecture/configuration.md)与[执行](execution.md)。
 
 载荷 plan 冻结 updateApply/extensionApply 的动作、目标根、前态、候选、原物理对象及资源。
 冻结不授予执行权，也不代替包信任、扩展退役或 writer 停止检查。
@@ -230,7 +230,7 @@ account_history 将该结果与同一运行的时间、恢复和退役状态关�
 活动 attempt 的原始修订、重试及任务投影复用由[执行读取](execution.md#活动执行读取)拥有，
 已验证前缀的结构状态随 attempt 保留；新增修订复制当前游标后继续校验，全部成功后才发布新游标。
 绑定、资源声明和门禁共享一次读取快照，writer 与取消事实也在同一短事务读取；配置成员的停止查询批量读取。
-配置快照及输出封存由[配置存储](configuration-storage.md)拥有，映像证明见[进程拥有权](process-ownership.md)。
+配置快照及输出封存由[配置存储](configuration-storage.md)拥有，映像证明见[进程拥有权](../architecture/process-ownership.md)。
 
 不可变文本缓存最多 1024 份、原字节 4 MiB，仅复用与当前字节一致的解析，不保存权限或恢复授权。
 契约 schema 图惰性初始化，静态引用解析后可并行求值，动态及未解析引用继续独占，禁止联网补齐。
@@ -256,5 +256,5 @@ account_history 将该结果与同一运行的时间、恢复和退役状态关�
 预检冷却、执行/通知期间暂停及旧工作树中断续做见[扩展生命周期](extensions.md)。
 
 历史到期候选通过 `julianday(created_at)` 的登记派生索引定位，保持时区和截止语义，无候选时跳过历史 join。
-派生索引只接受登记定义，未知或改写索引拒绝。全库历史容量见[启动与容量](startup-and-capacity.md)，
+派生索引只接受登记定义，未知或改写索引拒绝。全库历史容量见[启动与容量](../architecture/startup.md)，
 回收验收覆盖共享引用、待通知、分页中断及原回执重放。

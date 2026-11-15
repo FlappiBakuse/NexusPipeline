@@ -2,7 +2,7 @@
 
 恢复容量保护活动家族及仍有待完成文件效果的家族；完成历史保留证据并释放新工作额度。
 额度、冻结预算和事务归属统一见[状态存储](storage.md#启动与恢复准入)。
-普通启动与显式完整诊断的读取范围见[启动与恢复](startup-and-capacity.md#普通启动与完整诊断)。
+普通启动与显式完整诊断的读取范围见[启动与恢复](../architecture/startup.md#普通启动与完整诊断)。
 
 `RecoveryCapacityStore`、`RecoveryCapacityInventory`、`RecoveryJournalRegistry` 和 `StartupJournalRecovery`
 分别负责计量、库存、登记及恢复。点查服务已绑定 journal，家族读取服务父子关系，完整活动检查维持隔离。
