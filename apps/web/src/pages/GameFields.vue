@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fieldHelp as vHelp } from '../components/field-help';
 import { computed, watch } from 'vue';
 import { useAdapterAvailability } from './adapter-availability';
 import type { AutomationBundle } from '../control/wire.generated';
@@ -144,7 +145,7 @@ function android(key: string, value: string): void {
     <p v-if="selfManagedPc">{{ t('客户端由脚本自身启动') }}</p>
     <div class="game-panel">
       <template v-if="target.kind === 'pc'">
-        <label>
+        <label v-help="t('游戏路径用于启动与进程身份核验；清理仅作用于本次持有的目标。')">
           {{ t('游戏路径') }}
           <em v-if="target.launchByHost || target.forceCloseAtEnd">*</em>
           <nexus-path-picker
@@ -158,7 +159,7 @@ function android(key: string, value: string): void {
             @nexus-browse="browse('gamePath')"
           />
         </label>
-        <label>
+        <label v-help="selfManagedPc ? t('客户端由脚本自身启动时，此项停用。') : t('启动游戏时传给游戏主程序的命令行参数；包含空格的参数使用双引号。')">
           {{ t('脚本自启动参数') }}
           <nexus-text-input
         data-draft-field="GameFields/paths.gameArguments"
@@ -171,10 +172,11 @@ function android(key: string, value: string): void {
       </template>
       <template v-else>
         <EmulatorFields :model-value="modelValue" :store="store" @update:model-value="emit('update:modelValue', $event)" />
-        <label>
+        <label v-help="t('选择 Host 上用于连接安卓设备的 ADB 可执行文件；设备地址和游戏包名分别填写。')">
           {{ t('ADB 程序路径') }}
           <nexus-path-picker
-            :aria-label="t('ADB 程序路径')"
+            :placeholder="t('ADB 可执行文件路径')"
+          :aria-label="t('ADB 程序路径')"
             :kinds.prop="['file']"
             :value.prop="paths.androidTool"
             :browse-allowed.prop.camel="!!desktop"
@@ -182,16 +184,17 @@ function android(key: string, value: string): void {
             @nexus-browse="browse('androidTool')"
           />
         </label>
-        <label>
+        <label v-help="t('填写精确的 ADB serial/address；发现模拟器实例后会带入对应地址。')">
           {{ t('ADB 地址') }}
           <nexus-text-input
         data-draft-field="GameFields/target.android?.endpoint || ''"
-            :aria-label="t('ADB 地址')"
+            :placeholder="t('模拟器 ADB 地址')"
+          :aria-label="t('ADB 地址')"
             :value.prop="target.android?.endpoint || ''"
             @nexus-change="android('endpoint', $event.detail.value)"
           />
         </label>
-        <label>
+        <label v-help="t('填写安卓游戏的应用包名，用于启动与本次目标身份核验。')">
           {{ t('游戏包名') }}
           <nexus-text-input
         data-draft-field="GameFields/target.android?.package || ''"
@@ -201,7 +204,7 @@ function android(key: string, value: string): void {
           />
         </label>
       </template>
-      <label>
+      <label v-help="t('PC 客户端使用游戏可执行文件；安卓模拟器使用 ADB 与游戏包名。')">
         {{ t('启动方式') }}
         <FormSelect
         data-draft-field="GameFields/target.kind" :value="target.kind" @change="mode(($event.target as HTMLSelectElement).value)">
@@ -209,7 +212,7 @@ function android(key: string, value: string): void {
           <option value="android" :disabled="policy?.supportsAndroid === false">{{ t('安卓模拟器') }}</option>
         </FormSelect>
       </label>
-      <label>
+      <label v-help="t('宿主启动游戏后等待指定秒数，再继续运行脚本；客户端由脚本自身启动时停用。')">
         {{ t('启动后等待秒数') }}
         <nexus-number-input
         data-draft-field="GameFields/target.waitSeconds"

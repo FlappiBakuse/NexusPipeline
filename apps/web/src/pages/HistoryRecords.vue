@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fieldHelp as vHelp } from '../components/field-help';
 import { computed } from 'vue';
 import type { RecordsStore } from '../app/store-ports';
 import type { RecordPage, RecordRow } from '../control/models';
@@ -55,7 +56,7 @@ const recordRows = computed(() =>
               <nexus-badge
                 :label="view.label"
                 :tone="view.tone"
-                :title="recordBusiness(row) + ' · ' + recordLifecycle(row)"
+                v-help="recordBusiness(row) + ' · ' + recordLifecycle(row)"
               />
             </span>
             <small>{{ view.description }}</small>

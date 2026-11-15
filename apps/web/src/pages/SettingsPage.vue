@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fieldHelp as vHelp } from '../components/field-help';
 import { createIdentity } from '../control/identity';
 import { computed, reactive, ref, watch } from 'vue';
 import type { AppStore } from '../app/store';
@@ -128,7 +129,7 @@ async function restart(): Promise<void> {
         >
           <template #token>
             <div v-if="store.can('secrets.status')" class="token">
-              <label>
+              <label v-help="t('留空保持当前令牌；远程客户端使用令牌访问宿主，本机回环请求使用当前本地授权规则。')">
                 {{ t('访问令牌') }}
                 <div class="token-input">
                   <input
@@ -210,7 +211,7 @@ async function restart(): Promise<void> {
             </div>
           </template>
           <template #proxy-password>
-            <label v-if="store.can('secrets.status')">
+            <label v-if="store.can('secrets.status')" v-help="t('留空保持已保存的代理密码；输入新值后提交替换。')">
               {{ t('密码') }}
               <input
                 type="password"

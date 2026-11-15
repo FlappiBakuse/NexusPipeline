@@ -7,7 +7,8 @@ using NexusPipeline.Platform.Serialization;
 namespace NexusPipeline.Platform.Storage.Settings;
 
 public sealed record InterfaceValues(string Theme, IReadOnlyList<string> DashboardCards,
-    IReadOnlyList<string> PinnedSettings, IReadOnlyList<string> CollapsedSettings, string Locale);
+    IReadOnlyList<string> PinnedSettings, IReadOnlyList<string> CollapsedSettings, string Locale,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? DashboardAvailableCards = null);
 public sealed record InterfaceSnapshot(long Revision, InterfaceValues Values, Guid OperationId);
 public sealed class InterfaceConflictException() : Exception("interface_revision_conflict");
 
@@ -46,6 +47,7 @@ public sealed class InterfacePreferences
             throw new ArgumentException("interface_request_invalid");
         Validate(values);
         values = values with { DashboardCards = Array.AsReadOnly(values.DashboardCards.ToArray()),
+            DashboardAvailableCards = values.DashboardAvailableCards is null ? null : Array.AsReadOnly(values.DashboardAvailableCards.ToArray()),
             PinnedSettings = Array.AsReadOnly(values.PinnedSettings.ToArray()), CollapsedSettings = Array.AsReadOnly(values.CollapsedSettings.ToArray()) };
         var digest = Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new { expectedRevision, values }, Json)));
         var admission = _resources.TryAcquire(operationId, [new("settings:interface", ResourceClaimMode.Mutation)]);
@@ -87,7 +89,7 @@ public sealed class InterfacePreferences
         PhysicalPathPolicy.NormalizeWithoutLinks(_path);
         if (!File.Exists(_path)) return new("nexus.interface.preferences", 1, _owner.Instance.InstanceId, 0, Default, Guid.Empty, "", "");
         using var input = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        if (input.Length is < 1 or > 8192) throw new IOException("interface_preferences_invalid");
+        if (input.Length is < 1 or > 16384) throw new IOException("interface_preferences_invalid");
         var bytes = new byte[(int)input.Length]; input.ReadExactly(bytes);
         using var parsed = StrictJson.Parse(bytes);
         var saved = parsed.RootElement.Deserialize<Saved>(Json) ?? throw new IOException("interface_preferences_invalid");
@@ -102,6 +104,7 @@ public sealed class InterfacePreferences
     private static InterfaceSnapshot Snapshot(Saved saved) => new(saved.Revision, saved.Values with
     {
         DashboardCards = Array.AsReadOnly(saved.Values.DashboardCards.ToArray()),
+        DashboardAvailableCards = saved.Values.DashboardAvailableCards is null ? null : Array.AsReadOnly(saved.Values.DashboardAvailableCards.ToArray()),
         PinnedSettings = Array.AsReadOnly(saved.Values.PinnedSettings.ToArray()),
         CollapsedSettings = Array.AsReadOnly(saved.Values.CollapsedSettings.ToArray())
     }, saved.OperationId);
@@ -109,13 +112,17 @@ public sealed class InterfacePreferences
     {
         if (values is null || values.Theme is not ("dark" or "light" or "system") || values.Locale is not ("zh-CN" or "en-US"))
             throw new ArgumentException("interface_values_invalid");
-        if (values.DashboardCards is null || values.DashboardCards.Count > 64 ||
-            values.DashboardCards.Distinct(StringComparer.Ordinal).Count() != values.DashboardCards.Count ||
-            values.DashboardCards.Any(value => value is null || !System.Text.RegularExpressions.Regex.IsMatch(value,
-                "^[a-z][a-z0-9.-]{0,95}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100))))
-            throw new ArgumentException("interface_values_invalid");
+        CheckCards(values.DashboardCards);
+        if (values.DashboardAvailableCards is not null) CheckCards(values.DashboardAvailableCards);
         Check(values.PinnedSettings, ["service", "remote", "proxy", "advanced", "updates", "diagnostics"], settings: true);
         Check(values.CollapsedSettings, ["service", "remote", "proxy", "advanced", "updates", "diagnostics"], settings: true);
+    }
+    private static void CheckCards(IReadOnlyList<string> cards)
+    {
+        if (cards is null || cards.Count > 64 || cards.Distinct(StringComparer.Ordinal).Count() != cards.Count ||
+            cards.Any(value => value is null || !System.Text.RegularExpressions.Regex.IsMatch(value,
+                "^[a-z][a-z0-9.-]{0,95}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100))))
+            throw new ArgumentException("interface_values_invalid");
     }
     private static void Check(IReadOnlyList<string> values, string[] allowed, bool settings = false)
     {

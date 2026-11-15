@@ -12,6 +12,21 @@ namespace NexusPipeline.Platform.Storage.Extensions;
 internal sealed class ScriptSourceService(RuntimeInstance instance, StateDatabase database, InstanceLease lease,
     ResourceLeaseManager resources, ContractReader contracts, PayloadApplyRoots roots, ExtensionActivator activator)
 {
+    internal bool IsRootDirectory(string rootPath, Action requireCaller, CancellationToken cancellation)
+    {
+        void Current()
+        {
+            cancellation.ThrowIfCancellationRequested(); requireCaller(); lease.VerifyHeld(instance);
+        }
+        Current();
+        bool exists;
+        try { exists = Directory.Exists(PhysicalPathPolicy.NormalizeWithoutLinks(rootPath)); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        { exists = false; }
+        Current();
+        return exists;
+    }
+
     internal ValueTask<ScriptSource> DiscoverAsync(Guid operationId, string extensionId, long revision,
         string rootPath, Action requireCaller, CancellationToken cancellation) =>
         UseAsync(operationId, extensionId, revision, rootPath, requireCaller, cancellation, (result, _) => result);

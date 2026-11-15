@@ -7,6 +7,8 @@ import { executionCommandContract } from './execution-command-contract.js';
 import { liveLogContract } from './live-log-contract.js';
 import { completionCommands } from './completion-command-contract.js';
 import { adapterResults } from './adapter-result-contract.js';
+import { scriptSourceContract } from './script-source-contract.js';
+import { formReviewContract } from './form-review-contract.js';
 
 function assert(condition: unknown, message: string, checks: string[]): asserts condition {
   if (!condition) throw new Error(message);
@@ -211,7 +213,8 @@ async function mediaPoolContract(checks: string[]): Promise<void> {
 }
 
 export async function runControlContract(): Promise<string[]> {
-  const checks: string[] = [];
+  const checks: string[] = await scriptSourceContract();
+  checks.push(...await formReviewContract());
   const sourceDocument = { '0': 'a', list: [{ '0': 'b' }], 'a/b': { '~': 'c' }, '': 'empty' };
   assert(JSON.stringify(valueSelector(sourceDocument, '/0')) === '["0"]'
     && JSON.stringify(valueSelector(sourceDocument, '/list/0/0')) === '["list",0,"0"]'

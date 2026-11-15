@@ -39,11 +39,6 @@
 .target-controls > label:nth-child(2) {
   flex: 1;
 }
-.running-empty {
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  min-height: 146px;
-}
 .target-controls nexus-button {
   min-width: 128px;
 }

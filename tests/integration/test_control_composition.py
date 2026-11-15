@@ -1,15 +1,11 @@
-import hashlib
 import json
 import os
 import time
 import subprocess
 import unittest
 import uuid
-import urllib.parse
 import queue
 import threading
-import sqlite3
-import contextlib
 import test_host_boundary as host_boundary
 import test_control_automation as automation_control
 

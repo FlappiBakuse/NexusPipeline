@@ -265,10 +265,11 @@ async function reorder(ids: string[]): Promise<void> {
         </div>
       </article>
     </nexus-sortable-list>
-    <div v-else-if="catalog" class="empty">
-      <h2>{{ t('尚未添加通知任务') }}</h2>
-      <p>{{ t('点击右上角“添加通知任务”，配置 SMTP 或 Webhook 发送目标。') }}</p>
-    </div>
+    <nexus-empty-state
+      v-else-if="catalog"
+      :title="t('尚未添加通知任务')"
+      :description="t('点击右上角“添加通知任务”，配置 SMTP 或 Webhook 发送目标。')"
+    />
     <ModalTransition>
       <NotificationEditor
         v-if="editor && catalog"

@@ -68,6 +68,7 @@
     "control-record-retirement.schema.json",
     "control-service-settings.schema.json",
     "control-script-source.schema.json",
+    "control-script-root.schema.json",
     "desktop-channel.schema.json",
     "desktop-frontend.schema.json",
     "desktop-proof.schema.json",

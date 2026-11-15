@@ -10,6 +10,7 @@ const props = defineProps<{
   step?: string | number;
   disabled?: boolean;
   readonly?: boolean;
+  placeholder?: string;
   validate?: (value: number | null) => boolean;
 }>();
 const emit = defineEmits<{
@@ -44,6 +45,7 @@ function change(event: CustomEvent<{ value: number | null }>): void {
     <nexus-number-input
       aria-required="true"
       :aria-label="label"
+      :placeholder="placeholder || ''"
       :aria-invalid="invalid || attrs['aria-invalid'] === 'true' ? 'true' : 'false'"
       :value.prop="numeric(modelValue === undefined ? value : modelValue)"
       :min.prop="min === undefined ? null : Number(min)"

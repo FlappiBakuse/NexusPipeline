@@ -12,6 +12,36 @@ export async function privateDraftContract(parent: HTMLElement, check: Check): P
   await notification(parent, check);
   await settings(parent, check);
   await layout(check);
+  await initialLayout(check);
+}
+
+async function initialLayout(check: Check) {
+  const { store } = draftFixture();
+  store.state.interface = { revision: 0, operationId: '', values: { theme: 'dark', locale: 'zh-CN',
+    dashboardCards: ['status', 'running', 'history-duration'], pinnedSettings: [], collapsedSettings: [] } };
+  const model = useDashboardLayout(store, () => ['game-activities']);
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  store.state.capabilities!.capabilities.push('settings.write', 'settings.read');
+  store.inspectInterface = async () => store.state.interface!;
+  store.saveInterface = async (values, expected, operationId = crypto.randomUUID()) => {
+    await held;
+    const snapshot = { revision: expected + 1, operationId, values };
+    store.state.interface = snapshot; return snapshot;
+  };
+  try {
+    await model.beginLayout();
+    model.changeLayout(['status', 'running', 'history-duration']);
+    check(!model.cards.value.includes('game-activities'), 'first layout removal previews immediately before Save');
+    model.changeLayout(['running', 'history-duration']);
+    check(!model.cards.value.includes('game-activities') && !model.cards.value.includes('status'),
+      'the next first-run edit preserves the removed default plugin card');
+    const saving = model.saveLayout();
+    check(!model.cards.value.includes('game-activities'), 'first layout preview remains active while Save is held');
+    release(); await saving;
+    check(JSON.stringify(store.state.interface.values.dashboardCards) === '["running","history-duration"]',
+      'first-run Save persists the complete preview');
+  } finally { release(); store.dispose(); }
 }
 async function notification(parent: HTMLElement, check: Check) {
   const { store, writes } = draftFixture();
@@ -79,7 +109,7 @@ async function layout(check: Check) {
   const { store, writes } = draftFixture();
   store.state.interface = { revision: 2, operationId: '', values: { theme: 'dark', locale: 'zh-CN',
     dashboardCards: ['status', 'running'], pinnedSettings: [], collapsedSettings: [] } };
-  const model = useDashboardLayout(store);
+  const model = useDashboardLayout(store, () => ['game-activities']);
   try {
     store.state.capabilities!.capabilities.push('settings.write', 'settings.read');
     store.saveInterface = async (values, expected, operationId = crypto.randomUUID()) => {
@@ -89,14 +119,24 @@ async function layout(check: Check) {
     };
     store.inspectInterface = async () => store.state.interface!;
     await model.beginLayout(); model.changeLayout(['running']); await settle();
-    check(JSON.stringify(store.state.interface!.values.dashboardCards) === '["running"]',
-      'layout changes apply before Save or Close');
-    model.closeLayout(); await model.beginLayout();
-    check(JSON.stringify(model.layoutCards.value) === '["running"]',
-      'reopening layout uses the committed selection');
+    check(JSON.stringify(model.cards.value) === '["running"]' && writes.length === 0,
+      'layout changes apply to the live page before Save without changing the saved baseline');
+    await model.cancelLayout(); await model.beginLayout();
+    check(JSON.stringify(model.layoutCards.value) === '["status","running"]',
+      'closing or cancelling layout restores the previously saved selection');
     model.changeLayout(['status']); await model.cancelLayout();
-    check(JSON.stringify(store.state.interface!.values.dashboardCards) === '["running"]',
+    check(JSON.stringify(store.state.interface!.values.dashboardCards) === '["status","running"]',
       'layout Cancel persists the selection from before this opening');
+    await model.beginLayout();
+    model.changeAvailableLayout(['history-duration', 'game-activities']);
+    check(JSON.stringify(model.layoutAvailableCards.value) === '["history-duration","game-activities"]',
+      'available card order applies before Save');
+    await model.saveLayout(); await model.beginLayout();
+    check(JSON.stringify(model.layoutAvailableCards.value) === '["history-duration","game-activities"]',
+      'saving retains the available card order on reopening');
+    model.changeAvailableLayout(['game-activities', 'history-duration']); await model.cancelLayout();
+    check(JSON.stringify(store.state.interface!.values.dashboardAvailableCards) === '["history-duration","game-activities"]',
+      'Cancel restores available order together with the visible layout');
     await model.beginLayout(); const count = writes.length; await model.saveLayout();
     check(writes.length === count && !model.layoutOpen.value, 'unchanged layout Save closes without another settings write');
   } finally { store.dispose(); }

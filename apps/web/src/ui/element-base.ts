@@ -1,5 +1,6 @@
 import { uiElementDefinitions, type UiElementName } from '@nexuspipeline/extension-sdk';
 import { observeLocale } from './locale-observer.js';
+import { suppressNativeValidation, suppressNativeControlTooltips } from './validation-presentation.js';
 
 type Definition = { properties: Record<string, string>; defaults: Record<string, unknown> };
 const attributeName = (name: string): string =>
@@ -16,6 +17,9 @@ export abstract class NexusElement extends HTMLElement {
     super();
     this.definition = uiElementDefinitions[name];
     this.root.innerHTML = '<style>' + styles + '</style>' + markup;
+    suppressNativeControlTooltips(this.root);
+    this.addEventListener('invalid', suppressNativeValidation);
+    this.root.addEventListener('invalid', suppressNativeValidation, true);
     for (const [key, value] of Object.entries(this.definition.defaults)) {
       const pending = Object.getOwnPropertyDescriptor(this, key);
       this.values[key] = pending ? pending.value : structuredClone(value);
@@ -88,9 +92,17 @@ export abstract class NexusElement extends HTMLElement {
 
   protected describe(control: HTMLElement): void {
     const ids = (this.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean);
-    const tree = this.getRootNode() as Document | ShadowRoot;
+    const find = (id: string): HTMLElement | null => {
+      let tree = this.getRootNode() as Document | ShadowRoot;
+      while (true) {
+        const element = tree.getElementById(id);
+        if (element) return element;
+        if (!(tree instanceof ShadowRoot)) return null;
+        tree = tree.host.getRootNode() as Document | ShadowRoot;
+      }
+    };
     control.ariaDescribedByElements = ids
-      .map((id) => tree.getElementById(id))
+      .map(find)
       .filter((element): element is HTMLElement => element instanceof HTMLElement);
   }
 
@@ -99,6 +111,13 @@ export abstract class NexusElement extends HTMLElement {
 
   private readAttribute(key: string, value: string | null): void {
     const kind = this.definition.properties[key];
+    if (key === 'title') {
+      this.setProperty(key, value ?? '');
+      this.updating = true;
+      this.removeAttribute('title');
+      this.updating = false;
+      return;
+    }
     if (key === 'value' && (this.values.type === 'password' || this.getAttribute('type') === 'password')) {
       if (value !== null) throw new TypeError('Password values require a property');
       return;

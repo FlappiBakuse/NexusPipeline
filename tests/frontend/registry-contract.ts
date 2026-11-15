@@ -4,6 +4,16 @@ import {
 import { FrontendRegistry } from '../../apps/web/src/extensions/frontend-registry.js';
 import { createApp, h, nextTick } from 'vue';
 import SurfaceOutlet from '../../apps/web/src/extensions/SurfaceOutlet.vue';
+import theme from '../../apps/web/src/styles/theme.css?inline';
+
+function backgroundPixel(element: Element): string {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 1;
+  const context = canvas.getContext('2d')!;
+  context.fillStyle = getComputedStyle(element).backgroundColor;
+  context.fillRect(0, 0, 1, 1);
+  return [...context.getImageData(0, 0, 1, 1).data].join(',');
+}
 
 function manifest(id: string): ExtensionManifest {
   return { format: 'nexus.extension.manifest', version: 1, extensionId: id, artifactName: 'Fixture', displayName: 'Fixture',
@@ -115,6 +125,17 @@ export async function registryContracts(checks: string[]): Promise<void> {
   const originalTheme = document.body.dataset.theme;
   const originalAccent = document.body.style.getPropertyValue('--accent');
   const originalPanel = document.body.style.getPropertyValue('--panel');
+  const originalSoft = document.body.style.getPropertyValue('--panel-soft');
+  const originalHover = document.body.style.getPropertyValue('--panel-hover');
+  const style = document.createElement('style'); style.textContent = theme;
+  const primary = document.createElement('nexus-card');
+  const secondary = document.createElement('nexus-card'); secondary.setAttribute('surface', 'secondary');
+  const nested = document.createElement('nexus-card'); nested.setAttribute('surface', 'nested');
+  const field = document.createElement('nexus-text-input');
+  const modal = document.createElement('nexus-modal'); modal.setAttribute('surface', 'secondary');
+  const modalCard = document.createElement('nexus-card'); modalCard.setAttribute('surface', 'nested');
+  const modalField = document.createElement('nexus-text-input'); modal.append(modalCard, modalField);
+  appearanceHost.append(style, primary, secondary, nested, field, modal);
   document.body.dataset.theme = 'dark';
   const appearanceSession = await registry.mount(appearance.extensionId, 'theme', appearanceHost,
     { surfaceId: 'application.appearance', instanceId: 'fixture-instance' });
@@ -129,10 +150,25 @@ export async function registryContracts(checks: string[]): Promise<void> {
   catch { invalidAppearance = true; }
   assert(invalidAppearance && document.body.style.getPropertyValue('--accent') === '#334455',
     'appearance rejects invalid or unknown fields without mutating current colors');
+  appearanceSession.setAppearance({ accent: '#334455', cardDark: '#112233', cardLight: '#eeeeee',
+    cardOpacity: .6, secondaryTransparent: false });
+  assert([modalCard, modalField.shadowRoot!.querySelector('input')!]
+    .every(element => backgroundPixel(element) === '17,34,51,255') && backgroundPixel(primary).endsWith(',153'),
+    'secondary overlay cards and inputs are opaque and retain the wallpaper palette');
+  assert([secondary, nested, field.shadowRoot!.querySelector('input')!].every(element => backgroundPixel(element).endsWith(',153')),
+    'all main-page nested surfaces retain transparency when secondary transparency is disabled');
   document.body.dataset.theme = 'light';
   await new Promise(resolve => setTimeout(resolve, 0));
   assert(document.body.style.getPropertyValue('--panel').includes('#eeeeee'),
     'appearance chooses the light card color when Host theme changes');
+  assert([modalCard, modalField.shadowRoot!.querySelector('input')!]
+    .every(element => backgroundPixel(element) === '238,238,238,255'),
+    'opaque overlay surfaces follow a live light-theme change');
+  appearanceSession.setAppearance({ accent: '#334455', cardDark: '#112233', cardLight: '#eeeeee',
+    cardOpacity: .6, secondaryTransparent: true });
+  assert([secondary, nested, field.shadowRoot!.querySelector('input')!, modalCard, modalField.shadowRoot!.querySelector('input')!]
+    .every(element => backgroundPixel(element).endsWith(',153')),
+    'enabling secondary transparency changes opacity without discarding the current palette');
   const otherSession = await registry.mount(appearance.extensionId, 'other', appearanceHost,
     { surfaceId: 'overview.cards', instanceId: 'fixture-instance' });
   let wrongSurface = false;
@@ -142,7 +178,9 @@ export async function registryContracts(checks: string[]): Promise<void> {
   await otherSession.scope.dispose();
   appearanceSession.setAppearance(null);
   assert(document.body.style.getPropertyValue('--accent') === originalAccent &&
-    document.body.style.getPropertyValue('--panel') === originalPanel,
+    document.body.style.getPropertyValue('--panel') === originalPanel &&
+    document.body.style.getPropertyValue('--panel-soft') === originalSoft &&
+    document.body.style.getPropertyValue('--panel-hover') === originalHover,
     'clearing appearance restores prior Host inline tokens');
   appearanceSession.setAppearance({ accent: '#abcdef', cardOpacity: .4 });
   await appearanceSession.scope.dispose();

@@ -99,6 +99,7 @@ export interface NexusNumberInputProperties {
   min: number | null;
   max: number | null;
   step: number;
+  placeholder: string;
   readOnly: boolean;
 }
 
@@ -139,6 +140,7 @@ export interface NexusDateRangePickerProperties {
 
 export interface NexusPathPickerProperties {
   value: string;
+  disabled: boolean;
   kinds: readonly ('file' | 'folder')[];
   browseAllowed: boolean;
   readOnly: boolean;
@@ -582,6 +584,7 @@ export const uiElementDefinitions = {
       "min": "number|null",
       "max": "number|null",
       "step": "number",
+      "placeholder": "string",
       "readOnly": "boolean"
     },
     "defaults": {
@@ -589,6 +592,7 @@ export const uiElementDefinitions = {
       "min": null,
       "max": null,
       "step": 1,
+      "placeholder": "",
       "readOnly": false
     },
     "slots": []
@@ -664,6 +668,7 @@ export const uiElementDefinitions = {
   "nexus-path-picker": {
     "properties": {
       "value": "string",
+      "disabled": "boolean",
       "kinds": "readonly(file|folder)[]",
       "browseAllowed": "boolean",
       "readOnly": "boolean"
@@ -674,6 +679,7 @@ export const uiElementDefinitions = {
         "folder"
       ],
       "browseAllowed": false,
+      "disabled": false,
       "value": "",
       "readOnly": false
     },

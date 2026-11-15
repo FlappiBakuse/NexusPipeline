@@ -39,6 +39,7 @@ const catalog = computed<{ id: DashboardCard; title: string; description: string
 const {
   layout,
   layoutCards,
+  layoutAvailableCards,
   layoutOpen,
   layoutBusy,
   layoutError,
@@ -47,11 +48,11 @@ const {
   readLayout,
   beginLayout,
   cancelLayout,
-  closeLayout,
   saveLayout,
   changeLayout,
+  changeAvailableLayout,
   resetLayout
-} = useDashboardLayout(props.store, () => (props.overviewCards ?? []).flatMap(item => item.dashboard && item.dashboard.defaultVisible ? [item.dashboard] : []).sort((a, b) => a.order - b.order).map(item => item.key));
+} = useDashboardLayout(props.store, () => (props.overviewCards ?? []).flatMap(item => item.dashboard && item.dashboard.defaultVisible ? [item.dashboard] : []).sort((a, b) => a.order - b.order).map(item => item.key), () => catalog.value.map(item => item.id));
 const statisticsVisible = computed(() => cards.value.includes('history-duration'));
 
 const active = ref<ActiveRun[]>([]);
@@ -253,15 +254,17 @@ onBeforeUnmount(() => {
         :title="t('编辑页面布局')"
         size="wide"
         surface="secondary"
-        @nexus-close="closeLayout"
+        @nexus-close="cancelLayout"
       >
         <p v-if="layoutError" role="alert">{{ t(layoutError) }}</p>
         <DashboardLayout
           v-if="layoutCards"
           :cards="layoutCards"
+          :available="layoutAvailableCards"
           :catalog="catalog"
           :locked="layoutBusy"
           @change="changeLayout"
+          @reorder-available="changeAvailableLayout"
         />
         <div slot="footer" class="layout-footer">
           <button :disabled="layoutBusy" @click="resetLayout">

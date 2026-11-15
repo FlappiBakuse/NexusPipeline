@@ -1,0 +1,23 @@
+{
+  "post": {
+    "operationId": "inspectScriptRoot",
+    "description": "Requires automation.read. Checks an existing Host directory under the current instance lease and physical path policy. Returns false for missing paths, files and rejected filesystem paths. Does not create directories, read script configuration or run programs.",
+    "requestBody": {
+      "required": true,
+      "content": {"application/json": {"schema": {"$ref": "../schemas/control-script-root.schema.json"}}}
+    },
+    "responses": {
+      "200": {
+        "description": "Root identity and the current directory observation. Saving still validates the path independently.",
+        "content": {"application/json": {"schema": {
+          "type": "object", "additionalProperties": false,
+          "required": ["rootPath", "isDirectory"],
+          "properties": {"rootPath": {"type": "string"}, "isDirectory": {"type": "boolean"}}
+        }}}
+      },
+      "400": {"description": "Invalid request schema or query."},
+      "403": {"description": "Capability or origin denied."},
+      "413": {"description": "Request exceeds the Control body bound."}
+    }
+  }
+}

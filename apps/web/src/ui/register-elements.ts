@@ -1,4 +1,5 @@
 import { NexusButtonElement } from './button-element.js';
+import { installValidationPresentation } from './validation-presentation.js';
 import { NexusCardElement } from './card-element.js';
 import { NexusModalElement } from './modal-element.js';
 import { NexusSwitchElement } from './switch-element.js';
@@ -82,6 +83,7 @@ const elements = {
 };
 
 export function registerElements(registry: CustomElementRegistry = customElements): void {
+  installValidationPresentation(document);
   for (const [name, constructor] of Object.entries(elements)) {
     const existing = registry.get(name);
     if (existing && existing !== constructor)

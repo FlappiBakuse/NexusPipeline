@@ -15,7 +15,6 @@ import concurrent.futures
 import http.client
 import sqlite3
 import contextlib
-import time
 from host_boundary_state import database_snapshot, DOMAINS
 
 

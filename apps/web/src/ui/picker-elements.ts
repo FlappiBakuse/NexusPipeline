@@ -1,5 +1,5 @@
 import { NexusElement, elementAttributes } from './element-base.js';
-import { controlStyles } from './control-styles.js';
+import { controlStyles, compositeFieldStyles } from './control-styles.js';
 
 const styles =
   controlStyles +
@@ -17,7 +17,7 @@ export class PathPicker extends NexusElement {
   constructor() {
     super(
       'nexus-path-picker',
-      styles +
+      styles + compositeFieldStyles +
         `:host{width:100%;gap:0}input{flex:1;border-radius:8px 0 0 8px}
       .actions{display:flex}button{display:grid;place-items:center;min-width:42px;width:42px;padding:0;border-radius:0}
       button:last-child{border-radius:0 8px 8px 0}svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.6}`,
@@ -31,7 +31,7 @@ export class PathPicker extends NexusElement {
       'change',
       (event) => {
         event.stopPropagation();
-        if (this.field.value === this.values.value || this.values.readOnly) return;
+        if (this.field.value === this.values.value || this.values.readOnly || this.values.disabled) return;
         this.setProperty('value', this.field.value);
         this.change(this.field.value, 'input');
       },
@@ -41,7 +41,8 @@ export class PathPicker extends NexusElement {
       'click',
       (event) => {
         const kind = (event.target as HTMLElement).closest<HTMLButtonElement>('button')?.dataset.kind;
-        if (kind && this.values.browseAllowed) this.emit('nexus-browse', { kind });
+        if (kind && this.values.browseAllowed && !this.values.disabled && !this.values.readOnly)
+          this.emit('nexus-browse', { kind });
       },
       { signal }
     );
@@ -73,7 +74,7 @@ export class PathPicker extends NexusElement {
             ? '<path d="M6 3h8l4 4v14H6zM14 3v5h4M9 12h6M9 16h6"/>'
             : '<path d="M3 7h6l2 2h10v11H3zM3 7V4h6l2 2h8v3"/>') +
           '</svg>';
-        button.disabled = Boolean(this.values.disabled) || !this.values.browseAllowed;
+        button.disabled = Boolean(this.values.disabled || this.values.readOnly) || !this.values.browseAllowed;
         return button;
       })
     );

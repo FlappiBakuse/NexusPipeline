@@ -35,6 +35,7 @@ MCP 工具列表与实际调用均复核当前启用和写权限，两个开关�
 |---|---|---|
 | 状态、诊断、操作查询 | status、doctor、support、operation、capabilities；操作结果绑定主体 | 对应只读工具；支持包不开放 |
 | 自动化定义与日程 | automation、scheduling、resolve、automation-change；删除共用定义事务 | 只读定义和日程 |
+| 脚本根目录核验 | Web 调用 `POST /control/v1/automation/scripts/root`；CLI 未单列命令 | 不开放 |
 | 新格式模板与交换 | automation-export、automation-attachment、automation-import-preview/apply | 不开放 |
 | 执行预演、启动、取消 | execution-preview/start/cancel；受理返回原 operation/run/attempt 身份 | 预演只读；启动和取消须写权限 |
 | 通用配置值与文件 | configuration-resources/files/original/value-preview/value-apply、configuration-import；binding resources 汇总只读资源身份与当前修订 | 仅资源清单 |
@@ -48,6 +49,9 @@ MCP 工具列表与实际调用均复核当前启用和写权限，两个开关�
 | 桌面与系统完成动作 | 固定本机授权入口；pending/cancel 提供本机倒计时与撤销；CLI 可撤销完成动作，不能伪造桌面确认 | 不开放 |
 | 宿主维护更新 | maintenance-feed/refresh/prepare/operation/start/cancel；查询绑定原主体，写入仅本机 | 不开放 |
 
+脚本根目录核验要求 `automation.read`。请求为 `nexus.control.script-root` v1 和 `rootPath`；
+响应回传 `rootPath` 与 `isDirectory`。该入口只检查 Host 上的目录，不创建目录、读取脚本配置或运行程序。
+
 事件按数据库提交序号、恢复修订、活动执行修订和界面偏好变化生成共享快照，空闲客户端只发送心跳；显式状态/诊断查询仍读取当前状态。事件是有界失效通知；丢失序列返回 resync，客户端重新取快照。配置等持久事务提交推进失效序列，失败事务不发布成功变化。
 事件连接到期或客户端断开按正常结束处理；客户端重连不授权重复执行写操作。
 状态流连接建立后立即刷新一条 SSE 注释确认，随后每秒检查内存修订，有变化即发送，无变化每 25 秒保活；日志流同样每 25 秒保活，有新帧时立即发送。
@@ -55,12 +59,12 @@ MCP 工具列表与实际调用均复核当前启用和写权限，两个开关�
 连续提交使事件快照暂时无法稳定时，已建立的连接发送 resync 后结束，不推进状态水位；客户端重新读取权威快照。
 历史列表及汇总支持独立的 `business` 与 `lifecycle` 筛选；生命周期仅接受 completed/cancelled/interrupted/blocked/skipped，未传入时不限制。筛选不改变记录的原始四维事实。
 
-`support` 复用 `control.doctor.read`，导出最多 64 KiB 的 ZIP，仅含固定 `manifest.json` 与 `doctor.json`。
+`support` 复用 `control.doctor.read`，导出最多 64 KiB 的 ZIP，固定成员及白名单内容见[支持材料](../operations/diagnostics.md)。
 清单记录版本和诊断身份；诊断包含运行时版本、准入/恢复解释、队列与已安装插件计数，以及最近至多 64 条类型化完成事实作为安全日志尾。导出不读取 worker 文本、私有原因码、配置、数据库原文或绝对路径，不在运行目录落盘。
 CLI 必须显式提供 `--binary-stdout true`，错误写 stderr；MCP 继续只提供结构化 doctor。
 
-定义、执行、配置、通知、历史及设置映射覆盖后端台账所需控制入口；共用 Web 页面、普通草稿与公共元素见 [前端](frontend.md)。
-媒体正向 HTTP、通用和专项原生编辑及有限支持包 HTTP/CLI 已定向通过；维护更新仍须闭合真实桌面交接和窗口恢复。旧业务保留的实现和剩余检查见 [当前实施范围](../status.md)，不能由控制接线通过代替。
+定义、执行、配置、通知、历史及设置映射覆盖后端台账所需控制入口；共用 Web 页面、普通草稿与公共元素见 [前端](../architecture/frontend.md)。
+HTTP/CLI 接线、原生事务和真实账号业务分别记录验收；当前未完成范围见[状态](../status.md)。
 
 维护查询、启动和取消复用原待办 owner；`start` 的 202 只表示交接已启动，不表示候选已成功。
 独立重启使用 `POST /control/v1/maintenance/restart/{operationId}`，要求本机维护权限，

@@ -6,6 +6,9 @@
     "description": "Implemented Host Control contracts. Capability policy and the current route handlers define authentication and effect ownership."
   },
   "paths": {
+    "/control/v1/automation/scripts/root": {
+      "$ref": "http/script-root.json"
+    },
     "/control/v1/settings/interface": {
       "$ref": "http/interface-read.json"
     },

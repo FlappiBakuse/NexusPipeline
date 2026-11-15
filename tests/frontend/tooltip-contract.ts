@@ -17,6 +17,7 @@ export async function tooltipContract(fixture: HTMLElement, check: (value: unkno
     check(document.activeElement !== panel && !anchor.title,
       'the painted tooltip neither takes keyboard focus nor needs a native title');
     anchor.dispatchEvent(new PointerEvent('pointerleave'));
+    await new Promise(resolve => setTimeout(resolve, 130));
     check(!tooltip.open && !panel.matches(':popover-open'), 'leaving the anchor releases the tooltip top layer');
     anchor.dispatchEvent(new PointerEvent('pointerenter'));
     tooltip.anchor = replacement;
@@ -54,5 +55,22 @@ export async function tooltipContract(fixture: HTMLElement, check: (value: unkno
     tooltip.hidden = true;
     check(!tooltip.open && !panel.matches(':popover-open') && wrapped.getBoundingClientRect().width === 0,
       'hiding a tooltip wrapper hides its child and releases its visible top layer');
+    tooltip.hidden = false;
+    const select = document.createElement('nexus-select') as UiElement<'nexus-select'>;
+    select.options = [{ id: 'one', label: 'One' }, { id: 'two', label: 'Two' }];
+    const label = document.createElement('label'); label.append(select); fixture.append(label);
+    tooltip.anchor = label;
+    select.focus(); await pause();
+    check(tooltip.open, 'a collapsed select exposes its field help on keyboard focus');
+    const input = select.shadowRoot!.querySelector('input')!;
+    input.click();
+    check(!tooltip.open && select.shadowRoot!.querySelector('.panel')!.matches(':popover-open'),
+      'opening a select immediately hides its tooltip while preserving the option list');
+    label.dispatchEvent(new PointerEvent('pointerenter')); await pause();
+    check(!tooltip.open, 'pointer hover cannot reopen field help over an expanded select');
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    label.dispatchEvent(new PointerEvent('pointerenter')); await pause();
+    check(tooltip.open, 'field help is available again after the select closes');
+    label.remove();
   } finally { tooltip.remove(); anchor.remove(); replacement.remove(); }
 }

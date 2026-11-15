@@ -191,14 +191,12 @@ details[open] > summary::before {
 .switch-field > nexus-switch {
   justify-self: end;
 }
-button.primary,
-.sticky-actions button[type='submit'] {
+button.primary {
   background: var(--accent-strong);
   border-color: var(--accent-strong);
   color: white;
 }
-button.primary:hover,
-.sticky-actions button[type='submit']:hover {
+button.primary:hover {
   background: var(--accent);
   border-color: var(--accent);
 }

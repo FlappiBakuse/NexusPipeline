@@ -69,6 +69,7 @@ export class NumberInput extends NexusElement {
     this.field.min = this.values.min === null ? '' : String(this.values.min);
     this.field.max = this.values.max === null ? '' : String(this.values.max);
     this.field.step = String(this.values.step);
+    this.field.placeholder = String(this.values.placeholder);
     this.field.required = this.getAttribute('aria-required') === 'true';
     this.field.readOnly = Boolean(this.values.readOnly);
     this.field.setAttribute('aria-invalid', this.getAttribute('aria-invalid') ?? 'false');
@@ -138,11 +139,12 @@ export class NexusRangeElement extends NexusElement {
       'nexus-range',
       fieldStyles +
         `
-      :host{width:100%;height:40px;align-items:center}.range{position:relative;width:100%;height:40px}
+      :host{width:100%;height:40px;align-items:center;outline:none!important}.range{position:relative;width:100%;height:40px;outline:none}
       .range-track{position:absolute;inset:16px 0 auto;height:8px;border:1px solid light-dark(#b2b2b2,#999);border-radius:999px;
       background-color:light-dark(#efefef,#3b3b3b);background-image:linear-gradient(to right,var(--nx-color-accent) 0 var(--range-progress),transparent var(--range-progress) 100%)}
       .range-thumb{position:absolute;top:12px;left:calc((100% - 16px) * var(--range-unit));width:16px;height:16px;border-radius:50%;background:var(--nx-color-accent)}
-      .range:focus-within{outline:2px solid var(--nx-color-accent);outline-offset:-2px;border-radius:4px}
+      .range:has(input:focus-visible){outline:2px solid var(--nx-color-accent);outline-offset:-2px;border-radius:4px}
+      :host([data-input-source=pointer]) .range{outline:none!important}
       input{position:absolute;inset:0;appearance:none;opacity:0;width:100%;height:40px;min-height:40px;margin:0;padding:0;border:0;background:transparent;cursor:pointer}
       .range-track,.range-thumb{pointer-events:none}
     `,
@@ -155,6 +157,7 @@ export class NexusRangeElement extends NexusElement {
       'pointerdown',
       () => {
         this.source = 'pointer';
+        this.setAttribute('data-input-source', 'pointer');
       },
       { signal }
     );
@@ -162,9 +165,11 @@ export class NexusRangeElement extends NexusElement {
       'keydown',
       () => {
         this.source = 'keyboard';
+        this.removeAttribute('data-input-source');
       },
       { signal }
     );
+    this.field.addEventListener('blur', () => this.removeAttribute('data-input-source'), { signal });
     this.field.addEventListener(
       'input',
       () => {

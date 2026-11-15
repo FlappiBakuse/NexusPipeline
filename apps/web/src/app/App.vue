@@ -208,7 +208,7 @@ onBeforeUnmount(() => {
         </nexus-toast>
         <nexus-toast v-if="store.state.feedError" class="connection-toast" tone="warning" :message.prop="t('事件连接中断，正在重连')" />
         <nexus-toast v-if="exitMessage" :tone="exitFailed ? 'warning' : 'info'" :message.prop="t(exitMessage)" />
-        <form v-if="!preparing && (!store.state.capabilities || coreFailed)" class="authentication" @submit.prevent="authenticate">
+        <form v-if="!preparing && (!store.state.capabilities || coreFailed)" novalidate class="authentication" @submit.prevent="authenticate">
           <label>
             {{ t('远程访问令牌') }}
             <input v-model="credential" type="password" autocomplete="off" />

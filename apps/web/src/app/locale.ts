@@ -1,4 +1,5 @@
 import { ref } from 'vue';
+import { helpMessages } from './help-messages';
 import { fieldMessages } from './field-messages';
 import { errorMessages } from './error-messages';
 import { runtimeMessages } from './runtime-messages';
@@ -6,6 +7,7 @@ import { runtimeMessages } from './runtime-messages';
 export const locale = ref<'zh-CN' | 'en-US'>('zh-CN');
 const english: Record<string, string> = {
   ...fieldMessages,
+  ...helpMessages,
   ...runtimeMessages,
   今日概览: 'Overview',
   运行中心: 'Run center',

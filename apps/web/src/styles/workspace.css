@@ -103,42 +103,6 @@
 .array-item > .form-group {
   padding-top: 0;
 }
-.optional-field {
-  color: var(--muted);
-}
-.sticky-actions {
-  position: sticky;
-  bottom: 0;
-  background: var(--panel);
-  padding: 12px 0;
-  display: flex;
-  gap: 10px;
-  border-top: 1px solid var(--border);
-}
-.fact-tree {
-  display: grid;
-  grid-template-columns: minmax(90px, auto) minmax(0, 1fr);
-  gap: 8px 14px;
-  margin: 12px 0;
-  font-size: 12px;
-}
-.fact-tree dt {
-  color: var(--muted);
-  overflow-wrap: anywhere;
-}
-.fact-tree dd {
-  min-width: 0;
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-.fact-tree .fact-tree {
-  padding-left: 10px;
-  border-left: 1px solid var(--border);
-}
-.fact-list {
-  padding-left: 18px;
-  margin: 0;
-}
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
@@ -291,9 +255,6 @@
   }
   .statistics {
     gap: 18px;
-  }
-  .fact-tree {
-    grid-template-columns: 95px minmax(0, 1fr);
   }
   .entity-line {
     padding: 14px;

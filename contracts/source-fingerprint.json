@@ -1,6 +1,6 @@
 {
   "algorithm": "nexus-sdk-source-manifest-sha256-v1",
-  "sourceFingerprint": "2721e9aa536475e8f8b98b0646b60ead043a61c2c59fe14e7099e5c115e4224b",
+  "sourceFingerprint": "0610ba037d4e1a0524e5f200f4b77bef7f16b7a90a59aef613a1187ced2da8cd",
   "inputs": [
     {
       "path": "Directory.Build.props",
@@ -153,6 +153,11 @@
       "sha256": "53bb9d32cb408d3176c5d0e5a1cf18b6caed7d5be8411824b569f5c570b0f563"
     },
     {
+      "path": "contracts/http/script-root.json",
+      "sizeBytes": 1144,
+      "sha256": "44e546b2ca5e783f62d9e9ff06ad42a51be1064bf1df395566d9820d69fbc008"
+    },
+    {
       "path": "contracts/http/secret-change.json",
       "sizeBytes": 1505,
       "sha256": "ad4f0245fb7a513efa31efc15409a84b64262795214154115b471cd48d4f4470"
@@ -179,8 +184,8 @@
     },
     {
       "path": "contracts/openapi.json",
-      "sizeBytes": 9667,
-      "sha256": "43de3667d31335fa3b739f307d8dcd2e9963a8a944af4fa7f5326e772ca3cfa5"
+      "sizeBytes": 9757,
+      "sha256": "784a66dbc347926bfc51694e9c398a1851441c624e5644fe70b9ff578607893a"
     },
     {
       "path": "contracts/protocol-catalog.json",
@@ -369,8 +374,8 @@
     },
     {
       "path": "contracts/schemas/control-interface-change.schema.json",
-      "sizeBytes": 1755,
-      "sha256": "a264c3eb6b5097340857ae7aabef6380fcb5ec2b8dc2f5c7abd58f371adb6e97"
+      "sizeBytes": 1999,
+      "sha256": "e49e979ba9b8ee494860b48a80603e76b3e244deb51b78e42f50763a33d3d774"
     },
     {
       "path": "contracts/schemas/control-maintenance-prepare.schema.json",
@@ -411,6 +416,11 @@
       "path": "contracts/schemas/control-record-retirement.schema.json",
       "sizeBytes": 696,
       "sha256": "39fd161eee181719ed65c002eea82ad44c6d005cf2494ccec32d8565dbb162ab"
+    },
+    {
+      "path": "contracts/schemas/control-script-root.schema.json",
+      "sizeBytes": 427,
+      "sha256": "71d0edd798c198acc2289bd50a461daeb5bd656bfae336c584e204270f7d5a72"
     },
     {
       "path": "contracts/schemas/control-script-source.schema.json",
@@ -739,13 +749,13 @@
     },
     {
       "path": "contracts/sdk-exports.json",
-      "sizeBytes": 6149,
-      "sha256": "02b1d6f57022c16b1817672105ed8264b39af3fb850a125348e09d8f2d2c205d"
+      "sizeBytes": 6188,
+      "sha256": "243fc760fc7119569bf2feb609d6944085d4303351308d84b6800e0918b9d2e1"
     },
     {
       "path": "contracts/sdk-frontend-api.json",
-      "sizeBytes": 57295,
-      "sha256": "17c01cfdc47cbc0bd7e921f21a569cc0ab0a32c27b1043b1becd0b95d4c6eaa7"
+      "sizeBytes": 57517,
+      "sha256": "3011ad1fca33cefea220ab4a53da20546bd1b8ce078b1e400e8a9d3b370d2561"
     },
     {
       "path": "contracts/sdk-public-api.json",
@@ -854,8 +864,8 @@
     },
     {
       "path": "contracts/ui-elements/nexus-number-input.json",
-      "sizeBytes": 488,
-      "sha256": "2404fb73d9b43fc3e90f915a79e27b12afaef11af22a676f555527baa70ae7ad"
+      "sizeBytes": 540,
+      "sha256": "01ba778ad495d160ccfa400c1ab35f2befb62cab0d41437b1bba1691ac257681"
     },
     {
       "path": "contracts/ui-elements/nexus-overflow-text.json",
@@ -874,8 +884,8 @@
     },
     {
       "path": "contracts/ui-elements/nexus-path-picker.json",
-      "sizeBytes": 569,
-      "sha256": "98bf8ece9b43bfd3e9e0b56ff8ecdcb39353843649fafbfe01bc9f176095fc4b"
+      "sizeBytes": 619,
+      "sha256": "317e20172ddca63ab65ba88ab83dcf9172a61aaa8094b1d254cab5053d6f8dfb"
     },
     {
       "path": "contracts/ui-elements/nexus-range.json",

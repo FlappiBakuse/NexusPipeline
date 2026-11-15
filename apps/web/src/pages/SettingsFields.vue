@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fieldHelp as vHelp } from '../components/field-help';
 import { computed, ref, watch } from 'vue';
 import type { ControlHostSettingsValues } from '../control/wire.generated';
 import type { InterfaceValues } from '../control/interface';
@@ -76,7 +77,7 @@ function updates(value: Partial<Values['updates']>): void {
             @update:model-value="$event !== null && emit('patch', { historyRetentionDays: $event })"
           />
         </label>
-        <label>
+        <label v-help="t('填写 0 或 1024–65535；0 由系统分配端口。端口修改在重启后生效，日志级别即时生效。')">
           {{ t('Web 端口') }}
           <FormNumber
             :disabled="disabled"
@@ -114,7 +115,7 @@ function updates(value: Partial<Values['updates']>): void {
             <option value="en-US">English</option>
           </FormSelect>
         </label>
-        <label>
+        <label v-help="t('控制 CLI、托盘、通知和后台日志；界面语言单独设置。')">
           {{ t('宿主语言') }}
           <FormSelect
             :disabled="disabled"
@@ -131,6 +132,7 @@ function updates(value: Partial<Values['updates']>): void {
       <div class="switches">
         <nexus-switch-setting
           :title="t('远程访问')"
+          v-help="t('其他设备请使用本机局域网 IP 与实际 Web 端口，并提供访问令牌。localhost 与 0.0.0.0 用于本机地址或监听配置。')"
           :description="t('绑定所有网卡，API 需要访问令牌；本地 127.0.0.1 请求豁免')"
           :value.prop="value.service.allowRemoteAccess"
           :disabled.prop="disabled"
@@ -155,7 +157,7 @@ function updates(value: Partial<Values['updates']>): void {
           @nexus-change="service({ mcpWriteEnabled: $event.detail.value })"
         />
       </div>
-      <label>
+      <label v-help="t('MCP 使用本机独立端口；监听与工具权限变更需重启服务，端口冲突会使 MCP 不可用。')">
         {{ t('MCP 端口') }}
         <FormNumber
           :disabled="disabled"
@@ -167,7 +169,7 @@ function updates(value: Partial<Values['updates']>): void {
       </label>
     </template>
     <template v-else-if="category === 'proxy'">
-      <label>
+      <label v-help="t('下载、更新和宿主 HTTP 请求使用代理，回环地址直连；SMTP 不使用此 HTTP 代理。')">
         {{ t('代理模式') }}
         <FormSelect
           :disabled="disabled"
@@ -180,7 +182,7 @@ function updates(value: Partial<Values['updates']>): void {
         </FormSelect>
       </label>
       <template v-if="proxyValue.mode === 'http'">
-        <label>
+        <label v-help="t('代理地址需包含 http:// 或 https://。')">
           {{ t('代理地址') }}
           <input
             :disabled="disabled"
@@ -251,7 +253,7 @@ function updates(value: Partial<Values['updates']>): void {
             <option value="prerelease">{{ t('预发布 (Pre-release)') }}</option>
           </FormSelect>
         </label>
-        <label>
+        <label v-help="t('留空时使用默认 GitHub 更新源。')">
           {{ t('镜像源地址') }}
           <input
             :disabled="disabled"

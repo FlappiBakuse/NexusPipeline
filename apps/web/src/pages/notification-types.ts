@@ -22,14 +22,6 @@ export interface NotificationCatalog {
   tasks: NotificationTask[];
 }
 export type NotificationChannel = 'smtp' | ControlNotificationCommandConfiguration['webhookKind'];
-export const notificationChannels: readonly { id: NotificationChannel; label: string }[] = [
-  { id: 'smtp', label: 'SMTP 邮件' },
-  { id: 'feishu', label: '飞书 Webhook' },
-  { id: 'wecom', label: '企业微信 Webhook' },
-  { id: 'slack', label: 'Slack Webhook' },
-  { id: 'discord', label: 'Discord Webhook' },
-  { id: 'generic', label: '通用 Webhook' }
-];
 export type SecretField =
   | 'webhook-url'
   | 'webhook-secret'

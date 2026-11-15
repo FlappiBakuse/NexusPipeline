@@ -25,4 +25,8 @@ public sealed record ControlInterfaceChangeValues
     /// <summary>Schema field <c>locale</c>; constraints are owned by control-interface-change.schema.json.</summary>
     [JsonPropertyName("locale")]
     public required string Locale { get; init; }
+    /// <summary>Schema field <c>dashboardAvailableCards</c>; constraints are owned by control-interface-change.schema.json.</summary>
+    [JsonPropertyName("dashboardAvailableCards")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? DashboardAvailableCards { get; init; }
 }

@@ -58,23 +58,6 @@ p {
 .actions button {
   min-width: 96px;
 }
-.empty {
-  display: grid;
-  align-content: center;
-  gap: 8px;
-  min-height: 147px;
-  padding: 24px;
-  text-align: center;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: var(--panel);
-}
-.empty h2 {
-  font-size: 17px;
-}
-.empty p {
-  color: var(--muted);
-}
 .error {
   color: var(--nx-color-danger);
 }

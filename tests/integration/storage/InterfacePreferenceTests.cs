@@ -30,11 +30,17 @@ public sealed class InterfacePreferenceTests
             firstValues with { Theme = "dark" }));
         Assert.Equal(1, preferences.Read().Revision);
 
-        var nextValues = new InterfaceValues("system", ["running", "history-duration"], ["service", "advanced"], ["proxy"], "zh-CN");
+        var nextValues = new InterfaceValues("system", ["running", "history-duration"], ["service", "advanced"], ["proxy"], "zh-CN",
+            ["game-activities", "status"]);
         var nextOperation = Guid.NewGuid();
         var next = preferences.Save(nextOperation, "local:interface-test", 1, nextValues);
         Assert.Equal(2, next.Revision);
+        Assert.Equal(new[] { "game-activities", "status" }, next.Values.DashboardAvailableCards);
         AssertSnapshot(next, preferences.Save(nextOperation, "local:interface-test", 1, nextValues));
+        Assert.Throws<ArgumentException>(() => preferences.Save(Guid.NewGuid(), "local:interface-test", 2,
+            nextValues with { DashboardAvailableCards = ["status", "status"] }));
+        Assert.Throws<ArgumentException>(() => preferences.Save(Guid.NewGuid(), "local:interface-test", 2,
+            nextValues with { DashboardAvailableCards = ["bad/key"] }));
 
         var path = Path.Combine(source.Instance.RuntimeRoot, "state", "interface.json");
         var savedBytes = File.ReadAllBytes(path);
@@ -115,6 +121,7 @@ public sealed class InterfacePreferenceTests
         Assert.Equal(expected.Values.Locale, actual.Values.Locale);
         Assert.Equal(expected.Values.Theme, actual.Values.Theme);
         Assert.Equal(expected.Values.DashboardCards, actual.Values.DashboardCards);
+        Assert.Equal(expected.Values.DashboardAvailableCards, actual.Values.DashboardAvailableCards);
         Assert.Equal(expected.Values.PinnedSettings, actual.Values.PinnedSettings);
         Assert.Equal(expected.Values.CollapsedSettings, actual.Values.CollapsedSettings);
     }

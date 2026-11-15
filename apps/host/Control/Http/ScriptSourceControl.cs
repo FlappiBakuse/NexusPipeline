@@ -10,6 +10,13 @@ internal sealed class ScriptSourceControl(ControlAuthentication authority, Sourc
 {
     internal void Map(WebApplication app)
     {
+        app.MapPost("/control/v1/automation/scripts/root", async (HttpContext context) =>
+        {
+            var request = authority.Require(context, ControlCapability.AutomationRead);
+            new ControlQueryValues(context.Request.Query).Validate();
+            using var body = await ControlRequestBody.ReadAsync(context);
+            return Results.Json(sources.InspectRoot(request, body.Root, context.RequestAborted), NotificationUseCases.Json);
+        });
         app.MapPost("/control/v1/automation/scripts/discover", async (HttpContext context) =>
         {
             var request = authority.Require(context, ControlCapability.ConfigurationRead);

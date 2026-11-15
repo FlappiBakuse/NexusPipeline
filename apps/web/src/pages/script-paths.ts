@@ -71,6 +71,13 @@ export function argumentValues(text: string): string[] {
   return values;
 }
 
+export function scriptRootValid(value: string): boolean {
+  const path = value.trim().replace(/\\/g, '/');
+  return /^(?:[a-z]:\/|\/\/[^/]+\/[^/]+(?:\/|$))/i.test(path) &&
+    !/[\u0000-\u001f<>"|?*]/.test(path) && !path.slice(2).includes(':') &&
+    !path.split('/').some(part => part === '.' || part === '..');
+}
+
 export function scriptPaths(store: AutomationStore, script: Script): ScriptPaths {
   const key = scriptPathKey(script.id);
   const saved = store.drafts.get(key);

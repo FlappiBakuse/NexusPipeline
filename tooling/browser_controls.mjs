@@ -49,7 +49,10 @@ export async function runControls({ root, modules, browser, runtime, output, chr
       if (!Array.isArray(checks) || !checks.length) throw new Error('Missing browser checks: ' + name);
       cases.push({ name, checks });
     };
-    if (scenario === 'controls-painted') {
+    if (scenario === 'controls-help') {
+      const { checkFieldHelp } = await import('../tests/frontend/browser-field-help.mjs');
+      addChecks('field-help', await checkFieldHelp(page, output));
+    } else if (scenario === 'controls-painted') {
       const result = await page.evaluate(async () => {
         const { registerElements } = await import('/apps/web/src/ui/register-elements.ts'); registerElements();
         const { paintedControls } = await import('/tests/frontend/painted-controls-contract.ts');

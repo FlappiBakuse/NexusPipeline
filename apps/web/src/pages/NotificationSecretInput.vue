@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fieldHelp as vHelp } from '../components/field-help';
 import { t } from '../app/locale';
 import type { SecretField } from './notification-types';
 
@@ -7,7 +8,7 @@ const emit = defineEmits<{ edit: [field: SecretField, value: string] }>();
 </script>
 
 <template>
-  <label class="secret-input" :data-secret-field="field">
+  <label v-help="configured ? t('已有凭据留空不修改；输入新值后在保存时替换，秘密内容不会写入提示。') : undefined" class="secret-input" :data-secret-field="field">
     {{ t(label) }}
     <input
         data-draft-field="NotificationSecretInput/value"

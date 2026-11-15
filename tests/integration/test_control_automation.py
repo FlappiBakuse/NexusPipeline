@@ -14,6 +14,27 @@ class ControlAutomationTests(unittest.TestCase):
     def tearDown(self):
         self.host.tearDown()
 
+    def test_inspects_script_root(self):
+        runtime = self.host.scope / "runtime"
+        _, started = self.host.start(runtime)
+        address = started["address"]
+        directory = self.host.scope / "script-root"
+        directory.mkdir()
+        file = directory / "program.exe"
+        file.write_bytes(b"not executed")
+        before = self.host.durable_state(runtime)
+        for path, exists in ((str(directory), True), (str(directory / "missing"), False),
+                             (str(file), False), ("relative/path", False), ("C:\\NUL", False)):
+            status, result = self.post(address, "/control/v1/automation/scripts/root", dict(
+                format="nexus.control.script-root", version=1, rootPath=path))
+            self.assertEqual(200, status)
+            self.assertEqual(dict(rootPath=path, isDirectory=exists), result)
+        status, _ = self.post(address, "/control/v1/automation/scripts/root", dict(
+            format="nexus.control.script-root", version=1, rootPath=str(directory), extra=True))
+        self.assertEqual(400, status)
+        self.assertEqual(before, self.host.durable_state(runtime))
+        self.assertEqual(b"not executed", file.read_bytes())
+
     @staticmethod
     def change(revision, **items):
         return dict(format="nexus.control.automation-change", version=1, operationId=str(uuid.uuid4()),

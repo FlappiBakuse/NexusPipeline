@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fieldHelp as vHelp } from '../components/field-help';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { AutomationStore } from '../app/store-ports';
 import type { AutomationBundle } from '../control/wire.generated';
@@ -88,10 +89,11 @@ onBeforeUnmount(() => owner.abort());
           @nexus-change="set('general', 'enabled', $event.detail.value)"
         />
       </div>
-      <label>
+      <label v-help="t('-1 表示永久运行，0 表示停止，正数为剩余运行天数，每日递减。')">
         {{ t('运行天数') }}
         <nexus-number-input
         data-draft-field="BindingPolicyFields/groups.general.runDays ?? -1"
+          :placeholder="t('-1 永久；0 停止')"
           :aria-label="t('运行天数')"
           aria-required="true"
           :min.prop="-1"
@@ -102,10 +104,11 @@ onBeforeUnmount(() => owner.abort());
           @nexus-change="set('general', 'runDays', $event.detail.value)"
         />
       </label>
-      <label>
+      <label v-help="t('-1 表示不限制；正整数达到当天成功次数上限后跳过，0 无效。')">
         {{ t('最多成功运行次数') }}
         <nexus-number-input
         data-draft-field="BindingPolicyFields/groups.general.maximumSuccessfulRunsPerDay ?? -1"
+          :placeholder="t('-1 表示不限次数')"
           :aria-label="t('最多成功运行次数')"
           aria-required="true"
           :min.prop="-1"
@@ -179,7 +182,7 @@ onBeforeUnmount(() => owner.abort());
           @nexus-change="set('advanced', 'syncEnabled', $event.detail.value)"
         />
       </div>
-      <label>
+      <label v-help="t('选择后仍可手动编辑；%FIRST% 前缀表示仅首次运行。')">
         {{ t('任务前运行脚本路径') }}
         <nexus-path-picker
           :aria-label="t('任务前运行脚本路径')"
@@ -192,7 +195,7 @@ onBeforeUnmount(() => owner.abort());
           @nexus-browse="browse('pre')"
         />
       </label>
-      <label>
+      <label v-help="t('选择后仍可手动编辑；%LAST% 前缀表示仅最终运行。')">
         {{ t('任务后运行脚本路径') }}
         <nexus-path-picker
           :aria-label="t('任务后运行脚本路径')"

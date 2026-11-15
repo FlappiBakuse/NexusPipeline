@@ -2,34 +2,31 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import type { AutomationStore } from '../app/store-ports';
 import type { AutomationBundle, ScriptSourceCandidate } from '../control/wire.generated';
-import { extensionList, extensionDetails, type ExtensionDetails } from '../control/extensions';
+import { extensionList, extensionDetails } from '../control/extensions';
 import { createIdentity } from '../control/identity';
 import { scriptPaths } from './script-paths';
 import { readSource, selectSource, scriptSourceKey } from './script-source';
 import { t, registerMessages } from '../app/locale';
 registerMessages({
   '请在 Host 本机创建专项脚本实例。': 'Create specialized script instances on the Host machine.',
-  '读取脚本配置': 'Read script configurations', '选择脚本配置': 'Select script configuration',
-  '请选择要使用的配置。': 'Select the configuration to use.',
+  '选择脚本配置': 'Select script configuration',
   '此目录没有可用的脚本配置。': 'No available script configurations in this directory.',
   '读取失败，请核对脚本目录后重试。': 'Read failed. Check the script directory and retry.',
-  '脚本根目录不存在，请选择有效目录后重试。': 'The script root directory does not exist. Choose an existing directory and retry.',
-  '已选择配置，保存实例后生效。': 'Configuration selected. Save the instance to apply it.',
-  '请在 Host 本机选择配置；当前连接只可查看候选。': 'Select configurations on the Host machine; this connection can only view candidates.'
+  '脚本根目录不存在，请选择有效目录后重试。': 'The script root directory does not exist. Choose an existing directory and retry.'
 });
 
 type Script = AutomationBundle['scripts'][number];
 const props = defineProps<{ store: AutomationStore; modelValue: Script }>();
 const emit = defineEmits<{ 'update:modelValue': [value: Script] }>();
 const paths = computed(() => scriptPaths(props.store, props.modelValue));
-const candidates = ref<readonly ScriptSourceCandidate[]>([]), selected = ref(''), busy = ref(false), note = ref('');
-const diagnostics = ref<readonly string[]>([]), details = ref<ExtensionDetails>();
+const candidates = ref<readonly ScriptSourceCandidate[]>([]), busy = ref(false), note = ref('');
+const diagnostics = ref<readonly string[]>([]);
 let owner: AbortController | undefined;
 const identity = () => [props.store.state.capabilities?.instanceId, props.modelValue.id,
   props.modelValue.extensionId, paths.value.root].join('\n');
 watch(identity, (_, previous) => {
-  owner?.abort(); candidates.value = []; selected.value = ''; busy.value = false; note.value = '';
-  diagnostics.value = []; details.value = undefined;
+  owner?.abort(); candidates.value = []; busy.value = false; note.value = '';
+  diagnostics.value = [];
   if (previous) {
     paths.value.executable = ''; paths.value.configuration = ''; paths.value.logs = ''; paths.value.arguments = '';
     props.store.drafts.delete(scriptSourceKey(props.modelValue.id));
@@ -41,9 +38,8 @@ onBeforeUnmount(() => owner?.abort());
 async function discover(): Promise<void> {
   owner?.abort(); const operation = new AbortController(); owner = operation;
   const ticket = identity(), root = paths.value.root, extensionId = props.modelValue.extensionId!;
-  const previousSelection = selected.value;
   busy.value = true; note.value = '';
-  diagnostics.value = []; details.value = undefined;
+  diagnostics.value = [];
   try {
     const installed = await props.store.client.read('/control/v1/extensions', extensionList, operation.signal);
     const extension = installed.items.find(item => item.extensionId === extensionId && item.isInstalled &&
@@ -54,17 +50,15 @@ async function discover(): Promise<void> {
       format: 'nexus.control.script-source', version: 1, operationId, extensionId,
       expectedInstalledRevision: extension.installedRevision, rootPath: root
     }, value => readSource(value, operationId, extensionId, root, extension.installedRevision), operation.signal);
-    const dictionary = result.diagnostics?.length ? await props.store.client.read(
+    if (result.diagnostics?.length) await props.store.client.read(
       '/control/v1/extensions/' + encodeURIComponent(extensionId) + '/details',
-      value => extensionDetails(value, extensionId), operation.signal) : undefined;
+      value => extensionDetails(value, extensionId), operation.signal);
     if (operation.signal.aborted || ticket !== identity()) return;
-    diagnostics.value = result.diagnostics || []; details.value = dictionary;
+    diagnostics.value = result.diagnostics || [];
     candidates.value = result.candidates!;
-    selected.value = candidates.value.some(item => item.candidateId === previousSelection) ? previousSelection : '';
-    note.value = selected.value ? '已选择配置，保存实例后生效。'
-      : candidates.value.length ? '请选择要使用的配置。' : diagnostics.value.length ? '' : '此目录没有可用的脚本配置。';
-    if (selected.value && props.store.can('automation.declare')) choose(selected.value);
-    if (!paths.value.executable && candidates.value.length && props.store.can('automation.declare')) choose(candidates.value[0]!.candidateId);
+    note.value = !candidates.value.length && !diagnostics.value.length ? '此目录没有可用的脚本配置。' : '';
+    if (!paths.value.executable && candidates.value.length && props.store.can('automation.declare'))
+      emit('update:modelValue', selectSource(props.store, props.modelValue, candidates.value[0]!));
   } catch (error) {
     if (!operation.signal.aborted && ticket === identity()) {
       note.value = error instanceof Error && error.message === 'script_source_root_missing'
@@ -72,13 +66,6 @@ async function discover(): Promise<void> {
         : error instanceof Error ? error.message : '读取失败，请核对脚本目录后重试。';
     }
   } finally { if (owner === operation) busy.value = false; }
-}
-function choose(value: string): void {
-  if (!props.store.can('automation.declare')) return;
-  const candidate = candidates.value.find(item => item.candidateId === value);
-  if (!candidate) return;
-  selected.value = value; emit('update:modelValue', selectSource(props.store, props.modelValue, candidate));
-  note.value = '已选择配置，保存实例后生效。';
 }
 </script>
 <template>

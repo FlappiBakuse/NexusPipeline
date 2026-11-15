@@ -115,6 +115,19 @@ body {
     'Microsoft YaHei',
     sans-serif;
 }
+nexus-modal,
+nexus-confirm-dialog,
+nexus-dialog-popover {
+  --panel: var(--_nexus-secondary-panel, var(--panel-opaque));
+  --panel-soft: var(--_nexus-secondary-soft, var(--panel-soft-opaque));
+  --panel-hover: var(--_nexus-secondary-hover, var(--panel-hover-opaque));
+  --content-card: var(--panel);
+  --content-card-soft: var(--panel-soft);
+  --content-card-secondary: var(--panel-soft);
+  --content-control: var(--panel-soft);
+  --content-control-hover: var(--panel-hover);
+  --nx-color-surface: var(--_nexus-appearance-color-surface, var(--_nexus-theme-color-surface, var(--panel)));
+}
 * {
   box-sizing: border-box;
 }

@@ -1,11 +1,10 @@
 import { createIdentity } from '../control/identity';
-import { pad, dateText, calendarChoices, timeChoices, choiceButton } from './date-choices.js';
+import { pad, dateText, calendarChoices, choiceButton } from './date-choices.js';
 import { controlStyles } from './control-styles.js';
 import { observeLocale } from './locale-observer.js';
 
 export type DateControlOptions = {
   value: string;
-  kind: 'date' | 'time';
   label: string;
   min?: string;
   max?: string;
@@ -24,7 +23,6 @@ svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5}
 .grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px}.weekday{text-align:center;color:var(--nx-color-muted,#92a8c4);font-size:11px;line-height:28px}
 .day{min-height:30px;padding:0;border:0;background:transparent;text-align:center;font-size:12px;border-radius:6px}.day.outside{color:var(--faint,var(--nx-color-muted,#92a8c4))}.day[aria-selected=true]{background:var(--accent-strong,var(--nx-color-accent,#62a0ff));color:white}.day.today{box-shadow:inset 0 0 0 1px var(--nx-color-accent,#62a0ff)}
 .footer{display:flex;justify-content:space-between;border-top:1px solid var(--nx-color-border,#394152);margin-top:10px;padding-top:10px;gap:8px}.footer button{min-height:28px;border:0;background:transparent;color:var(--nx-color-accent,#62a0ff);padding:0 8px;font-size:12px}
-.time-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.time-column{max-height:230px;overflow:hidden}.time-items{display:grid;gap:4px}.time-column button{min-height:32px;border:0;background:transparent;text-align:center}.time-column button[aria-pressed=true]{color:var(--nx-color-accent,#62a0ff);background:var(--accent-soft,color-mix(in srgb,var(--nx-color-accent,#62a0ff) 15%,transparent))}
 .error{display:block;color:var(--nx-color-danger,#ff727b);font-size:11px;margin-top:4px}.error:empty{display:none}
 `;
 
@@ -34,9 +32,8 @@ export class DateControl {
   private readonly popup: HTMLElement;
   private readonly error: HTMLElement;
   private readonly scope = new AbortController();
-  private options: DateControlOptions = { value: '', kind: 'date', label: '' };
+  private options: DateControlOptions = { value: '', label: '' };
   private month = new Date();
-  private hour = 0;
 
   constructor(
     private readonly root: ShadowRoot,
@@ -131,16 +128,12 @@ export class DateControl {
     if (options.value !== this.options.value)
       this.field.value = options.value;
     this.options = options;
-    this.field.placeholder = options.kind === 'time' ? 'HH:mm' : 'YYYY-MM-DD';
+    this.field.placeholder = 'YYYY-MM-DD';
     this.field.setAttribute('aria-label', options.label);
     this.field.inputMode = 'numeric';
     this.field.disabled = this.trigger.disabled = Boolean(options.disabled);
     this.trigger.setAttribute('aria-label', options.label + (this.chinese ? ' 选择' : ' Choose'));
     this.popup.setAttribute('aria-label', options.label);
-    this.trigger.innerHTML =
-      options.kind === 'time'
-        ? '<svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg>'
-        : '<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M8 3v4m8-4v4M4 10h16"/></svg>';
     if (options.disabled) this.close();
   }
 
@@ -158,11 +151,9 @@ export class DateControl {
   }
   private valid(value: string): boolean {
     if (!value) return true;
-    return this.options.kind === 'time'
-      ? /^([01]\d|2[0-3]):[0-5]\d$/.test(value)
-      : /^\d{4}-\d{2}-\d{2}$/.test(value) &&
-          !Number.isNaN(Date.parse(value)) &&
-          dateText(new Date(value + 'T00:00:00Z')) === value;
+    return /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+      !Number.isNaN(Date.parse(value)) &&
+      dateText(new Date(value + 'T00:00:00Z')) === value;
   }
   private commit(value: string): void {
     if (!this.valid(value) || (value && !this.allowed(value))) {
@@ -184,11 +175,10 @@ export class DateControl {
     const value = this.options.value;
     const today = new Date();
     this.month =
-      value && this.options.kind === 'date'
+      value
         ? new Date(value + 'T00:00:00Z')
         : new Date(Date.UTC(today.getFullYear(), today.getMonth(), 1));
     this.month.setUTCDate(1);
-    this.hour = Number(value.split(':')[0]) || 0;
     this.draw();
     this.popup.hidden = false;
     this.popup.showPopover();
@@ -202,7 +192,8 @@ export class DateControl {
           ? rect.bottom + 5
           : rect.top - this.popup.offsetHeight - 5
       ) + 'px';
-    this.popup.querySelector<HTMLButtonElement>('[aria-selected=true],button:not(:disabled)')?.focus();
+    const selected = this.popup.querySelector<HTMLButtonElement>('[aria-selected=true]:not(:disabled)');
+    (selected || this.popup.querySelector<HTMLButtonElement>('button:not(:disabled)'))?.focus();
   }
   private close(): void {
     if (this.popup.matches(':popover-open')) this.popup.hidePopover();
@@ -214,42 +205,34 @@ export class DateControl {
     const action = active?.dataset.action, value = active?.dataset.value;
     const heading = document.createElement('div');
     heading.className = 'heading';
-    if (this.options.kind === 'time') {
-      const title = document.createElement('strong');
-      title.textContent = this.chinese ? '小时 / 分钟' : 'Hours / Minutes';
-      heading.append(title);
-    } else {
-      for (const [label, step] of [
-        ['«', -12],
-        ['‹', -1],
-        ['', 0],
-        ['›', 1],
-        ['»', 12]
-      ] as const) {
-        if (!step) {
-          const title = document.createElement('strong');
-          title.textContent = new Intl.DateTimeFormat(document.documentElement.lang || 'zh-CN', {
-            year: 'numeric',
-            month: 'long',
-            timeZone: 'UTC'
-          }).format(this.month);
-          heading.append(title);
-        } else {
-          const button = choiceButton(label, 'month', String(step));
-          button.setAttribute(
-            'aria-label',
-            (step < 0 ? (this.chinese ? '上一' : 'Previous ') : this.chinese ? '下一' : 'Next ') +
-              (Math.abs(step) === 12 ? (this.chinese ? '年' : 'year') : this.chinese ? '月' : 'month')
-          );
-          heading.append(button);
-        }
+    for (const [label, step] of [
+      ['«', -12],
+      ['‹', -1],
+      ['', 0],
+      ['›', 1],
+      ['»', 12]
+    ] as const) {
+      if (!step) {
+        const title = document.createElement('strong');
+        title.textContent = new Intl.DateTimeFormat(document.documentElement.lang || 'zh-CN', {
+          year: 'numeric',
+          month: 'long',
+          timeZone: 'UTC'
+        }).format(this.month);
+        heading.append(title);
+      } else {
+        const button = choiceButton(label, 'month', String(step));
+        button.setAttribute(
+          'aria-label',
+          (step < 0 ? (this.chinese ? '上一' : 'Previous ') : this.chinese ? '下一' : 'Next ') +
+            (Math.abs(step) === 12 ? (this.chinese ? '年' : 'year') : this.chinese ? '月' : 'month')
+        );
+        heading.append(button);
       }
     }
     this.popup.replaceChildren(
       heading,
-      this.options.kind === 'date'
-        ? calendarChoices(this.month, this.options.value, this.chinese, (value) => this.allowed(value))
-        : timeChoices(this.hour, this.options.value, this.chinese)
+      calendarChoices(this.month, this.options.value, this.chinese, (value) => this.allowed(value))
     );
     const footer = document.createElement('div');
     footer.className = 'footer';
@@ -270,22 +253,14 @@ export class DateControl {
       this.month.setUTCMonth(this.month.getUTCMonth() + Number(value));
       this.draw();
       this.popup.querySelector<HTMLButtonElement>(`[data-action=month][data-value="${value}"]`)?.focus();
-    } else if (action === 'hour') {
-      this.hour = Number(value);
-      this.draw();
-      this.popup.querySelector<HTMLButtonElement>(`[data-action=hour][data-value="${value}"]`)?.focus();
     } else {
       const now = new Date();
       this.commit(
         action === 'date'
           ? value
-          : action === 'minute'
-            ? `${pad(this.hour)}:${pad(Number(value))}`
-            : action === 'clear'
-              ? ''
-              : this.options.kind === 'time'
-                ? `${pad(now.getHours())}:${pad(now.getMinutes())}`
-                : `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+          : action === 'clear'
+            ? ''
+            : `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
       );
       this.field.focus();
     }

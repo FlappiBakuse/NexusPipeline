@@ -1,6 +1,16 @@
 import type { UiElement } from '@nexuspipeline/extension-sdk';
 
 export async function feedbackLayoutContract(fixture: HTMLElement, check: (value: unknown, name: string) => void): Promise<void> {
+  const inherited = document.createElement('div'); inherited.style.cssText = 'font:14px/1.5 sans-serif;width:320px';
+  const empty = document.createElement('nexus-empty-state') as UiElement<'nexus-empty-state'>;
+  empty.title = 'No tasks'; empty.description = 'Create a task to get started.';
+  inherited.append(empty); fixture.append(inherited);
+  const heading = getComputedStyle(empty.shadowRoot!.querySelector('h3')!);
+  const description = getComputedStyle(empty.shadowRoot!.querySelector('p')!);
+  check(empty.getBoundingClientRect().height === 147 && heading.fontSize === '15px' && heading.fontWeight === '700' &&
+    description.fontSize === '13px' && description.fontWeight === '400',
+    'empty task cards share their height and running-center typography across inherited plugin text styles');
+  inherited.remove();
   const field = document.createElement('nexus-text-input') as UiElement<'nexus-text-input'>;
   const clipped = document.createElement('div');
   clipped.style.cssText = 'overflow:hidden;width:240px'; clipped.append(field); fixture.append(clipped);

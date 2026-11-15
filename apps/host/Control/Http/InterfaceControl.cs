@@ -19,7 +19,7 @@ internal sealed class InterfaceControl(ControlAuthentication authority, Interfac
         app.MapPost("/control/v1/settings/interface/change", async (HttpContext context) =>
         {
             var request = authority.Require(context, ControlCapability.SettingsWrite); NoQuery(context);
-            using var body = await ControlRequestBody.ReadAsync(context, 8192);
+            using var body = await ControlRequestBody.ReadAsync(context, 16384);
             body.RequireSchema(contracts, "control-interface-change.schema.json");
             var root = body.Root; var values = root.GetProperty("values");
             var operation = ControlRequestBody.Uuid(root.GetProperty("operationId"));
@@ -28,7 +28,8 @@ internal sealed class InterfaceControl(ControlAuthentication authority, Interfac
                 var saved = preferences.Save(operation, request.SubjectId, root.GetProperty("expectedRevision").GetInt64(),
                     new(values.GetProperty("theme").GetString()!,
                         Strings("dashboardCards"), Strings("pinnedSettings"), Strings("collapsedSettings"),
-                        values.GetProperty("locale").GetString()!));
+                        values.GetProperty("locale").GetString()!,
+                        values.TryGetProperty("dashboardAvailableCards", out _) ? Strings("dashboardAvailableCards") : null));
                 return Results.Json(saved, NotificationUseCases.Json);
             }
             catch (InterfaceConflictException) { return ControlErrors.Result(409, "interface_revision_conflict", operation); }

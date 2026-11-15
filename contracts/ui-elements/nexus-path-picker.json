@@ -2,6 +2,7 @@
   "name": "nexus-path-picker",
   "properties": {
     "value": "string",
+    "disabled": "boolean",
     "kinds": "readonly(file|folder)[]",
     "browseAllowed": "boolean",
     "readOnly": "boolean"
@@ -12,6 +13,7 @@
       "folder"
     ],
     "browseAllowed": false,
+    "disabled": false,
     "value": "",
     "readOnly": false
   },

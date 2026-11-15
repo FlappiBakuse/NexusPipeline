@@ -260,6 +260,7 @@ export class SwitchSetting extends NexusElement {
     this.control.disabled = Boolean(this.values.disabled);
     this.control.value = Boolean(this.values.value);
     this.control.setAttribute('aria-label', String(this.values.title));
+    this.control.setAttribute('aria-describedby', this.getAttribute('aria-describedby') || '');
   }
 }
 

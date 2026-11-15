@@ -202,10 +202,12 @@ function openRow(row: unknown, global = false): void {
     <nexus-toast v-if="pending && !editing" tone="warning" :message.prop="t('操作结果待确认；请查询状态，勿重复提交。')" />
     <nexus-toast v-if="notice" :message.prop="t(notice)" @nexus-close="notice = ''" />
     <section class="entity-list">
-      <div v-if="!listedRows.length" class="automation-empty">
-        <strong>{{ t(emptyText[0]!) }}</strong>
-        <p>{{ t(emptyText[1]!) }}</p>
-      </div>
+      <nexus-empty-state
+        v-if="!listedRows.length"
+        class="automation-empty"
+        :title="t(emptyText[0]!)"
+        :description="t(emptyText[1]!)"
+      />
       <AutomationRows
         v-else-if="bundle"
         :kind="kind"

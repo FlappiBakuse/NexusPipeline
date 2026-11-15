@@ -7,7 +7,10 @@ const variables = [
   '--accent-soft',
   '--panel',
   '--panel-soft',
-  '--panel-hover'
+  '--panel-hover',
+  '--_nexus-secondary-panel',
+  '--_nexus-secondary-soft',
+  '--_nexus-secondary-hover'
 ] as const;
 const allowed = new Set([
   'accent',
@@ -79,9 +82,13 @@ function render(): void {
   const opacity = current.cardOpacity ?? 1;
   if (cardColor || opacity < 1)
     style.setProperty('--panel', blend(cardColor || 'var(--panel-opaque)', opacity));
-  if (current.secondaryTransparent) {
+  if (cardColor || opacity < 1) {
     style.setProperty('--panel-soft', blend(cardColor || 'var(--panel-soft-opaque)', opacity));
     style.setProperty('--panel-hover', blend(cardColor || 'var(--panel-hover-opaque)', opacity));
+    const secondaryOpacity = current.secondaryTransparent ? opacity : 1;
+    style.setProperty('--_nexus-secondary-panel', blend(cardColor || 'var(--panel-opaque)', secondaryOpacity));
+    style.setProperty('--_nexus-secondary-soft', blend(cardColor || 'var(--panel-soft-opaque)', secondaryOpacity));
+    style.setProperty('--_nexus-secondary-hover', blend(cardColor || 'var(--panel-hover-opaque)', secondaryOpacity));
   }
 }
 

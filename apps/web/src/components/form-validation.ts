@@ -15,7 +15,7 @@ export function validateForm(root: HTMLElement | undefined): boolean {
   let first: HTMLElement | undefined;
   const visit = (container: HTMLElement | ShadowRoot): void => {
     for (const element of container.querySelectorAll<HTMLElement>('*')) {
-      if (element.closest('[inert], :disabled') || element.hidden || !element.getClientRects().length) continue;
+      if (element.closest('[inert], [disabled], :disabled') || element.hidden || !element.getClientRects().length) continue;
       if (element.localName === 'nexus-select' && element.getAttribute('aria-required') === 'true') {
         const valid = () => {
           const value = (element as UiElement<'nexus-select'>).value;

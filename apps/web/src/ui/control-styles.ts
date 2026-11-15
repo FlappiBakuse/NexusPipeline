@@ -18,10 +18,20 @@ input[aria-invalid=true],textarea[aria-invalid=true]{border-color:var(--nx-color
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 `;
 
+export const compositeFieldStyles = `
+:host{border-radius:var(--nx-radius-sm,8px)}
+:host(:focus-within){outline:2px solid var(--nx-color-accent,#80a7ff);outline-offset:-2px}
+:host([aria-invalid=true]){outline:1px solid var(--nx-color-danger,#ef7070);outline-offset:-1px}
+:host([aria-invalid=true]:focus-within){outline-width:2px;outline-offset:-2px}
+:host([disabled]){outline:none}
+input:focus,textarea:focus{outline:none}
+input[aria-invalid=true],textarea[aria-invalid=true]{border-color:var(--nx-color-border,#394152)}
+`;
+
 export const fieldStyles =
   controlStyles +
   `
 :host{display:inline-flex;min-width:0;width:100%}input,textarea{width:100%;min-height:var(--nx-control-height,40px);padding:8px 12px;
 border:1px solid var(--nx-color-border,#394152);border-radius:var(--nx-radius-sm,8px);background:var(--content-control,#ffffff08)}
-textarea{resize:none;line-height:var(--nx-textarea-line-height,1.5)}input[aria-invalid=true],textarea[aria-invalid=true]{border-color:var(--nx-color-danger,#ef7070)}
-`;
+textarea{resize:none;line-height:var(--nx-textarea-line-height,1.5)}
+` + compositeFieldStyles;

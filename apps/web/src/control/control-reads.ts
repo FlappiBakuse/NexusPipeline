@@ -12,7 +12,6 @@ type SharedRead = {
 type Decoder<T> = (value: unknown) => T;
 
 export class ControlReads {
-  private readonly reading = new Set<Promise<unknown>>();
   private readonly prepared = new Map<string, SharedRead>();
   private readonly shared = new Map<string, SharedRead>();
   private generation = 0;
@@ -72,10 +71,7 @@ export class ControlReads {
         throw error;
       }
     }
-    const work = this.request(path, signal);
-    this.reading.add(work);
-    try { return decode(await work); }
-    finally { this.reading.delete(work); }
+    return decode(await this.request(path, signal));
   }
   private startShared(path: string, prepared: boolean): SharedRead {
     const controller = new AbortController();
@@ -83,10 +79,8 @@ export class ControlReads {
     const item: SharedRead = { work, controller, generation: this.generation,
       preparationGeneration: this.preparationGeneration, prepared, users: 0, settled: false };
     this.shared.set(path, item);
-    this.reading.add(work);
     const finish = () => {
       item.settled = true;
-      this.reading.delete(work);
       if (this.shared.get(path) === item) this.shared.delete(path);
     };
     void work.then(finish, finish);

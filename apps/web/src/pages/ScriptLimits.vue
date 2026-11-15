@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fieldHelp as vHelp } from '../components/field-help';
 import { t } from '../app/locale';
 import type { AutomationBundle } from '../control/wire.generated';
 
@@ -14,7 +15,7 @@ function limit(key: keyof Limits, value: number): void {
     <section class="script-section">
       <h3>{{ t('运行设置') }}</h3>
       <div class="columns three">
-        <label>
+        <label v-help="t('每个步骤最多尝试的次数，包含首次运行；实际重试还需满足插件声明与安全条件。')">
           {{ t('最大尝试次数（含首次）') }}
           <em>*</em>
           <nexus-number-input
@@ -27,7 +28,7 @@ function limit(key: keyof Limits, value: number): void {
             @nexus-change="limit('maximumAttempts', $event.detail.value)"
           />
         </label>
-        <label>
+        <label v-help="t('达到该时长且日志无更新时判定停滞；0 表示不启用日志停滞限制。')">
           {{ t('日志无更新上限（分钟）') }}
           <em>*</em>
           <nexus-number-input
@@ -40,7 +41,7 @@ function limit(key: keyof Limits, value: number): void {
             @nexus-change="limit('stallTimeoutSeconds', $event.detail.value)"
           />
         </label>
-        <label>
+        <label v-help="t('限制当前步骤的总运行时间，包含重试；0 表示不启用总时间限制。')">
           {{ t('运行总时间上限（分钟）') }}
           <em>*</em>
           <nexus-number-input

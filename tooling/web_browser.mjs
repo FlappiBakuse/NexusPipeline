@@ -22,7 +22,7 @@ const absolute = name => {
 const root = absolute('--root'), modules = absolute('--modules'), browser = absolute('--browser');
 const runtime = absolute('--runtime'), output = absolute('--output'), scenario = options.get('--scenario');
 const scenarios = {
-  controls: 'controls', 'controls-painted': 'controls',
+  controls: 'controls', 'controls-painted': 'controls', 'controls-help': 'controls',
   'host-automation': 'automation-module.mjs', 'host-source': 'source-module.mjs', 'host-installed': 'installed-module.mjs',
   'host-checkin': 'checkin-module.mjs', 'host-activities': 'activities-module.mjs', 'host-screenshot': 'screenshot-module.mjs',
   'host-plugin-list': 'plugin-list-module.mjs',

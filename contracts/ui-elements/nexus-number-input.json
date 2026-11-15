@@ -5,6 +5,7 @@
     "min": "number|null",
     "max": "number|null",
     "step": "number",
+    "placeholder": "string",
     "readOnly": "boolean"
   },
   "defaults": {
@@ -12,6 +13,7 @@
     "min": null,
     "max": null,
     "step": 1,
+    "placeholder": "",
     "readOnly": false
   },
   "slots": [],

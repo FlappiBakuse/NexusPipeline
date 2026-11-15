@@ -3,7 +3,7 @@ export const dateText = (value: Date): string =>
   `${value.getUTCFullYear()}-${pad(value.getUTCMonth() + 1)}-${pad(value.getUTCDate())}`;
 export function calendarChoices(
   month: Date,
-  value: string,
+  selected: string,
   chinese: boolean,
   allowed: (value: string) => boolean
 ): HTMLElement {
@@ -31,38 +31,9 @@ export function calendarChoices(
       (value === todayText ? ' today' : '');
     button.role = 'gridcell';
     button.setAttribute('aria-label', value);
-    button.setAttribute('aria-selected', String(value === value));
+    button.setAttribute('aria-selected', String(value === selected));
     button.disabled = !allowed(value);
     grid.append(button);
-  }
-  return grid;
-}
-export function timeChoices(hour: number, value: string, chinese: boolean): HTMLElement {
-  const grid = document.createElement('div');
-  grid.className = 'time-grid';
-  for (const kind of ['hour', 'minute']) {
-    const column = document.createElement('nexus-scroll-area');
-    column.className = 'time-column';
-    column.setAttribute(
-      'label',
-      kind === 'hour' ? (chinese ? '小时' : 'Hours') : chinese ? '分钟' : 'Minutes'
-    );
-    const items = document.createElement('div');
-    items.className = 'time-items';
-    column.append(items);
-    for (let index = 0; index < (kind === 'hour' ? 24 : 60); index++) {
-      const button = choiceButton(pad(index), kind, String(index));
-      button.setAttribute(
-        'aria-label',
-        (kind === 'hour' ? (chinese ? '小时 ' : 'Hour ') : chinese ? '分钟 ' : 'Minute ') + pad(index)
-      );
-      button.setAttribute(
-        'aria-pressed',
-        String(kind === 'hour' ? index === hour : index === Number(value.split(':')[1]))
-      );
-      items.append(button);
-    }
-    grid.append(column);
   }
   return grid;
 }

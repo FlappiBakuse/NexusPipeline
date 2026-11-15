@@ -11,6 +11,15 @@ namespace NexusPipeline.Host.Control.Configuration;
 [SupportedOSPlatform("windows")]
 internal sealed class SourceUseCases(ScriptSourceService sources, ContractReader contracts)
 {
+    internal object InspectRoot(AuthenticatedControlRequest request, JsonElement body, CancellationToken cancellation)
+    {
+        void Current() => request.Require(ControlCapability.AutomationRead);
+        Current();
+        var command = contracts.Read<ControlScriptRoot>(JsonSerializer.SerializeToUtf8Bytes(body), "control-script-root.schema.json");
+        var exists = sources.IsRootDirectory(command.RootPath, Current, cancellation);
+        return new { rootPath = command.RootPath, isDirectory = exists };
+    }
+
     internal async ValueTask<object> DiscoverAsync(AuthenticatedControlRequest request, JsonElement body, CancellationToken cancellation)
     {
         void Current()

@@ -14,7 +14,8 @@ export async function formLabelContract(fixture: HTMLElement,
     h('label', [locale.value === 'en-US' ? 'Mode' : '模式', h(FormSelect, { modelValue: 'one' },
       { default: () => [h('option', { value: 'one' }, t('信息')),
         h('option', { value: 'fatal' }, t('致命')), h('option', { value: 'proxy' }, t('不使用代理'))] })]),
-    h('label', [locale.value === 'en-US' ? 'Date' : '日期', h(FormDate, { modelValue: '2030-01-01' })])
+    h('label', [locale.value === 'en-US' ? 'Date' : '日期', h(FormDate, { modelValue: '2030-01-01' })]),
+    h('label', ['Time', h(FormDate, { type: 'time', modelValue: '08:30' })])
   ]) });
   app.mount(holder); await nextTick();
   const number = holder.querySelector('nexus-number-input')!;
@@ -37,6 +38,9 @@ export async function formLabelContract(fixture: HTMLElement,
         language + ': the selected option follows the current locale without changing its value');
       check(date.getAttribute('aria-label') === (language === 'en-US' ? 'Date' : '日期'),
         language + ': mounted date inherits the translated label');
+      const time = holder.querySelectorAll('.form-date')[1]!.shadowRoot!;
+      check(!!time.querySelector('.columns') && !time.querySelector('input') && time.querySelector('.trigger')!.textContent?.includes('08:30'),
+        language + ': FormDate time mode uses the current wheel control and preserves its value');
       const draft = current.shadowRoot!.querySelector('input')!;
       check(draft.value === '9' && document.activeElement === current && current.shadowRoot!.activeElement === draft,
         language + ': locale refresh retains the invalid number draft and editing focus');

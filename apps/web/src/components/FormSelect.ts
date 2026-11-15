@@ -57,6 +57,7 @@ export default defineComponent({
           h('nexus-select', {
             value: selected < 0 ? '' : String(selected),
             'aria-label': label.value,
+            placeholder: attrs.placeholder || '',
             searchable: items.length > 80,
             options: items.map((item, index) => ({
               id: String(index),

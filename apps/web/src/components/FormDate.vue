@@ -25,7 +25,6 @@ let kind: 'date' | 'time' | undefined;
 function update(): void {
   if (!control) return;
   const options = {
-    kind: props.type || 'date',
     value: props.modelValue ?? props.value ?? '',
     label: label.value,
     min: props.min,

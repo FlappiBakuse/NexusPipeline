@@ -15,8 +15,7 @@ import { configurationDrafts } from './configuration-drafts';
 import {
   adapterResult,
   createAdapterDraft,
-  resetAdapterProposal,
-  type AdapterDraft as Draft
+  resetAdapterProposal
 } from './adapter-results';
 const props = defineProps<{ store: ConfigurationStore; overview: ConfigurationOverview; visible: boolean }>();
 const emit = defineEmits<{ changed: [] }>();

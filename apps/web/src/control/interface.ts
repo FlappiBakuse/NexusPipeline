@@ -6,6 +6,7 @@ export interface InterfaceValues {
   theme: 'dark' | 'light' | 'system';
   locale: 'zh-CN' | 'en-US';
   dashboardCards: DashboardCard[];
+  dashboardAvailableCards?: DashboardCard[];
   pinnedSettings: InterfaceCategory[];
   collapsedSettings: InterfaceCategory[];
 }
@@ -54,7 +55,8 @@ export function interfaceSnapshot(value: unknown): InterfaceSnapshot {
       locale: selected(values.locale, ['zh-CN', 'en-US']),
       dashboardCards: cardKeys(values.dashboardCards),
       pinnedSettings: settingsCategories(values.pinnedSettings),
-      collapsedSettings: settingsCategories(values.collapsedSettings)
+      collapsedSettings: settingsCategories(values.collapsedSettings),
+      ...(values.dashboardAvailableCards === undefined ? {} : { dashboardAvailableCards: cardKeys(values.dashboardAvailableCards) })
     }
   };
 }

@@ -3,10 +3,11 @@ import type { DashboardCard } from '../control/interface';
 import { t } from '../app/locale';
 const props = defineProps<{
   cards: DashboardCard[];
+  available: DashboardCard[];
   catalog: { id: DashboardCard; title: string; description: string }[];
   locked: boolean;
 }>();
-const emit = defineEmits<{ change: [cards: DashboardCard[]] }>();
+const emit = defineEmits<{ change: [cards: DashboardCard[]]; reorderAvailable: [cards: DashboardCard[]] }>();
 </script>
 
 <template>
@@ -41,16 +42,18 @@ const emit = defineEmits<{ change: [cards: DashboardCard[]] }>();
       </article>
     </nexus-sortable-list>
     <h3>{{ t('可添加') }}</h3>
-    <div class="layout-list">
-      <p v-if="cards.length === catalog.length" class="all-added">{{ t('所有可用卡片均已加入') }}</p>
-      <article v-for="item in catalog.filter((item) => !cards.includes(item.id))" :key="item.id">
+    <nexus-sortable-list class="layout-list" :ids.prop="available" :disabled.prop="locked"
+      @nexus-reorder="emit('reorderAvailable', $event.detail.ids)">
+      <p v-if="!available.some(id => catalog.some(item => item.id === id))" class="all-added">{{ t('所有可用卡片均已加入') }}</p>
+      <article v-for="id in available.filter(id => catalog.some(item => item.id === id))" :key="id" :data-item-id="id">
+        <nexus-drag-handle :item-id="id" :label="t('调整卡片顺序')" :disabled.prop="locked" />
         <span>
-          <strong>{{ t(item.title) }}</strong>
-          <small>{{ t(item.description) }}</small>
+          <strong>{{ t(catalog.find(item => item.id === id)!.title) }}</strong>
+          <small>{{ t(catalog.find(item => item.id === id)!.description) }}</small>
         </span>
-        <button :disabled="locked" @click="emit('change', [...cards, item.id])">{{ t('添加') }}</button>
+        <button :disabled="locked" @click="emit('change', [...cards, id])">{{ t('添加') }}</button>
       </article>
-    </div>
+    </nexus-sortable-list>
   </div>
 </template>
 

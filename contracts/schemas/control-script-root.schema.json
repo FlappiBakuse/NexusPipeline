@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/control-script-root.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "rootPath"],
+  "properties": {
+    "format": {"const": "nexus.control.script-root"},
+    "version": {"const": 1},
+    "rootPath": {"type": "string", "minLength": 1, "maxLength": 32767}
+  }
+}

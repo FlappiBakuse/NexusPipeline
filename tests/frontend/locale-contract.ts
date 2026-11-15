@@ -16,7 +16,7 @@ export async function localeContract(fixture: HTMLElement, check: (condition: un
   fixture.append(number, color, holder, toast);
   const root = holder.attachShadow({ mode: 'open' });
   const date = new DateControl(root, () => { throw new Error('Locale changes must not commit date drafts'); });
-  date.set({ value: '2030-01-01', kind: 'date', label: 'Date' });
+  date.set({ value: '2030-01-01', label: 'Date' });
   const numeric = number.shadowRoot!.querySelector('input')!;
   numeric.value = '9';
   numeric.dispatchEvent(new Event('change', { bubbles: true }));
@@ -30,7 +30,7 @@ export async function localeContract(fixture: HTMLElement, check: (condition: un
       locale.value = language;
       document.documentElement.lang = language;
       await new Promise(resolve => setTimeout(resolve, 0));
-      date.set({ value: '2030-01-01', kind: 'date', label: language === 'en-US' ? 'Date' : '日期' });
+      date.set({ value: '2030-01-01', label: language === 'en-US' ? 'Date' : '日期' });
       check(number.shadowRoot!.querySelector('input')!.value === '9' && number.value === 20 && number.getAttribute('aria-invalid') === 'true',
         language + ': invalid number text survives a locale refresh');
       check(date.field.value === '2030-02-31' && date.field.getAttribute('aria-invalid') === 'true',

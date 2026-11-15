@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fieldHelp as vHelp } from '../components/field-help';
 import type {
   ControlNotificationCommandInput,
   ControlNotificationCommandConfiguration
@@ -214,7 +215,7 @@ function editSecret(field: SecretField, value: string): void {
         />
       </div>
       <div v-if="modelValue.configuration.webhookKind === 'feishu'" class="columns">
-        <label>
+        <label v-help="t('用于上传通知图片的飞书自建应用凭据。')">
           {{ t('飞书 App ID') }}
           <input
         data-draft-field="NotificationFields/modelValue.configuration.feishuAppId"
@@ -232,7 +233,7 @@ function editSecret(field: SecretField, value: string): void {
         />
       </div>
       <div v-if="modelValue.configuration.webhookKind === 'slack'" class="columns">
-        <label>
+        <label v-help="t('机器人需已加入目标频道。')">
           Slack Channel ID
           <input
         data-draft-field="NotificationFields/modelValue.configuration.slackChannelId"
@@ -249,7 +250,7 @@ function editSecret(field: SecretField, value: string): void {
           @edit="editSecret"
         />
       </div>
-      <label v-if="modelValue.configuration.webhookKind === 'generic'">
+      <label v-if="modelValue.configuration.webhookKind === 'generic'" v-help="t('JSON 模板支持 {text}、{imageBase64}、{imageDataUri}、{imageFileName} 和 {imageContentType} 替换。')">
         {{ t('generic 自定义模板（JSON）') }}
         <nexus-text-area
         data-draft-field="NotificationFields/modelValue.configuration.webhookTemplate"

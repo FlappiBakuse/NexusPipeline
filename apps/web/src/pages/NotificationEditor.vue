@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fieldHelp as vHelp } from '../components/field-help';
 import { createIdentity } from '../control/identity';
 import { computed, onBeforeUnmount, reactive, ref, toRefs, watch } from 'vue';
 import DraftNotice from '../components/DraftNotice.vue';
@@ -191,7 +192,7 @@ function cancel(): void {
       <button
         v-if="task"
         :disabled="busy || !!pending || dirty || !port.can('notifications.test')"
-        :title="dirty ? t('先保存当前修改，再测试已保存的任务。') : ''"
+        v-help="dirty ? t('先保存当前修改，再测试已保存的任务。') : ''"
         @click="commands.test()"
       >
         {{ t('测试通知') }}
