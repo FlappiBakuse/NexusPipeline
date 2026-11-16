@@ -1,6 +1,6 @@
 # 配置生命周期
 
-本页解释当前配置事实与流程；快照格式、CAS、补丁和原生编辑参数由[配置存储](../reference/configuration-storage.md)维护。未完成验收集中于[当前状态](../status.md)。
+本页解释当前配置事实与流程；快照格式、CAS、补丁和原生编辑参数由[配置存储](../reference/configuration-storage.md)维护。
 
 ## 四类事实
 

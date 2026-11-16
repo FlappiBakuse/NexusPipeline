@@ -26,7 +26,7 @@ SDK 接收显式资源所有权，不暴露容器、Core、数据库或任意 Ho
 manifest 的 `contractFingerprint` 绑定实际 SDK 契约字节，适用于 managed 与 specialized 包。
 managed 激活在构造扩展前验证 manifest、扩展身份、SDK 版本/指纹和最低 Host 版本。
 失败撤销 scope 的部分注册；浏览器握手也绑定当前指纹。
-包签名、安装、回滚保护与生产激活由 Extensions owner 组合，进度见[当前范围](../status.md)。
+包签名、安装、回滚保护与生产激活由 Extensions owner 组合。
 受控 DLL 或脚本夹具不代替正式包信任，也不代表任意 managed 代码已获沙箱隔离。
 
 ## 定义与受控执行
@@ -79,5 +79,5 @@ PNG 限 8 MiB，并核验摘要、尺寸、像素预算、完整数据流和实�
 执行截图的持久 source/root/collected 与媒体预览授权各有边界，不能互相授予设备控制权。
 
 `/control/v1/capabilities` 提供公开能力；桌面会话与原生动作授权见[桌面原生授权](desktop-authorization.md)。
-完整 Web/CLI/MCP 业务表面与媒体浏览器表面以[当前范围](../status.md)为准。
+Web、CLI、MCP 与媒体入口共用[控制面](control-http.md)的用例、权限和资源边界。
 产品不提供旧格式 reader、旧 `/api` 路由或旧 SDK 别名。

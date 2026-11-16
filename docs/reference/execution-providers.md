@@ -115,8 +115,7 @@ device grant 只指向本次 nonce 对应的本机管道；连接及每条请求
 同一物理窗口的有界借用，每次动作仍重验原进程、窗口、尺寸及执行预算。
 
 当前 PC 后端支持点击、拖动、单触点、键盘、文本和滚轮。按下状态由原借用持有，完成或
-取消时只释放本会话持有的键和触点，随后关闭捕获域与目标。PC 应用启动和 shell
-尚未接入。截图方法可选 PrintWindow、GDI、ScreenDC、FramePool；鼠标、键盘分别可选
+取消时只释放本会话持有的键和触点，随后关闭捕获域与目标。截图方法可选 PrintWindow、GDI、ScreenDC、FramePool；鼠标、键盘分别可选
 SendMessage、PostMessage、SendMessageWithCursorPos 或 Seize。`configure` 必须在首个设备操作前
 完成，随后仅接受相同选择。ScreenDC 由原目标输入 owner 提升所选窗口；只读 helper 在捕获前后
 核对客户区位置、可见范围和遮挡情况，拒绝捕获其他窗口的画面。FramePool 从同一窗口的合成帧

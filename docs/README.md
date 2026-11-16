@@ -1,6 +1,6 @@
 # 文档导航
 
-本仓拥有平台与公开 SDK；插件业务和上游支持范围归 [Plugins 文档](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/next/docs/README.md)。当前未完成事项集中于 [status](status.md)，实际运行结果由绑定源码与产物的回执记录。
+本仓拥有平台与公开 SDK；插件业务和上游支持范围归 [Plugins 文档](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/next/docs/README.md)。本导航按任务和主题连接当前实现、操作步骤与接口参考。
 
 ## 按任务进入
 
@@ -50,9 +50,9 @@
 | 工具参数与依赖锁 | [命令参考](reference/commands.md) | `tooling`、`global.json`、原生锁 |
 | 命名与例外 | [命名规范](development/naming.md) | Python / C# / TS AST 检查器 |
 
-## 决策、版本与历史
+## 决策与版本
 
-现有决策保留可核对背景：[Electron 选型](decisions/desktop-shell.md)、[资产准备](decisions/asset-preparation.md)、[秘密准备](decisions/secret-preparation.md)、[留存续办](decisions/retention-resume.md)。当前版本摘要见 [0.18.0](releases/0.18.0.md)。[历史索引](archive/README.md)只用于了解旧阶段范围及证据。
+现有决策保留可核对背景：[Electron 选型](decisions/desktop-shell.md)、[资产准备](decisions/asset-preparation.md)、[秘密准备](decisions/secret-preparation.md)、[留存续办](decisions/retention-resume.md)。文档范围见[文档决策](decisions/documentation.md)。当前版本摘要见 [0.18.0](releases/0.18.0.md)。
 
 `docs/users` 保留旧安装链接导航；更新屏障仍引用该路径。`tooling/application-readme.md` 是成品随包说明，`apps/desktop/README.md` 是桌面模块入口，`metadata/README.md` 说明旧客户端发现协议，各自具有独立消费位置。
 
@@ -65,6 +65,6 @@
 - 一个模块具有独立任务、契约或复杂生命周期时增加模块页，并在本索引和任务地图链接；只有独立执行规则才增加子 AGENTS。
 - schema、SDK API 清单、UI 元数据、指纹和产物清单由现役 producer 生成；手写文档解释用途和边界，不复制字段全集或测试方法计数。
 - 新页面先检查现有权威位置，其他页面用相对链接引用。迁移同时更新仓内和配套仓链接；程序引用的兼容路径保留简短导航。
-- 当前事实给出代码/配置依据；设计意图归决策；未验证假设明确标注；未完成项只在 status 维护。历史报告保留原源码身份，新增结果不覆盖原失败。
+- 仓库文档只保留项目已实现的内容；当前事实给出代码或配置依据，长期边界选择归 decisions。
 
 分类采用 [Diátaxis](https://diataxis.fr/) 的读者需求；入口与贡献职责参考 [GitHub Docs](https://github.com/github/docs)、[VS Code](https://github.com/microsoft/vscode) 和 [Kubernetes Community](https://github.com/kubernetes/community)，目录按本项目实际内容设置。

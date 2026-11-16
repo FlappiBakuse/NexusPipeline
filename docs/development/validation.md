@@ -36,8 +36,8 @@
 从 Host 仓库根执行，以下变量换成本机明确路径：
 
 ```powershell
-$NexusBuildRoot = 'D:\Projects\Temp\nexus-validation\host-test'
-$NexusReportRoot = 'D:\Projects\Temp\nexus-validation\reports'
+$NexusBuildRoot = 'C:\NexusWork\nexus-validation\host-test'
+$NexusReportRoot = 'C:\NexusWork\nexus-validation\reports'
 ```
 
 使用已拥有且可复核的构建槽复用依赖；报告使用本次新目录。不是本轮拥有的非空目录不能当作输出。源码身份由现役工具读取实际字节；未提交源码为 local-uncommitted，参考 HEAD 单列。
@@ -113,8 +113,8 @@ Host 构建的 Web 前置步骤失败时，构建回执标记 `FAIL`，保留该
 需要交付客户端或原生行为验收时，使用同一冻结源码和实际当前输入：
 
 ```powershell
-python -B tooling/nexus.py product-publish --build-root $NexusBuildRoot --output 'D:\Projects\Temp\nexus-validation\product' --runtime-archive '<本机锁定 Electron ZIP 的绝对路径>' --profile test
-python -B tooling/nexus.py product-assemble --publication-root '<本次实际 publicationRoot>' --output 'D:\Projects\Temp\nexus-validation\application' --bundle-root '<本次已验证插件 bundle 的绝对路径>'
+python -B tooling/nexus.py product-publish --build-root $NexusBuildRoot --output 'C:\NexusWork\nexus-validation\product' --runtime-archive '<本机锁定 Electron ZIP 的绝对路径>' --profile test
+python -B tooling/nexus.py product-assemble --publication-root '<本次实际 publicationRoot>' --output 'C:\NexusWork\nexus-validation\application' --bundle-root '<本次已验证插件 bundle 的绝对路径>'
 ```
 
 尖括号是必须替换的显式输入，publicationRoot 从真实回执取得，不猜最新目录。完整产品任务需要实际软件；纯规则或文档改动不自动 publish 整个产品。Test 与 Production 结果分开；只有权限清单、发行入口或对应交付任务需要时补生产范围，不能借本地 Test 信任执行正式发布。

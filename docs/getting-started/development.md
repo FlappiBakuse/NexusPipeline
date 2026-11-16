@@ -10,10 +10,10 @@
 
 ## 准备工作目录
 
-在 Host 仓库根执行，使用本轮拥有的仓外根。本机示例统一使用 Temp：
+在 Host 仓库根执行，使用本轮拥有的仓外根。示例使用显式仓外目录：
 
 ```powershell
-$NexusWorkRoot = 'D:\Projects\Temp\nexus-development'
+$NexusWorkRoot = 'C:\NexusWork\nexus-development'
 New-Item -ItemType Directory -Force "$NexusWorkRoot\tmp" | Out-Null
 $env:TEMP = "$NexusWorkRoot\tmp"
 $env:TMP = $env:TEMP
@@ -37,7 +37,7 @@ python -B tooling/nexus.py build --profile test --project NexusPipeline.Host --o
 在另一个终端从同一仓库根查询：
 
 ```powershell
-$NexusWorkRoot = 'D:\Projects\Temp\nexus-development'
+$NexusWorkRoot = 'C:\NexusWork\nexus-development'
 & "$NexusWorkRoot\host\build\bin\NexusPipeline.Host\release\NexusPipeline.Host.exe" control status --address http://127.0.0.1:58731
 ```
 

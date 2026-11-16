@@ -3,7 +3,6 @@
 `Core.Extensions` 拥有插件安装策略；Platform 实现目录信任、物理载荷、运行时与持久安装事实。
 Host 只组合服务。SDK 为 0.1.0，Host 为 0.18.0，官方插件目标版本为 0.5.0。
 仅接受当前 managed-code/data-specialized manifest；managed 代码不具备沙箱隔离保证。
-尚未完成的产品入口和恢复范围见[当前范围](../status.md)。
 
 ## 信任与缓存
 
