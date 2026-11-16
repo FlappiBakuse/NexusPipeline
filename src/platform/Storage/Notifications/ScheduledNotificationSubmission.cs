@@ -17,7 +17,7 @@ internal sealed class ScheduledNotificationSubmission(RuntimeInstance instance, 
         lease.PublishExecution(() =>
         {
             using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-            using var transaction = connection.BeginTransaction(deferred: true);
+            using var transaction = DatabaseConnections.BeginRead(connection);
             work.RequireCurrent(connection, transaction);
         });
     }
@@ -58,7 +58,7 @@ internal sealed class ScheduledNotificationSubmission(RuntimeInstance instance, 
     private NotificationQueueAcceptance? ReadExisting(NotificationSubmission submission, WorkNotificationOrigin work)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         work.RequireCurrent(connection, transaction);
         var reference = NotificationScheduledRows.Lookup(connection, transaction, submission.OperationId);
         if (reference is null)

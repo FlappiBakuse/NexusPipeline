@@ -12,7 +12,7 @@ internal static class NotificationReferenceMetadata
         Action<NotificationWorkSnapshot> manualVisit)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         foreach (var item in NotificationReferenceInventory.Pages(connection, transaction, "notification_receipt_sources"))
         {
             var source = new NotificationReceiptCodec(instance, database, contracts).ReadMetadata(item.Reference, connection, transaction);

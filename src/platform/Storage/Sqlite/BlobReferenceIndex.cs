@@ -106,6 +106,7 @@ public sealed class BlobReferenceIndex
     private void VisitJournalReferences(IEnumerable<RegisteredJournal> journals, Action<BlobReference> include, Func<bool> complete,
         BlobReferenceScan? scan)
     {
+        using var reads = new HistoryReadScope(_instance, _database, _contracts);
         var retired = ReadRetiredJournals();
         foreach (var journal in journals)
         {
@@ -247,7 +248,7 @@ public sealed class BlobReferenceIndex
     {
         CleanupCandidateFiles.Validate(item);
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = "SELECT digest,size_bytes,state,EXISTS(SELECT 1 FROM system.secret_fields f WHERE f.secret_id=p.secret_id) " +

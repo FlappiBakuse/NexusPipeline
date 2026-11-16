@@ -9,7 +9,7 @@ internal static class StartupQueueInventory
     {
         if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot) throw StartupQueueRows.Invalid();
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         var after = "";
         while (true)

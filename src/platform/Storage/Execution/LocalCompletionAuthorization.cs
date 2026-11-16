@@ -110,7 +110,7 @@ public sealed class LocalCompletionAuthorization : ICompletionLocalAuthorization
         {
             if (_disposed || !_finality.IsFinal(receipt) || _source.Capture(receipt) is not null) return;
             using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-            using var transaction = connection.BeginTransaction(deferred: true);
+            using var transaction = DatabaseConnections.BeginRead(connection);
             var current = StartSourceRows.Read(connection, transaction, receipt.OperationId);
             var original = StartSourceRows.Original(connection, transaction, current);
             _localStarts.Remove(original.Identity.OperationId);
@@ -142,7 +142,7 @@ public sealed class LocalCompletionAuthorization : ICompletionLocalAuthorization
         if (context is null || context.Sources.Length is < 1 or > 4096) throw Invalid();
         var origins = new List<Guid>();
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         foreach (var source in context.Sources)
         {
             var receipt = AttemptReceiptStore.ReadInside(connection, transaction, source.Intent.AttemptId) ?? throw Invalid();

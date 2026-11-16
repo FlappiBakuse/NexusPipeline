@@ -69,7 +69,7 @@ internal sealed class ExecutionAdmissionPort : IExecutionAdmissionPort
         _lease.VerifyHeld(_instance);
         _retryOrigin?.RequireRequest(operationId, subject, request, false);
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         ExecutionRetryRows.RequireExplicit(connection, transaction, operationId, _retryOrigin?.Intent);
         transaction.Commit();
         var identity = ExecutionStartIdentity.Create(operationId, subject, request);
@@ -131,9 +131,15 @@ internal sealed class ExecutionAdmissionPort : IExecutionAdmissionPort
         using var inboxReservation = _inbox.Reserve(identity.OperationId);
         try
         {
-            var accepted = _acceptance.AcceptStart(identity, draft.Draft, prepared.Attempt, acceptedAt, _scheduledOrigin, _retryOrigin);
-            if (accepted.Acceptance.IsNew) _lease.RunBudgets.RecordAccepted(_database, prepared, root, _resources, TimeProvider.System);
-            PublishVerified();
+            using var borrow = root.Borrow(_resources, identity.OperationId, ExecutionPlanResources.Claims(prepared.Total.Plan.ReadWire()));
+            var accepted = borrow.Use(() => _lease.PublishExecution(() =>
+            {
+                if (!_index.Current.IsReady) throw new ExecutionSelectionException("execution_host_unavailable");
+                var result = _acceptance.AcceptStart(identity, draft.Draft, prepared.Attempt, acceptedAt, _scheduledOrigin, _retryOrigin);
+                if (result.Acceptance.IsNew) _lease.RunBudgets.RecordAccepted(_database, prepared, root, _resources, TimeProvider.System);
+                VerifyPublication();
+                return result;
+            }));
             if (accepted.Acceptance.IsNew) _inbox.Publish(identity, prepared, root, accepted);
             return accepted;
         }
@@ -145,12 +151,14 @@ internal sealed class ExecutionAdmissionPort : IExecutionAdmissionPort
         }
     }
 
-    private void PublishVerified() => _lease.PublishExecution(() =>
+    private void PublishVerified() => _lease.PublishExecution(VerifyPublication);
+
+    private void VerifyPublication()
     {
         _lease.VerifyHeld(_instance);
         _publication.VerifyAndPublish();
         ConfigurationRecoveryHolds.Publish(_database, _index, _roots);
-    });
+    }
 
     private void ReconcileFailure(OperationIdentity identity)
     {

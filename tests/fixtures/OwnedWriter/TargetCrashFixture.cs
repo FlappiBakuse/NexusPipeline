@@ -31,8 +31,8 @@ internal static class TargetCrashFixture
             using var lease = InstanceLease.Acquire(instance, new());
             var database = StateDatabase.OpenExisting(instance, Path.Combine(Path.GetDirectoryName(inputPath)!, "owner-diagnostics"),
                 new JournalStartupAdmission(instance, new()));
-            var index = new StartupJournalRecovery(instance, new(), database,
-                new(Path.GetDirectoryName(inputPath)!, Path.Combine(runtime, "extensions"))).Recover(lease);
+            var payloadRoots = new PayloadApplyRoots(Path.GetDirectoryName(inputPath)!, Path.Combine(runtime, "extensions"));
+            var index = new StartupJournalRecovery(instance, new(), database, payloadRoots).Recover(lease);
             var resources = new ResourceLeaseManager(new HostLifecycle(index, TimeProvider.System)); var inbox = new ExecutionAdmissionInbox();
             var imageRetirement = point.StartsWith("ImageRetirement", StringComparison.Ordinal);
             var capture = point == "LivePreviewOpen" || imageRetirement || point.StartsWith("Capture", StringComparison.Ordinal) ||
@@ -67,14 +67,22 @@ internal static class TargetCrashFixture
                 var executing = session.ExecuteStepAsync(stepId, CancellationToken.None);
                 var previewState = AttemptWriterState.Read(instance, database, new(), parent);
                 var context = new RunMediaContext(instance.InstanceId, Guid.Parse(previewState.Attempt.RunId), Guid.Parse(previewState.Attempt.AttemptId));
-                var clock = System.Diagnostics.Stopwatch.StartNew(); ExecutionLivePreview? preview = null;
-                while (preview is null)
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                while (true)
                 {
                     if (executing.IsCompleted) throw new IOException("fixture_live_main_ended_early");
-                    try { preview = liveMedia.OpenPreview(accepted.Identity.SubjectId, context, "crash-live-fixture", "window"); }
+                    try
+                    {
+                        await using var preview = liveMedia.OpenPreview(accepted.Identity.SubjectId, context, "crash-live-fixture", "window");
+                        _ = await preview.CaptureAsync();
+                        break;
+                    }
                     catch (UnauthorizedAccessException) when (clock.Elapsed < TimeSpan.FromSeconds(15)) { await Task.Delay(20); }
+                    catch (PreviewUnavailableException error) when (error.State is PreviewAvailability.WaitingForGame or PreviewAvailability.WindowNotReady &&
+                        clock.Elapsed < TimeSpan.FromSeconds(15)) { await Task.Delay(20); }
+                    catch (OperationCanceledException) when (!executing.IsCompleted && clock.Elapsed < TimeSpan.FromSeconds(15))
+                    { await Task.Delay(20); }
                 }
-                _ = await preview.CaptureAsync(); await preview.DisposeAsync();
                 previewState = AttemptWriterState.Read(instance, database, new(), parent);
                 var previewTarget = TargetJobCodec.Read(previewState.Latest.Root, previewState.Total, previewState.Attempt.ExecutionPlan.Sha256).Single();
                 observer.Publish(previewTarget.Binding);
@@ -106,7 +114,7 @@ internal static class TargetCrashFixture
                 var completed = AttemptWriterState.Read(instance, database, new(), parent);
                 var binding = TargetJobCodec.Read(completed.Latest.Root, completed.Total,
                     completed.Attempt.ExecutionPlan.Sha256).Single().Binding;
-                var retirement = new ContentRetirementService(instance, database, new(), lease, resources, index,
+                var retirement = new ContentRetirementService(instance, database, new(), lease, resources, index, payloadRoots,
                     new ImageRetirementBarrier(() => observer.Publish(binding), point));
                 _ = retirement.RetireImagesPage(Guid.NewGuid(), "image-retirement-crash", committed.Facts.RunId)
                     ?? throw new IOException("fixture_image_retirement_content_missing");

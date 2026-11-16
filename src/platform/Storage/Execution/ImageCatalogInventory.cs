@@ -24,7 +24,7 @@ internal static class ImageCatalogInventory
     internal static void VerifyAttempt(RuntimeInstance instance, StateDatabase database, ContractReader contracts, AttemptWriterState state)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT EXISTS(SELECT 1 FROM records.execution_image_catalog WHERE attempt_id=$attempt), " +
             "EXISTS(SELECT 1 FROM records.execution_image_asset_catalog WHERE final_attempt_id=$attempt);";

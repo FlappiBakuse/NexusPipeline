@@ -130,7 +130,7 @@ public sealed class PreparedRecoverySession : IPreparedRecoverySession, IPrepare
     private void RequireNoCancellation()
     {
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         ExecutionCancellationRows.RequireDispatchOpen(connection, transaction, _journalId);
         transaction.Commit();
     }

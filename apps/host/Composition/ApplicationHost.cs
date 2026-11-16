@@ -83,7 +83,7 @@ internal static class ApplicationHost
         var operations = new OperationQueryService(instance, instanceLease, runtime.Database);
         startup?.Advance(StartupStage.PreparingServices);
         var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { ContentRootPath = payloadRoots.HostPayloadRoot });
-        await using var services = new ExecutionRuntimeServices(instance, runtime.Database, contracts, instanceLease, resources, lifecycle, runtime.Recovery, providers, secretService, nativeBinding, runtime.Notifications);
+        await using var services = new ExecutionRuntimeServices(instance, runtime.Database, contracts, instanceLease, resources, lifecycle, runtime.Recovery, providers, secretService, payloadRoots, nativeBinding, runtime.Notifications);
         var extensionSecrets = new SecretAccessPolicy(instance, runtime.Database, instanceLease, resources);
         var desktopPresence = new NexusPipeline.Core.Desktop.DesktopPresence();
         using var nativeClients = new NexusPipeline.Core.Desktop.NativeClientSessions(instance.InstanceId);
@@ -253,13 +253,13 @@ internal static class ApplicationHost
             new ExecutionLogReader(instance, runtime.Database, contracts),
             new ImageCatalogReader(instance, runtime.Database, contracts),
             new NexusPipeline.Platform.Storage.Records.ContentRetirementService(instance, runtime.Database,
-                contracts, instanceLease, resources, runtime.Recovery), services.History);
+                contracts, instanceLease, resources, runtime.Recovery, payloadRoots), services.History);
         var eventStatistics = new NexusPipeline.Host.Control.Events.ControlEventStatistics(
             () => runtime.Database.CommitSequence, () =>
             {
-                var counts = doctor.ReadCounts();
-                return new(definitions.ReadRevision(), controlSettings.Read().Revision,
-                    counts.PendingOperations, counts.Attempts, counts.CompletedRuns);
+                var snapshot = doctor.ReadControlSnapshot();
+                return new(snapshot.CatalogRevision, snapshot.SettingsRevision,
+                    snapshot.Counts.PendingOperations, snapshot.Counts.Attempts, snapshot.Counts.CompletedRuns);
             });
         var eventFeed = new NexusPipeline.Host.Control.Events.ControlEventFeed(instance.InstanceId,
             () => new(runtime.Database.CommitSequence, runtime.Recovery.Current.Revision, execution.ProgressRevision,

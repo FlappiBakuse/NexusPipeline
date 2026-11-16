@@ -8,7 +8,7 @@ internal static class ScheduleMinuteInventory
     internal static void Verify(StateDatabase database)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var checkpoint = ScheduleMinuteRows.Checkpoint(connection, transaction);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT operation_id,watermark_revision,utc_minute FROM main.schedule_minute_claims ORDER BY watermark_revision;";

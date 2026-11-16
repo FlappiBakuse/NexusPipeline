@@ -44,7 +44,7 @@ internal sealed class ExecutionInvocationStore(RuntimeInstance instance, StateDa
         StepWritersEvidence.RequireStopped(instance, database, contracts, journalId, state.AllJobs.Where(job => job.StepId == stepId));
         using var restored = RunBindingEvidence.HoldRestored(instance, database, contracts, state, [stepId]);
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             AttemptTerminalEvidence.RequireRestoredInside(connection, transaction, state, stepId: stepId);
             transaction.Commit();

@@ -32,7 +32,7 @@ internal sealed class ScheduledProviderPublication(RuntimeInstance instance, Sta
                 counter.Read().IsExhausted) return null;
             plans.Entry.Use(() => true);
             using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.All))
-            using (var transaction = connection.BeginTransaction(deferred: true))
+            using (var transaction = DatabaseConnections.BeginRead(connection))
             {
                 if (ScheduledProviderRows.Find(connection, transaction, operation) is { } prior)
                 {
@@ -88,7 +88,7 @@ internal sealed class ScheduledProviderPublication(RuntimeInstance instance, Sta
                 if (NexusPipeline.Platform.Processes.WriterStopEvidence.ObserveProcess(before.Source.Document.Creator.Process) != WriterState.Stopped)
                     throw new IOException("scheduled_provider_owner_unconfirmed");
                 using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.All);
-                using var transaction = connection.BeginTransaction(deferred: true);
+                using var transaction = DatabaseConnections.BeginRead(connection);
                 var current = new ScheduledProviderEvidence(instance, contracts).Read(before.Source.Reference, connection, transaction);
                 transaction.Commit();
                 if (current.Result is not null) return;
@@ -122,7 +122,7 @@ internal sealed class ScheduledProviderPublication(RuntimeInstance instance, Sta
     {
         Require();
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var state = new ScheduledProviderEvidence(instance, contracts).Read(invocation.Source.Reference, connection, transaction);
         if (state.Source.Document.Creator != JournalWriterStore.CurrentWriter ||
             state.Source.Document.OwnerGeneration != lease.StartupGeneration) throw ScheduledProviderCodec.Invalid();

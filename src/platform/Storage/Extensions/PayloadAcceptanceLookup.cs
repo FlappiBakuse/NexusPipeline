@@ -18,7 +18,7 @@ internal sealed class PayloadAcceptanceLookup(RuntimeInstance instance, StateDat
         var identity = request.Identity(operationId, subject);
         OperationAcceptance acceptance; RegisteredJournal registered;
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             var existing = OperationRows.ReadExisting(connection, transaction, identity);
             if (existing is null) return null;
@@ -36,7 +36,7 @@ internal sealed class PayloadAcceptanceLookup(RuntimeInstance instance, StateDat
         codec.RequireFrozenBinding(source, plan);
         if (ExtensionApplyRequest.FromSource(source).Identity(operationId, subject) != identity) throw new OperationConflictException();
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             if (OperationRows.ReadExisting(connection, transaction, identity) != acceptance) throw Invalid();
             var fresh = ReadInitial(connection, transaction, operationId);

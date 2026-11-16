@@ -206,7 +206,7 @@ public sealed class ExtensionRuntimeLifecycle : IExtensionRuntimeLifecycle, IAsy
     private string[] ReadEnabledInstallations()
     {
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         // Larger installation evidence starts earlier so expensive activation does not occupy the final slot alone.
         var selected = HostSettingsRows.ReadCurrent(connection, transaction).Values.Extensions
             .Where(item => item.Enabled)

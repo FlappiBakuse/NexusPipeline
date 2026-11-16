@@ -14,7 +14,7 @@ public sealed class AutomationExportService(RuntimeInstance instance, ContractRe
         AutomationCatalog catalog;
         IReadOnlyList<ExportSource> sources;
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Content))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             catalog = AutomationRows.Read(connection, transaction);
             var scripts = templateScriptId is { } selected ? catalog.Scripts.Where(value => value.Id == selected) : catalog.Scripts;

@@ -28,7 +28,7 @@ internal static class ExtensionInstalledRows
     private static HashSet<string> ReadDigests(StateDatabase database, bool includeManifest)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT extension_id FROM extensions.extension_installations UNION SELECT extension_id FROM extensions.extension_installation_revisions;";
         var extensions = new List<string>();

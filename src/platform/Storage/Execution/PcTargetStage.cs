@@ -360,7 +360,7 @@ internal sealed class PcTargetStage : IDisposable
     private ExecutionCancellationIntent? AcceptedClose()
     {
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         return ExecutionCancellationRows.Read(connection, transaction, _parent, _attempt);
     }
 

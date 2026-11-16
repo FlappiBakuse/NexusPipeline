@@ -53,7 +53,7 @@ internal sealed class ExecutionNotificationSource
         var facts = OrderedFacts(bound.Plan, total, parsed.RootElement, receipt);
         string subject;
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             RequirePublishedRecord(connection, transaction, receipt);
             using var command = connection.CreateCommand(); command.Transaction = transaction;

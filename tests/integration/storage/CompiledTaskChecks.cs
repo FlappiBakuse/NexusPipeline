@@ -1,15 +1,74 @@
+using System.Collections.Immutable;
+using System.Runtime.Versioning;
 using System.Text.Json;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Configuration;
 using NexusPipeline.Platform.Storage.Execution;
+using NexusPipeline.Platform.Storage.Journals;
 using Xunit;
 
 namespace NexusPipeline.StorageTests;
 
 internal static class CompiledTaskChecks
 {
+    [SupportedOSPlatform("windows")]
+    internal static void VerifyOwnedDefinitions(ExtensionCatalogFixture catalog, AcceptedExecutionAdmission accepted, ExecutionPlanStep step)
+    {
+        var total = accepted.Prepared.Total.Plan.ReadWire();
+        var prepared = accepted.Prepared.Configurations[step.StepId];
+        var journal = accepted.Receipt.JournalId;
+        var store = new ConfigurationRunStore(catalog.Instance, catalog.Database, new());
+        var identity = ConfigurationRunStore.BeginIdentity(Guid.NewGuid(), "fixture", journal, step.StepId, prepared);
+        var session = store.Begin(identity, journal, step.StepId, prepared, DateTimeOffset.UtcNow);
+        using var owner = catalog.Lease.BindAttemptReads(catalog.Database).Start(catalog.Instance, catalog.Database, new(), journal)!;
+        Assert.NotNull(owner.ReadDefinitions());
+        var expected = ConfigurationRunBinding.Read(catalog.Instance, catalog.Database, new(), session);
+        var state = Assert.Single(expected.Resources).State;
+        var rules = state.Tasks.Select(item => item.Rule).ToImmutableArray();
+        var blobs = new ImmutableBlobStore(catalog.Instance, new());
+        var foreignInstance = new InstanceRoot(new()).OpenOrCreate(Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!,
+            "foreign-definitions-" + Guid.NewGuid().ToString("N")));
+        var foreign = new ImmutableBlobStore(foreignInstance, new());
+        var definition = total.DefinitionBundle;
+        using var blocked = new FileStream(Path.Combine(catalog.Instance.RuntimeRoot, definition.RelativePath),
+            FileMode.Open, FileAccess.Read, FileShare.Read);
+        blocked.Lock(0, blocked.Length);
+        try
+        {
+            Assert.Throws<IOException>(() => ExecutionAdapterBinding.RequireFrozenConfiguration(total, step, state.Source, blobs, new()));
+            Assert.Throws<IOException>(() => ExecutionTaskProjection.RequireBoundRules(total, step, state.Source, rules, blobs, new()));
+            var actual = ConfigurationRunBinding.Read(catalog.Instance, catalog.Database, new(), session);
+            Assert.Equal(expected.Evidence.AttemptId, actual.Evidence.AttemptId);
+            Assert.Equal(state.SnapshotReference, Assert.Single(actual.Resources).State.SnapshotReference);
+            using (JournalReadScope.HoldAttempt(catalog.Instance, new(), catalog.Database, journal))
+            {
+                ExecutionAdapterBinding.RequireFrozenConfiguration(total, step, state.Source, blobs, new());
+                ExecutionTaskProjection.RequireBoundRules(total, step, state.Source, rules, blobs, new());
+                foreach (var changed in new[]
+                {
+                    (Plan: total with { DefinitionBundle = definition with { RelativePath = definition.RelativePath + ".changed" } }, Error: typeof(ArgumentException)),
+                    (Plan: total with { DefinitionBundle = definition with { SizeBytes = definition.SizeBytes + 1 } }, Error: typeof(IOException)),
+                    (Plan: total with { DefinitionBundle = definition with { Sha256 = new('b', 64) } }, Error: typeof(ArgumentException))
+                })
+                {
+                    Assert.Throws(changed.Error, () => ExecutionAdapterBinding.RequireFrozenConfiguration(changed.Plan, step, state.Source, blobs, new()));
+                    Assert.Throws(changed.Error, () => ExecutionTaskProjection.RequireBoundRules(changed.Plan, step, state.Source, rules, blobs, new()));
+                }
+                Assert.Null(JournalReadScope.ReadDefinitions(foreign.Instance, total));
+                Assert.ThrowsAny<IOException>(() => ExecutionAdapterBinding.RequireFrozenConfiguration(total, step, state.Source, foreign, new()));
+                Assert.ThrowsAny<IOException>(() => ExecutionTaskProjection.RequireBoundRules(total, step, state.Source, rules, foreign, new()));
+                var captured = Assert.Single(state.Tasks);
+                Assert.Throws<IOException>(() => ExecutionTaskProjection.RequireBoundRules(total, step, state.Source,
+                    [captured.Rule with { Access = captured.Rule.Access with { Protected = [new([new ConfigurationProperty("taskB")])] } }], blobs, new()));
+            }
+            owner.Dispose();
+            Assert.Throws<IOException>(() => ConfigurationRunBinding.Read(catalog.Instance, catalog.Database, new(), session));
+        }
+        finally { blocked.Unlock(0, blocked.Length); }
+    }
+
     internal static string Tasks(ProjectSourceFixture project)
     {
         if (!project.HasTaskProjection) return "[]";

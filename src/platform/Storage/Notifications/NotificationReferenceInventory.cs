@@ -21,7 +21,7 @@ internal static class NotificationReferenceInventory
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true,
             domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System))
         {
-            using var transaction = connection.BeginTransaction(deferred: true);
+            using var transaction = DatabaseConnections.BeginRead(connection);
             foreach (var item in Pages(connection, transaction, "notification_receipt_sources"))
             {
                 var source = new NotificationReceiptCodec(instance, database, contracts).ReadContext(item.Reference, connection, transaction);

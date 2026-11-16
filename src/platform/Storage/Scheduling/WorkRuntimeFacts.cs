@@ -30,7 +30,7 @@ internal sealed class WorkRuntimeFacts(RuntimeInstance instance, StateDatabase d
         var publicPlans = plans is null ? null : await plans.ReadPlansAsync(cancellation).ConfigureAwait(false);
         var saved = ReadRuns(entry.ExtensionId, providerId, ids.ToHashSet(), cancellation);
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var now = clock.GetUtcNow(); var after = now;
         var watermark = ScheduleMinuteRows.Checkpoint(connection, transaction);
         if (watermark.HighestUtcMinute is { } highest && highest > now.ToUnixTimeSeconds() / 60)
@@ -109,7 +109,7 @@ internal sealed class WorkRuntimeFacts(RuntimeInstance instance, StateDatabase d
     {
         var result = new List<RecordedRun>();
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         ManualWorkInventory.Visit(instance, database, contracts, state =>
         {
             cancellation.ThrowIfCancellationRequested(); var source = state.Source.Document;

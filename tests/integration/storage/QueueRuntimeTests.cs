@@ -8,6 +8,7 @@ using NexusPipeline.Platform.Storage.Automation;
 using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Scheduling;
+using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
 
 namespace NexusPipeline.StorageTests;
@@ -37,9 +38,37 @@ public sealed class QueueRuntimeTests
         var receipt = Assert.IsType<AttemptReceipt>(await fixture.Consumer.RunNextAsync());
         Assert.Equal(occurrence.RunId, receipt.Facts.RunId); fixture.RequireActualClosure(occurrence.StartOperationId);
         dispatch.Tick(default); Assert.Empty(store.ReadWaiting()); Assert.Null(await fixture.Consumer.RunNextAsync());
+        RequireNoPolling(fixture, dispatch);
         Assert.Equal(1, fixture.Count("startup_queue_batches")); Assert.Equal(1, fixture.Count("journal_writer_job_roots"));
         StartupQueueInventory.Verify(fixture.Source.Instance, fixture.Source.Database);
         RunBudgetInventory.Verify(fixture.Source.Instance, fixture.Source.Database, new());
+    }
+
+    [Fact(DisplayName = "An Empty Committed Startup Generation Stays Drained After Later Definition Edits")]
+    public void StopsPollingEmptyGeneration()
+    {
+        using var fixture = new ScheduleNativeFixture();
+        var store = new StartupQueueStore(fixture.Source.Instance, fixture.Source.Database, fixture.Source.Lease, fixture.Base.Resources, TimeProvider.System);
+        var dispatch = new StartupQueueDispatch(fixture.Source.Instance, fixture.Source.Database, fixture.Source.Lease, store, fixture.Base.Service, TimeProvider.System);
+        dispatch.Tick(default);
+        Enable(fixture);
+        Assert.Empty(store.Commit().Occurrences);
+        RequireNoPolling(fixture, dispatch);
+        Assert.Equal(0, fixture.Base.Inbox.PendingCount);
+    }
+
+    [Fact(DisplayName = "An Empty Startup Tick Before Registration Still Commits And Starts Its Later Frozen Batch")]
+    public async Task RegistersAfterUncommittedEmptyTick()
+    {
+        using var fixture = new ScheduleNativeFixture();
+        var store = new StartupQueueStore(fixture.Source.Instance, fixture.Source.Database, fixture.Source.Lease, fixture.Base.Resources, TimeProvider.System);
+        var dispatch = new StartupQueueDispatch(fixture.Source.Instance, fixture.Source.Database, fixture.Source.Lease, store, fixture.Base.Service, TimeProvider.System);
+        dispatch.Tick(default, canCommit: false);
+        Assert.Equal(0, fixture.Count("startup_queue_batches"));
+        Enable(fixture); dispatch.Tick(default);
+        Assert.Equal(1, fixture.Base.Inbox.PendingCount);
+        var receipt = Assert.IsType<AttemptReceipt>(await fixture.Consumer.RunNextAsync());
+        Assert.Equal(Assert.Single(store.Commit().Occurrences).RunId, receipt.Facts.RunId);
     }
 
     [Fact(DisplayName = "Startup Preference Round Trips And Failure To Commit The Batch Starts Nothing")]
@@ -89,5 +118,13 @@ public sealed class QueueRuntimeTests
         var catalog = fixture.Source.Definitions.Read();
         var change = new AutomationChanges(catalog.Revision, [], [], [], [], [catalog.Queues.Single() with { RunOnStartup = true }], [], []);
         fixture.Source.Definitions.Commit(AutomationDefinitionStore.Identity(Guid.NewGuid(), "startup-fixture", change), change, DateTimeOffset.UtcNow);
+    }
+
+    private static void RequireNoPolling(ScheduleNativeFixture fixture, StartupQueueDispatch dispatch)
+    {
+        using var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, domains: DatabaseDomain.Runtime);
+        using var command = connection.CreateCommand(); command.CommandText = "BEGIN EXCLUSIVE;"; command.ExecuteNonQuery();
+        try { dispatch.Tick(default); }
+        finally { command.CommandText = "ROLLBACK;"; command.ExecuteNonQuery(); }
     }
 }

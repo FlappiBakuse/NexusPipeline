@@ -29,6 +29,12 @@ public sealed class CompiledProjectTests
     [Fact(DisplayName = "Installed Adapter Projection Creates Actual Frozen Configuration Candidates Without Reading Live Bytes")]
     public Task ProjectsInstalledTasks() => FreezesInstalledProject("projection");
 
+    [Fact(DisplayName = "Owned Configuration Binding Reuses Its Frozen Adapter Definitions While Cold And Released Reads Recheck Bytes")]
+    public Task ReusesOwnedConfigurationDefinitions() => FreezesInstalledProject("owned-configuration");
+
+    [Fact(DisplayName = "Installed Adapter Observation Reuses Protected History While Cold Released And Foreign Binding Reads Stay Rejected")]
+    public Task ReusesOwnedAdapterHistory() => FreezesInstalledProject("worker-owned-history");
+
     [Fact(DisplayName = "Actual Installed Adapter Retries Only The Failed Task And Carries Prior Success Through Persisted Evidence")]
     public Task RetriesInstalledTasks() => FreezesInstalledProject("worker-task-retry");
 
@@ -49,9 +55,9 @@ public sealed class CompiledProjectTests
     {
         var worker = mode.StartsWith("worker", StringComparison.Ordinal);
         var protectedWorker = mode.StartsWith("worker-secret", StringComparison.Ordinal);
-        var workerMode = mode == "worker" ? "project-read" : mode.Replace("worker-", "project-", StringComparison.Ordinal);
-        using var project = new ProjectSourceFixture(configuration: true, enabled: mode is "accepted" or "projection" || worker,
-            taskProjection: protectedWorker || mode is "projection" or "worker-task-retry", taskRetry: mode == "worker-task-retry");
+        var workerMode = mode is "worker" or "worker-owned-history" ? "project-read" : mode.Replace("worker-", "project-", StringComparison.Ordinal);
+        using var project = new ProjectSourceFixture(configuration: true, enabled: mode is "accepted" or "projection" or "owned-configuration" || worker,
+            taskProjection: protectedWorker || mode is "projection" or "owned-configuration" or "worker-task-retry" or "worker-owned-history", taskRetry: mode == "worker-task-retry");
         project.Write("interface.json", "{\"task\":[]}"u8.ToArray());
         var assets = Path.Combine(project.Path, "assets"); Directory.CreateDirectory(assets);
         File.WriteAllText(Path.Combine(assets, "pipeline.json"), "{\"entry\":{\"action\":\"DoNothing\"}}");
@@ -117,14 +123,15 @@ public sealed class CompiledProjectTests
             {
                 Assert.Equal(64, (await running).Length); await AssertSavedChoice(service, project);
                 var adapters = await AssertAdapterService(provider, project);
-                if (mode is "accepted" or "projection" || worker) await AssertAcceptedPlan(service, adapters, provider, project, worker ? providers : null, workerMode);
+                if (mode is "accepted" or "projection" or "owned-configuration" || worker)
+                    await AssertAcceptedPlan(service, adapters, provider, project, worker ? providers : null, workerMode, mode == "owned-configuration", mode == "worker-owned-history");
                 else
                 {
                     await AssertPreviewService(service, provider, project);
                     await ProjectControlChecks.VerifyAsync(service, provider, project);
                 }
             }
-            Assert.Equal(mode is "normal" or "accepted" or "projection" || worker, published);
+            Assert.Equal(mode is "normal" or "accepted" or "projection" or "owned-configuration" || worker, published);
             if (retained is not null) Assert.Throws<ObjectDisposedException>(retained);
         }
         finally { await provider.Activator.StopAllAsync(TimeSpan.FromSeconds(10)); }
@@ -252,7 +259,8 @@ public sealed class CompiledProjectTests
     }
 
     private static async Task AssertAcceptedPlan(ProjectCompilationService compilation, TaskAdapterService adapters,
-        InstallRuntimeFixture provider, ProjectSourceFixture project, ExecutionProviderRegistry? providers = null, string workerMode = "project-read")
+        InstallRuntimeFixture provider, ProjectSourceFixture project, ExecutionProviderRegistry? providers = null, string workerMode = "project-read",
+        bool ownedDefinitions = false, bool ownedAdapterHistory = false)
     {
         var catalog = project.Catalog; var inbox = new ExecutionAdmissionInbox();
         var service = new ExecutionAdmissionService(catalog.Instance, catalog.Database, new(), catalog.Lease, catalog.Resources, catalog.Index,
@@ -263,13 +271,14 @@ public sealed class CompiledProjectTests
         var operation = Guid.NewGuid(); var result = service.Start(operation, "fixture", request, DateTimeOffset.UtcNow);
         if (providers is not null)
         {
-            await CompiledWorkerFixture.RunAsync(catalog, inbox, adapters, project, result.JournalId, workerMode);
+            await CompiledWorkerFixture.RunAsync(catalog, inbox, adapters, project, result.JournalId, workerMode, ownedAdapterHistory);
             return;
         }
         using var accepted = Assert.IsType<AcceptedExecutionAdmission>(inbox.Take(operation));
         Assert.Equal(operation, accepted.Identity.OperationId); Assert.Equal(result.JournalId, accepted.Receipt.JournalId);
         var plan = accepted.Prepared.Total.Plan.ReadWire(); var step = Assert.Single(plan.Steps);
         if (project.HasTaskProjection) CompiledTaskChecks.Verify(catalog, accepted, project, step);
+        if (ownedDefinitions) CompiledTaskChecks.VerifyOwnedDefinitions(catalog, accepted, step);
         Assert.Equal("fixture-plugin", step.Adapter!.CompiledProvider);
         Assert.Equal("maas", step.ExtensionId);
         Assert.Equal(definitions.Scripts.Single(item => item.Id.ToString("D") == step.ScriptId).UpdateConfigurationAtFinish, step.UpdateConfigurationAtFinish);

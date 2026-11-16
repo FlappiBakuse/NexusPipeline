@@ -114,7 +114,7 @@ internal static class ExecutionStepAdmission
                 throw new IOException("execution_predecessor_stop_unconfirmed");
         }
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             RequirePredecessorsInside(connection, transaction, state, state.Latest, ordinal); transaction.Commit();
         }

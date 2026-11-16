@@ -77,7 +77,7 @@ internal sealed class PayloadSourceCodec(RuntimeInstance instance, ContractReade
         if (database.InstanceId != instance.InstanceId ||
             !StringComparer.OrdinalIgnoreCase.Equals(database.RuntimeRoot, instance.RuntimeRoot)) throw Invalid();
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             ExtensionCatalogRows.RequireAcceptedInside(connection, transaction, package.Catalog);
             transaction.Commit();

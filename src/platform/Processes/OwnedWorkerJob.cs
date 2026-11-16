@@ -123,8 +123,9 @@ public sealed class OwnedWorkerJob : IDisposable
     }
 
     internal OwnedWorkerIdentity StartFrozen(string executable, IReadOnlyList<string> arguments, string workingDirectory,
-        Guid instanceId, Guid attemptId, Action<OwnedWorkerIdentity> persistBeforeExecution, OwnedProcessOutput? output, CommandLineSyntax syntax)
-        => StartCore(executable, arguments, workingDirectory, instanceId, attemptId, persistBeforeExecution, output, syntax);
+        Guid instanceId, Guid attemptId, Action<OwnedWorkerIdentity> persistBeforeExecution, OwnedProcessOutput? output, CommandLineSyntax syntax,
+        ProcessIdentityLease? imageProtection = null)
+        => StartCore(executable, arguments, workingDirectory, instanceId, attemptId, persistBeforeExecution, output, syntax, imageProtection);
 
     internal OwnedWorkerIdentity StartNested(OwnedWorkerJob actualParent, string executable, IReadOnlyList<string> arguments,
         string workingDirectory, Guid instanceId, Guid attemptId, Action<OwnedWorkerIdentity> persistBeforeExecution,
@@ -143,9 +144,10 @@ public sealed class OwnedWorkerJob : IDisposable
             instanceId, attemptId, persistBeforeExecution, output, CommandLineSyntax.ArgumentVector, actualPreview: domain)));
 
     private OwnedWorkerIdentity StartCore(string executable, IReadOnlyList<string> arguments, string workingDirectory,
-        Guid instanceId, Guid attemptId, Action<OwnedWorkerIdentity> persistBeforeExecution, OwnedProcessOutput? output, CommandLineSyntax syntax)
+        Guid instanceId, Guid attemptId, Action<OwnedWorkerIdentity> persistBeforeExecution, OwnedProcessOutput? output, CommandLineSyntax syntax,
+        ProcessIdentityLease? imageProtection = null)
         => _targetLifetime.UseOwned(() => StartOwnedCore(executable, arguments, workingDirectory,
-            instanceId, attemptId, persistBeforeExecution, output, syntax));
+            instanceId, attemptId, persistBeforeExecution, output, syntax, imageProtection: imageProtection));
 
     private OwnedWorkerIdentity StartOwnedCore(string executable, IReadOnlyList<string> arguments, string workingDirectory,
         Guid instanceId, Guid attemptId, Action<OwnedWorkerIdentity> persistBeforeExecution, OwnedProcessOutput? output,
@@ -245,8 +247,6 @@ public sealed class OwnedWorkerJob : IDisposable
         var code = ReadExitCode(identity) ?? throw new IOException("worker_root_still_running");
         return callback(code);
     });
-
-
     internal T UseObservedMember<T>(ProcessIdentity identity, Func<T> action) => _targetLifetime.UseOwned(() =>
     {
         ArgumentNullException.ThrowIfNull(identity); ArgumentNullException.ThrowIfNull(action);

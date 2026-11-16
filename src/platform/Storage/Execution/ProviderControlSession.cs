@@ -12,6 +12,7 @@ using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Configuration;
 using NexusPipeline.Platform.Storage.Extensions;
+using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
 
 namespace NexusPipeline.Platform.Storage.Execution;
@@ -93,7 +94,12 @@ internal sealed class ProviderControlSession : IDisposable
                 var snapshot = CompiledProjectCodec.Read(instance, _blobs, new(reference.RelativePath, reference.SizeBytes, reference.Sha256));
                 if (!snapshot.Value.CanExecute || snapshot.Value.Consumer.Installed.ExtensionId != step.ExtensionId ||
                     snapshot.Value.BindingId.ToString("D") != step.BindingId) throw new IOException("execution_project_unbound");
-                var retry = TaskRetryEvidence.ForJob(instance, contracts, context.Total, binding);
+                ExecutionTaskRetry? retry;
+                using (var history = database.AttemptReads?.Find(binding.ParentJournalId) is null
+                    ? null : JournalReadScope.HoldAttempt(instance, contracts, database, binding.ParentJournalId))
+                {
+                    retry = TaskRetryEvidence.ForJob(instance, contracts, context.Total, binding);
+                }
                 var selectedIds = TaskRetryEvidence.InvocationIds(step, retry);
                 var selected = selectedIds.Select(id => step.Tasks.Single(task => task.TaskId == id)).ToArray();
                 var executionIds = selected.Any(task => task.ExecutionTaskId is not null) ? selected.Select(task => task.ExecutionTaskId ?? task.TaskId).ToArray() : null;

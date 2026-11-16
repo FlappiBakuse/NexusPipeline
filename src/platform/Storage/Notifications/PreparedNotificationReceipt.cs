@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Runtime.Versioning;
 using NexusPipeline.Core.Notifications;
 using NexusPipeline.Core.Secrets;
+using NexusPipeline.Core.Settings;
 using NexusPipeline.Platform.Security;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Secrets;
@@ -31,6 +32,7 @@ internal sealed class PreparedNotificationReceipt : IDisposable
         {
             NotificationCatalogCursor? cursor;
             NexusPipeline.Core.Records.RecordAsset? screenshot;
+            HostLocale locale;
             using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System | DatabaseDomain.Content))
                 cursor = NotificationCatalogRows.ReadCurrent(connection, null);
             var codec = new NotificationCatalogCodec(instance, contracts);
@@ -43,7 +45,7 @@ internal sealed class PreparedNotificationReceipt : IDisposable
             var tasks = ImmutableArray.CreateBuilder<ReceiptTaskSecrets>();
             var files = new SecretPayloadFiles(instance, new UserSecretProtector());
             using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System | DatabaseDomain.Content))
-            using (var transaction = connection.BeginTransaction(deferred: true))
+            using (var transaction = DatabaseConnections.BeginRead(connection))
             {
                 if (NotificationCatalogRows.ReadCurrent(connection, transaction) != cursor)
                     throw new NotificationTaskException("notification_revision_conflict");
@@ -62,13 +64,14 @@ internal sealed class PreparedNotificationReceipt : IDisposable
                     tasks.Add(new(task.Id, fields.ToImmutable()));
                 }
                 screenshot = NotificationReceiptAssets.ReadPublished(connection, transaction, source.Receipt.Facts.RunId);
+                locale = HostSettingsRows.ReadCurrent(connection, transaction).Values.Locale;
                 transaction.Commit();
             }
             foreach (var payload in tasks.SelectMany(task => task.Secrets).Select(field => field.Payload).OfType<SecretPayloadIdentity>().Distinct())
                 held.Add(files.HoldVerified(payload));
             if (screenshot is { } asset)
                 held.Add(blobs.OpenVerified(new($"blobs/content/{asset.Sha256}.bin", asset.SizeBytes, asset.Sha256)));
-            var snapshot = new NotificationReceiptCodec(instance, database, contracts).Persist(source, catalog, tasks.ToImmutable(), screenshot);
+            var snapshot = new NotificationReceiptCodec(instance, database, contracts).Persist(source, catalog, tasks.ToImmutable(), screenshot, locale);
             held.Add(blobs.OpenVerified(snapshot.Reference));
             return new(snapshot, catalog.Document.Tasks, held);
         }

@@ -28,7 +28,7 @@ public sealed class RetirementRetryTests
         var catalog = new LogCatalogReader(source.Instance, source.Database, new());
         var queries = new LogCatalogQuery[] { new(first.Facts.RunId, first.Facts.AttemptId), new(second.Facts.RunId, second.Facts.AttemptId) };
         var original = queries.Select(query => Assert.Single(catalog.ReadPage(query).Items)).ToArray();
-        var service = new ContentRetirementService(source.Instance, source.Database, new(), source.Lease, fixture.Base.Resources, fixture.Base.Index);
+        var service = new ContentRetirementService(source.Instance, source.Database, new(), source.Lease, fixture.Base.Resources, fixture.Base.Index, source.PayloadRoots);
         Assert.NotNull(service.RetireLogsPage(Guid.NewGuid(), "retirement-fixture", second.Facts.RunId));
         Assert.Equal(original.Select(item => item with { ContentAvailability = RecordContentAvailability.Retired }),
             queries.Select(query => Assert.Single(catalog.ReadPage(query).Items)));

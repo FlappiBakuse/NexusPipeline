@@ -57,7 +57,7 @@ internal sealed class InstalledConsumptionFacts(RuntimeInstance instance, StateD
             (commit.ActivationId != activation || commit.ActivationState != "published" || !commit.DesiredEnabled)) throw Unavailable();
         var expected = ExtensionPayloadBinding.DerivedInstallation(bound.Plan, commit, footprint);
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         if (ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, extension) != expected ||
             HostSettingsRows.ReadCurrent(connection, transaction).Values.Extensions
                 .SingleOrDefault(item => item.ExtensionId == extension)?.Enabled != true) throw Unavailable();

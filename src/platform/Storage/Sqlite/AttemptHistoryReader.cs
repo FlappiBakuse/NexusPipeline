@@ -9,7 +9,7 @@ public sealed class AttemptHistoryReader(StateDatabase database) : IAttemptHisto
     {
         AttemptHistoryPolicy.Validate(query);
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT attempt_id,ordinal FROM records.attempt_receipts WHERE run_id=$run AND ordinal>$ordinal " +
             "AND NOT EXISTS(SELECT 1 FROM records.run_records WHERE run_id=$run AND history_retired_at_utc_ticks IS NOT NULL) ORDER BY ordinal LIMIT $limit;";

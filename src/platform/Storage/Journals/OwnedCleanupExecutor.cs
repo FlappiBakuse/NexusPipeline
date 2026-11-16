@@ -1,4 +1,5 @@
 using NexusPipeline.Core.Configuration;
+using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Core.Operations;
 using NexusPipeline.Platform.Processes;
@@ -10,8 +11,9 @@ namespace NexusPipeline.Platform.Storage.Journals;
 
 public sealed class OwnedCleanupExecutor(RuntimeInstance instance, ContractReader contracts, StateDatabase database, RecoveryIndex index)
 {
-    public FileCleanupResult Execute(Guid journalId, InstanceLease instanceLease, ResourceOperationLease resources)
-        => ExecuteCore(journalId, instanceLease, resources, null, null, null, null);
+    public FileCleanupResult Execute(Guid journalId, InstanceLease instanceLease, ResourceOperationLease resources,
+        PayloadApplyRoots? roots = null)
+        => ExecuteCore(journalId, instanceLease, resources, roots, null, null, null);
 
     internal FileCleanupResult ExecutePrepared(Guid journalId, InstanceLease instanceLease, ResourceOperationLease resources,
         PayloadApplyRoots roots, ExtensionWorkExecution work, ICleanupPersistenceObserver? observer) =>
@@ -46,11 +48,38 @@ public sealed class OwnedCleanupExecutor(RuntimeInstance instance, ContractReade
             var observation = writers.Observe(journalId, current);
             return new(instance.InstanceId, journalId, observation.IsComplete, observation.State);
         }
-        _ = Observe();
-        var session = new CleanupRecoverySession(instance, journalId, contracts, database, Observe, observer, roots, work, held, cleanup);
-        index.BlockUnknown("cleanup_execution_active");
+        var initialObservation = Observe();
+        var scopedAdmission = OperatingSystem.IsWindows() && roots is not null && work is null && held is null &&
+            index.Current.IsReady && initialObservation is { IsComplete: true, State: WriterState.Stopped } &&
+            plan.Items.All(item => item.Blob.RelativePath == $"blobs/content/{item.Blob.Sha256}.bin");
+        if (!scopedAdmission) index.BlockUnknown("cleanup_execution_active");
         try
         {
+            var blobs = new ImmutableBlobStore(instance, contracts);
+            cleanup ??= new(instance, blobs, new(instance, contracts, database, blobs, roots));
+            using var candidates = held is null && work is null ? cleanup.ProtectCandidates(plan.Items) : null;
+            if (scopedAdmission)
+            {
+                try
+                {
+                    var published = cleanup.HasProtectedCandidates(plan.Items) && instanceLease.PublishExecution(() =>
+                    {
+                        if (!index.Current.IsReady || Observe() is not { IsComplete: true, State: WriterState.Stopped }) return false;
+                        var admissionEvidence = new NexusPipeline.Platform.Storage.Execution.AdmissionPublicationEvidence(
+                            instance, database, contracts, roots!, journalId);
+                        new RecoveryCoordinator(registry, admissionEvidence, index).VerifyAndPublish();
+                        NexusPipeline.Platform.Storage.Configuration.ConfigurationRecoveryHolds.Publish(database, index, roots!);
+                        return true;
+                    });
+                    if (!published) index.BlockUnknown("cleanup_execution_active");
+                }
+                catch
+                {
+                    index.BlockUnknown("cleanup_execution_reconciliation_required");
+                    throw;
+                }
+            }
+            var session = new CleanupRecoverySession(instance, journalId, contracts, database, Observe, observer, roots, work, held, cleanup, instanceLease);
             using var evidence = registered.Phase == JournalPhase.Prepared ? work?.ProtectEvidence(plan) : null;
             using var history = session.ProtectReadHistory();
             var recovery = new FileCleanupRecovery(session);
@@ -60,13 +89,16 @@ public sealed class OwnedCleanupExecutor(RuntimeInstance instance, ContractReade
         {
             try
             {
-                IRecoveryEvidence evidence = roots is null ? new JournalRecoveryEvidence(instance, new(instance, contracts), database) :
-                    OperatingSystem.IsWindows() ? new NexusPipeline.Platform.Storage.Execution.AdmissionPublicationEvidence(
-                        instance, database, contracts, roots, journalId) :
-                    throw new PlatformNotSupportedException();
-                new RecoveryCoordinator(registry, evidence, index).VerifyAndPublish();
-                if (roots is not null)
-                    NexusPipeline.Platform.Storage.Configuration.ConfigurationRecoveryHolds.Publish(database, index, roots);
+                instanceLease.PublishExecution(() =>
+                {
+                    IRecoveryEvidence evidence = roots is null ? new JournalRecoveryEvidence(instance, new(instance, contracts), database) :
+                        OperatingSystem.IsWindows() ? new NexusPipeline.Platform.Storage.Execution.AdmissionPublicationEvidence(
+                            instance, database, contracts, roots, journalId) :
+                        throw new PlatformNotSupportedException();
+                    new RecoveryCoordinator(registry, evidence, index).VerifyAndPublish();
+                    if (roots is not null)
+                        NexusPipeline.Platform.Storage.Configuration.ConfigurationRecoveryHolds.Publish(database, index, roots);
+                });
             }
             catch (Exception error) when (error is IOException or InvalidOperationException or Microsoft.Data.Sqlite.SqliteException)
             {

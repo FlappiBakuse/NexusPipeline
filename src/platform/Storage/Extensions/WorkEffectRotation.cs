@@ -49,7 +49,7 @@ internal sealed class WorkEffectRotation(RuntimeInstance instance, StateDatabase
         {
             var reference = SecretDocumentRows.Find(connection, null, operationId) ?? throw WorkEffectRows.Invalid();
             source = new SecretDocumentFormat(instance, contracts).Read(reference);
-            using var transaction = connection.BeginTransaction(deferred: true);
+            using var transaction = DatabaseConnections.BeginRead(connection);
             if (SecretDocumentRows.Status(connection, transaction, source) != "completed" || source.Document.SubjectId != subject ||
                 source.Document.ExtensionId != prepared[0].Key.ExtensionId) throw WorkEffectRows.Invalid();
         }

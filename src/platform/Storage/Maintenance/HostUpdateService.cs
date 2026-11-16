@@ -75,7 +75,7 @@ internal sealed class HostUpdateService : IAsyncDisposable
             RequireAvailable();
             var pending = new MaintenancePendingStore(_instance, _database, _lease, _resources, _contracts, _roots, _verifier);
             using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System))
-            using (var transaction = connection.BeginTransaction(deferred: true))
+            using (var transaction = DatabaseConnections.BeginRead(connection))
             {
                 if (OperationRows.ReadExisting(connection, transaction, identity) is not null)
                 {

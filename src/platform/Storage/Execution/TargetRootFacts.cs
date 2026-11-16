@@ -37,7 +37,7 @@ internal static class TargetRootFacts
         if (jobs.Select(item => item.Binding.TargetId).Intersect(commands.Select(item => item.Binding.TargetId)).Any())
             throw new IOException("execution_target_sql_root_unbound");
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT target_id,command_sequence FROM main.execution_target_job_roots WHERE journal_id=$journal LIMIT 1025;";
         command.Parameters.AddWithValue("$journal", journalId.ToString("D"));
@@ -73,7 +73,7 @@ internal static class TargetRootFacts
     internal static ProcessIdentity? Read(StateDatabase database, ExecutionTargetBinding binding)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var result = ReadInside(connection, transaction, binding);
         transaction.Commit(); return result;
     }
@@ -131,7 +131,7 @@ internal static class TargetRootFacts
     internal static ProcessIdentity? ReadCommand(StateDatabase database, AndroidCommandRegistration registration)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var result = ReadCommandInside(connection, transaction, registration);
         transaction.Commit(); return result;
     }

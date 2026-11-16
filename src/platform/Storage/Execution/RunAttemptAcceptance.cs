@@ -115,7 +115,7 @@ public sealed class RunAttemptAcceptance(RuntimeInstance instance, ContractReade
         OperationAcceptance accepted;
         RegisteredJournal journal;
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             var existing = OperationRows.ReadExisting(connection, transaction, operation);
             if (existing is null) return null;
@@ -154,7 +154,7 @@ public sealed class RunAttemptAcceptance(RuntimeInstance instance, ContractReade
         if (database.InstanceId != instance.InstanceId || operation.OperationId.ToString("D") != candidate.OperationId)
             throw new IOException("attempt_acceptance_identity_unbound");
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var accepted = OperationRows.ReadExisting(connection, transaction, operation);
         if (accepted is null) return null;
         var journal = new RecoveryJournalRegistry(database).ReadOperationJournal(operation.OperationId);

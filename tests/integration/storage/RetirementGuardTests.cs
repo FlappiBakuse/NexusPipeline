@@ -32,7 +32,7 @@ public sealed class RetirementGuardTests
         var observed = new JournalWriterStore(source.Database).ObserveForCurrentExecutor(receipt.JournalId);
         Assert.True(observed.IsComplete); Assert.Equal(NexusPipeline.Core.Execution.WriterState.Stopped, observed.State);
         var commits = source.Database.CommitSequence;
-        var service = new ContentRetirementService(source.Instance, source.Database, new(), source.Lease, fixture.Base.Resources, fixture.Base.Index);
+        var service = new ContentRetirementService(source.Instance, source.Database, new(), source.Lease, fixture.Base.Resources, fixture.Base.Index, source.PayloadRoots);
         var rejected = Assert.Throws<IOException>(() => service.RetireLogsPage(Guid.NewGuid(), "retirement-fixture", receipt.Facts.RunId));
         Assert.Equal("record_retirement_run_pending", rejected.Message);
         Assert.Equal(commits, source.Database.CommitSequence);
@@ -53,7 +53,7 @@ public sealed class RetirementGuardTests
         var pending = fixture.Delivery.ReadPendingForRun(run);
         Assert.False(pending.IsSettled); Assert.Equal(expand, pending.IsExpanded);
         var source = fixture.Source; var commits = source.Database.CommitSequence;
-        var service = new ContentRetirementService(source.Instance, source.Database, new(), source.Lease, fixture.Base.Resources, fixture.Base.Index);
+        var service = new ContentRetirementService(source.Instance, source.Database, new(), source.Lease, fixture.Base.Resources, fixture.Base.Index, source.PayloadRoots);
         Assert.ThrowsAny<IOException>(() => service.RetireLogsPage(Guid.NewGuid(), "retirement-fixture", run));
         Assert.Equal(commits, source.Database.CommitSequence);
         Assert.Equal(pending, fixture.Delivery.ReadPendingForRun(run));

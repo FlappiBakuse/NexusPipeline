@@ -31,7 +31,7 @@ public sealed class ExtensionQueryService : IExtensionOperationQueries
         if (subject is not { Length: >= 1 and <= 256 } || subject.Any(char.IsControl) ||
             offset is < 0 or > 10000 || limit is < 1 or > 50) throw new ArgumentException("extension_operation_page_invalid");
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT operation_id,created_at FROM main.operations WHERE subject_id=$subject AND operation_kind='extension.apply' " +
             "ORDER BY created_at DESC,operation_id DESC LIMIT $limit OFFSET $offset;";
@@ -84,7 +84,7 @@ public sealed class ExtensionQueryService : IExtensionOperationQueries
             if (revision != 0)
             {
                 using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System);
-                using var transaction = connection.BeginTransaction(deferred: true);
+                using var transaction = DatabaseConnections.BeginRead(connection);
                 installed = ExtensionInstalledRows.ReadMetadataAt(connection, transaction, bound.Source.ExtensionId, revision).IsInstalled;
                 transaction.Commit();
             }

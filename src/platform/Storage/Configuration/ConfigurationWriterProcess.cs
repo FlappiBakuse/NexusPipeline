@@ -1,7 +1,6 @@
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Runtime.Versioning;
-using System.Security.Cryptography;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Platform.Processes;
@@ -296,8 +295,8 @@ internal sealed class ConfigurationWriterProcess : IDisposable
         OwnedProcessOutput? output)
     {
         if (!FileTreePolicy.Digest(expectedSha256)) throw new IOException("configuration_editor_image_invalid");
-        using var image = new FileStream(PhysicalPathPolicy.NormalizeWithoutLinks(executable), FileMode.Open, FileAccess.Read, FileShare.Read);
-        if (Convert.ToHexStringLower(SHA256.HashData(image)) != expectedSha256) throw new IOException("configuration_editor_image_changed");
+        using var image = ProcessIdentityLease.HoldImage(executable);
+        if (image.Sha256 != expectedSha256) throw new IOException("configuration_editor_image_changed");
         return _job.StartFrozen(executable, arguments, workingDirectory, _instance.InstanceId, _processScopeId, identity =>
         {
             _root = identity;
@@ -307,7 +306,7 @@ internal sealed class ConfigurationWriterProcess : IDisposable
             _lease.VerifyHeld(_instance);
             _rootPublished = true;
             _persistenceObserver?.Reached(WriterPersistencePoint.RootPublished, process);
-        }, output, _commandLineSyntax);
+        }, output, _commandLineSyntax, image);
     }
 
     internal Task<int?> AwaitRootAsync(TimeSpan timeout, CancellationToken cancellationToken = default)

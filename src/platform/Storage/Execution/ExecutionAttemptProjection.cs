@@ -35,7 +35,8 @@ internal static class ExecutionAttemptProjection
         AttemptWriterState state, IReadOnlyList<JournalDocument> history, bool verifiedNoEffects,
         IAttemptPersistenceObserver? observer, PreparedBudgetTerminal? budget, PreparedPreviewClosure? previewClosure)
     {
-        PreviewDomainCodec.RequireHistory(history, state.Total, state.Attempt.ExecutionPlan.Sha256);
+        using var parsedHistory = new AttemptReadScope(history, state.Total, database.AttemptReads?.Find(state.Journal.JournalId)?.ParsedHistory);
+        state.RequireValidatedRead().RequirePreviewHistory(history, state.Total);
         var tail = history.Where(item => item.Revision > state.Journal.Revision).ToArray();
         if (tail.Length == 0) return;
         var projected = history.Single(item => item.Revision == state.Journal.Revision);

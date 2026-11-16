@@ -196,7 +196,7 @@ internal sealed class EnteredRecoverySession(RuntimeInstance instance, StateData
         try
         {
             using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration);
-            using var transaction = connection.BeginTransaction(deferred: true);
+            using var transaction = DatabaseConnections.BeginRead(connection);
             AttemptTerminalEvidence.RequireRestoredInside(connection, transaction, state, completeGroups); transaction.Commit(); return true;
         }
         catch (IOException) { return false; }

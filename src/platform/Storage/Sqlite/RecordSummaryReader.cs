@@ -56,7 +56,7 @@ public sealed class RecordSummaryReader(StateDatabase database)
     {
         query.Validate();
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         var where = Prepare(command, query);
         var days = ReadDays(command, query, where);

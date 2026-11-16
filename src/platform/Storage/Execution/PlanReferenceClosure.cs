@@ -102,7 +102,7 @@ internal sealed class PlanReferenceClosure(RuntimeInstance instance, ContractRea
                 contents.Add(referenceToChild); contents.AddRange(codec.References(child));
             }
             using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
-            using (var transaction = connection.BeginTransaction(deferred: true))
+            using (var transaction = DatabaseConnections.BeginRead(connection))
             {
                 if (LogCatalogRows.Exists(connection, transaction, Guid.Parse(attempt.AttemptId)))
                 {

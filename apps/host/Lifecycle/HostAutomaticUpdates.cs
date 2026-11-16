@@ -163,7 +163,7 @@ internal sealed class HostAutomaticUpdates : IAsyncDisposable
             if (!_settings.Read().Effective.Updates.PluginAutoUpdateEnabled) return;
             ExtensionInstalledMetadata original;
             using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
-            using (var transaction = connection.BeginTransaction(deferred: true))
+            using (var transaction = DatabaseConnections.BeginRead(connection))
             { original = ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, state.ExtensionId) ?? throw new IOException("automatic_extension_missing"); transaction.Commit(); }
             var candidate = catalog.Entries.SingleOrDefault(item => item.ExtensionId == state.ExtensionId);
             if (candidate is null || !_packages.IsAutomaticUpgrade(channel, candidate, original.Revision) ||

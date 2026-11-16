@@ -29,7 +29,7 @@ public sealed class ConfigurationRunStore
     public ConfigurationRunStatus? Read(Guid sessionId, string subject)
     {
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         return ConfigurationRunRows.Read(connection, transaction, sessionId, subject);
     }
 
@@ -41,7 +41,7 @@ public sealed class ConfigurationRunStore
             new OperationIdentity(operation.OperationId, operation.SubjectId, Digest(prepared, parentJournalId, stepId, resources), "configuration.run.begin"))
             throw new OperationConflictException();
         using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
             if (OperationRows.ReadExisting(connection, transaction, operation) is not null)
                 return Required(connection, transaction, operation.OperationId, operation.SubjectId);
         var parent = RunBindingEvidence.ReadAdmission(_instance, _database, _contracts, parentJournalId, prepared.OwnerOperationId, stepId,

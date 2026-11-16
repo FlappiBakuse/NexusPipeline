@@ -1,12 +1,92 @@
 using System.Text.Json;
 using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Storage;
+using NexusPipeline.Platform.Storage.Execution;
 using Xunit;
 
 namespace NexusPipeline.StorageTests;
 
 public sealed class ExecutionPlanTests
 {
+    [Fact(DisplayName = "Repeated Frozen Executable And Runtime Inputs Share Protection Until The Plan Lease Is Released")]
+    public void SharesRepeatedInputs()
+    {
+        var fixture = ExecutionPlanFixture.Create();
+        var step = fixture.Plan.Steps[0];
+        var runtimePath = Path.Combine(step.WorkingDirectory, "shared.runtime");
+        File.WriteAllBytes(runtimePath, [3, 2, 1]);
+        var runtime = new ExecutionPlanRuntimeFile
+        {
+            RelativePath = Path.GetFileName(runtimePath), SizeBytes = 3,
+            Sha256 = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(runtimePath))),
+            Identity = FileTreeProtocol.ToWire(PhysicalObjectIdentity.Read(runtimePath)), ParentIdentity = step.ParentIdentity
+        };
+        var image = new ExecutionPlanInterpreterImage
+        {
+            Path = step.ExecutablePath, SizeBytes = step.ImageSizeBytes, Sha256 = step.ImageSha256,
+            Identity = step.ImageIdentity, ParentIdentity = step.ParentIdentity, RuntimeFiles = [runtime]
+        };
+        var plan = fixture.Plan with
+        {
+            CaptureRuntime = new() { Broker = image, TimeoutMilliseconds = 5000, MaximumPngBytes = 8388608, MaximumFramesPerStep = 1 },
+            Steps = [step with { JudgementWorker = new() { Broker = image, ScriptSha256 = step.ImageSha256,
+                MaximumInvocations = 1, MaximumEvidenceBytes = 1024 } }, step with { StepId = "second" }]
+        };
+        var held = new List<IDisposable>();
+        try
+        {
+            PlanInputLease.Acquire(plan, held);
+            Assert.Equal(2, held.OfType<FileStream>().Count());
+            foreach (var path in new[] { fixture.Image, runtimePath })
+            {
+                Assert.Throws<IOException>(() => File.WriteAllBytes(path, [9]));
+                Assert.Throws<IOException>(() => File.Delete(path));
+            }
+            Assert.Throws<IOException>(() => Directory.Move(step.WorkingDirectory, step.WorkingDirectory + "-moved"));
+        }
+        finally { for (var index = held.Count - 1; index >= 0; index--) held[index].Dispose(); }
+        File.WriteAllBytes(fixture.Image, [9]); File.WriteAllBytes(runtimePath, [8]);
+        Directory.Move(step.WorkingDirectory, step.WorkingDirectory + "-moved");
+    }
+
+    [Theory(DisplayName = "Shared Plan Inputs Reject Conflicting Size Digest File Or Parent Identity And Release All Protection")]
+    [InlineData("size", false)]
+    [InlineData("digest", false)]
+    [InlineData("file", false)]
+    [InlineData("parent", false)]
+    [InlineData("size", true)]
+    [InlineData("digest", true)]
+    [InlineData("file", true)]
+    [InlineData("parent", true)]
+    public void RejectsConflictingSharedInputs(string fault, bool captureFirst)
+    {
+        var fixture = ExecutionPlanFixture.Create();
+        var step = fixture.Plan.Steps[0];
+        var conflict = fault switch
+        {
+            "size" => step with { ImageSizeBytes = step.ImageSizeBytes + 1 },
+            "digest" => step with { ImageSha256 = new('0', 64) },
+            "file" => step with { ImageIdentity = step.ParentIdentity },
+            _ => step with { ParentIdentity = step.ImageIdentity }
+        };
+        var plan = fixture.Plan with { Steps = captureFirst ? [conflict] : [step, conflict with { StepId = "second" }] };
+        if (captureFirst) plan = plan with
+        {
+            CaptureRuntime = new()
+            {
+                Broker = new() { Path = step.ExecutablePath, SizeBytes = step.ImageSizeBytes, Sha256 = step.ImageSha256,
+                    Identity = step.ImageIdentity, ParentIdentity = step.ParentIdentity, RuntimeFiles = [] },
+                TimeoutMilliseconds = 5000, MaximumPngBytes = 8388608, MaximumFramesPerStep = 1
+            }
+        };
+        var held = new List<IDisposable>();
+        try { Assert.Throws<IOException>(() => PlanInputLease.Acquire(plan, held)); }
+        finally { for (var index = held.Count - 1; index >= 0; index--) held[index].Dispose(); }
+        Assert.Equal(new byte[] { 0, 1, 255 }, File.ReadAllBytes(fixture.Image));
+        File.WriteAllBytes(fixture.Image, [9]);
+        Directory.Move(step.WorkingDirectory, step.WorkingDirectory + "-moved");
+    }
+
     [Fact(DisplayName = "Frozen Execution Plan Keeps Independent Bytes And Leases Its Real Images And Definition")]
     public void OwnsFrozenImages()
     {

@@ -14,7 +14,7 @@ internal sealed class NotificationSendingStore(RuntimeInstance instance, StateDa
         return lease.PublishExecution(() =>
         {
             using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System))
-            using (var transaction = connection.BeginTransaction(deferred: true))
+            using (var transaction = DatabaseConnections.BeginRead(connection))
             {
                 _ = new NotificationDeliveryEvidence(instance, database, contracts).ReadFromSnapshot(snapshot.Reference, connection, transaction);
                 NotificationDeliveryOrigins.RequireRegistered(instance, database, contracts, snapshot, connection, transaction);
@@ -46,7 +46,7 @@ internal sealed class NotificationSendingStore(RuntimeInstance instance, StateDa
         lease.PublishExecution(() =>
         {
             using (var read = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System))
-            using (var snapshotRead = read.BeginTransaction(deferred: true))
+            using (var snapshotRead = DatabaseConnections.BeginRead(read))
             {
                 _ = new NotificationDeliveryEvidence(instance, database, contracts).ReadFromSnapshot(snapshot.Reference, read, snapshotRead);
                 snapshotRead.Commit();

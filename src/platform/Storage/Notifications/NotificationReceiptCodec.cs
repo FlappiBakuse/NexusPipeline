@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Notifications;
+using NexusPipeline.Core.Settings;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Journals;
@@ -18,12 +19,12 @@ internal sealed class NotificationReceiptCodec(RuntimeInstance instance, StateDa
             $"notification-receipt/{instanceId:D}/{receipt.Facts.RunId:D}/{receipt.Facts.AttemptId:D}/{receipt.SourceReceiptDigest}")).AsSpan(0, 16));
 
     internal NotificationReceiptSnapshot Persist(ExecutionNotificationSource source, NotificationCatalogSnapshot catalog,
-        ImmutableArray<ReceiptTaskSecrets> tasks, NexusPipeline.Core.Records.RecordAsset? screenshot)
+        ImmutableArray<ReceiptTaskSecrets> tasks, NexusPipeline.Core.Records.RecordAsset? screenshot, HostLocale locale)
     {
         var document = new NotificationReceiptDocument("nexus.notification.receipt-source", 1, instance.InstanceId,
             OperationId(instance.InstanceId, source.Receipt), source.SubjectId, source.Receipt, source.DeclineReasonCode,
             source.TotalPlan, source.DefinitionBundle, catalog.Reference, catalog.Catalog.Revision, source.Routes.Length, source.Facts, tasks, screenshot,
-            new HostSettingsStore(database).Read().Values.Locale);
+            locale);
         Require(document);
         return new(document, new ImmutableBlobStore(instance, contracts).PersistPlan(NotificationCatalogCodec.Encode(document)));
     }
@@ -65,6 +66,7 @@ internal sealed class NotificationReceiptCodec(RuntimeInstance instance, StateDa
             new BlobReference(total.DefinitionBundle.RelativePath, total.DefinitionBundle.SizeBytes, total.DefinitionBundle.Sha256) != document.DefinitionBundle)
             throw Invalid();
         var physical = new JournalStore(instance, contracts).Read(registered.JournalId);
+        using var parsed = new AttemptReadScope([physical], total, metadata is null ? null : owner?.ParsedHistory);
         if (physical.Revision != registered.Revision || physical.Phase != JournalPhase.Committed ||
             AttemptPreparedBinding.ExpectedReceipt(attempt, physical) != document.Receipt ||
             !ExecutionNotificationSource.OrderedFacts(attempt, total, physical.Root, document.Receipt).SequenceEqual(document.OrderedFacts))

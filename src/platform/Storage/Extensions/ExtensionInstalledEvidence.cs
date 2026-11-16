@@ -14,7 +14,7 @@ internal sealed class ExtensionInstalledEvidence(RuntimeInstance instance, State
     {
         ExtensionInstalledMetadata? saved;
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             saved = ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, extensionId);
             transaction.Commit();
@@ -26,7 +26,7 @@ internal sealed class ExtensionInstalledEvidence(RuntimeInstance instance, State
             ExtensionPayloadBinding.DerivedInstallation(bound.Plan, bound.Commit, bound.Footprint) != saved)
             throw Invalid();
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             if (ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, extensionId) != saved) throw Invalid();
             transaction.Commit();
@@ -38,7 +38,7 @@ internal sealed class ExtensionInstalledEvidence(RuntimeInstance instance, State
     {
         ExtensionInstalledMetadata? saved;
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             saved = ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, extensionId);
             transaction.Commit();

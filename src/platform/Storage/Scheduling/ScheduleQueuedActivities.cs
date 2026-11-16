@@ -15,7 +15,7 @@ internal static class ScheduleQueuedActivities
         try { held.Use(() =>
         {
             using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.System);
-            using var transaction = connection.BeginTransaction(deferred: true);
+            using var transaction = DatabaseConnections.BeginRead(connection);
             using var command = connection.CreateCommand(); command.Transaction = transaction;
             command.CommandText = "SELECT c.occurrence_id,0 FROM main.scheduled_occurrences c LEFT JOIN main.operations o ON o.operation_id=c.start_operation_id LEFT JOIN main.schedule_occurrence_outcomes b ON b.occurrence_id=c.occurrence_id WHERE o.operation_id IS NULL AND b.occurrence_id IS NULL UNION ALL SELECT c.occurrence_id,1 FROM main.startup_queue_occurrences c LEFT JOIN main.operations o ON o.operation_id=c.start_operation_id LEFT JOIN main.startup_queue_outcomes b ON b.occurrence_id=c.occurrence_id WHERE o.operation_id IS NULL AND b.occurrence_id IS NULL ORDER BY 1 LIMIT 8193;";
             var ids = new List<(Guid Id, bool Startup)>();

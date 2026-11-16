@@ -80,7 +80,7 @@ internal sealed class SnapshotCompletionOwner(RuntimeInstance instance, StateDat
     private void RequireOperationBindings(RegisteredJournal parent, ConfigurationRunStatus session, string subject)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operations WHERE operation_id=$parent AND subject_id=$subject AND status=$parentStatus) " +
             "AND EXISTS(SELECT 1 FROM main.operations WHERE operation_id=$session AND subject_id=$subject AND operation_kind='configuration.run.begin' AND status=$status);";

@@ -112,7 +112,7 @@ internal sealed class PreparationRecoverySession : IDisposable
     {
         var plan = _frozen.ReadWire();
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         SecretPreparationRows.VerifyPlan(connection, transaction, plan);
         var identity = SecretFieldStore.Identity(Guid.Parse(plan.OperationId), SecretPreparationRows.Key(plan), plan.ExpectedRevision, SecretDisposition.Set);
         var operation = OperationRows.ReadExisting(connection, transaction, identity) ?? throw new IOException("secret_recovery_operation_missing");
@@ -165,7 +165,7 @@ internal sealed class PreparationRecoverySession : IDisposable
     private bool BeforeMatches()
     {
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         try { SecretPreparationRows.VerifyBefore(connection, transaction, _frozen.ReadWire()); return true; }
         catch (InvalidOperationException) { return false; }
     }

@@ -39,7 +39,7 @@ internal static class MaintenancePendingInventory
         if (database.InstanceId != instance.InstanceId || !StringComparer.OrdinalIgnoreCase.Equals(database.RuntimeRoot, instance.RuntimeRoot))
             throw new IOException("maintenance_inventory_instance_unbound");
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var rows = MaintenanceOperationRows.ReadAll(connection, transaction);
         using (var missing = connection.CreateCommand())
         {

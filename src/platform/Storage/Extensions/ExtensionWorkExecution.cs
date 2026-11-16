@@ -72,7 +72,7 @@ internal sealed class ExtensionWorkExecution
         if (_evidence is not null)
         {
             using var heldConnection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System);
-            using var heldTransaction = heldConnection.BeginTransaction(deferred: true);
+            using var heldTransaction = DatabaseConnections.BeginRead(heldConnection);
             RequireInside(heldConnection, heldTransaction, allowUnaccepted); heldTransaction.Commit();
             return;
         }
@@ -88,7 +88,7 @@ internal sealed class ExtensionWorkExecution
             if (actual.Origin.Proof.Nodes.Any(node => protectedIds.Contains(node.Identity))) throw Pending();
         }
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         RequireInside(connection, transaction, allowUnaccepted); transaction.Commit();
     }
 

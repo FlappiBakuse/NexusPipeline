@@ -149,7 +149,13 @@ public sealed class StateDatabase
         using var changes = new DatabaseChanges(connection);
         var result = operation(connection, transaction);
         DatabaseRelations.VerifyChanges(connection, transaction, changes);
-        transaction.Commit();
+        // A busy COMMIT leaves the transaction active; retry it without repeating the operation.
+        for (var attempt = 0; ; attempt++)
+        {
+            try { transaction.Commit(); break; }
+            catch (SqliteException error) when (error.SqliteErrorCode == 5 && attempt < 2)
+            { Thread.Sleep(50); }
+        }
         if (changes.Domains != 0)
         {
             for (var index = 0; index < DatabaseLayout.Domains.Length; index++)

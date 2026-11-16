@@ -163,7 +163,7 @@ internal sealed class ExecutionCaptureStore(RuntimeInstance instance, StateDatab
         if (png is not null || frames.Count != 0)
         {
             using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-            using var transaction = connection.BeginTransaction(deferred: true);
+            using var transaction = DatabaseConnections.BeginRead(connection);
             if (ExecutionCancellationRows.Read(connection, transaction, state.Journal, state.Attempt) is not null)
             { png = null; frames = []; reason = "execution_capture_context_closed"; }
             else ExecutionCaptureProjection.RequireCapturedPublicationInside(connection, transaction, state, state.Latest, binding);

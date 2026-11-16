@@ -42,7 +42,7 @@ internal sealed class VerifiedRecordRetirement
         var blobs = new ImmutableBlobStore(instance, contracts);
         IReadOnlyList<BlobReference> proofs;
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             RecordRetirementRows.RequireFamilyInside(connection, transaction, family.RunId, family.Attempts.Length);
             proofs = RecordRetirementRows.ProofsFor(connection, transaction, family.RunId, candidates);
@@ -82,7 +82,7 @@ internal sealed class VerifiedRecordRetirement
         }
         if (unbound.Count != 0) throw RecordRetirementCodec.Invalid();
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         _ = RecoveryJournalRegistry.ReadValidatedSnapshotInside(connection, transaction);
         RecordRetirementRows.RequireSavedInside(connection, transaction, document, reference);
         RecordRetirementRows.RequireFamilyInside(connection, transaction, family.RunId, family.Attempts.Length);

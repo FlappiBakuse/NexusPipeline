@@ -63,9 +63,14 @@ internal sealed class RunBindingEvidence
             throw new IOException("configuration_run_parent_unbound");
     }
 
-    internal void RequireResource(FrozenRunState state, string targetPath) =>
+    internal void RequireResource(FrozenRunState state, string targetPath)
+    {
+        var journal = Guid.Parse(_attempt.JournalId);
+        using var history = _database.AttemptReads?.Find(journal) is null
+            ? null : JournalReadScope.HoldAttempt(_instance, _contracts, _database, journal);
         RunConfigurationBinding.Require(state, _step.StepId, targetPath, _attempt, _total, _blobs, _contracts,
             laterInvocation: _ordinal > 1, taskRetry: _taskRetry);
+    }
 
     internal void RequireSources(IReadOnlyDictionary<ConfigurationAddress, FrozenRunState> states) =>
         PreparedRetryOrigin.RequireSaved(_instance, _database, _contracts, _attempt, _total, _step.StepId, states);

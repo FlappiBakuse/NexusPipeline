@@ -2,12 +2,82 @@ using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Configuration;
 using NexusPipeline.Core.Configuration;
+using System.Runtime.InteropServices;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace NexusPipeline.StorageTests;
 
-public sealed class BlobScopeTests
+public sealed class BlobScopeTests(ITestOutputHelper output)
 {
+    [Fact(DisplayName = "Nested Readers Reuse One Protected Blob Without Rehashing Its Bytes For Every Historical Owner")]
+    public void BoundsNestedVerificationReads()
+    {
+        var (instance, store) = Create();
+        var bytes = Enumerable.Range(0, 65536).Select(index => (byte)(index % 251)).ToArray();
+        var reference = store.PersistContent(bytes, default);
+        var before = ReadBytes();
+        using (BlobReadScope.Hold(instance))
+            for (var owner = 0; owner < 128; owner++)
+            {
+                using var nested = BlobReadScope.Hold(instance);
+                using var input = store.OpenVerified(reference);
+                Assert.Equal(bytes[0], input.ReadByte());
+            }
+        var readBytes = ReadBytes() - before;
+        output.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { phase = "nested-blob-verification", owners = 128,
+            contentBytes = bytes.Length, maximumReadBytes = 2097152, actualReadBytes = readBytes }));
+        Assert.InRange(readBytes, 0UL, 2097152UL);
+    }
+
+    [Fact(DisplayName = "Nested Capture Reports Each Read Once While Its Same Runtime Outer Protection Survives")]
+    public void SharesCapturedProtection()
+    {
+        var (instance, store) = Create(); var (foreign, other) = Create();
+        var reference = store.PersistContent(new byte[] { 1, 2, 3 }, default);
+        var foreignReference = other.PersistContent(new byte[] { 4, 5, 6 }, default);
+        var path = Path.Combine(instance.RuntimeRoot, reference.RelativePath);
+        var foreignPath = Path.Combine(foreign.RuntimeRoot, foreignReference.RelativePath);
+        var seen = new List<string>();
+        using (BlobReadScope.Hold(instance))
+        {
+            using (BlobReadScope.Capture(instance, seen.Add))
+            {
+                using (store.OpenVerified(reference)) { }
+                using (store.OpenVerified(reference)) { }
+            }
+            Assert.Equal(new[] { Path.GetFullPath(path), Path.GetFullPath(path) }, seen.Select(Path.GetFullPath));
+            Assert.Throws<IOException>(() => File.WriteAllBytes(path, [9]));
+            using (BlobReadScope.Hold(foreign)) using (other.OpenVerified(foreignReference)) { }
+            File.WriteAllBytes(foreignPath, [9]);
+            Assert.Throws<IOException>(() => other.OpenVerified(foreignReference));
+        }
+        var replaced = path + ".retained";
+        File.Move(path, replaced); File.WriteAllBytes(path, [9]);
+        using (BlobReadScope.Hold(instance)) Assert.Throws<IOException>(() => store.OpenVerified(reference));
+        Assert.Equal(new byte[] { 1, 2, 3 }, File.ReadAllBytes(replaced));
+    }
+
+    [Fact(DisplayName = "A Failed Nested Read Publishes No Protection And A Later Read Verifies The Actual Bytes")]
+    public void RechecksUnavailableReads()
+    {
+        var (instance, store) = Create();
+        var reference = store.PersistContent(new byte[] { 1, 2, 3 }, default);
+        var path = Path.Combine(instance.RuntimeRoot, reference.RelativePath);
+        var seen = new List<string>();
+        using (BlobReadScope.Capture(instance, seen.Add))
+        {
+            using (var writer = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.None))
+            using (BlobReadScope.Hold(instance)) Assert.Throws<IOException>(() => store.OpenVerified(reference));
+            Assert.Empty(seen);
+            using (BlobReadScope.Hold(instance)) using (store.OpenVerified(reference)) { }
+            Assert.Single(seen);
+            Assert.Throws<IOException>(() => File.Delete(path));
+        }
+        File.WriteAllBytes(path, [9]);
+        using (BlobReadScope.Hold(instance)) Assert.Throws<IOException>(() => store.OpenVerified(reference));
+    }
+
     [Fact(DisplayName = "Frozen Snapshot Reads Preserve Immutable Values And Recheck Changed Files After Protection Ends")]
     public void ProtectsSnapshotValues()
     {
@@ -102,7 +172,8 @@ public sealed class BlobScopeTests
         var retained = new List<string>();
         using (BlobReadScope.Hold(instance))
         {
-            foreach (var item in references) using (store.OpenVerified(item)) { }
+            foreach (var item in references)
+                using (BlobReadScope.Hold(instance)) using (store.OpenVerified(item)) { }
             BlobReference? released = null;
             foreach (var item in references)
             {
@@ -122,7 +193,7 @@ public sealed class BlobScopeTests
         foreach (var path in retained) using (File.Open(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite)) { }
     }
 
-    [Fact(DisplayName = "Nested Blob Scopes Release Only Their Own Protection In Owner Order")]
+    [Fact(DisplayName = "Nested Blob Scopes Promote Protection To Their Same Runtime Outer Owner And Release In Order")]
     public void PreservesNestedOwners()
     {
         var (instance, store) = Create();
@@ -138,10 +209,11 @@ public sealed class BlobScopeTests
             Assert.Throws<InvalidOperationException>(() => outer.Dispose());
             Assert.Throws<IOException>(() => File.WriteAllBytes(secondPath, [9]));
         }
-        File.WriteAllBytes(secondPath, [9]);
+        Assert.Throws<IOException>(() => File.WriteAllBytes(secondPath, [9]));
         Assert.Throws<IOException>(() => File.WriteAllBytes(firstPath, [9]));
         outer.Dispose();
         File.WriteAllBytes(firstPath, [9]);
+        File.WriteAllBytes(secondPath, [9]);
     }
 
     [Fact(DisplayName = "Blob Protection Never Spills Into A Different Runtime")]
@@ -170,4 +242,20 @@ public sealed class BlobScopeTests
         var instance = new InstanceRoot(contracts).OpenOrCreate(root);
         return (instance, new(instance, contracts));
     }
+
+    private static ulong ReadBytes()
+    {
+        if (!GetProcessIoCounters(new IntPtr(-1), out var counters)) throw new IOException("native_process_io_unavailable");
+        return counters.ReadBytes;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IoCounters
+    {
+        public ulong ReadOperations, WriteOperations, OtherOperations, ReadBytes, WriteBytes, OtherBytes;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetProcessIoCounters(IntPtr process, out IoCounters counters);
 }

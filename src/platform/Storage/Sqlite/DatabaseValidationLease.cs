@@ -47,7 +47,7 @@ internal sealed class DatabaseValidationLease : IDisposable
             using var timing = StartupProfile.Measure(_measurement);
             using var opened = continuous is null ? DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: _domains) : null;
             var connection = continuous ?? opened!;
-            using (var transaction = connection.BeginTransaction(deferred: true))
+            using (var transaction = DatabaseConnections.BeginRead(connection))
             { validate(connection, transaction); transaction.Commit(); }
             if (DatabaseVersion.Read(_database, continuous, _domains) == version) _validated = version;
         }
@@ -61,7 +61,7 @@ internal sealed class DatabaseValidationLease : IDisposable
             var continuous = Continuous();
             using var opened = continuous is null ? DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: _domains) : null;
             var connection = continuous ?? opened!;
-            using var transaction = connection.BeginTransaction(deferred: true);
+            using var transaction = DatabaseConnections.BeginRead(connection);
             var value = read(connection, transaction); transaction.Commit(); return value;
         }
     }

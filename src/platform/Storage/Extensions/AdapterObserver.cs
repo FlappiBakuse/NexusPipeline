@@ -145,7 +145,12 @@ internal sealed class AdapterObserver
                 scriptNow.Revision != total.SourceRevisions.Single(item => item.EntityKind == "script" && item.EntityId == step.ScriptId).Revision || scriptNow.ExtensionId != step.ExtensionId)
                 throw new IOException("adapter_current_binding_changed");
         }
-        var retry = TaskRetryEvidence.ForJob(_instance, _contracts, total, binding);
+        ExecutionTaskRetry? retry;
+        using (var history = _database.AttemptReads?.Find(binding.ParentJournalId) is null
+            ? null : JournalReadScope.HoldAttempt(_instance, _contracts, _database, binding.ParentJournalId))
+        {
+            retry = TaskRetryEvidence.ForJob(_instance, _contracts, total, binding);
+        }
         using var invocation = new AttemptInvocation(identity, step, accepted.Root, resources, blobs, raw,
             context.Root?.ProcessId, total.RetryPolicy.IdempotencyKey, Check, Live, compiled);
         invocation.SelectedIds = TaskRetryEvidence.InvocationIds(step, retry);

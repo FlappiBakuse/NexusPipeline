@@ -87,7 +87,7 @@ internal sealed class HistoryReadScope : IDisposable
 
     private static T ReadInside<T>(SqliteConnection connection, Func<SqliteConnection, SqliteTransaction, T> read)
     {
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var result = read(connection, transaction);
         transaction.Commit();
         return result;

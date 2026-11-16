@@ -65,7 +65,7 @@ internal sealed class PreparedRetryOrigin
         if (steps.Length == 0) return sources.ToImmutable();
         var sessions = new List<(string Step, Guid Id, ConfigurationRunStatus Session)>();
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             foreach (var step in steps)
             {
@@ -87,7 +87,7 @@ internal sealed class PreparedRetryOrigin
         }).ToArray();
         var publications = new Dictionary<(Guid Session, ConfigurationAddress Address), StoredConfigurationRevision>();
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Content))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             foreach (var item in bindings)
             {
@@ -175,6 +175,7 @@ internal sealed class PreparedRetryOrigin
     internal static void RequireSaved(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
         RunAttemptPlan parent, ExecutionPlan total, string stepId, IReadOnlyDictionary<ConfigurationAddress, FrozenRunState> states)
     {
+        using var history = JournalReadScope.HoldAttempt(instance, contracts, database, Guid.Parse(parent.JournalId));
         var latest = new JournalStore(instance, contracts).Read(Guid.Parse(parent.JournalId));
         var childCodec = new ConfigurationPlanCodec(instance, contracts, new(instance, contracts));
         var operationIds = states.Values.Select(state => state.ConfigurationOperationId).ToHashSet();
@@ -192,7 +193,7 @@ internal sealed class PreparedRetryOrigin
         }
         ExecutionRetryIntent intent;
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             var id = ExecutionRetryRows.ForNext(connection, transaction, Guid.Parse(parent.OperationId)) ?? throw Invalid();
             intent = ExecutionRetryRows.Read(connection, transaction, id);

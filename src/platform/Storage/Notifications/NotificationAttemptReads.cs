@@ -23,7 +23,7 @@ internal sealed class NotificationAttemptReads(
     internal void HoldReceipt(BlobReference reference)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var receipt = new NotificationReceiptCodec(instance, database, contracts).ReadMetadata(reference, connection, transaction);
         HoldJournal(receipt.Document.Receipt.JournalId);
         transaction.Commit();

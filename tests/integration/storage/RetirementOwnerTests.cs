@@ -68,7 +68,7 @@ public sealed class RetirementOwnerTests
         Assert.Equal(fixture.OriginalBytes, File.ReadAllBytes(source.Configuration));
         Assert.Equal(fixture.OriginalIdentity, PhysicalObjectIdentity.Read(source.Configuration));
         var resources = new ResourceLeaseManager(new HostLifecycle(index, TimeProvider.System));
-        var service = new ContentRetirementService(source.Instance, database, new(), lease, resources, index);
+        var service = new ContentRetirementService(source.Instance, database, new(), lease, resources, index, roots);
         var replay = Assert.IsType<ContentRetirementPage>(service.RetireLogsPage(
             registered.OperationId, document.SubjectId, receipt.Facts.RunId, document.AfterSha256, document.Limit));
         Assert.Equal(registered.JournalId, replay.CleanupJournalId);

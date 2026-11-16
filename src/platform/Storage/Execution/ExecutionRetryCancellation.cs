@@ -42,7 +42,7 @@ internal static class ExecutionRetryCancellation
     internal static void VerifyInventory(StateDatabase database)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT o.operation_id,r.operation_id FROM main.operations o LEFT JOIN main.execution_retry_intents r " +
             "ON r.previous_journal_id=o.initial_journal_id WHERE o.operation_kind=$kind ORDER BY o.operation_id;";

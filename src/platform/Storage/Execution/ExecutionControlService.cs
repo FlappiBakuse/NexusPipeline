@@ -60,7 +60,7 @@ public sealed class ExecutionControlService(RuntimeInstance instance, StateDatab
             var identity = ExecutionCancellationStore.Identity(operationId, subject, source.JournalId,
                 startOperationId, runId, attemptId);
             using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-            using var transaction = connection.BeginTransaction(deferred: true);
+            using var transaction = DatabaseConnections.BeginRead(connection);
             var existing = OperationRows.ReadOwned(connection, transaction, operationId, subject);
             if (existing is not null && existing.Kind != identity.Kind && existing.Kind != ExecutionRetryCancellation.Kind)
                 throw new OperationConflictException();
@@ -89,7 +89,7 @@ public sealed class ExecutionControlService(RuntimeInstance instance, StateDatab
     private FrozenStartSource ReadSource(Guid operationId, string subject)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         if (OperationRows.ReadOwned(connection, transaction, operationId, subject) is null)
             throw new IOException("execution_control_source_unavailable");
         var source = StartSourceRows.Read(connection, transaction, operationId);

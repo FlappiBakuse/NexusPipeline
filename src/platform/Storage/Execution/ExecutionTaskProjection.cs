@@ -6,6 +6,7 @@ using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Extensions;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Configuration;
+using NexusPipeline.Platform.Storage.Journals;
 
 namespace NexusPipeline.Platform.Storage.Execution;
 
@@ -18,9 +19,13 @@ internal static class ExecutionTaskProjection
         var tasks = AdapterTaskPolicy.Freeze(step.Tasks.Select(TaskAdapterProtocol.ReadTask).ToImmutableArray());
         if (tasks.All(task => task.Projection is null)) return [];
         var reference = total.DefinitionBundle;
-        using var input = blobs.OpenVerified(new(reference.RelativePath, reference.SizeBytes, reference.Sha256));
-        var bytes = new byte[checked((int)input.Length)]; input.ReadExactly(bytes);
-        var bundle = contracts.Read<AutomationBundle>(bytes, "automation-bundle.schema.json");
+        var bundle = JournalReadScope.ReadDefinitions(blobs.Instance, total);
+        using var input = bundle is null ? blobs.OpenVerified(new(reference.RelativePath, reference.SizeBytes, reference.Sha256)) : null;
+        if (bundle is null)
+        {
+            var bytes = new byte[checked((int)input!.Length)]; input.ReadExactly(bytes);
+            bundle = contracts.Read<AutomationBundle>(bytes, "automation-bundle.schema.json");
+        }
         var script = NexusPipeline.Platform.Storage.Automation.BindingSourceCodec.Resolve(bundle, step);
         foreach (var task in tasks.Where(task => task.Projection is not null))
             if (!script.AdapterResources.Any(resource => resource.ResourceId == task.Projection!.ResourceId &&

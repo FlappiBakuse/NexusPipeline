@@ -62,7 +62,7 @@ internal sealed class ScheduledProviderDispatch : IPlannedInvocationAuthorizatio
         {
             ScheduleMinuteDocument? minute;
             using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.System))
-            using (var transaction = connection.BeginTransaction(deferred: true))
+            using (var transaction = DatabaseConnections.BeginRead(connection))
             {
                 var current = _clock.GetUtcNow().ToUnixTimeSeconds() / 60;
                 minute = ScheduleMinuteRows.ReadMinute(connection, transaction, ScheduleMinuteCodec.OperationId(_instance.InstanceId, current), _instance.InstanceId);
@@ -152,7 +152,7 @@ internal sealed class ScheduledProviderDispatch : IPlannedInvocationAuthorizatio
         {
             work.Use(_publication, () => true);
             using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-            using var transaction = connection.BeginTransaction(deferred: true);
+            using var transaction = DatabaseConnections.BeginRead(connection);
             var verified = new ScheduledProviderEvidence(_instance, _contracts).Read(work.Source.Reference, connection, transaction);
             if (verified.Source.Reference != work.Source.Reference || verified.Source.Document.Creator != JournalWriterStore.CurrentWriter ||
                 verified.Source.Document.OwnerGeneration != _lease.StartupGeneration) throw ScheduledProviderCodec.Invalid();

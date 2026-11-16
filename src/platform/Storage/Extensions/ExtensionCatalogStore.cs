@@ -73,13 +73,13 @@ internal sealed class ExtensionCatalogStore
         {
             ExtensionCatalogSaved? saved;
             using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions))
-            using (var transaction = connection.BeginTransaction(deferred: true))
+            using (var transaction = DatabaseConnections.BeginRead(connection))
             { saved = ExtensionCatalogRows.ReadHead(connection, transaction, channel); transaction.Commit(); }
             if (saved is null) return null;
             var verified = _verifier.Verify(Read(saved.Pointer), Read(saved.Catalog), Read(saved.Signature), channel);
             if (verified.Identity != saved.Identity || verified.KeyId != saved.KeyId) throw Invalid();
             using var fresh = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions);
-            using var tx = fresh.BeginTransaction(deferred: true);
+            using var tx = DatabaseConnections.BeginRead(fresh);
             if (ExtensionCatalogRows.ReadHead(fresh, tx, channel) != saved) throw Invalid();
             tx.Commit(); return verified;
         });
@@ -97,7 +97,7 @@ internal sealed class ExtensionCatalogStore
             {
                 ExtensionCatalogSaved current;
                 using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions))
-                using (var transaction = connection.BeginTransaction(deferred: true))
+                using (var transaction = DatabaseConnections.BeginRead(connection))
                 {
                     ExtensionCatalogRows.RequireAcceptedInside(connection, transaction, original);
                     current = ExtensionCatalogRows.ReadHead(connection, transaction, original.Identity.Channel) ?? throw Invalid();

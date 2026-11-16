@@ -9,6 +9,7 @@ internal static class DatabaseConnections
     {
         internal DatabaseDomain Domains = DatabaseDomain.Runtime;
         internal bool Initialized;
+        internal string ReadSnapshotSql = "SELECT rootpage FROM main.sqlite_schema LIMIT 1;";
     }
     private static readonly ConditionalWeakTable<SQLitePCL.sqlite3, ConnectionState> States = new();
 
@@ -32,7 +33,7 @@ internal static class DatabaseConnections
                 DefaultTimeout = 2
             }.ToString());
             connection.Open();
-            Configure(connection, path, domains, readOnly, creating);
+            Configure(connection, path, domains, readOnly, creating, shared?.CacheBudgetKiB ?? 8192);
             shared?.Attach(connection);
             return connection;
         }
@@ -53,7 +54,23 @@ internal static class DatabaseConnections
         catch { connection.Dispose(); throw; }
     }
 
-    private static void Configure(SqliteConnection connection, string path, DatabaseDomain domains, bool readOnly, bool creating)
+    internal static SqliteTransaction BeginRead(SqliteConnection connection)
+    {
+        if (connection.Handle is not { } handle || !States.TryGetValue(handle, out var state))
+            throw new IOException("database_read_snapshot_unbound");
+        var transaction = connection.BeginTransaction(deferred: true);
+        try
+        {
+            using var command = connection.CreateCommand(); command.Transaction = transaction;
+            // One statement acquires shared snapshots in SQLite database-index order before business reads.
+            command.CommandText = state.ReadSnapshotSql; command.ExecuteScalar();
+            return transaction;
+        }
+        catch { transaction.Dispose(); throw; }
+    }
+
+    private static void Configure(SqliteConnection connection, string path, DatabaseDomain domains, bool readOnly, bool creating,
+        int cacheBudgetKiB)
     {
         var state = States.GetValue(connection.Handle!, _ => new());
         using var command = connection.CreateCommand();
@@ -78,9 +95,11 @@ internal static class DatabaseConnections
         }
         if (!changed) return;
         var selected = DatabaseLayout.Domains.Where(domain => (state.Domains & domain) != 0).ToArray();
+        state.ReadSnapshotSql = "SELECT " + string.Join(",", selected.Select(domain =>
+            "(SELECT rootpage FROM " + DatabaseLayout.Alias(domain) + ".sqlite_schema LIMIT 1)")) + ";";
         int Weight(DatabaseDomain domain) => selected.Length <= 3 ? 1 : domain switch
         { DatabaseDomain.Runtime => 4, DatabaseDomain.Configuration => 3, _ => 1 };
-        var unit = 8192 / selected.Sum(Weight);
+        var unit = cacheBudgetKiB / selected.Sum(Weight);
         foreach (var domain in DatabaseLayout.Domains.Where(domain => (state.Domains & domain) != 0))
         {
             command.CommandText = $"PRAGMA {DatabaseLayout.Alias(domain)}.cache_size=-{Math.Max(64, unit * Weight(domain))};";

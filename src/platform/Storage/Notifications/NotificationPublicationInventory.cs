@@ -72,7 +72,7 @@ internal sealed class NotificationPublicationInventory(RuntimeInstance instance,
         var childPlans = document.Secrets.Where(field => field.Disposition == SecretDisposition.Set).ToDictionary(field => field.Field,
             field => new PreparationPlanCodec(instance, contracts, database).Read(field.Preparation!).ReadWire());
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var accepted = NotificationCatalogRows.Lookup(connection, transaction, NotificationPublicationCodec.Identity(document))
             ?? throw new IOException("notification_publication_missing");
         if (accepted.Reference != publication.Reference) throw new IOException("notification_publication_reference_changed");

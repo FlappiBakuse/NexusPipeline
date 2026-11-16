@@ -50,7 +50,7 @@ internal sealed class SecretDocumentInventory(RuntimeInstance instance, StateDat
         var plans = source.Document.Secrets.Where(change => change.Preparation is not null).ToDictionary(change => change.OperationId,
             change => new PreparationPlanCodec(instance, contracts, database).Read(change.Preparation!).ReadWire());
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         using (var command = SecretDocumentRows.Command(connection, transaction,
             "SELECT child_operation_id,subject_id,field FROM system.secret_document_fields WHERE parent_operation_id=$0;", source.Document.OperationId.ToString("D")))
         using (var rows = command.ExecuteReader())

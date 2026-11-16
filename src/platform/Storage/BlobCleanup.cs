@@ -9,6 +9,41 @@ public sealed class BlobCleanup(RuntimeInstance instance, ImmutableBlobStore blo
     private PhysicalObjectDeletion.FileLease? _guarded;
     private BlobReference? _guardedBlob;
     private IReadOnlySet<BlobReference>? _guardedReferences;
+    private CandidateProtection? _protection;
+
+    internal IDisposable ProtectCandidates(IReadOnlyList<FrozenCleanupItem> items)
+    {
+        if (_protection is not null) throw new InvalidOperationException("cleanup_candidates_already_protected");
+        var protection = new CandidateProtection(this);
+        try
+        {
+            foreach (var item in items)
+            {
+                if (protection.Guards.ContainsKey(item.Blob)) continue;
+                try { protection.Guards.Add(item.Blob, PhysicalObjectDeletion.HoldFile(Intent(item, Resolve(item)))); }
+                catch (IOException) { }
+            }
+            _protection = protection;
+            return protection;
+        }
+        catch { protection.Dispose(); throw; }
+    }
+
+    internal bool HasProtectedCandidates(IReadOnlyList<FrozenCleanupItem> items)
+    {
+        if (_protection is not { } protection || items.Count == 0) return false;
+        try
+        {
+            foreach (var item in items)
+            {
+                if (!protection.Guards.TryGetValue(item.Blob, out var guard)) return false;
+                guard.Require(Intent(item, Resolve(item)));
+            }
+            return true;
+        }
+        catch (IOException) { return false; }
+    }
+
     public CleanupItemState Inspect(FrozenCleanupItem item)
         => Inspect(item, null, null);
 
@@ -34,13 +69,14 @@ public sealed class BlobCleanup(RuntimeInstance instance, ImmutableBlobStore blo
         try
         {
             var path = Resolve(item);
-            if (held is null)
+            var guarded = Guard(item, held);
+            if (guarded is null)
             {
                 if (PhysicalObjectIdentity.Read(Path.GetDirectoryName(path)!) != item.ParentIdentity) return CleanupItemState.Unknown;
                 using var input = CleanupCandidateFiles.OpenVerified(instance, blobs, item.Blob);
                 if (PhysicalObjectIdentity.Read(input.SafeFileHandle) != item.Identity) return CleanupItemState.Unknown;
             }
-            else held.Require(Intent(item, path));
+            else guarded.Require(Intent(item, path));
             return (referenced?.Contains(item.Blob) ?? ReadReferences([item], held).Contains(item.Blob))
                 ? CleanupItemState.Referenced : CleanupItemState.VerifiedUnreferenced;
         }
@@ -54,13 +90,33 @@ public sealed class BlobCleanup(RuntimeInstance instance, ImmutableBlobStore blo
     {
         var intent = Intent(item, Resolve(item));
         bool Unreferenced() => !ReadReferences([item], held).Contains(item.Blob);
-        var deleted = held is null ? PhysicalObjectDeletion.TryDeleteUnreferenced(intent, Unreferenced) :
-            held.TryDelete(intent, Unreferenced);
+        var guarded = Guard(item, held);
+        var deleted = guarded is null ? PhysicalObjectDeletion.TryDeleteUnreferenced(intent, Unreferenced) :
+            guarded.TryDelete(intent, Unreferenced);
         return deleted ? CleanupStepResult.Deleted : CleanupStepResult.SkippedReferenced;
     }
 
     private IReadOnlySet<BlobReference> ReadReferences(IReadOnlyList<FrozenCleanupItem> items, PhysicalObjectDeletion.FileLease? held)
     {
+        if (held is null && _protection is { } protection)
+        {
+            var guarded = new HashSet<BlobReference>();
+            var remaining = new HashSet<BlobReference>();
+            foreach (var candidate in items)
+            {
+                if (Guard(candidate, null) is { } lease)
+                { lease.Require(Intent(candidate, Resolve(candidate))); guarded.Add(candidate.Blob); }
+                else remaining.Add(candidate.Blob);
+            }
+            var found = new HashSet<BlobReference>();
+            if (guarded.Count > 0)
+            {
+                protection.References ??= references.ReadReferenced(protection.Guards.Keys.ToHashSet());
+                found.UnionWith(protection.References.Where(guarded.Contains));
+            }
+            if (remaining.Count > 0) found.UnionWith(references.ReadReferenced(remaining));
+            return found;
+        }
         if (held is null || items.Count != 1) return references.ReadReferenced(items.Select(item => item.Blob).ToHashSet());
         var item = items[0]; held.Require(Intent(item, Resolve(item)));
         if (ReferenceEquals(held, _guarded) && item.Blob == _guardedBlob) return _guardedReferences!;
@@ -68,6 +124,22 @@ public sealed class BlobCleanup(RuntimeInstance instance, ImmutableBlobStore blo
         var result = references.ReadReferenced(new HashSet<BlobReference> { item.Blob });
         _guarded = held; _guardedBlob = item.Blob; _guardedReferences = result;
         return result;
+    }
+
+    private PhysicalObjectDeletion.FileLease? Guard(FrozenCleanupItem item, PhysicalObjectDeletion.FileLease? held)
+        => held ?? (_protection?.Guards.TryGetValue(item.Blob, out var guarded) == true ? guarded : null);
+
+    private sealed class CandidateProtection(BlobCleanup owner) : IDisposable
+    {
+        internal readonly Dictionary<BlobReference, PhysicalObjectDeletion.FileLease> Guards = new();
+        internal IReadOnlySet<BlobReference>? References;
+
+        public void Dispose()
+        {
+            if (ReferenceEquals(owner._protection, this)) owner._protection = null;
+            foreach (var guard in Guards.Values) guard.Dispose();
+            Guards.Clear(); References = null;
+        }
     }
 
     internal static FileObjectDeletion Intent(FrozenCleanupItem item, string path) => new(path, item.ParentIdentity,

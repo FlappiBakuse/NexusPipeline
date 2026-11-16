@@ -62,7 +62,7 @@ internal sealed class TaskTestService
     internal TaskTestAcceptance? ReadExisting(OperationIdentity identity)
     {
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var reference = TaskTestRows.Lookup(connection, transaction, identity);
         if (reference is null) return null;
         var source = new TaskTestCodec(_instance, _database, _contracts).Read(reference, connection, transaction);

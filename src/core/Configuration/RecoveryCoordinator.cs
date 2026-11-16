@@ -91,7 +91,7 @@ public sealed class RecoveryCoordinator(IRecoveryRegistry registry, IRecoveryEvi
     {
         lock (_gate)
         {
-            var blocked = index.BlockUnknown("recovery_verification_in_progress");
+            var blocked = index.BeginVerification(out var generation);
             try
             {
                 var snapshot = registry.ReadSnapshot();
@@ -108,7 +108,7 @@ public sealed class RecoveryCoordinator(IRecoveryRegistry registry, IRecoveryEvi
                 var published = registry.PublishVerified(snapshot.Revision, checked(blocked.Revision + 1));
                 if (evidence is ISnapshotCompletionEvidence)
                     RequireSameInventory(snapshot, published, compareRevision: false);
-                index.PublishVerifiedCompletions(blocked.Revision, published.Revision, published.Isolations, completions);
+                index.PublishVerifiedCompletions(generation, blocked.Revision, published.Revision, published.Isolations, completions);
                 return index.Current;
             }
             catch

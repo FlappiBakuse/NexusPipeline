@@ -211,7 +211,7 @@ public sealed class ControlBearerVerifier : IDisposable
         if (reference.SecretId is not { } secret || reference.Revision < 1)
             throw new IOException("control_credential_producer_unbound");
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         SecretFieldRows.RequireReference(connection, transaction, key, reference);
         Guid operation, journalId;
         using (var query = connection.CreateCommand())

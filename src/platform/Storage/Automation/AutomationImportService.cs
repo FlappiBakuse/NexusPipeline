@@ -81,7 +81,7 @@ public sealed class AutomationImportService(RuntimeInstance instance, ContractRe
     private AutomationImportResult? Lookup(OperationIdentity operation)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         if (OperationRows.ReadExisting(connection, transaction, operation) is null) return null;
         using var command = connection.CreateCommand();
         command.Transaction = transaction;

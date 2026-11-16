@@ -13,6 +13,60 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class SnapshotCompletionTests
 {
+    [Theory(DisplayName = "Concurrent Hold Updates Preserve Verified Publication And Current Holds Without Repeating Evidence Or The Registry Commit")]
+    [InlineData("add")]
+    [InlineData("replace")]
+    [InlineData("remove")]
+    public void PublishesConcurrentHolds(string change)
+    {
+        using var fixture = new SnapshotCompletionFixture();
+        var run = fixture.Run; var index = run.Index;
+        var original = new RecoveryResourceHold(Guid.NewGuid(), "completion:state", "fixture_original");
+        if (change != "add") index.UpdateResourceHolds(RecoveryHoldOwner.CompletionActions, [original]);
+        var otherHolds = index.Current.ResourceHolds.Where(item => item.Owner != RecoveryHoldOwner.CompletionActions).ToArray();
+        RecoveryResourceHold[] changed = change == "remove" ? [] : [original with { ReasonCode = "fixture_current" }];
+        var source = run.Source; long holdRevision = 0;
+        var actual = new InterleavedEvidence(new RecoveryJournalRegistry(source.Database),
+            new SnapshotCompletionEvidence(source.Instance, source.Database, new()), () =>
+            {
+                index.UpdateResourceHolds(RecoveryHoldOwner.CompletionActions, changed);
+                holdRevision = index.Current.Revision;
+            });
+        var result = run.Lease.PublishExecution(() => new RecoveryCoordinator(actual, actual, index).VerifyAndPublish());
+        Assert.True(result.IsReady); Assert.True(result.Revision > holdRevision);
+        Assert.Equal(otherHolds, result.ResourceHolds.Where(item => item.Owner != RecoveryHoldOwner.CompletionActions));
+        Assert.Equal(changed.Select(item => item with { Owner = RecoveryHoldOwner.CompletionActions }),
+            result.ResourceHolds.Where(item => item.Owner == RecoveryHoldOwner.CompletionActions));
+        Assert.Equal(1, actual.Verifications); Assert.Equal(1, actual.Publications);
+        Assert.True(((IRecoveryRegistry)new RecoveryJournalRegistry(source.Database)).ReadSnapshot().IsReady);
+        run.VerifyOriginal();
+    }
+
+    [Theory(DisplayName = "A New Unknown State Verified Publication Or Isolation During Evidence Still Rejects Publication And Preserves Its Block")]
+    [InlineData("unknown")]
+    [InlineData("publish")]
+    [InlineData("isolation")]
+    public void RejectsChangedVerification(string change)
+    {
+        using var fixture = new SnapshotCompletionFixture();
+        var run = fixture.Run; var index = run.Index; var source = run.Source;
+        var isolation = new ResourceIsolation("fixture:changed", Guid.NewGuid(), "fixture_unverified");
+        var actual = new InterleavedEvidence(new RecoveryJournalRegistry(source.Database),
+            new SnapshotCompletionEvidence(source.Instance, source.Database, new()), () =>
+            {
+                if (change == "unknown") index.BlockUnknown("recovery_verification_in_progress");
+                else index.PublishVerified(index.Current.Revision, index.Current.Revision + 1,
+                    change == "isolation" ? [isolation] : index.Current.Isolations);
+            });
+        var error = Assert.Throws<InvalidOperationException>(() => run.Lease.PublishExecution(() =>
+            new RecoveryCoordinator(actual, actual, index).VerifyAndPublish()));
+        Assert.Equal("recovery_index_revision_conflict", error.Message);
+        Assert.False(index.Current.IsReady); Assert.Empty(index.Current.SnapshotCompletions);
+        if (change == "isolation") Assert.Contains(isolation, index.Current.Isolations);
+        Assert.Equal(1, actual.Verifications); Assert.Equal(1, actual.Publications);
+        run.VerifyOriginal();
+    }
+
     [Theory(DisplayName = "Snapshot Completion Never Uses A Quarantined Unknown Entered Foreign Or Changed Scope As An Ordinary Continuation")]
     [InlineData("unknown")]
     [InlineData("quarantined")]
@@ -97,4 +151,24 @@ public sealed class SnapshotCompletionTests
 
     private static long[] Counts(ConfigurationRunFixture fixture) => [fixture.Count("operations"), fixture.Count("configuration_revisions"),
         fixture.Count("configuration_run_sync_items"), fixture.Count("journal_writer_jobs"), fixture.Count("journal_writer_job_closures")];
+
+    private sealed class InterleavedEvidence(IRecoveryRegistry registry, ISnapshotCompletionEvidence evidence, Action change)
+        : IRecoveryRegistry, ISnapshotCompletionEvidence
+    {
+        internal int Verifications { get; private set; }
+        internal int Publications { get; private set; }
+        public RecoveryRegistrySnapshot ReadSnapshot() => registry.ReadSnapshot();
+        public void VerifyAll(IReadOnlyList<RegisteredJournal> registered)
+        {
+            evidence.VerifyAll(registered); Verifications++;
+            Task.Run(change).GetAwaiter().GetResult();
+        }
+        public IReadOnlyList<SnapshotCompletionProjection> ReadPendingCompletions(RecoveryRegistrySnapshot verified) =>
+            evidence.ReadPendingCompletions(verified);
+        public RecoveryRegistrySnapshot PublishVerified(long expectedRevision, long minimumRevision)
+        {
+            Publications++;
+            return registry.PublishVerified(expectedRevision, minimumRevision);
+        }
+    }
 }

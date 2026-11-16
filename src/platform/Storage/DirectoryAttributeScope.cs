@@ -1,14 +1,17 @@
+using System.Runtime.CompilerServices;
+
 namespace NexusPipeline.Platform.Storage;
 
 public sealed class DirectoryAttributeScope : IDisposable
 {
     [ThreadStatic] private static DirectoryAttributeScope? _current;
+    private static readonly object ReadMarker = new();
     private readonly DirectoryAttributeScope? _previous = _current;
     private readonly int _thread = Environment.CurrentManagedThreadId;
     private readonly DirectoryAttributeProtection _protection;
     private readonly bool _ownsProtection;
     private readonly Dictionary<string, FileAttributes> _facts;
-    private readonly HashSet<object> _checks;
+    private readonly ConditionalWeakTable<object, object> _checks;
     private bool _disposed;
 
     private DirectoryAttributeScope(DirectoryAttributeProtection protection, bool ownsProtection)
@@ -18,7 +21,7 @@ public sealed class DirectoryAttributeScope : IDisposable
         _facts = _previous is { } prior && ReferenceEquals(prior._protection, protection)
             ? prior._facts : new(StringComparer.Ordinal);
         _checks = _previous is { } previous && ReferenceEquals(previous._protection, protection)
-            ? previous._checks : new(ReferenceEqualityComparer.Instance);
+            ? previous._checks : new();
         _current = this;
     }
 
@@ -45,7 +48,7 @@ public sealed class DirectoryAttributeScope : IDisposable
         return false;
     }
 
-    internal static bool FirstRead(object owner) => _current?._checks.Add(owner) ?? true;
+    internal static bool FirstRead(object owner) => _current?._checks.TryAdd(owner, ReadMarker) ?? true;
 
     internal static void Refresh()
     {

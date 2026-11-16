@@ -51,7 +51,7 @@ internal sealed class MaintenanceHandoffInputs : IDisposable
     {
         if (_held.Count == 0 || Read(Database, Plan.OperationId, Operation.HandoffId!.Value) != Operation) throw Invalid();
         using var connection = DatabaseConnections.Open(Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         RequireInside(connection, transaction); transaction.Commit();
     }
 
@@ -73,7 +73,7 @@ internal sealed class MaintenanceHandoffInputs : IDisposable
     {
         if (operationId == Guid.Empty || handoffId == Guid.Empty) throw Invalid();
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var row = MaintenanceOperationRows.ReadAll(connection, transaction).SingleOrDefault(item => item.Identity.OperationId == operationId) ?? throw Invalid();
         if (row.State != HostUpdateState.Starting &&
             !(row.State == HostUpdateState.Completed && row.TerminalCode == "maintenance_original_restored") ||

@@ -50,7 +50,7 @@ internal sealed class PreparedExecutionRetry : IPreparedExecutionRetry
         lease.VerifyHeld(instance);
         ExecutionRetryIntent intent; FrozenStartSource previous; HostSettingsSnapshot settings; bool replay;
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             intent = ExecutionRetryRows.Read(connection, transaction, retryOperationId);
             previous = StartSourceRows.Read(connection, transaction, intent.PreviousOperationId);

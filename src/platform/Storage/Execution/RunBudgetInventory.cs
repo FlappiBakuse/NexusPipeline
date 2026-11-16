@@ -13,7 +13,7 @@ internal static class RunBudgetInventory
     internal static void Verify(RuntimeInstance instance, StateDatabase database, ContractReader contracts)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         using var inputs = new BudgetPlanInputs(instance, contracts);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT run_id FROM main.execution_run_budget_states ORDER BY run_id;";

@@ -21,7 +21,7 @@ internal sealed class RetirementFamilyReader(RuntimeInstance instance, StateData
         var ids = new List<Guid>();
         var saved = new List<(AttemptReceipt Receipt, RegisteredJournal Journal)>();
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             using var command = RecordRetirementRows.Command(connection, transaction,
                 "SELECT attempt_id FROM records.attempt_receipts WHERE run_id=$0 ORDER BY ordinal LIMIT 100;", runId);
@@ -60,7 +60,7 @@ internal sealed class RetirementFamilyReader(RuntimeInstance instance, StateData
             AttemptTerminalEvidence.RequireStopped(database, item.Receipt.JournalId);
             AttemptTerminalEvidence.RequireArtifacts(instance, database, contracts, state);
             using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-            using var transaction = connection.BeginTransaction(deferred: true);
+            using var transaction = DatabaseConnections.BeginRead(connection);
             AttemptTerminalEvidence.RequireRestoredInside(connection, transaction, state,
                 allowUnregistered: state.Gate.State == EffectGateState.Sealed);
             transaction.Commit();
@@ -127,7 +127,7 @@ internal sealed class RetirementFamilyReader(RuntimeInstance instance, StateData
         if (!captures.IsEmpty)
         {
             using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-            using var transaction = connection.BeginTransaction(deferred: true);
+            using var transaction = DatabaseConnections.BeginRead(connection);
             var source = StartSourceRows.Read(connection, transaction, receipt.OperationId);
             StartSourceRows.RequireAttempt(source, attempt);
             var snapshot = ImageCatalogCapture.FromMetadata(receipt, journal, source, captures);

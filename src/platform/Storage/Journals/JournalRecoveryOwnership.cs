@@ -102,7 +102,7 @@ public sealed class JournalRecoveryOwnership(StateDatabase database) : IRecovery
     private ImmutableArray<JournalWriter> ReadExtensionWriters(Guid journalId)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.All);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var result = ReadExtensionWritersInside(connection, transaction, journalId);
         transaction.Commit();
         return result;
@@ -311,7 +311,7 @@ public sealed class JournalRecoveryOwnership(StateDatabase database) : IRecovery
             MaintenanceWriterSet Read()
             {
                 using var connection = DatabaseConnections.Open(expected.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-                using var transaction = connection.BeginTransaction(deferred: true);
+                using var transaction = DatabaseConnections.BeginRead(connection);
                 var value = ReadMaintenanceWriters(connection, transaction, journal); transaction.Commit(); return value;
             }
             var before = Read();
@@ -332,7 +332,7 @@ public sealed class JournalRecoveryOwnership(StateDatabase database) : IRecovery
             MaintenanceWriterSet Read()
             {
                 using var connection = DatabaseConnections.Open(expected.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-                using var transaction = connection.BeginTransaction(deferred: true);
+                using var transaction = DatabaseConnections.BeginRead(connection);
                 var value = ReadMaintenanceWriters(connection, transaction, failure.JournalId); transaction.Commit(); return value;
             }
             var before = Read();

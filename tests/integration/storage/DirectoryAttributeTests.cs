@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Security.Cryptography;
+using System.Runtime.CompilerServices;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage;
 using Xunit;
@@ -8,6 +9,43 @@ namespace NexusPipeline.StorageTests;
 
 public sealed class DirectoryAttributeTests
 {
+    [Fact(DisplayName = "Nested Directory Scopes Remember Live Read Owners Until Their Facts Are Refreshed")]
+    public void RemembersLiveReadOwners()
+    {
+        var instance = Create();
+        var owner = new object();
+        using var outer = DirectoryAttributeScope.Hold(instance);
+        Assert.True(DirectoryAttributeScope.FirstRead(owner));
+        Assert.False(DirectoryAttributeScope.FirstRead(owner));
+        using (DirectoryAttributeScope.Hold(instance))
+        {
+            Assert.False(DirectoryAttributeScope.FirstRead(owner));
+            DirectoryAttributeScope.Refresh();
+            Assert.True(DirectoryAttributeScope.FirstRead(owner));
+        }
+        Assert.False(DirectoryAttributeScope.FirstRead(owner));
+        GC.KeepAlive(owner);
+    }
+
+    [Fact(DisplayName = "A Retained Directory Scope Releases Completed Read Owners Before The Inventory Ends")]
+    public void ReleasesCompletedReadOwners()
+    {
+        var instance = Create();
+        using var scope = DirectoryAttributeScope.Hold(instance);
+        var completed = RegisterCompletedRead();
+        GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+        Assert.False(completed.IsAlive);
+        Assert.Throws<IOException>(() => Directory.Move(instance.RuntimeRoot, instance.RuntimeRoot + "-moved"));
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference RegisterCompletedRead()
+    {
+        var owner = new object();
+        Assert.True(DirectoryAttributeScope.FirstRead(owner));
+        return new(owner);
+    }
+
     [Fact(DisplayName = "Retained Directory Attributes Never Cache Or Lock The Contents Of Their Child Files")]
     public void ReadsCurrentFiles()
     {

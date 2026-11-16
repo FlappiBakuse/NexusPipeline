@@ -13,7 +13,7 @@ internal sealed class NotificationDeliveryEvidence(RuntimeInstance instance, Sta
     internal NotificationDeliverySnapshot Read(BlobReference reference)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var result = ReadFromSnapshot(reference, connection, transaction);
         transaction.Commit();
         return result;

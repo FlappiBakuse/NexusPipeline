@@ -104,14 +104,17 @@ public sealed class ExecutionRetryService(RuntimeInstance instance, StateDatabas
         lease.VerifyHeld(instance);
         lease.PublishExecution(() =>
         {
-            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-            using var transaction = connection.BeginTransaction(deferred: true);
-            using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT operation_id FROM main.execution_retry_intents WHERE run_id=$run ORDER BY next_ordinal DESC LIMIT 1;";
-            command.Parameters.AddWithValue("$run", runId.ToString("D"));
-            var id = command.ExecuteScalar() as string ?? throw new IOException("execution_retry_not_waiting");
-            var found = ExecutionRetryRows.Read(connection, transaction, Guid.ParseExact(id, "D"));
-            if (found.SubjectId != subject) throw new IOException("execution_retry_subject_mismatch");
+            ExecutionRetryIntent found;
+            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
+            using (var transaction = DatabaseConnections.BeginRead(connection))
+            {
+                using var command = connection.CreateCommand(); command.Transaction = transaction;
+                command.CommandText = "SELECT operation_id FROM main.execution_retry_intents WHERE run_id=$run ORDER BY next_ordinal DESC LIMIT 1;";
+                command.Parameters.AddWithValue("$run", runId.ToString("D"));
+                var id = command.ExecuteScalar() as string ?? throw new IOException("execution_retry_not_waiting");
+                found = ExecutionRetryRows.Read(connection, transaction, Guid.ParseExact(id, "D"));
+                if (found.SubjectId != subject) throw new IOException("execution_retry_subject_mismatch");
+            }
             WriteDecline(found, "retry_run_cancelled", now);
             return true;
         });
@@ -154,7 +157,7 @@ public sealed class ExecutionRetryService(RuntimeInstance instance, StateDatabas
             var revision = DatabaseVersion.Read(database, null, DatabaseDomain.Runtime | DatabaseDomain.Records);
             if (_waitingRevision == revision) return _waiting;
             using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
-            using var transaction = connection.BeginTransaction(deferred: true);
+            using var transaction = DatabaseConnections.BeginRead(connection);
             var values = ExecutionRetryRows.Waiting(connection, transaction)
                 .Select(id => ExecutionRetryRows.Read(connection, transaction, id)).ToArray();
             // These bounded candidates carry no admission authority; due retries acquire fresh preparation.
@@ -167,7 +170,7 @@ public sealed class ExecutionRetryService(RuntimeInstance instance, StateDatabas
     private ExecutionRetryIntent? ReadAfter(Guid attempt)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         return ExecutionRetryRows.After(connection, transaction, attempt);
     }
 }

@@ -27,7 +27,7 @@ internal sealed class CompletionIntentSource(RuntimeInstance instance, StateData
         var journal = new JournalStore(instance, contracts).Read(receipt.JournalId);
         if (AttemptResultCodec.Receipt(bound.Plan, journal, receipt.Facts) != receipt) throw CompletionActionCodec.Invalid();
         var reference = AttemptPlanCodec.Reference(bound.Plan.ExecutionPlan);
-        var plan = new ExecutionPlanCodec(instance, contracts, new(instance, contracts)).Read(reference).ReadWire();
+        var plan = bound.Total;
         if (plan.RunId != receipt.Facts.RunId.ToString("D")) throw CompletionActionCodec.Invalid();
         if (plan.CompletionAction == "none") return null;
         if (plan.QueueId is not { } queueId) throw CompletionActionCodec.Invalid();

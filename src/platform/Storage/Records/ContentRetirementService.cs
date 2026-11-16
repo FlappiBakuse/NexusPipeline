@@ -20,6 +20,7 @@ public sealed class ContentRetirementService
     private readonly InstanceLease _lease;
     private readonly ResourceLeaseManager _resources;
     private readonly RecoveryIndex _index;
+    private readonly PayloadApplyRoots _payloadRoots;
     private readonly ICleanupPersistenceObserver? _observer;
     private static readonly ResourceClaim[] Claims = [
         new("records:retention", ResourceClaimMode.Mutation), new("blobs:content", ResourceClaimMode.Reference),
@@ -27,12 +28,13 @@ public sealed class ContentRetirementService
 
     public ContentRetirementService(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
         InstanceLease lease, ResourceLeaseManager resources, RecoveryIndex index,
+        PayloadApplyRoots payloadRoots,
         ICleanupPersistenceObserver? observer = null)
     {
         if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot ||
             !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "runtime.db")) ||
             !resources.UsesRecoveryIndex(index)) throw RecordRetirementCodec.Invalid();
-        _instance = instance; _database = database; _contracts = contracts; _lease = lease; _resources = resources; _index = index; _observer = observer;
+        _instance = instance; _database = database; _contracts = contracts; _lease = lease; _resources = resources; _index = index; _payloadRoots = payloadRoots; _observer = observer;
     }
 
     public ContentRetirementPage? RetireLogsPage(Guid operationId, string subjectId, Guid runId,
@@ -51,7 +53,7 @@ public sealed class ContentRetirementService
         using var root = _resources.TryAcquire(page.OperationId, claims).Lease ?? throw new IOException("record_retirement_admission_blocked");
         using var borrowed = root.Borrow(_resources, page.OperationId, claims);
         return borrowed.Use(() => new OwnedCleanupExecutor(_instance, _contracts, _database, _index)
-            .Execute(page.CleanupJournalId, _lease, root)) == FileCleanupResult.Cleaned;
+            .Execute(page.CleanupJournalId, _lease, root, _payloadRoots)) == FileCleanupResult.Cleaned;
     }
 
     internal bool RetireEmptyHistory(Guid runId, long settingsRevision, DateTimeOffset now)
@@ -116,7 +118,7 @@ public sealed class ContentRetirementService
                 if (current.JournalId != original.JournalId)
                 {
                     using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-                    using var transaction = connection.BeginTransaction(deferred: true);
+                    using var transaction = DatabaseConnections.BeginRead(connection);
                     var identity = ResumeIdentity(subject, reference, current);
                     if (OperationRows.ReadExisting(connection, transaction, identity) is null) throw RecordRetirementCodec.Invalid();
                 }
@@ -202,7 +204,7 @@ public sealed class ContentRetirementService
         return borrow.Use(() => _lease.PublishExecution<ContentRetirementPage?>(() =>
         {
             using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
-            using (var transaction = connection.BeginTransaction(deferred: true))
+            using (var transaction = DatabaseConnections.BeginRead(connection))
             {
                 var existing = OperationRows.ReadExisting(connection, transaction, identity);
                 if (existing is not null)

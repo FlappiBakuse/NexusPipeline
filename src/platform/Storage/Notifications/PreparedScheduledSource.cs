@@ -30,7 +30,7 @@ internal sealed class PreparedScheduledSource : IDisposable
         {
             WorkStartEvidence begin;
             using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications | DatabaseDomain.System))
-            using (var transaction = connection.BeginTransaction(deferred: true))
+            using (var transaction = DatabaseConnections.BeginRead(connection))
             {
                 var invocation = WorkInvocationEvidence.ReadScheduled(instance, contracts, actualWork.Reference, connection, transaction);
                 if (!invocation.IsOpen || invocation.Begin is not { } started) throw NotificationScheduledCodec.Invalid();

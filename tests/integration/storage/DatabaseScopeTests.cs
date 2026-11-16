@@ -9,6 +9,62 @@ namespace NexusPipeline.StorageTests;
 
 public sealed class DatabaseScopeTests
 {
+    [Fact(DisplayName = "Eight Concurrent Read Roles Keep The Retained Page Budget And Observe Writes Before All Handles Release")]
+    public void BoundsConcurrentReaders()
+    {
+        var root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "pooled-readers-" + Guid.NewGuid().ToString("N"));
+        var instance = new InstanceRoot(new()).OpenOrCreate(root);
+        using var lease = InstanceLease.Acquire(instance, new());
+        var database = StateDatabase.CreateFresh(instance, lease);
+        var readers = new List<SqliteConnection>();
+        try
+        {
+            foreach (var domain in new[]
+            {
+                DatabaseDomain.Runtime,
+                DatabaseDomain.Runtime | DatabaseDomain.Configuration,
+                DatabaseDomain.Runtime | DatabaseDomain.Records,
+                DatabaseDomain.Runtime | DatabaseDomain.System,
+                DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Records | DatabaseDomain.System,
+                DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System,
+                DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Content,
+                DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content
+            })
+                readers.Add(DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: domain));
+            var readerBudget = readers.Sum(connection =>
+            {
+                var budget = CacheBudget(connection);
+                Assert.InRange(budget, 1, 3072);
+                return budget;
+            });
+            var writerBudget = database.Write((connection, transaction) =>
+            {
+                using var command = DatabaseConnections.Command(connection, transaction, "PRAGMA main.synchronous;");
+                Assert.Equal(2L, command.ExecuteScalar());
+                command.CommandText = "PRAGMA foreign_keys;";
+                Assert.Equal(1L, command.ExecuteScalar());
+                return CacheBudget(connection, transaction);
+            });
+            Assert.InRange(writerBudget, 1, 8192);
+            Assert.InRange(readerBudget + writerBudget, 1, 32768);
+            using (var overflow = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime))
+            {
+                Assert.InRange(CacheBudget(overflow), 1, 8192);
+                Assert.Equal(0L, DatabaseConnections.Scalar(overflow, "SELECT count(*) FROM main.operations;"));
+                Assert.True(database.Accept(Operation(), DateTimeOffset.UtcNow).IsNew);
+                foreach (var connection in readers.Append(overflow))
+                {
+                    Assert.Equal(1L, DatabaseConnections.Scalar(connection, "SELECT count(*) FROM main.operations;"));
+                    using var command = connection.CreateCommand(); command.CommandText = "DELETE FROM main.operations;";
+                    Assert.Throws<SqliteException>(() => command.ExecuteNonQuery());
+                }
+            }
+        }
+        finally { foreach (var connection in readers) connection.Dispose(); }
+        lease.Dispose();
+        Directory.Move(root, root + "-released");
+    }
+
     [Fact(DisplayName = "Scoped Recovery Snapshots Observe External Commits And Never Share Facts Between Instances")]
     public void RefreshesHistorySnapshots()
     {
@@ -206,6 +262,19 @@ public sealed class DatabaseScopeTests
     }
 
     private static OperationIdentity Operation() => new(Guid.NewGuid(), "fixture", new string('a', 64), "fixture.command");
+
+    private static long CacheBudget(SqliteConnection connection, SqliteTransaction? transaction = null)
+    {
+        var aliases = new List<string>();
+        using (var command = DatabaseConnections.Command(connection, transaction, "PRAGMA database_list;"))
+        using (var rows = command.ExecuteReader())
+            while (rows.Read()) if (rows.GetString(1) != "temp") aliases.Add(rows.GetString(1));
+        return aliases.Sum(alias =>
+        {
+            using var command = DatabaseConnections.Command(connection, transaction, "PRAGMA " + alias + ".cache_size;");
+            return -(long)command.ExecuteScalar()!;
+        });
+    }
 
     private static long Read(string path)
     {

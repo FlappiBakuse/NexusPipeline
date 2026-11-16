@@ -48,7 +48,7 @@ internal static class ExecutionCancellationRows
         JsonElement latest, JsonElement projected)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var row = VerifyInside(connection, transaction, parent, plan, total, latest, projected);
         transaction.Commit(); return row;
     }

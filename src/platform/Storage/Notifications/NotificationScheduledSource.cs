@@ -9,7 +9,7 @@ internal static class NotificationScheduledSource
         ContractReader contracts, BlobReference reference, Guid expectedRunId)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var source = new NotificationScheduledCodec(instance, contracts).Read(reference, connection, transaction, expectedRunId);
         NotificationWorkFanout.Verify(instance, database, contracts, source, connection, transaction, "notification_scheduled_deliveries");
         transaction.Commit();

@@ -8,7 +8,7 @@ namespace NexusPipeline.StorageTests;
 
 public sealed class DatabaseReaderTests
 {
-    [Fact(DisplayName = "Domain Pool Eviction Preserves Borrowed And Recently Used Connections Within The Four Handle Budget")]
+    [Fact(DisplayName = "Domain Pool Eviction Preserves Borrowed And Recently Used Connections Within The Nine Handle Budget")]
     public async Task RetainsBusyConnections()
     {
         var root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "domain-pool-" + Guid.NewGuid().ToString("N"));
@@ -32,11 +32,11 @@ public sealed class DatabaseReaderTests
             using (var selected = DatabaseConnections.Open(database.DatabasePath, readOnly: true,
                 domains: DatabaseDomain.Automation | DatabaseDomain.Records)) handles.Add(selected.Handle!);
             using (var following = DatabaseConnections.Open(database.DatabasePath)) Assert.Same(writer, following.Handle);
-            Assert.InRange(handles.Distinct().Count(handle => !handle.IsClosed), 1, 4);
+            Assert.InRange(handles.Distinct().Count(handle => !handle.IsClosed), 1, 9);
             using var wide = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
             var budgets = DatabaseLayout.Domains.ToDictionary(domain => domain, domain =>
                 -(long)DatabaseConnections.Scalar(wide, $"PRAGMA {DatabaseLayout.Alias(domain)}.cache_size;"));
-            Assert.InRange(budgets.Values.Sum(), 1, 8192);
+            Assert.InRange(budgets.Values.Sum(), 1, 3072);
             Assert.True(budgets[DatabaseDomain.Runtime] > budgets[DatabaseDomain.Configuration]);
             Assert.True(budgets[DatabaseDomain.Configuration] > budgets[DatabaseDomain.Records]);
         }

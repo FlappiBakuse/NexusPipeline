@@ -29,7 +29,7 @@ public sealed class RecordDisplayReader(RuntimeInstance instance, StateDatabase 
         var receipts = new AttemptHistoryReader(database).ReadPage(new(runId, Limit: 100)).Items;
         if (receipts.Count == 0) return null;
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var first = receipts[0];
         var journal = RecoveryJournalRegistry.ReadInside(connection, transaction, first.JournalId);
         var metadata = AttemptPreparedBinding.ReadPlanMetadata(instance, contracts, journal);

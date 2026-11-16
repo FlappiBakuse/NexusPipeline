@@ -23,7 +23,7 @@ internal static class WorkEffectInventory
                 source.Invocation.RunId, source.Invocation.AttemptId, source.HostLocalDate, state.Begin is not null));
         });
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         using (var versions = connection.CreateCommand())
         {
             versions.Transaction = transaction; versions.CommandText = "SELECT extension_id,field,identity_version FROM main.work_identity_versions;";

@@ -10,12 +10,14 @@ internal sealed class InstanceReadScope : IDisposable
     private readonly RuntimeInstance _instance;
     private readonly StableDirectoryLease? _directory;
     private readonly FileStream? _identity;
+    private readonly InstanceLease? _lease;
     private bool _disposed;
 
     private InstanceReadScope(RuntimeInstance instance, ContractReader contracts)
     {
         _instance = instance;
-        if (_previous?._instance == instance) { _current = this; return; }
+        if (_previous?._instance == instance)
+        { _lease = _previous._lease; _lease?.VerifyHeld(instance); _current = this; return; }
         _directory = StableDirectoryLease.Acquire(instance.RuntimeRoot);
         try
         {
@@ -33,11 +35,19 @@ internal sealed class InstanceReadScope : IDisposable
         catch { _directory.Dispose(); throw; }
     }
 
+    private InstanceReadScope(RuntimeInstance instance, InstanceLease lease)
+    {
+        lease.VerifyHeld(instance);
+        _instance = instance; _lease = lease; _current = this;
+    }
+
     internal static InstanceReadScope Hold(RuntimeInstance instance, ContractReader contracts) => new(instance, contracts);
+    internal static InstanceReadScope Hold(RuntimeInstance instance, InstanceLease lease) => new(instance, lease);
 
     internal static RuntimeInstance? Read(string root)
     {
         if (_current is not { } scope || !StringComparer.OrdinalIgnoreCase.Equals(root, scope._instance.RuntimeRoot)) return null;
+        scope._lease?.VerifyHeld(scope._instance);
         // The identity denies writes/deletion and the directory leases pin every ancestor name.
         return scope._instance;
     }

@@ -1,6 +1,8 @@
 using System.Text.Json;
 using NexusPipeline.Core.Configuration;
+using NexusPipeline.Core.Operations;
 using NexusPipeline.Core.Records;
+using NexusPipeline.Core.Settings;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
@@ -9,6 +11,68 @@ namespace NexusPipeline.StorageTests;
 
 public sealed class RuntimeDoctorTests
 {
+    [Fact(DisplayName = "Control Snapshots Keep Catalog Settings And Counts Together Across Atomic Commits")]
+    public async Task ReadsControlSnapshot()
+    {
+        var fixture = Create();
+        var doctor = new RuntimeDoctor(fixture.Instance, fixture.Database, new RecoveryIndex());
+        var original = doctor.ReadControlSnapshot();
+        var automation = Guid.NewGuid();
+        var writer = Task.Run(() =>
+        {
+            for (var revision = 1; revision <= 24; revision++)
+                fixture.Database.Write((connection, transaction) =>
+                {
+                    HostSettingsRows.Insert(connection, transaction, new(revision, HostSettings.Default));
+                    using var command = DatabaseConnections.Command(connection, transaction,
+                        "UPDATE system.settings_current SET revision=$0 WHERE singleton=1; " +
+                        "UPDATE automation.automation_catalog_state SET revision=$0 WHERE singleton=1;", revision);
+                    command.ExecuteNonQuery();
+                    OperationRows.Accept(connection, transaction,
+                        new OperationIdentity(Guid.NewGuid(), "control-snapshot", new string('a', 64), "fixture.control"), DateTimeOffset.UtcNow);
+                    RunRecordStore.PublishInside(connection, transaction, RecordStoreFixture.Record(revision, automation));
+                    return true;
+                });
+        });
+        try
+        {
+            do
+            {
+                var snapshot = doctor.ReadControlSnapshot();
+                Assert.Equal(snapshot.CatalogRevision, snapshot.SettingsRevision);
+                Assert.Equal(snapshot.CatalogRevision, snapshot.Counts.CompletedRuns);
+                Assert.Equal(snapshot.CatalogRevision, snapshot.Counts.PendingOperations);
+                Assert.Equal(0, snapshot.Counts.Attempts);
+                await Task.Yield();
+            } while (!writer.IsCompleted);
+        }
+        finally { await writer.WaitAsync(TimeSpan.FromSeconds(15)); }
+        var current = doctor.ReadControlSnapshot();
+        Assert.Equal(24, current.CatalogRevision);
+        Assert.Equal(24, current.SettingsRevision);
+        Assert.Equal(24, current.Counts.CompletedRuns);
+        Assert.Equal(0, original.CatalogRevision);
+        Assert.Equal(0, original.Counts.CompletedRuns);
+    }
+
+    [Fact(DisplayName = "Control Snapshots Revalidate Current Settings And Recover After Invalid Saved Values Are Corrected")]
+    public void RechecksControlSettings()
+    {
+        var fixture = Create();
+        var doctor = new RuntimeDoctor(fixture.Instance, fixture.Database, new RecoveryIndex());
+        Assert.Equal(0, doctor.ReadControlSnapshot().SettingsRevision);
+        Save(2);
+        Assert.Equal("settings_proxy_url_required", Assert.Throws<HostSettingsException>(() => doctor.ReadControlSnapshot()).Message);
+        Save(0);
+        Assert.Equal(0, doctor.ReadControlSnapshot().SettingsRevision);
+        void Save(int mode) => fixture.Database.Write((connection, transaction) =>
+        {
+            using var command = DatabaseConnections.Command(connection, transaction,
+                "UPDATE system.settings_snapshots SET proxy_mode=$0,proxy_url=NULL WHERE revision=0;", mode);
+            return command.ExecuteNonQuery();
+        });
+    }
+
     [Fact(DisplayName = "The Actual Read Only Diagnostic Counts Saved Facts Without Exporting Private Reasons Subjects Or Paths")]
     public void ReportsSafeCounts()
     {

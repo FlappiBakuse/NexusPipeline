@@ -114,7 +114,7 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
         var parent = new RecoveryJournalRegistry(database).ReadJournal(binding.ParentJournalId);
         var attempt = ReadPlan<RunAttemptPlan>(AttemptPreparedBinding.Reference(instance, parent), "run-attempt-plan.schema.json");
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var result = ExecutionCancellationRows.Read(connection, transaction, parent, attempt);
         transaction.Commit(); return result;
     }

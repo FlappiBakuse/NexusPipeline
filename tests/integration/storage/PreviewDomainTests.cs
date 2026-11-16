@@ -148,6 +148,18 @@ public sealed class PreviewDomainTests
                 changedHistory[^1] = JournalDocument.Read(JsonSerializer.SerializeToUtf8Bytes(changed), new());
                 Assert.Throws<IOException>(() => PreviewDomainCodec.RequireHistory(changedHistory, final.Total,
                     final.Attempt.ExecutionPlan.Sha256));
+                var validated = final.RequireValidatedRead();
+                validated.RequirePreviewHistory(history, final.Total);
+                Assert.Throws<IOException>(() => validated.RequirePreviewHistory(history, final.Total with { CaptureRuntime = null }));
+                Assert.Throws<IOException>(() => validated.RequirePreviewHistory(changedHistory, final.Total));
+                var appended = JsonNode.Parse(final.Latest.Export())!.AsObject();
+                appended["revision"] = final.Latest.Revision + 1;
+                appended["participants"]!.AsArray().Add(PreviewDomainCodec.Participant(events[1] with
+                {
+                    BeforeRevision = final.Latest.Revision
+                }, final.Total.Steps[0].ScriptId));
+                var appendedHistory = history.Append(JournalDocument.Read(JsonSerializer.SerializeToUtf8Bytes(appended), new())).ToArray();
+                Assert.Throws<IOException>(() => validated.RequirePreviewHistory(appendedHistory, final.Total));
                 Assert.Equal(original, File.ReadAllBytes(fixture.Source.Configuration));
                 Assert.Equal(0, fixture.Consumer.PendingReconciliationCount);
             }

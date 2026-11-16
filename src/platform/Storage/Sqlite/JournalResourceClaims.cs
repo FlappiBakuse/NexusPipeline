@@ -28,7 +28,7 @@ internal static class JournalResourceClaims
     internal static IReadOnlyDictionary<string, ResourceClaimMode> Read(StateDatabase database, Guid journalId)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         return ReadInside(connection, transaction, journalId);
     }
 
@@ -64,7 +64,7 @@ internal static class JournalResourceClaims
     internal static void VerifyInventory(RuntimeInstance instance, StateDatabase database, ContractReader contracts, PayloadApplyRoots? payloadRoots = null)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         VerifyScope(instance, database, contracts, RecoveryJournalRegistry.ReadHistoryInside(connection, transaction), payloadRoots);
     }
 
@@ -72,7 +72,7 @@ internal static class JournalResourceClaims
         IEnumerable<RegisteredJournal> registered, PayloadApplyRoots? payloadRoots = null)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         foreach (var batch in registered.Chunk(128))
         {
             var claims = ReadBatch(connection, transaction, batch.Select(item => item.JournalId).ToArray());
@@ -149,6 +149,11 @@ internal static class JournalResourceClaims
         actual ??= Read(database, journal.JournalId);
         var blobs = new ImmutableBlobStore(instance, contracts);
         var reference = new BlobReference(journal.PlanPath, new FileInfo(Path.Combine(instance.RuntimeRoot, journal.PlanPath)).Length, journal.PlanDigest);
+        if (database.AttemptReads?.Find(journal.JournalId)?.ReadPlanMetadata(journal, reference) is { } owned)
+        {
+            VerifyAttempt(journal, owned.Plan, owned.Total, actual);
+            return;
+        }
         using var bound = new AttemptPlanCodec(instance, contracts, blobs).ReadBound(reference);
         VerifyAttempt(journal, bound.Plan, bound.Total, actual);
     }

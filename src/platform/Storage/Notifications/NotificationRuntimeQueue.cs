@@ -17,7 +17,7 @@ internal sealed class NotificationRuntimeQueue(RuntimeInstance instance, StateDa
     internal void VerifyProjection()
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         NotificationReferenceInventory.RequireNoOrphans(connection, transaction);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT EXISTS(SELECT 1 FROM notifications.notification_deliveries d " +
@@ -42,7 +42,7 @@ internal sealed class NotificationRuntimeQueue(RuntimeInstance instance, StateDa
     {
         if (state is not ("queued" or "sending")) throw new ArgumentException("notification_pending_state_invalid");
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var result = new List<(Guid Operation, BlobReference Reference)>();
         using (var command = NotificationDeliveryRows.Command(connection, transaction,
             "SELECT p.operation_id,d.relative_path,d.size_bytes,d.sha256 FROM notifications.notification_delivery_pending p " +

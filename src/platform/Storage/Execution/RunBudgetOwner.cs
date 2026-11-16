@@ -18,7 +18,7 @@ internal sealed class RunBudgetOwner(InstanceLease lease)
     {
         Require(database);
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         return RunBudgetRows.Read(connection, transaction, runId)?.FirstPreparedAtUtc;
     }
 
@@ -36,7 +36,7 @@ internal sealed class RunBudgetOwner(InstanceLease lease)
         {
             RunBudgetObservation? saved;
             using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime))
-            using (var transaction = connection.BeginTransaction(deferred: true))
+            using (var transaction = DatabaseConnections.BeginRead(connection))
                 saved = RunBudgetRows.Read(connection, transaction, origin.RunId);
             var budget = GetOrCreate(origin.RunId, origin.OperationId, total, deadline, saved, clock, startedTimestamp, firstPreparedAt);
             if (saved is null)
@@ -61,13 +61,13 @@ internal sealed class RunBudgetOwner(InstanceLease lease)
     {
         prepared.RequireLive(); var wire = prepared.Total.Plan.ReadWire(); var runId = Guid.Parse(wire.RunId);
         using var borrow = root.Borrow(resources, prepared.Identity.OperationId, ExecutionPlanResources.Claims(wire));
-        borrow.Use(() => lease.PublishExecution(() =>
+        borrow.Use(() =>
         {
             Require(database);
             var saved = Read(database, runId);
             Guid initialOperation;
             using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime))
-            using (var transaction = connection.BeginTransaction(deferred: true))
+            using (var transaction = DatabaseConnections.BeginRead(connection))
                 initialOperation = StartSourceRows.Original(connection, transaction,
                     StartSourceRows.Read(connection, transaction, prepared.Identity.OperationId)).Identity.OperationId;
             var total = TimeSpan.FromSeconds(wire.Budget.TotalTimeoutSeconds);
@@ -104,7 +104,7 @@ internal sealed class RunBudgetOwner(InstanceLease lease)
                 if (!measured.AcceptedRun.IsActive) throw new IOException("execution_run_inactive");
             }
             return true;
-        }));
+        });
     }
 
     internal PreparedBudgetTerminal PrepareTerminal(StateDatabase database, AcceptedExecutionAdmission accepted,
@@ -156,7 +156,7 @@ internal sealed class RunBudgetOwner(InstanceLease lease)
     {
         Require(database);
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var actual = ScheduleMinuteRows.ReadOccurrence(connection, transaction, occurrence.Frozen.OccurrenceId, lease.Instance.InstanceId);
         if (actual != occurrence || actual.Phase != NexusPipeline.Core.Scheduling.ScheduleOccurrencePhase.Blocked)
             throw RunBudgetRows.Invalid();
@@ -167,7 +167,7 @@ internal sealed class RunBudgetOwner(InstanceLease lease)
     {
         Require(database);
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var actual = StartupQueueRows.Read(connection, transaction, occurrenceId, lease.Instance.InstanceId);
         if (actual.BlockReason is null) throw RunBudgetRows.Invalid();
         Remove(actual.Occurrence.RunId);
@@ -231,7 +231,7 @@ internal sealed class RunBudgetOwner(InstanceLease lease)
     private static RunBudgetObservation? Read(StateDatabase database, Guid runId)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         return RunBudgetRows.Read(connection, transaction, runId);
     }
 

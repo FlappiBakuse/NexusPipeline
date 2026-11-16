@@ -266,7 +266,7 @@ internal sealed class StepWriterScope : IConfigurationWriterScope
         var state = Read();
         if (state.Jobs.Any(job => job.JobName == jobName)) throw new IOException("execution_unregistered_job_release_unverified");
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         AttemptWriterState.RequireCursor(connection, transaction, state.Journal, state.Gate.State);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.journal_writer_jobs WHERE job_name=$job) OR " +
@@ -287,7 +287,7 @@ internal sealed class StepWriterScope : IConfigurationWriterScope
             !StringComparer.OrdinalIgnoreCase.Equals(native.ImagePath, Command.ExecutablePath) || native.ImageSha256 != Command.ExecutableSha256)
             throw new IOException("execution_capture_writer_unbound");
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         ExecutionCancellationRows.RequireDispatchOpen(connection, transaction, _journalId);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT r.process_id,r.created_file_time,r.image_path,r.image_sha256,r.user_sid,r.elevated," +

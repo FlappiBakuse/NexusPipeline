@@ -32,7 +32,7 @@ internal static class CompletionActionStartup
     private static void VerifyInventory(StateDatabase database, Action<BoundCompletionIntent> requireSource)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         foreach (var page in Pages(connection, transaction, "completion_candidates", "run_id"))
             foreach (var id in page) VerifyCandidate(connection, transaction, id, requireSource);
         foreach (var page in Pages(connection, transaction, "completion_actions", "operation_id"))
@@ -58,7 +58,7 @@ internal static class CompletionActionStartup
         lease.VerifyHeld(lease.Instance);
         var holds = new List<RecoveryResourceHold>();
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         foreach (var page in Pages(connection, transaction, "completion_actions", "operation_id"))
             foreach (var id in page)
             {

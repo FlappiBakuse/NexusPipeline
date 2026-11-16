@@ -66,7 +66,7 @@ internal sealed class RestoredStartupEvidence : IDisposable
     {
         if (_contents is null) throw Invalid();
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         RequireInside(connection, transaction); transaction.Commit();
     }
 

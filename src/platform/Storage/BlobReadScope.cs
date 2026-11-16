@@ -35,20 +35,29 @@ public sealed class BlobReadScope : IDisposable
                 observing._capture(path);
         var relative = Path.GetRelativePath(scope._root, path);
         if (Path.IsPathRooted(relative) || relative == ".." || relative.StartsWith("..\\", StringComparison.Ordinal)) return;
-        if (scope._held.TryGetValue(path, out var current))
+        scope.Retain(path);
+        var outer = scope;
+        for (var parent = scope._previous; parent is not null; parent = parent._previous)
+            if (string.Equals(parent._root, scope._root, StringComparison.OrdinalIgnoreCase)) outer = parent;
+        if (!ReferenceEquals(outer, scope)) outer.Retain(path);
+    }
+
+    private void Retain(string path)
+    {
+        if (_held.TryGetValue(path, out var current))
         {
-            scope._recent.Remove(current.Node); scope._recent.AddLast(current.Node); return;
+            _recent.Remove(current.Node); _recent.AddLast(current.Node); return;
         }
         var lease = BlobReadStream.Retain(path);
         try
         {
-            if (scope._held.Count == MaximumReferences)
+            if (_held.Count == MaximumReferences)
             {
-                var oldest = scope._recent.First!;
-                var removed = scope._held[oldest.Value];
-                scope._held.Remove(oldest.Value); scope._recent.RemoveFirst(); removed.Lease.Dispose();
+                var oldest = _recent.First!;
+                var removed = _held[oldest.Value];
+                _held.Remove(oldest.Value); _recent.RemoveFirst(); removed.Lease.Dispose();
             }
-            scope._held.Add(path, (lease, scope._recent.AddLast(path)));
+            _held.Add(path, (lease, _recent.AddLast(path)));
         }
         catch { lease.Dispose(); throw; }
     }

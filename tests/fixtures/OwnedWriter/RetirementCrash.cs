@@ -35,7 +35,7 @@ internal static class RetirementCrash
             var receipt = await consumer.RunNextAsync() ?? throw new IOException("retirement_fixture_execution_missing");
             new ExecutionRecordProjection(instance, database, contracts, lease, new(instance, database, contracts)).OnCommitted(receipt);
             var observer = new Observer(phase, report, receipt.Facts.RunId);
-            var service = new ContentRetirementService(instance, database, contracts, lease, resources, index, observer);
+            var service = new ContentRetirementService(instance, database, contracts, lease, resources, index, roots, observer);
             var page = service.RetireLogsPage(Guid.Parse(operation), subject, receipt.Facts.RunId)
                 ?? throw new IOException("retirement_fixture_page_missing");
             Observer.Stop(report, page.CleanupJournalId, receipt.Facts.RunId);
@@ -43,7 +43,8 @@ internal static class RetirementCrash
         }
         catch (Exception error)
         {
-            if (!File.Exists(report)) OwnedFixtureEvidence.WriteReport(report, new { status = "refused", code = error.Message, type = error.GetType().FullName });
+            if (!File.Exists(report)) OwnedFixtureEvidence.WriteReport(report, new { status = "refused", code = error.Message,
+                type = error.GetType().FullName, cause = error.InnerException?.Message });
             return 1;
         }
     }

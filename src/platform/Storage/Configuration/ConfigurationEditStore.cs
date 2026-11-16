@@ -46,7 +46,7 @@ public sealed class ConfigurationEditStore
     public ConfigurationEditStatus? Read(Guid sessionId, string subject)
     {
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         return ConfigurationEditRows.Read(connection, transaction, sessionId, subject);
     }
 
@@ -54,7 +54,7 @@ public sealed class ConfigurationEditStore
     {
         if (!FileTreePolicy.Digest(sourceDigest)) throw new ConfigurationException("configuration_source_request_invalid");
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var status = ConfigurationEditRows.Read(connection, transaction, sessionId, subject);
         if (status is null) return null;
         using var command = ConfigurationEditRows.Command(connection, transaction, sessionId);
@@ -86,7 +86,7 @@ public sealed class ConfigurationEditStore
     {
         Require(operation, BeginIdentity(operation.OperationId, operation.SubjectId, request));
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         return OperationRows.ReadExisting(connection, transaction, operation) is null ? null : Required(connection, transaction, operation.OperationId, operation.SubjectId);
     }
 
@@ -149,7 +149,7 @@ public sealed class ConfigurationEditStore
         completion = ConfigurationEditPolicy.Freeze(completion);
         Require(operation, SaveIdentity(operation.OperationId, operation.SubjectId, completion));
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Content);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         if (OperationRows.ReadExisting(connection, transaction, operation) is null) return null;
         RequireTerminal(Required(connection, transaction, completion.SessionId, operation.SubjectId), operation.OperationId, ConfigurationEditPhase.Saved);
         return _batches.ReadResult(connection, transaction, operation.OperationId, completion.Batch);
@@ -184,7 +184,7 @@ public sealed class ConfigurationEditStore
     {
         Require(operation, CancelIdentity(operation.OperationId, operation.SubjectId, cancel));
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         if (OperationRows.ReadExisting(connection, transaction, operation) is null) return null;
         var session = Required(connection, transaction, cancel.SessionId, operation.SubjectId);
         RequireTerminal(session, operation.OperationId, ConfigurationEditPhase.Cancelled);

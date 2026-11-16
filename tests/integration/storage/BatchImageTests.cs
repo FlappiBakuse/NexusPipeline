@@ -37,7 +37,7 @@ public sealed class BatchImageTests(ITestOutputHelper output)
                 Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(first)),
                     Convert.ToHexStringLower(SHA256.HashData(second)));
             var retirement = new ContentRetirementService(source.Instance, source.Database, new(),
-                source.Lease, fixture.Base.Resources, fixture.Base.Index);
+                source.Lease, fixture.Base.Resources, fixture.Base.Index, source.PayloadRoots);
             Assert.Equal(1, retirement.RetireImagesPage(Guid.NewGuid(), "image-retirement",
                 receipt.Facts.RunId, limit: 1)!.Count);
             var after = reader.ReadPage(query).Items;
@@ -66,7 +66,7 @@ public sealed class BatchImageTests(ITestOutputHelper output)
             Assert.Equal(2, before.Select(item => item.ImageSha256).Distinct().Count());
             var validated = AttemptPreparedBinding.Read(source.Instance, new(), source.Database, receipt.JournalId).ValidatedRead;
             var retirement = new ContentRetirementService(source.Instance, source.Database, new(),
-                source.Lease, fixture.Base.Resources, fixture.Base.Index);
+                source.Lease, fixture.Base.Resources, fixture.Base.Index, source.PayloadRoots);
             _ = Assert.IsType<ContentRetirementPage>(retirement.RetireImagesPage(Guid.NewGuid(),
                 "image-retirement", receipt.Facts.RunId, limit: 1));
             var after = reader.ReadPage(query).Items;

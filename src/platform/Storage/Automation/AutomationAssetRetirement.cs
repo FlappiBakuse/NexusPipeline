@@ -28,7 +28,7 @@ internal sealed class AutomationAssetRetirement : IDisposable
         if (scripts.Length == 0) return null;
         IReadOnlyList<Ownership> ownership;
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Content))
-        using (var transaction = connection.BeginTransaction(deferred: true)) ownership = Read(connection, transaction, scripts);
+        using (var transaction = DatabaseConnections.BeginRead(connection)) ownership = Read(connection, transaction, scripts);
         var result = new AutomationAssetRetirement(database, scripts, Digest(ownership));
         try
         {

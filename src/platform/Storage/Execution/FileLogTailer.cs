@@ -40,6 +40,7 @@ internal sealed class FileLogTailer : IDisposable
     {
         _instance = instance; _database = database; _contracts = contracts; _binding = binding; _raw = raw; _activity = activity;
         _blobs = new(instance, contracts);
+        using var history = JournalReadScope.HoldAttempt(instance, contracts, database, binding.ParentJournalId);
         var context = new StepEvidenceReader(instance, database, contracts).Context(binding);
         var reference = context.Job.FileLogBaseline ?? throw new IOException("execution_log_baseline_missing");
         _selectors = ExecutionLogSelectors.Read(instance, contracts, context.Total, binding.StepId);
@@ -144,12 +145,15 @@ internal sealed class FileLogTailer : IDisposable
     {
         _stop.Cancel(); if (_loop is not null) await _loop.ConfigureAwait(false);
         if (_finished) return;
-        var context = new StepEvidenceReader(_instance, _database, _contracts).Context(_binding);
-        var latest = new JournalStore(_instance, _contracts).Read(_binding.ParentJournalId);
-        var jobs = WriterIntentCodec.ReadJobs(latest.Root, context.Total);
-        if (context.Root is not null) ExecutionStepAdmission.RequireRequiredRoles(context.Total, jobs, _binding.StepId, "process", latest.Root);
-        StepWritersEvidence.RequireStopped(_instance, _database, _contracts, _binding.ParentJournalId,
-            jobs.Where(job => job.StepId == _binding.StepId));
+        using (JournalReadScope.HoldAttempt(_instance, _contracts, _database, _binding.ParentJournalId))
+        {
+            var context = new StepEvidenceReader(_instance, _database, _contracts).Context(_binding);
+            var latest = new JournalStore(_instance, _contracts).Read(_binding.ParentJournalId);
+            var jobs = WriterIntentCodec.ReadJobs(latest.Root, context.Total);
+            if (context.Root is not null) ExecutionStepAdmission.RequireRequiredRoles(context.Total, jobs, _binding.StepId, "process", latest.Root);
+            StepWritersEvidence.RequireStopped(_instance, _database, _contracts, _binding.ParentJournalId,
+                jobs.Where(job => job.StepId == _binding.StepId));
+        }
         await SampleAsync().ConfigureAwait(false);
         _finished = true; _raw.CompleteFiles(_failure);
     }

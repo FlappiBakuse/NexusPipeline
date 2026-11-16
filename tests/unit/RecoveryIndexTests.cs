@@ -19,15 +19,22 @@ public sealed class RecoveryIndexTests
         Assert.Equal("unknown_journal", index.Current.GlobalBlockReason);
     }
 
-    [Fact(DisplayName = "A Scan From Before Invalidation Cannot Reopen Admission")]
-    public void RejectsStaleScans()
+    [Theory(DisplayName = "A Public Scan From Before Invalidation Or A Hold Update Cannot Reopen Admission")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RejectsStaleScans(bool holdUpdate)
     {
         var index = new RecoveryIndex();
         var observed = index.Current;
-        index.BlockUnknown("external_change");
+        if (holdUpdate) index.UpdateResourceHolds(RecoveryHoldOwner.ConfigurationOperations,
+            [new(Guid.NewGuid(), "slot:changed", "configuration_operation_pending")]);
+        else index.BlockUnknown("external_change");
+        var current = index.Current;
         Assert.Throws<InvalidOperationException>(() => index.PublishVerified(observed.Revision, 2, []));
         Assert.False(index.Current.IsReady);
-        Assert.Equal("external_change", index.Current.GlobalBlockReason);
+        Assert.Equal(current.Revision, index.Current.Revision);
+        Assert.Equal(current.GlobalBlockReason, index.Current.GlobalBlockReason);
+        Assert.Equal(current.ResourceHolds, index.Current.ResourceHolds);
     }
 
     [Fact(DisplayName = "Published Isolation Is Immutable And Only Blocks The Affected Resources")]

@@ -134,7 +134,7 @@ internal sealed class MaintenancePhysicalJournal(MaintenanceHandoffInputs inputs
             registered = registered with { Revision = document.Revision, Phase = document.Phase };
         }
         using var connection = DatabaseConnections.Open(inputs.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         MaintenanceEffectCursor.RequireEffectsInside(connection, transaction, registered, plan, history, entries);
         transaction.Commit();
         return new(registered, history[^1], entries);

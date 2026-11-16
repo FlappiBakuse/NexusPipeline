@@ -80,7 +80,7 @@ internal sealed class HistoryReadServer : IAsyncDisposable
             var useCases = new RecordUseCases(new RunRecordStore(database), new AttemptHistoryReader(database),
                 new LogCatalogReader(instance, database, contracts), new ExecutionLogReader(instance, database, contracts),
                 new ImageCatalogReader(instance, database, contracts),
-                new ContentRetirementService(instance, database, contracts, lease, resources, index));
+                new ContentRetirementService(instance, database, contracts, lease, resources, index, new(Path.Combine(root, "host"), Path.Combine(instance.RuntimeRoot, "extensions"))));
             new RecordControl(authority, useCases, contracts).Map(app);
             new RecordSummaryControl(authority, new(database), new(instance, database, contracts)).Map(app);
             await app.StartAsync();

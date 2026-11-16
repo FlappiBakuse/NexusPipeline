@@ -16,7 +16,7 @@ public sealed class HostSettingsStore(StateDatabase database) : IHostSettingsSto
     public HostSettingsSnapshot Read()
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         return HostSettingsRows.ReadCurrent(connection, transaction);
     }
 
@@ -24,7 +24,7 @@ public sealed class HostSettingsStore(StateDatabase database) : IHostSettingsSto
     {
         if (revision is < 0 or > 9007199254740991) throw new HostSettingsException("settings_revision_invalid");
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         return HostSettingsRows.Read(connection, transaction, revision);
     }
 
@@ -128,7 +128,7 @@ public sealed class HostSettingsStore(StateDatabase database) : IHostSettingsSto
     {
         VerifyIdentity(operation, change);
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         return OperationRows.ReadExisting(connection, transaction, operation) is null ? null : ReadResult(connection, transaction, operation.OperationId);
     }
 

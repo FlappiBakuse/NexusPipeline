@@ -63,7 +63,7 @@ public sealed class RetirementNotificationTests
             var metadata = fixture.Base.Counts();
             var operation = Guid.NewGuid();
             var service = new ContentRetirementService(source.Instance, source.Database, new(),
-                source.Lease, fixture.Base.Resources, fixture.Base.Index);
+                source.Lease, fixture.Base.Resources, fixture.Base.Index, source.PayloadRoots);
             Assert.ThrowsAny<IOException>(() => service.RetireLogsPage(operation, "retirement-socket", fixture.Receipt.Facts.RunId));
             Assert.Equal(metadata, fixture.Base.Counts());
             Assert.Equal(0, fixture.Base.Count("record_content_retirements"));

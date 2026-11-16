@@ -21,7 +21,7 @@ internal sealed class DatabaseConnectionPool : IDisposable
         internal (DatabaseDomain Domains, bool ReadOnly)? Role;
         internal string? ConnectionString;
     }
-    private readonly Slot[] _slots = [new(0), new(1), new(2), new(3)];
+    private readonly Slot[] _slots = [new(0), new(1), new(2), new(3), new(4), new(5), new(6), new(7), new(8)];
     private long _clock;
     private int _readers;
     private bool _disposed;
@@ -67,10 +67,11 @@ internal sealed class DatabaseConnectionPool : IDisposable
                 Slot? selected = null;
                 if (connection)
                 {
-                    var role = (domains, readOnly);
+                    var role = (DatabaseLayout.Normalize(domains), readOnly);
+                    var writer = role == (DatabaseDomain.All, false);
                     foreach (var slot in pool._slots)
                     {
-                        if (slot.Active) continue;
+                        if (slot.Active || (slot.Index == 0) != writer || !writer && !readOnly) continue;
                         if (slot.Role == role) { selected = slot; break; }
                         if (selected is null || slot.Used < selected.Used) selected = slot;
                     }
@@ -148,6 +149,7 @@ internal sealed class DatabaseConnectionPool : IDisposable
         internal BorrowLease(DatabaseConnectionPool owner, Slot? slot) { _owner = owner; _slot = slot; }
         private SqliteConnection? _connection;
         internal bool IsPooled => _slot is not null;
+        internal int CacheBudgetKiB => _slot is { Index: > 0 } ? 3072 : 8192;
         internal string PoolSuffix => _slot is null ? "" : "&nexus_pool=" + _slot.Index.ToString(System.Globalization.CultureInfo.InvariantCulture);
         internal string Path => _owner?._path ?? throw new ObjectDisposedException(nameof(BorrowLease));
 

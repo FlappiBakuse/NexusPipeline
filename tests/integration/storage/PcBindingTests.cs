@@ -11,6 +11,30 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class PcBindingTests
 {
+    [Fact(DisplayName = "Target Readiness Protects Its Image Until Release And Releases Failed Image Admission")]
+    public void ProtectsImageLifetime()
+    {
+        var root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "readiness-image-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var path = Path.Combine(root, "unstarted-" + Guid.NewGuid().ToString("N") + ".exe");
+        byte[] bytes = [1, 2, 3]; File.WriteAllBytes(path, bytes);
+        var image = new PcTargetImage(path, bytes.Length,
+            Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes)), PhysicalObjectIdentity.Read(path));
+        using (var proof = PcTargetReadiness.Capture(image, CancellationToken.None))
+        {
+            proof.RequireExpected(image, PcReadinessMode.Process);
+            Assert.Throws<IOException>(() => File.WriteAllBytes(path, [9]));
+            Assert.Throws<IOException>(() => File.Delete(path));
+            Assert.Throws<IOException>(() => Directory.Move(root, root + "-moved"));
+            Assert.Equal(bytes, File.ReadAllBytes(path));
+            proof.Dispose();
+            Assert.Throws<ObjectDisposedException>(() => proof.RequireExpected(image, PcReadinessMode.Process));
+        }
+        Assert.Throws<IOException>(() => PcTargetReadiness.Capture(image with { Sha256 = new string('0', 64) }, CancellationToken.None));
+        File.WriteAllBytes(path, [9]);
+        Directory.Move(root, root + "-moved");
+    }
+
     [Theory(DisplayName = "A Real Held Process Proof Cannot Be Rebound To Another Readiness Mode Or Frozen Image")]
     [InlineData("mode")]
     [InlineData("image")]

@@ -129,7 +129,7 @@ internal sealed class PreparedExtensionPayload : IDisposable
                         ExtensionUpgradeSource.AllowsSameVersion(binding?.Catalog.Channel, original?.Operation.Source.Package?.Catalog.Identity.Channel));
                     ExtensionCatalogSaved? catalog = null;
                     using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System))
-                    using (var transaction = connection.BeginTransaction(deferred: true))
+                    using (var transaction = DatabaseConnections.BeginRead(connection))
                     {
                         ExtensionInstalledRows.RequireExpectedInside(connection, transaction, extensionId,
                             expectedInstalledRevision, original?.Metadata.Footprint);

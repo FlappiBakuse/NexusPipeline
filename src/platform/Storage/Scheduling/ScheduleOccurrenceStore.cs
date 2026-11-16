@@ -26,7 +26,7 @@ internal sealed class ScheduleOccurrenceStore(RuntimeInstance instance, StateDat
     {
         RequireInstance();
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var watermark = ScheduleMinuteRows.Checkpoint(connection, transaction);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT revision FROM automation.automation_catalog_state WHERE singleton=1;";
@@ -47,7 +47,7 @@ internal sealed class ScheduleOccurrenceStore(RuntimeInstance instance, StateDat
         if (clock.GetUtcNow().ToUnixTimeSeconds() / 60 != minute) return null;
         _ = CommitMinuteCore(null, retainEmpty: true);
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         return ScheduleMinuteRows.ReadMinute(connection, transaction, ScheduleMinuteCodec.OperationId(instance.InstanceId, minute), instance.InstanceId);
     }
 
@@ -65,7 +65,7 @@ internal sealed class ScheduleOccurrenceStore(RuntimeInstance instance, StateDat
             if (now.Offset != TimeSpan.Zero || now < DateTimeOffset.UnixEpoch) throw new IOException("schedule_clock_invalid");
             var operationId = ScheduleMinuteCodec.OperationId(instance.InstanceId, now.ToUnixTimeSeconds() / 60);
             using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.System))
-            using (var transaction = connection.BeginTransaction(deferred: true))
+            using (var transaction = DatabaseConnections.BeginRead(connection))
             {
                 var prior = ScheduleMinuteRows.ReadMinute(connection, transaction, operationId, instance.InstanceId);
                 if (prior is not null) return Result(connection, transaction, prior);
@@ -74,7 +74,7 @@ internal sealed class ScheduleOccurrenceStore(RuntimeInstance instance, StateDat
             ScheduleMinuteWatermark watermark;
             long settingsRevision;
             using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.System))
-            using (var transaction = connection.BeginTransaction(deferred: true))
+            using (var transaction = DatabaseConnections.BeginRead(connection))
             {
                 catalog = AutomationRows.Read(connection, transaction);
                 watermark = ScheduleMinuteRows.Checkpoint(connection, transaction);
@@ -144,7 +144,7 @@ internal sealed class ScheduleOccurrenceStore(RuntimeInstance instance, StateDat
     private ImmutableArray<ScheduledOccurrence> ReadWaitingCore(int limit)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT c.occurrence_id FROM main.scheduled_occurrences c LEFT JOIN main.operations o ON o.operation_id=c.start_operation_id LEFT JOIN main.schedule_occurrence_outcomes b ON b.occurrence_id=c.occurrence_id WHERE o.operation_id IS NULL AND b.occurrence_id IS NULL ORDER BY c.trigger_utc_minute,c.occurrence_id LIMIT $limit;";
         command.Parameters.AddWithValue("$limit", limit);

@@ -5,6 +5,7 @@ using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Extensions;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Configuration;
+using NexusPipeline.Platform.Storage.Journals;
 
 namespace NexusPipeline.Platform.Storage.Execution;
 
@@ -81,9 +82,13 @@ internal static class ExecutionAdapterBinding
         var entry = source.Tree.Entries.SingleOrDefault(item => item.Kind == FileObjectKind.File && item.RelativePath == resource.RelativePath) ?? throw Invalid();
         if (source.Revision != resource.Revision || entry.Sha256 != resource.Sha256) throw Invalid();
         var reference = total.DefinitionBundle;
-        using var input = blobs.OpenVerified(new(reference.RelativePath, reference.SizeBytes, reference.Sha256));
-        var bytes = new byte[checked((int)input.Length)]; input.ReadExactly(bytes);
-        var bundle = contracts.Read<AutomationBundle>(bytes, "automation-bundle.schema.json");
+        var bundle = JournalReadScope.ReadDefinitions(blobs.Instance, total);
+        using var input = bundle is null ? blobs.OpenVerified(new(reference.RelativePath, reference.SizeBytes, reference.Sha256)) : null;
+        if (bundle is null)
+        {
+            var bytes = new byte[checked((int)input!.Length)]; input.ReadExactly(bytes);
+            bundle = contracts.Read<AutomationBundle>(bytes, "automation-bundle.schema.json");
+        }
         var script = NexusPipeline.Platform.Storage.Automation.BindingSourceCodec.Resolve(bundle, step);
         var declaration = script.AdapterResources.SingleOrDefault(item => item.ResourceId == resource.ResourceId && item.RelativePath == resource.RelativePath) ?? throw Invalid();
         var target = script.ConfigurationPaths[checked((int)declaration.DeclarationIndex)];

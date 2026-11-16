@@ -99,7 +99,7 @@ internal sealed class AttemptTerminalStore(RuntimeInstance instance, StateDataba
             preflight: next =>
             {
                 using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-                using var transaction = connection.BeginTransaction(deferred: true);
+                using var transaction = DatabaseConnections.BeginRead(connection);
                 ExecutionStepAdmission.RequireUndispatchedInside(connection, transaction, state, next); transaction.Commit();
             });
         Synchronize(parentJournalId);
@@ -329,7 +329,7 @@ internal sealed class AttemptTerminalStore(RuntimeInstance instance, StateDataba
     private IDisposable HoldRestored(AttemptWriterState state, bool requireCompletedGroups, bool allowUnregistered = false)
     {
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             AttemptTerminalEvidence.RequireRestoredInside(connection, transaction, state, requireCompletedGroups, allowUnregistered); transaction.Commit();
         }

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Runtime.Versioning;
+using NexusPipeline.Platform.Storage.Notifications;
 using NexusPipeline.Platform.Storage.Sqlite;
 
 namespace NexusPipeline.Platform.Storage.Records;
@@ -44,6 +45,16 @@ public sealed class RecordHistoryRetention
         var localDate = TimeZoneInfo.ConvertTime(now, TimeZoneInfo.Local).Date;
         var today = DateOnly.FromDateTime(localDate);
         if (_resumeComplete && _nextSweep is { } nextDay && today < nextDay && _observedMutation == _database.CommitSequence) return;
+        using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications))
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operations WHERE operation_kind='execution.start' AND status='accepted') " +
+                "OR EXISTS(SELECT 1 FROM notifications.notification_delivery_pending WHERE state IN ($queued,$sending)) " +
+                "OR EXISTS(SELECT 1 FROM notifications.notification_receipt_progress WHERE next_ordinal<route_count);";
+            command.Parameters.AddWithValue("$queued", NotificationDeliveryState.Queued.ToString().ToLowerInvariant());
+            command.Parameters.AddWithValue("$sending", NotificationDeliveryState.Sending.ToString().ToLowerInvariant());
+            if ((long)command.ExecuteScalar()! != 0) return;
+        }
         var saved = new HostSettingsStore(_database).Read();
         _observedMutation = _database.CommitSequence;
         if (_settingsRevision != saved.Revision)

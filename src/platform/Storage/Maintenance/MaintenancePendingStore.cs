@@ -54,7 +54,7 @@ internal sealed class MaintenancePendingStore
     {
         _lease.VerifyHeld(_instance);
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var ids = new List<(Guid Id, string Subject)>();
         using (var command = connection.CreateCommand())
         {
@@ -77,7 +77,7 @@ internal sealed class MaintenancePendingStore
     {
         RequireIdentity(operationId, subject); _lease.VerifyHeld(_instance);
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var row = MaintenanceOperationRows.ReadOwned(connection, transaction, operationId, subject);
         transaction.Commit(); return row is null ? null : Snapshot(row);
     }
@@ -115,7 +115,7 @@ internal sealed class MaintenancePendingStore
                 cancellation.ThrowIfCancellationRequested();
                 MaintenanceOperationRow row;
                 using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System))
-                using (var transaction = connection.BeginTransaction(deferred: true))
+                using (var transaction = DatabaseConnections.BeginRead(connection))
                 { row = MaintenanceOperationRows.ReadOwned(connection, transaction, operationId, subject) ?? throw Invalid(); transaction.Commit(); }
                 if (row.State != HostUpdateState.Pending) throw Invalid();
                 var codec = new UpdateSourceCodec(_instance, _contracts);

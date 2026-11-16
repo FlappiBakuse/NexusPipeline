@@ -39,6 +39,7 @@ internal sealed class PlanBuilderFixture : IDisposable
     internal StateDatabase Database { get; }
     internal InstanceLease Lease { get; }
     internal ResourceLeaseManager Resources { get; }
+    internal PayloadApplyRoots PayloadRoots { get; }
     internal ExecutionPlanBuilder Builder { get; }
     internal AutomationDefinitionStore Definitions => new(Database);
     internal HostSettingsStore Settings => new(Database);
@@ -47,6 +48,7 @@ internal sealed class PlanBuilderFixture : IDisposable
     {
         Root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "execution-builder-" + Guid.NewGuid().ToString("N"));
         Instance = new InstanceRoot(new()).OpenOrCreate(Path.Combine(Root, "runtime"));
+        PayloadRoots = new(Path.Combine(Root, "host"), Path.Combine(Instance.RuntimeRoot, "extensions"));
         Database = StateDatabase.CreateFresh(Instance);
         var main = Path.Combine(Root, "script"); var other = Path.Combine(Root, "other-script");
         var external = Path.Combine(Root, "external");
@@ -59,8 +61,7 @@ internal sealed class PlanBuilderFixture : IDisposable
         Lease = InstanceLease.Acquire(Instance, new());
         try
         {
-            var index = new StartupJournalRecovery(Instance, new(), Database,
-                new(Path.Combine(Root, "host"), Path.Combine(Instance.RuntimeRoot, "extensions"))).Recover(Lease);
+            var index = new StartupJournalRecovery(Instance, new(), Database, PayloadRoots).Recover(Lease);
             Resources = new(new(index, TimeProvider.System));
             var service = new AutomationImportService(Instance, new(), Database, Lease, Resources, index);
             var catalog = Seed(main, other, external, specialized, otherExtensionId);

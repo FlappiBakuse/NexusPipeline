@@ -29,6 +29,7 @@
     "NexusPipeline.StorageTests.ConfigurationBehaviorTests",
     "NexusPipeline.StorageTests.ConfigurationCapacityTests",
     "NexusPipeline.StorageTests.ConfigurationCursorsTests",
+    "NexusPipeline.StorageTests.ConfigurationRestorationQueryTests",
     "NexusPipeline.StorageTests.ConfigurationWriterTests",
     "NexusPipeline.StorageTests.ControlReadTests",
     "NexusPipeline.StorageTests.DeferredRegistrationTests",

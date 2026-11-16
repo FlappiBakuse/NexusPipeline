@@ -13,7 +13,7 @@ public sealed record StartupPresentation(DesktopPreferences Desktop, HostLocale 
         if (!File.Exists(guard) && !File.Exists(path)) return new(HostSettings.Default.Desktop, HostSettings.Default.Locale);
         var database = StateDatabase.OpenCurrent(instance, lease);
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var settings = HostSettingsRows.ReadCurrent(connection, transaction).Values;
         transaction.Commit();
         return new(settings.Desktop, settings.Locale);

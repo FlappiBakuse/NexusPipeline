@@ -44,6 +44,11 @@ internal sealed class JournalReadScope : IDisposable
     internal static JournalReadScope HoldParents(RuntimeInstance instance, NexusPipeline.Platform.Serialization.ContractReader contracts,
         Execution.AttemptReadRegistry? attempts = null) => new(new JournalStore(instance, contracts), null, attempts);
 
+    internal static NexusPipeline.Platform.Serialization.Protocol.AutomationBundle? ReadDefinitions(RuntimeInstance instance,
+        NexusPipeline.Platform.Serialization.Protocol.ExecutionPlan total) =>
+        _current?.Owner is { } scope && scope._store.Instance == instance
+            ? scope._attempts?.Find(total)?.ReadDefinitions() : null;
+
     internal static void SelectActiveParent(RuntimeInstance instance, NexusPipeline.Platform.Serialization.ContractReader contracts, Guid journalId)
     {
         if (_current?.Owner._attempts?.Find(journalId) is not null) SelectParent(instance, contracts, journalId);
@@ -71,6 +76,8 @@ internal sealed class JournalReadScope : IDisposable
         if (_current?.Owner is not { _parents: true } scope || scope._store.Instance != instance) return null;
         SelectParent(instance, contracts, journal.JournalId);
         var reference = Execution.AttemptPreparedBinding.Reference(instance, journal);
+        if (scope._attempts?.Find(journal.JournalId)?.ReadPlanMetadata(journal, reference) is { } owned)
+            return owned;
         if (scope._planReference != reference)
         {
             scope._inputs?.Dispose(); scope._inputs = null; scope._planReference = null;

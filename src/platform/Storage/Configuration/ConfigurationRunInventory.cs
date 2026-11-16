@@ -17,7 +17,7 @@ internal static class ConfigurationRunInventory
         {
             using var parents = JournalReadScope.HoldParents(instance, contracts);
             using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-            using var transaction = connection.BeginTransaction(deferred: true);
+            using var transaction = DatabaseConnections.BeginRead(connection);
             using var command = connection.CreateCommand(); command.Transaction = transaction;
             foreach (var item in ReadSessions(connection, transaction))
             {
@@ -128,7 +128,7 @@ internal static class ConfigurationRunInventory
     private static ImmutableArray<ConfigurationRunStatus> ReadCompletionGroups(StateDatabase database, RegisteredJournal parent)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT subject_id FROM main.operations WHERE operation_id=$owner AND status='accepted';";
         command.Parameters.AddWithValue("$owner", parent.OperationId.ToString("D"));
@@ -189,7 +189,8 @@ internal static class ConfigurationRunInventory
                 "JOIN main.operation_journals j ON j.journal_id=r.journal_id AND j.operation_id=r.operation_id " +
                 "WHERE s.owner_operation_id=$owner AND s.parent_journal_id=$parent AND s.step_id=$step " +
                 "AND ($complete=0 OR (s.phase IN (2,3) AND s.writer_gate=1 AND s.closed_elapsed_milliseconds IS NOT NULL AND s.completion_operation_id IS NOT NULL)) " +
-                "AND r.plan_path=$path AND r.plan_digest=$digest AND j.phase='committed' AND j.operation_kind='configExchange');";
+                "AND r.plan_path=$path AND r.plan_digest=$digest AND j.plan_path=$path AND j.plan_digest=$digest " +
+                "AND j.phase='committed' AND j.operation_kind='configExchange');";
             command.Parameters.Clear(); command.Parameters.AddWithValue("$owner", parent.OperationId.ToString("D"));
             command.Parameters.AddWithValue("$parent", parent.JournalId.ToString("D")); command.Parameters.AddWithValue("$step", child.StepId);
             command.Parameters.AddWithValue("$path", plan.RelativePath); command.Parameters.AddWithValue("$digest", plan.Sha256);

@@ -10,7 +10,7 @@ internal static class ExecutionBindingSuccesses
     internal static IReadOnlyDictionary<Guid, int> Today(StateDatabase database, DateTimeOffset now)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var (start, end) = Day(now);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT binding_id,count(*) FROM main.execution_binding_successes WHERE started_at_utc_ticks>=$start AND started_at_utc_ticks<$end AND started_at_utc_ticks<=$now GROUP BY binding_id;";

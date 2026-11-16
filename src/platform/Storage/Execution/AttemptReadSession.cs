@@ -94,7 +94,8 @@ internal sealed class AttemptReadSession : IDisposable
         {
             if (_disposed) return read(null, null);
             using var paths = DirectoryAttributeScope.Enter(_paths);
-            using var instance = InstanceReadScope.Hold(_instance, _contracts);
+            using var instance = _database.RuntimeLease is { } owner
+                ? InstanceReadScope.Hold(_instance, owner) : InstanceReadScope.Hold(_instance, _contracts);
             using var blobs = BlobReadScope.Capture(_instance, RetainVerified);
             using var selected = JournalReadScope.Hold(_journals, JournalId);
             var history = _journals.ReadAllRevisions(JournalId);

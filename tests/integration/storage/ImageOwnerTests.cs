@@ -64,7 +64,7 @@ public sealed class ImageOwnerTests
         Assert.Throws<RetiredContentException>(() => after.OpenOriginal(image.Key, image.ResultSha256));
         RequireOriginal();
         var resources = new ResourceLeaseManager(new HostLifecycle(index, TimeProvider.System));
-        var service = new ContentRetirementService(source.Instance, database, new(), lease, resources, index);
+        var service = new ContentRetirementService(source.Instance, database, new(), lease, resources, index, roots);
         var replay = Assert.IsType<ContentRetirementPage>(service.RetireImagesPage(
             registered.OperationId, document.SubjectId, receipt.Facts.RunId, document.AfterSha256, document.Limit));
         Assert.Equal(registered.JournalId, replay.CleanupJournalId); Assert.Equal(1, replay.Count);

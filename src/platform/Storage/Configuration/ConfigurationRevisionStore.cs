@@ -101,7 +101,7 @@ public sealed class ConfigurationRevisionStore : IConfigurationRevisionStore
     {
         RequireIdentity(operation, ConfigurationRevisionPolicy.Freeze(change));
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Content);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         return OperationRows.ReadExisting(connection, transaction, operation) is null ? null : ReadResult(connection, transaction, operation.OperationId);
     }
 
@@ -111,7 +111,7 @@ public sealed class ConfigurationRevisionStore : IConfigurationRevisionStore
     internal ConfigurationSaveResult? LookupSource(Guid operationId, string subject, IReadOnlyCollection<ConfigurationAddress> addresses, string sourceRequestDigest)
     {
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Content);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = "SELECT o.subject_id,o.operation_kind,m.binding_id,m.resource_id,m.source_request_digest " +
@@ -133,7 +133,7 @@ public sealed class ConfigurationRevisionStore : IConfigurationRevisionStore
     internal StoredConfigurationRevision? ReadStored(ConfigurationAddress address)
     {
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Content);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var binding = ConfigurationRevisionRows.Binding(connection, transaction, address.BindingId);
         var result = ConfigurationRevisionRows.Current(connection, transaction, address, _codec);
         if (result is not null && (result.Revision.UserId != binding.UserId || result.Revision.ScriptId != binding.ScriptId))
@@ -176,7 +176,7 @@ public sealed class ConfigurationRevisionStore : IConfigurationRevisionStore
     {
         var store = new ConfigurationRevisionStore(instance, database, contracts);
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Content);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = "SELECT binding_id,resource_id FROM configuration.configuration_current;";

@@ -221,7 +221,7 @@ internal sealed class ExtensionArchiveCleanup(RuntimeInstance instance, StateDat
     {
         OperationAcceptance? acceptance;
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             acceptance = OperationRows.ReadExisting(connection, transaction, identity);
             transaction.Commit();

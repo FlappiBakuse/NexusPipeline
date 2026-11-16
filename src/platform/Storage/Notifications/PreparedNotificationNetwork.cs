@@ -36,7 +36,7 @@ internal sealed class PreparedNotificationNetwork : IDisposable
             var settings = new HostSettingsStore(database).Read();
             SecretPayloadIdentity? payload = null;
             using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System))
-            using (var transaction = connection.BeginTransaction(deferred: true))
+            using (var transaction = DatabaseConnections.BeginRead(connection))
             {
                 if (credential.Reference.SecretId is { } id) payload = SecretFieldStore.ReadPayload(connection, transaction, id);
                 var view = new NotificationDeliveryNetwork(settings.Revision, credential.Reference, payload);

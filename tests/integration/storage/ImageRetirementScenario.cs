@@ -25,7 +25,7 @@ internal sealed class ImageRetirementScenario(PcStageFixture fixture, AttemptRec
     internal AttemptReceipt Receipt => receipt;
     internal ImageCatalogReader Images => new(Source.Instance, Source.Database, new());
     internal ContentRetirementService Service => new(Source.Instance, Source.Database, new(),
-        Source.Lease, fixture.Base.Resources, fixture.Base.Index);
+        Source.Lease, fixture.Base.Resources, fixture.Base.Index, Source.PayloadRoots);
     internal ImageCatalogItem Image => Assert.Single(Images.ReadPage(new(receipt.Facts.RunId, receipt.Facts.AttemptId)).Items);
     internal string PngPath => Path.Combine(Source.Instance.RuntimeRoot, "blobs", "content", Image.ImageSha256 + ".bin");
 
@@ -87,7 +87,7 @@ internal sealed class ImageRetirementScenario(PcStageFixture fixture, AttemptRec
 
     internal FileCleanupResult Cleanup(ContentRetirementPage page) => WithCleanupRoot(page, root =>
         new OwnedCleanupExecutor(Source.Instance, new(), Source.Database, fixture.Base.Index)
-            .Execute(page.CleanupJournalId, Source.Lease, root));
+            .Execute(page.CleanupJournalId, Source.Lease, root, Source.PayloadRoots));
 
     internal BlobReference RegisterNotification()
     {

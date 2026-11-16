@@ -86,7 +86,7 @@ internal sealed class WorkCleanupService(RuntimeInstance instance, StateDatabase
     private CleanupAcceptanceResult? ReadAccepted(OperationIdentity identity)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var acceptance = OperationRows.ReadExisting(connection, transaction, identity);
         if (acceptance is null) return null;
         var operation = OperationRows.ReadOwned(connection, transaction, identity.OperationId, identity.SubjectId) ?? throw Invalid();

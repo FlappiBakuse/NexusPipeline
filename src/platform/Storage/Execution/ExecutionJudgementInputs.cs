@@ -2,6 +2,7 @@ using NexusPipeline.Core.Configuration;
 using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Execution.Judgement;
 using NexusPipeline.Platform.Serialization;
+using NexusPipeline.Platform.Storage.Journals;
 
 namespace NexusPipeline.Platform.Storage.Execution;
 
@@ -39,6 +40,11 @@ internal sealed class ExecutionJudgementInputs(RuntimeInstance instance, Contrac
     {
         var content = total.DefinitionBundle;
         if (content.SizeBytes is < 1 or > StrictJson.MaximumBytes) throw new IOException("execution_definition_reference_invalid");
+        if (JournalReadScope.ReadDefinitions(instance, total) is { } owned)
+        {
+            ExecutionPlanSources.Validate(total, owned);
+            return owned;
+        }
         using var stream = new ImmutableBlobStore(instance, contracts).OpenVerified(new(content.RelativePath, content.SizeBytes, content.Sha256));
         var bytes = new byte[checked((int)stream.Length)]; stream.ReadExactly(bytes);
         var bundle = contracts.Read<AutomationBundle>(bytes, "automation-bundle.schema.json");

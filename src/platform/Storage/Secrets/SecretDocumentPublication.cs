@@ -15,7 +15,7 @@ internal sealed class SecretDocumentPublisher(RuntimeInstance instance, StateDat
     {
         source = new SecretDocumentFormat(instance, contracts).Read(source.Reference);
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var status = SecretDocumentRows.Status(connection, transaction, source);
         if (status == "accepted") SecretDocumentRows.Before(connection, transaction, source);
         else

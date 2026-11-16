@@ -11,7 +11,7 @@ internal static class ConfigurationBatchInventory
         try
         {
             using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Content);
-            using var transaction = connection.BeginTransaction(deferred: true);
+            using var transaction = DatabaseConnections.BeginRead(connection);
             using var command = connection.CreateCommand(); command.Transaction = transaction;
             command.CommandText = "SELECT o.operation_id,o.operation_kind,o.status FROM main.operations o WHERE " +
                 "o.operation_kind IN ('configuration.save-batch','configuration.patch-batch','configuration.import-batch') OR " +

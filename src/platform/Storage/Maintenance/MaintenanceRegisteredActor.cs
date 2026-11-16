@@ -27,7 +27,7 @@ internal sealed class MaintenanceRegisteredActor : IDisposable
         var current = ProcessIdentityReader.Read(Environment.ProcessId); bootstrap.RequireHelper(current);
         var writer = new JournalWriter(writerId, current);
         using (var connection = DatabaseConnections.Open(bootstrap.Inputs.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         { RequireRegistered(connection, transaction, bootstrap.Inputs.Plan.JournalId, writer, jobName); transaction.Commit(); }
         var job = JobNative.OpenJobObjectW(4, false, jobName);
         try
@@ -182,7 +182,7 @@ internal sealed class MaintenanceRegisteredActor : IDisposable
         _bootstrap.RequireCurrent();
         RequireNativeBound();
         using var connection = DatabaseConnections.Open(_bootstrap.Inputs.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         RequireRegistered(connection, transaction, _bootstrap.Inputs.Plan.JournalId, Writer, JobName); transaction.Commit();
     }
 

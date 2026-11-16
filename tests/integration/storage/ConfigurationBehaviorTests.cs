@@ -4,6 +4,7 @@ using NexusPipeline.Core.Execution;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Configuration;
 using NexusPipeline.Platform.Storage.Execution;
+using NexusPipeline.Platform.Storage.Journals;
 using Xunit;
 
 namespace NexusPipeline.StorageTests;
@@ -11,6 +12,40 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class ConfigurationBehaviorTests
 {
+    [Fact(DisplayName = "Configuration Sources Reuse Owned Attempt History While Independent Reads Still Recheck Bytes")]
+    public void ReusesOwnedRetrySources()
+    {
+        using var fixture = new ConfigurationRunFixture();
+        using var root = fixture.Acquire(fixture.Request);
+        using var prepared = fixture.Preparation.Prepare(root, fixture.Owner, fixture.Execution.Plan, fixture.StepId, fixture.Request);
+        var parent = fixture.Parent(prepared); fixture.Accept(parent);
+        var source = fixture.Source; var journalId = Guid.Parse(parent.JournalId);
+        var store = new ConfigurationRunStore(source.Instance, source.Database, new());
+        var identity = ConfigurationRunStore.BeginIdentity(Guid.NewGuid(), ConfigurationRunFixture.Subject, journalId, fixture.StepId, prepared);
+        var group = store.Begin(identity, journalId, fixture.StepId, prepared, DateTimeOffset.UtcNow);
+        using var owner = fixture.Lease.BindAttemptReads(source.Database).Start(source.Instance, source.Database, new(), journalId)!;
+        var expected = ConfigurationRunBinding.Read(source.Instance, source.Database, new(), group);
+        var path = Path.Combine(source.Instance.RuntimeRoot, "journals", journalId.ToString("D"), "0000000001.json");
+        using var blocked = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        blocked.Lock(0, blocked.Length);
+        try
+        {
+            Assert.Throws<IOException>(() => new JournalStore(source.Instance, new()).Read(journalId));
+            var actual = ConfigurationRunBinding.Read(source.Instance, source.Database, new(), group);
+            Assert.Equal((expected.ParentJournal.JournalId, expected.ParentJournal.OperationId, expected.ParentJournal.Kind, expected.ParentJournal.Phase,
+                    expected.ParentJournal.Revision, expected.ParentJournal.PlanPath, expected.ParentJournal.PlanDigest),
+                (actual.ParentJournal.JournalId, actual.ParentJournal.OperationId, actual.ParentJournal.Kind, actual.ParentJournal.Phase,
+                    actual.ParentJournal.Revision, actual.ParentJournal.PlanPath, actual.ParentJournal.PlanDigest));
+            Assert.Equal(expected.ParentJournal.ResourceKeys.ToArray(), actual.ParentJournal.ResourceKeys.ToArray());
+            Assert.Equal(expected.Evidence.AttemptId, actual.Evidence.AttemptId);
+            Assert.Equal(expected.Resources.Select(item => item.State.ConfigurationOperationId), actual.Resources.Select(item => item.State.ConfigurationOperationId));
+            Assert.Equal(expected.Resources.Select(item => (item.State.Source.Address, item.State.Source.Revision, item.State.InitialPublicationRevision)),
+                actual.Resources.Select(item => (item.State.Source.Address, item.State.Source.Revision, item.State.InitialPublicationRevision)));
+            Assert.Equal(expected.Resources.Select(item => item.State.SnapshotReference), actual.Resources.Select(item => item.State.SnapshotReference));
+        }
+        finally { blocked.Unlock(0, blocked.Length); }
+    }
+
     [Fact(DisplayName = "An Invalid First Start Leaves No Saved Configuration Or Receipt And Can Be Retried With Valid Bytes")]
     public void EstablishesInitialSnapshot()
     {

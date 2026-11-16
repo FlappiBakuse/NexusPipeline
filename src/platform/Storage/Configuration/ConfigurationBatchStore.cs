@@ -45,7 +45,7 @@ public sealed class ConfigurationBatchStore
         IReadOnlyList<(ConfigurationAddress Address, long ExpectedRevision, string Digest)> sources)
     {
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Content);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT subject_id,operation_kind,status,request_digest FROM main.operations WHERE operation_id=$operation;";
         command.Parameters.AddWithValue("$operation", operationId.ToString("D"));
@@ -78,7 +78,7 @@ public sealed class ConfigurationBatchStore
         batch = RevisionBatchPolicy.Freeze(batch);
         RequireIdentity(operation, batch);
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Content);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         return OperationRows.ReadExisting(connection, transaction, operation) is null ? null : ReadResult(connection, transaction, operation.OperationId, batch);
     }
 
@@ -86,7 +86,7 @@ public sealed class ConfigurationBatchStore
         IReadOnlyList<BatchSourceRequest> sources)
     {
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Content);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT subject_id,operation_kind,status,request_digest FROM main.operations WHERE operation_id=$operation;";
         command.Parameters.AddWithValue("$operation", operationId.ToString("D"));

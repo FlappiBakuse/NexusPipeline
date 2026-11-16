@@ -82,7 +82,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
     internal RegisteredJournal ReadJournal(Guid journalId)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var result = ReadJournalInside(connection, transaction, journalId);
         transaction.Commit(); return result;
     }
@@ -90,7 +90,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
     internal RegisteredJournal? FindJournal(Guid journalId)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operation_journals WHERE journal_id=$id);";
         command.Parameters.AddWithValue("$id", journalId.ToString("D"));
@@ -100,7 +100,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
     internal RegisteredJournal ReadOperationJournal(Guid operationId)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT initial_journal_id FROM main.operations WHERE operation_id=$id;";
         command.Parameters.AddWithValue("$id", operationId.ToString("D"));
@@ -113,7 +113,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
     internal IReadOnlySet<Guid> ReadInactiveIds()
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT j.journal_id,CASE WHEN j.phase='committed' AND r.owner_journal_id IS NOT NULL AND NOT " +
             RecoveryCapacityStore.ActiveReservation + " THEN 1 ELSE 0 END " +
@@ -167,7 +167,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
         {
             RegisteredJournal[] page;
             using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime))
-            using (var transaction = connection.BeginTransaction(deferred: true))
+            using (var transaction = DatabaseConnections.BeginRead(connection))
             {
                 page = ReadHistoryInside(connection, transaction, completedFamiliesOnly, after).Take(128).ToArray();
                 transaction.Commit();
@@ -200,7 +200,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
     internal IEnumerable<RecoveryRegistrySnapshot> ReadCompleted()
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         RecoveryCapacityStore.VerifyGlobal(connection, transaction);
         var after = "";
         while (true)
@@ -303,7 +303,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
     public RecoveryRegistrySnapshot ReadSnapshot()
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var result = ReadSnapshot(connection, transaction, includeHistory: true);
         transaction.Commit(); return result;
     }
@@ -318,7 +318,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
     {
         var path = Path.Combine(inspection.DiagnosticCopyRoot, "runtime.db");
         using var connection = DatabaseConnections.Open(path, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var result = ReadSnapshot(connection, transaction);
         transaction.Commit();
         return result;

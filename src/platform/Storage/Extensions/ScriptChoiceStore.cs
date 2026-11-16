@@ -67,7 +67,7 @@ internal sealed class ScriptChoiceStore(RuntimeInstance instance, StateDatabase 
         lease.VerifyHeld(instance);
         var identity = Identity(operationId, subject, scriptId, scriptRevision, expectedRevision, extensionId, providerId, selection);
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         if (OperationRows.ReadExisting(connection, transaction, identity) is null) return null;
         return ExtensionDocumentRows.ReadCommit(connection, transaction, operationId, providerId, subject)
             ?? throw new IOException("project_script_choice_result_missing");

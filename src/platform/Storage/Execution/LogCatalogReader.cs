@@ -15,7 +15,7 @@ public sealed class LogCatalogReader(RuntimeInstance instance, StateDatabase dat
         var expected = original.CaptureCatalog(receipt);
         var selected = new List<LogCatalogEntry>();
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             if (AttemptReceiptStore.ReadInside(connection, transaction, query.AttemptId) != receipt) throw LogCatalogRows.Invalid();
             LogCatalogRows.RequireSaved(connection, transaction, expected);

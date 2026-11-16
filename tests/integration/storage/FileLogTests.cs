@@ -1,5 +1,7 @@
 using System.Runtime.Versioning;
+using System.Text.Json;
 using NexusPipeline.Core.Execution;
+using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Execution;
@@ -121,6 +123,70 @@ public sealed class FileLogTests
         await Task.Delay(1500); Assert.False(fixture.Collector.TryRequestStop());
         await fixture.WaitExit(); var document = await fixture.Collect(); Assert.Null(document.Stop);
         Assert.Equal(BusinessOutcome.Unverified, document.Business); await fixture.Complete();
+    }
+
+    [Fact(DisplayName = "File Log Finalization Reuses Its Protected Attempt History While Independent Reads Still Recheck Bytes")]
+    public async Task ReusesProtectedHistoryAtFinish()
+    {
+        await using var fixture = new FileLogFixture("append"); fixture.Prepare();
+        var source = fixture.Source;
+        using var owner = source.Lease.BindAttemptReads(source.Database)
+            .Start(source.Instance, source.Database, new(), fixture.Binding.ParentJournalId)!;
+        await fixture.Start(); await fixture.WaitExit();
+        var path = Path.Combine(source.Instance.RuntimeRoot, "journals", fixture.Binding.ParentJournalId.ToString("D"), "0000000001.json");
+        using (var blocked = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            blocked.Lock(0, blocked.Length);
+            try
+            {
+                Assert.Throws<IOException>(() => new JournalStore(source.Instance, new()).Read(fixture.Binding.ParentJournalId));
+                var document = await fixture.Collect();
+                Assert.Equal(BusinessOutcome.Failed, document.Business);
+                var raw = RawOutputCodec.Read(new(source.Instance, new()), fixture.Binding, document.RawOutput!);
+                var lines = new List<string>(); Assert.True(RawOutputReplay.Read(new(source.Instance, new()), raw, lines.Add));
+                Assert.Contains("file-failure", lines); Assert.DoesNotContain("old-file-success", lines);
+                Assert.DoesNotContain("pipe-success", lines);
+            }
+            finally { blocked.Unlock(0, blocked.Length); }
+        }
+        owner.Dispose(); await fixture.Complete();
+    }
+
+    [Fact(DisplayName = "Owned Log Selectors Reuse Frozen Definitions And Still Reject Changed Declarations References And Instances")]
+    public async Task ReusesOwnedSelectorDefinitions()
+    {
+        await using var fixture = new FileLogFixture("append"); fixture.Prepare();
+        var source = fixture.Source;
+        using var owner = source.Lease.BindAttemptReads(source.Database)
+            .Start(source.Instance, source.Database, new(), fixture.Binding.ParentJournalId)!;
+        Assert.NotNull(owner.ReadDefinitions());
+        var path = Path.Combine(source.Instance.RuntimeRoot, fixture.Total.DefinitionBundle.RelativePath);
+        using (var blocked = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            blocked.Lock(0, blocked.Length);
+            try
+            {
+                Assert.Throws<IOException>(() => new ExecutionJudgementInputs(source.Instance, new()).ReadBundle(fixture.Total));
+                using (JournalReadScope.HoldAttempt(source.Instance, new(), source.Database, fixture.Binding.ParentJournalId))
+                {
+                    Assert.Equal(fixture.LogPath, Assert.Single(ExecutionLogSelectors.Read(source.Instance, new(), fixture.Total, fixture.Binding.StepId)).Declaration);
+                    var changed = JsonSerializer.SerializeToNode(fixture.Total, StepResultCodec.Options)!;
+                    changed["steps"]![0]!["logTargets"]![0]!["scopePath"] = fixture.LogPath + ".changed";
+                    Assert.Throws<IOException>(() => new ExecutionJudgementInputs(source.Instance, new())
+                        .ReadBundle(changed.Deserialize<ExecutionPlan>(StepResultCodec.Options)!));
+                    changed = JsonSerializer.SerializeToNode(fixture.Total, StepResultCodec.Options)!;
+                    changed["definitionBundle"]!["sizeBytes"] = fixture.Total.DefinitionBundle.SizeBytes + 1;
+                    Assert.Throws<IOException>(() => new ExecutionJudgementInputs(source.Instance, new())
+                        .ReadBundle(changed.Deserialize<ExecutionPlan>(StepResultCodec.Options)!));
+                    Assert.Throws<IOException>(() => new ExecutionJudgementInputs(source.Instance with { InstanceId = Guid.NewGuid() }, new()).ReadBundle(fixture.Total));
+                }
+                owner.Dispose();
+                using (JournalReadScope.HoldParents(source.Instance, new(), source.Database.AttemptReads))
+                    Assert.Throws<IOException>(() => new ExecutionJudgementInputs(source.Instance, new()).ReadBundle(fixture.Total));
+            }
+            finally { blocked.Unlock(0, blocked.Length); }
+        }
+        await fixture.Start(); await fixture.WaitExit(); await fixture.Collect(); await fixture.Complete();
     }
 
     private static byte[] Read(ImmutableBlobStore blobs, BlobReference content)

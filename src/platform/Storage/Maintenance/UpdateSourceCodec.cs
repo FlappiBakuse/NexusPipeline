@@ -98,7 +98,7 @@ internal sealed class UpdateSourceCodec(RuntimeInstance instance, ContractReader
         if (database.InstanceId != instance.InstanceId || !StringComparer.OrdinalIgnoreCase.Equals(database.RuntimeRoot, instance.RuntimeRoot)) throw Invalid();
         SavedUpdateFeed head;
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             RequireAcceptedInside(connection, transaction, source);
             head = UpdateFeedRows.ReadHead(connection, transaction, source.Feed.Identity.Channel) ?? throw Invalid();
@@ -117,7 +117,7 @@ internal sealed class UpdateSourceCodec(RuntimeInstance instance, ContractReader
     private void RequireCurrentHead(HostUpdateSource source, StateDatabase database, SavedUpdateFeed head)
     {
         using var fresh = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
-        using var tx = fresh.BeginTransaction(deferred: true);
+        using var tx = DatabaseConnections.BeginRead(fresh);
         RequireAcceptedInside(fresh, tx, source);
         if (UpdateFeedRows.ReadHead(fresh, tx, head.Identity.Channel) != head) throw Invalid();
         tx.Commit();

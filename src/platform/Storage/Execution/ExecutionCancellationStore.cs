@@ -46,7 +46,7 @@ internal sealed class ExecutionCancellationStore(RuntimeInstance instance, State
     {
         lease.VerifyHeld(instance);
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
-        using (var transaction = connection.BeginTransaction(deferred: true)) _ = OperationRows.ReadExisting(connection, transaction, identity);
+        using (var transaction = DatabaseConnections.BeginRead(connection)) _ = OperationRows.ReadExisting(connection, transaction, identity);
         if (identity.Kind != DispatchIntentCodec.Kind(reason)) throw new OperationConflictException();
         var state = AttemptWriterState.Read(instance, database, contracts, parentJournalId);
         if (identity != DispatchIntentCodec.Identity(identity.OperationId, identity.SubjectId, parentJournalId, state.Journal.OperationId,
@@ -123,7 +123,7 @@ internal sealed class ExecutionCancellationStore(RuntimeInstance instance, State
         if (pageSize is < 1 or > 128) throw new ArgumentOutOfRangeException(nameof(pageSize));
         VerifyTargets(database);
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         const string targets = "(c.operation_kind IN ('execution.cancel','execution.close') OR j.operation_kind='runAttempt' AND c.operation_id<>j.operation_id AND c.operation_kind<>'execution.retry.cancel')";
         var after = "";
         while (true)
@@ -144,7 +144,7 @@ internal sealed class ExecutionCancellationStore(RuntimeInstance instance, State
     internal static void VerifyTargets(StateDatabase database)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         ExecutionCancellationRows.RequireRecognizedTargets(connection, transaction);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operations c LEFT JOIN main.operation_journals j ON j.journal_id=c.initial_journal_id " +

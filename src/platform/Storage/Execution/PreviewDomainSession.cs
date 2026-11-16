@@ -50,7 +50,7 @@ internal sealed class PreviewDomainSession
         var state = ReadFresh(); var current = Current(state);
         if (current is null || current.Closed || current.Source != _source || state.IsDispatchClosed) throw PreviewDomainCodec.Invalid();
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         PreviewDomainEvidence.RequireSourceInside(connection, transaction, _source); transaction.Commit(); return true;
     }));
 

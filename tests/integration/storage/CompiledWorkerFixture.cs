@@ -2,9 +2,12 @@ using System.Text.Json.Nodes;
 using System.Runtime.Versioning;
 using System.Text.Json;
 using NexusPipeline.Core.Execution;
+using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Processes;
+using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Extensions;
+using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
 using NexusPipeline.Platform.Execution.Judgement;
@@ -28,12 +31,31 @@ internal static class CompiledWorkerFixture
     }
 
     internal static async Task RunAsync(ExtensionCatalogFixture catalog, ExecutionAdmissionInbox inbox, TaskAdapterService adapters,
-        ProjectSourceFixture project, Guid journalId, string mode)
+        ProjectSourceFixture project, Guid journalId, string mode, bool ownedHistory = false)
     {
         var originalConfiguration = File.ReadAllBytes(project.ConfigurationFile!);
-        var runtime = new ExecutionRuntimeConsumer(catalog.Instance, catalog.Database, new(), catalog.Lease, catalog.Resources, catalog.Index, inbox);
-        runtime.ConfigureTaskAdapters(adapters);
-        var running = runtime.RunNextAsync();
+        OwnedHistorySession? guarded = null;
+        Task<AttemptReceipt?> running;
+        if (ownedHistory)
+        {
+            var accepted = Assert.IsType<AcceptedExecutionAdmission>(inbox.TakeNext());
+            var session = new AttemptRuntimeSession(catalog.Instance, catalog.Database, new(), catalog.Lease,
+                catalog.Resources, catalog.Index, accepted, adapters: adapters);
+            var owned = new OwnedHistorySession(session, catalog, accepted, adapters, journalId);
+            guarded = owned;
+            running = Execute();
+            async Task<AttemptReceipt?> Execute()
+            {
+                try { return await new ExecutionAttemptCoordinator().RunAsync(owned); }
+                finally { if (session.IsTerminal) session.Dispose(); }
+            }
+        }
+        else
+        {
+            var runtime = new ExecutionRuntimeConsumer(catalog.Instance, catalog.Database, new(), catalog.Lease, catalog.Resources, catalog.Index, inbox);
+            runtime.ConfigureTaskAdapters(adapters);
+            running = runtime.RunNextAsync();
+        }
         if (mode == "project-secret-revision")
         {
             var marker = Path.Combine(project.Path, "synthetic-worker-ready");
@@ -44,6 +66,7 @@ internal static class CompiledWorkerFixture
             File.WriteAllText(marker + ".secret-release", "released");
         }
         var receipt = Assert.IsType<AttemptReceipt>(await running);
+        guarded?.RequireReleased();
         Assert.Equal(EngineOutcome.Succeeded, receipt.Facts.Engine);
         var state = catalog.Lease.PublishExecution(() => AttemptWriterState.Read(catalog.Instance, catalog.Database, new(), journalId));
         if (project.HasTaskRetry)
@@ -116,6 +139,66 @@ internal static class CompiledWorkerFixture
         Assert.Contains(closure.Family, member => member.ProcessId == observedPid);
         Assert.All(closure.Family, member => Assert.Equal(WriterState.Stopped, WriterStopEvidence.ObserveProcess(member)));
         Assert.Equal(originalConfiguration, File.ReadAllBytes(project.ConfigurationFile!));
+    }
+
+    private sealed class OwnedHistorySession(AttemptRuntimeSession inner, ExtensionCatalogFixture catalog,
+        AcceptedExecutionAdmission accepted, TaskAdapterService adapters, Guid journalId) : IExecutionAttemptSession
+    {
+        private readonly ExecutionPlan _total = accepted.Prepared.Total.Plan.ReadWire();
+        private StepEvidenceBinding? _binding;
+        public IReadOnlyList<string> StepIds => inner.StepIds;
+        public bool HasEnteredEffect => inner.HasEnteredEffect;
+        public void PrepareConfigurationGroups() => inner.PrepareConfigurationGroups();
+        public ExecutionStopReason? ReadStopRequest() => inner.ReadStopRequest();
+        public ValueTask<bool> TrySkipAsync(string stepId) => inner.TrySkipAsync(stepId);
+        public ValueTask<bool> TryRetryAsync(string stepId) => inner.TryRetryAsync(stepId);
+        public void PrepareNextStep(string stepId) => inner.PrepareNextStep(stepId);
+        public void EnterEffect(string stepId) => inner.EnterEffect(stepId);
+        public async Task<ExecutionStopReason?> ExecuteStepAsync(string stepId, CancellationToken stopping)
+        {
+            Assert.NotNull(catalog.Database.AttemptReads?.Find(journalId));
+            var state = catalog.Lease.PublishExecution(() => AttemptWriterState.Read(catalog.Instance, catalog.Database, new(), journalId));
+            var job = Assert.Single(state.Jobs, item => item.StepId == stepId && item.Role == "process");
+            var binding = StepResultCodec.Binding(state.Latest.Root, job); _binding = binding;
+            using var blocked = new FileStream(HistoryPath(), FileMode.Open, FileAccess.Read, FileShare.Read);
+            blocked.Lock(0, blocked.Length);
+            try
+            {
+                Assert.Throws<IOException>(() => TaskRetryEvidence.ForJob(catalog.Instance, new(), _total, binding));
+                using (JournalReadScope.HoldAttempt(catalog.Instance, new(), catalog.Database, journalId))
+                    Assert.Throws<IOException>(() => TaskRetryEvidence.ForJob(catalog.Instance, new(), _total,
+                        binding with { JobName = binding.JobName + ".foreign" }));
+                var reason = await inner.ExecuteStepAsync(stepId, stopping);
+                var collected = catalog.Lease.PublishExecution(() => AttemptWriterState.Read(catalog.Instance, catalog.Database, new(), journalId));
+                var result = Assert.Single(StepResultCodec.Read(collected.Latest.Root, collected.Total), item => item.Binding.StepId == stepId);
+                var document = StepEvidenceCodec.Read(new(catalog.Instance, new()), binding, result.Latest.Artifact);
+                Assert.NotNull(document.TaskAdapter);
+                await Assert.ThrowsAsync<UnauthorizedAccessException>(() => adapters.ObserveOwnedAsync(accepted,
+                    binding with { ParentOperationId = Guid.NewGuid() }, document.RawOutput!,
+                    () => throw new InvalidOperationException("foreign_binding_reached_step")).AsTask());
+                return reason;
+            }
+            finally { blocked.Unlock(0, blocked.Length); }
+        }
+        public Task CollectStepAsync(string stepId) => inner.CollectStepAsync(stepId);
+        public Task RestoreStepAsync(string stepId) => inner.RestoreStepAsync(stepId);
+        public void FreezeDispatch(ExecutionStopReason reason) => inner.FreezeDispatch(reason);
+        public Task CollectRemainingAsync() => inner.CollectRemainingAsync();
+        public void CloseUndispatched() => inner.CloseUndispatched();
+        public void MarkApplied() => inner.MarkApplied();
+        public Task RestoreRemainingAsync(ExecutionStopReason reason) => inner.RestoreRemainingAsync(reason);
+        public AttemptReceipt Commit(ExecutionStopReason reason) => inner.Commit(reason);
+        public Task QuarantineFailureAsync() => inner.QuarantineFailureAsync();
+        internal void RequireReleased()
+        {
+            Assert.Null(catalog.Database.AttemptReads?.Find(journalId));
+            var binding = _binding ?? throw new InvalidOperationException("adapter_collection_not_observed");
+            using var blocked = new FileStream(HistoryPath(), FileMode.Open, FileAccess.Read, FileShare.Read);
+            blocked.Lock(0, blocked.Length);
+            try { Assert.Throws<IOException>(() => TaskRetryEvidence.ForJob(catalog.Instance, new(), _total, binding)); }
+            finally { blocked.Unlock(0, blocked.Length); }
+        }
+        private string HistoryPath() => Path.Combine(catalog.Instance.RuntimeRoot, "journals", journalId.ToString("D"), "0000000001.json");
     }
 
     internal static void Populate(string directory)

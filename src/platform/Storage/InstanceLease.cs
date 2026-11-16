@@ -9,6 +9,7 @@ public sealed class InstanceLease : IDisposable
     private NexusPipeline.Core.Maintenance.ResourceLeaseManager? _extensionResources;
     private readonly FileStream _lock;
     private readonly FileStream _identity;
+    private readonly StableDirectoryLease? _identityDirectory;
     private readonly ExecutionPublicationQueue _executionPublications = new();
     private readonly Execution.AttemptReadRegistry _attemptReads = new();
     private readonly object _executorGate = new();
@@ -22,12 +23,13 @@ public sealed class InstanceLease : IDisposable
     internal Execution.RunBudgetOwner RunBudgets { get; }
     internal Execution.LiveLogHub LiveLogs { get; }
 
-    private InstanceLease(RuntimeInstance instance, FileStream instanceLock, FileStream identity)
+    private InstanceLease(RuntimeInstance instance, FileStream instanceLock, FileStream identity, StableDirectoryLease? identityDirectory)
     {
         Instance = instance;
         RunBudgets = new(this); LiveLogs = new(this);
         _lock = instanceLock;
         _identity = identity;
+        _identityDirectory = identityDirectory;
     }
 
     public static InstanceLease Acquire(RuntimeInstance instance, ContractReader contracts)
@@ -44,25 +46,30 @@ public sealed class InstanceLease : IDisposable
     private static InstanceLease AcquireCore(RuntimeInstance instance, ContractReader contracts, bool installer)
     {
         if (!installer && OperatingSystem.IsWindows()) Installation.InstallerRuntimeGate.RequireAvailable(instance.RuntimeRoot);
-        var actual = new InstanceRoot(contracts).OpenExisting(instance.RuntimeRoot);
-        if (actual.InstanceId != instance.InstanceId) throw new IOException("runtime_identity_mismatch");
-        var path = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(actual.RuntimeRoot, "instance.lock"));
-        if (File.Exists(path) && new FileInfo(path).Length != 0) throw new IOException("unrecognized_instance_lock");
-        var identity = new FileStream(Path.Combine(actual.RuntimeRoot, "instance.json"), FileMode.Open, FileAccess.Read, FileShare.Read);
+        var identityDirectory = OperatingSystem.IsWindows() ? StableDirectoryLease.Acquire(instance.RuntimeRoot) : null;
         try
         {
-            if (new InstanceRoot(contracts).OpenExisting(actual.RuntimeRoot) != actual)
-                throw new IOException("runtime_identity_changed");
-            var instanceLock = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            var actual = new InstanceRoot(contracts).OpenExisting(instance.RuntimeRoot);
+            if (actual.InstanceId != instance.InstanceId) throw new IOException("runtime_identity_mismatch");
+            var path = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(actual.RuntimeRoot, "instance.lock"));
+            if (File.Exists(path) && new FileInfo(path).Length != 0) throw new IOException("unrecognized_instance_lock");
+            var identity = new FileStream(Path.Combine(actual.RuntimeRoot, "instance.json"), FileMode.Open, FileAccess.Read, FileShare.Read);
             try
             {
-                if (!installer && OperatingSystem.IsWindows()) Installation.InstallerRuntimeGate.RequireAvailable(instance.RuntimeRoot);
-                if (instanceLock.Length == 0) return new(actual, instanceLock, identity);
-                throw new IOException("unrecognized_instance_lock");
+                if (new InstanceRoot(contracts).OpenExisting(actual.RuntimeRoot) != actual)
+                    throw new IOException("runtime_identity_changed");
+                var instanceLock = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                try
+                {
+                    if (!installer && OperatingSystem.IsWindows()) Installation.InstallerRuntimeGate.RequireAvailable(instance.RuntimeRoot);
+                    if (instanceLock.Length == 0) return new(actual, instanceLock, identity, identityDirectory);
+                    throw new IOException("unrecognized_instance_lock");
+                }
+                catch { instanceLock.Dispose(); throw; }
             }
-            catch { instanceLock.Dispose(); throw; }
+            catch { identity.Dispose(); throw; }
         }
-        catch { identity.Dispose(); throw; }
+        catch { identityDirectory?.Dispose(); throw; }
     }
 
     public void Dispose()
@@ -72,7 +79,11 @@ public sealed class InstanceLease : IDisposable
             _attemptReads.Dispose(); RunBudgets.Close(); LiveLogs.Close();
             lock (_executorGate) if (OperatingSystem.IsWindows()) _executor?.Dispose();
             try { lock (_databaseGate) _databaseReads?.Dispose(); }
-            finally { _directories?.Dispose(); _lock.Dispose(); _identity.Dispose(); }
+            finally
+            {
+                try { _directories?.Dispose(); _lock.Dispose(); _identity.Dispose(); }
+                finally { _identityDirectory?.Dispose(); }
+            }
         });
     }
 
@@ -154,7 +165,7 @@ public sealed class InstanceLease : IDisposable
             VerifyHeld(Instance);
             using var paths = OperatingSystem.IsWindows()
                 ? DirectoryAttributeScope.Enter(_directories ??= DirectoryAttributeProtection.Acquire(Instance)) : null;
-            using var instance = OperatingSystem.IsWindows() ? InstanceReadScope.Hold(Instance, new()) : null;
+            using var instance = OperatingSystem.IsWindows() ? InstanceReadScope.Hold(Instance, this) : null;
             using var identity = OperatingSystem.IsWindows() ? new Processes.ProcessIdentityScope(ExecutorIdentity) : null;
             using var reads = OperatingSystem.IsWindows() ? Sqlite.DatabaseReadScope.Hold(Path.Combine(Instance.RuntimeRoot, "state", "runtime.db")) : null;
             using var journals = OperatingSystem.IsWindows() ? Journals.JournalReadScope.HoldParents(Instance, new(), _attemptReads) : null;

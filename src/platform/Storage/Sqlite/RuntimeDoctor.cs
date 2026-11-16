@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Execution;
 using System.Runtime.InteropServices;
+using System.Globalization;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Records;
 
@@ -31,7 +32,7 @@ public sealed class RuntimeDoctor : IRuntimeDoctor
         cancellationToken.ThrowIfCancellationRequested();
         var recovery = _recovery.Current;
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         RequireIdentity(connection, transaction);
         var counts = ReadCounts(connection, transaction);
         var pending = counts.PendingOperations; var attempts = counts.Attempts; var runs = counts.CompletedRuns;
@@ -69,9 +70,28 @@ public sealed class RuntimeDoctor : IRuntimeDoctor
     public RuntimeRecordCounts ReadCounts()
     {
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         RequireIdentity(connection, transaction);
         return ReadCounts(connection, transaction);
+    }
+
+    public RuntimeControlSnapshot ReadControlSnapshot()
+    {
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true,
+            domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Records | DatabaseDomain.System);
+        using var transaction = DatabaseConnections.BeginRead(connection);
+        RequireIdentity(connection, transaction);
+        long catalog;
+        using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "SELECT revision FROM automation.automation_catalog_state WHERE singleton=1;";
+            catalog = Convert.ToInt64(command.ExecuteScalar() ?? throw new IOException("automation_catalog_revision_missing"), CultureInfo.InvariantCulture);
+        }
+        var settings = HostSettingsRows.ReadCurrent(connection, transaction);
+        var counts = ReadCounts(connection, transaction);
+        transaction.Commit();
+        return new(catalog, settings.Revision, counts);
     }
 
     private void RequireIdentity(SqliteConnection connection, SqliteTransaction transaction)
@@ -133,3 +153,4 @@ public sealed class RuntimeDoctor : IRuntimeDoctor
 }
 
 public sealed record RuntimeRecordCounts(long PendingOperations, long Attempts, long CompletedRuns);
+public sealed record RuntimeControlSnapshot(long CatalogRevision, long SettingsRevision, RuntimeRecordCounts Counts);

@@ -108,7 +108,7 @@ internal static class StartupIntentRows
             command.Parameters.AddWithValue("$id", intent.Status.OperationId.ToString("D"));
             if (command.ExecuteScalar() is not long revision || revision != intent.Status.SettingsRevision)
                 throw new IOException("startup_intent_settings_result_unbound");
-            using var transaction = connection.BeginTransaction(deferred: true);
+            using var transaction = DatabaseConnections.BeginRead(connection);
             var saved = HostSettingsRows.Read(connection, transaction, revision);
             if (saved.Values.AutoStart != intent.Status.Enable) throw new IOException("startup_intent_target_unbound");
         }
@@ -118,7 +118,7 @@ internal static class StartupIntentRows
             throw new IOException("startup_registration_history_unbound");
         var pending = intents.Where(intent => intent.Status.State != StartupEffectState.Completed).ToArray();
         if (pending.Length > 1) throw new IOException("startup_intent_inventory_unrecognized");
-        using var view = connection.BeginTransaction(deferred: true);
+        using var view = DatabaseConnections.BeginRead(connection);
         var latestSettings = HostSettingsRows.ReadCurrent(connection, view);
         if (pending.Length == 1)
         {

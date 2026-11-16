@@ -11,7 +11,7 @@ public static class ConfigurationEditInventory
         try
         {
             using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration);
-            using var transaction = connection.BeginTransaction(deferred: true);
+            using var transaction = DatabaseConnections.BeginRead(connection);
             using var command = connection.CreateCommand(); command.Transaction = transaction;
             command.CommandText = "SELECT s.session_id,o.subject_id,o.operation_kind,o.status FROM configuration.configuration_edit_sessions s " +
                 "JOIN main.operations o ON o.operation_id=s.session_id LIMIT 4097;";

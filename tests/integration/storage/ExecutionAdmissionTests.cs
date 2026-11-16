@@ -218,7 +218,8 @@ public sealed class ExecutionAdmissionTests
         {
             if (point != AttemptPersistencePoint.AcceptanceCommitted) return;
             var parent = new RecoveryJournalRegistry(source.Database).ReadSnapshot().Journals.Single(item => item.JournalId == journalId);
-            var plan = AttemptPreparedBinding.ReadPlan(source.Instance, new(), parent);
+            using var inputs = AttemptPreparedBinding.ReadPlanInputs(source.Instance, new(), parent);
+            var plan = inputs.Plan;
             Directory.CreateDirectory(Path.Combine(source.Instance.RuntimeRoot, plan.OutputDirectory));
             throw new IOException("fixture_unknown_output");
         }

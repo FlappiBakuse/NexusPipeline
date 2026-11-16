@@ -25,7 +25,7 @@ public static class ConfigurationRecoveryHolds
     private static IReadOnlyList<RecoveryResourceHold> Read(StateDatabase database, PayloadApplyRoots? payloadRoots)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Extensions | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var groups = new List<(Guid Session, Guid Owner, bool Run)>();
         using (var command = connection.CreateCommand())
         {

@@ -41,7 +41,7 @@ internal static class ProviderLauncherRows
     internal static ProcessIdentity? Root(StateDatabase database, ProviderLauncherBinding binding)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var result = RootInside(connection, transaction, binding); transaction.Commit(); return result;
     }
 
@@ -137,7 +137,7 @@ internal static class ProviderLauncherRows
         var jobs = ExecutionInvocationCodec.Views(journal).SelectMany(view => ProviderLauncherCodec.Read(view, total, totalSha))
             .GroupBy(item => item.Binding.LauncherId).Select(group => group.Last()).ToArray();
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT launcher_id,job_name FROM main.execution_provider_launcher_roots WHERE journal_id=$journal LIMIT 1025;";
         command.Parameters.AddWithValue("$journal", journal.GetProperty("journalId").GetString()!);

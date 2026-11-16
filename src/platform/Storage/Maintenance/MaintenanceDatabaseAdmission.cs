@@ -24,7 +24,7 @@ internal sealed class MaintenanceDatabaseAdmission(RuntimeInstance instance, Con
             snapshot.Isolations.Any(item => item.JournalId != own.JournalId)) throw Invalid();
         // A SQLite reader can change SHM; all SQL checks must use the frozen copy during admission.
         using var connection = DatabaseConnections.Open(Path.Combine(inspection.DiagnosticCopyRoot, "runtime.db"), readOnly: true, domains: DatabaseDomain.All);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         requireInspectedBinding(connection, transaction);
         transaction.Commit();
         requireCurrentPeer();

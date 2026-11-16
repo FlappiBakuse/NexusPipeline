@@ -190,7 +190,7 @@ internal sealed class AssetRecoverySession : IAssetRecoverySession, IDisposable
     private AutomationImportResult ReadResult()
     {
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         return AssetPreparationAcceptance.ReadAccepted(connection, transaction, Guid.Parse(_frozen.ReadWire().OperationId), false).Result;
     }
 

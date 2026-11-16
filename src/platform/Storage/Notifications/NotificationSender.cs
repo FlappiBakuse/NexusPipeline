@@ -65,7 +65,7 @@ internal sealed class NotificationSender : IAsyncDisposable
             timeout.CancelAfter(TimeSpan.FromSeconds(task.Configuration.TimeoutSeconds));
             NotificationDeliveryNetwork network;
             using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
-            using (var transaction = connection.BeginTransaction(deferred: true))
+            using (var transaction = DatabaseConnections.BeginRead(connection))
             {
                 var state = NotificationDeliveryRows.ReadState(connection, transaction, id);
                 if (state.State != NotificationDeliveryState.Queued) return state.State;
@@ -153,7 +153,7 @@ internal sealed class NotificationSender : IAsyncDisposable
     {
         if (maximum is < 1 or > 4) throw new ArgumentOutOfRangeException(nameof(maximum));
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var sourceOperation = NotificationDeliveryOrigins.ReadOperation(_instance, _database, _contracts, source, connection, transaction);
         var result = new List<BlobReference>();
         using (var command = NotificationDeliveryRows.Command(connection, transaction,

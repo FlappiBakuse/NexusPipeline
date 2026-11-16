@@ -30,16 +30,16 @@ public sealed class ContractReader
         }
     }
 
-    internal void RequireSchema(JsonDocument document, ReadOnlyMemory<byte> ownedBytes, string schemaName)
+    internal void RequireSchema(JsonDocument document, ReadOnlyMemory<byte> ownedBytes, string schemaName, string? sha256 = null)
     {
         ContractSchemas.RequireName(schemaName);
         if (ownedBytes.Length is < 1 or > StrictJson.MaximumBytes) throw new JsonException("invalid_json_size");
-        RequireValid(document.RootElement, schemaName, ownedBytes.Span);
+        RequireValid(document.RootElement, schemaName, ownedBytes.Span, sha256);
     }
 
-    private static void RequireValid(JsonElement value, string schemaName, ReadOnlySpan<byte> bytes)
+    private static void RequireValid(JsonElement value, string schemaName, ReadOnlySpan<byte> bytes, string? sha256 = null)
     {
-        var key = new ValidatedDocument(schemaName, bytes.Length, Convert.ToHexStringLower(SHA256.HashData(bytes)));
+        var key = new ValidatedDocument(schemaName, bytes.Length, sha256 ?? Convert.ToHexStringLower(SHA256.HashData(bytes)));
         // Only fixed-schema validity is reusable; callers still verify fresh domain, file and ownership evidence.
         lock (CacheGate)
         {

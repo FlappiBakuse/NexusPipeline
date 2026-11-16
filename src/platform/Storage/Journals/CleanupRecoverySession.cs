@@ -24,6 +24,7 @@ public sealed class CleanupRecoverySession : ICleanupRecoverySession
     private readonly JsonObject _journal;
     private readonly WorkCleanupItems? _work;
     private readonly PhysicalObjectDeletion.FileLease? _held;
+    private readonly InstanceLease? _executionLease;
 
     public CleanupRecoverySession(RuntimeInstance instance, Guid journalId, ContractReader contracts, StateDatabase database,
         Func<CleanupWriterObservation> writers, ICleanupPersistenceObserver? observer = null, PayloadApplyRoots? payloadRoots = null)
@@ -31,9 +32,12 @@ public sealed class CleanupRecoverySession : ICleanupRecoverySession
 
     internal CleanupRecoverySession(RuntimeInstance instance, Guid journalId, ContractReader contracts, StateDatabase database,
         Func<CleanupWriterObservation> writers, ICleanupPersistenceObserver? observer, PayloadApplyRoots? payloadRoots,
-        ExtensionWorkExecution? workExecution, PhysicalObjectDeletion.FileLease? held = null, BlobCleanup? cleanup = null)
+        ExtensionWorkExecution? workExecution, PhysicalObjectDeletion.FileLease? held = null, BlobCleanup? cleanup = null,
+        InstanceLease? executionLease = null)
     {
         if (database.InstanceId != instance.InstanceId) throw new IOException("cleanup_database_unbound");
+        executionLease?.VerifyHeld(instance);
+        _executionLease = executionLease;
         _instance = instance; _writers = writers; _observer = observer; _held = held;
         _store = new(instance, contracts); _registry = new(database); _outbox = new(database);
         var bound = CleanupJournalBinding.Read(instance, contracts, _registry.ReadSnapshot(journalId), journalId, database, payloadRoots);
@@ -133,13 +137,13 @@ public sealed class CleanupRecoverySession : ICleanupRecoverySession
     {
         RequireStopped();
         RequireTerminalItems();
-        _projection.Synchronize(_plan, false);
+        Publish(() => _projection.Synchronize(_plan, false));
         Save(JournalPhase.Committed, "commit-cleanup", "completed", "cleanup_committed");
     }
 
     public void Quarantine(string reasonCode)
     {
-        _projection.Synchronize(_plan, false);
+        Publish(() => _projection.Synchronize(_plan, false));
         Save(JournalPhase.Quarantined, "isolate-cleanup", "unknown", reasonCode);
     }
 
@@ -147,7 +151,7 @@ public sealed class CleanupRecoverySession : ICleanupRecoverySession
     {
         RequireStopped();
         if (!Inspect().CanReconcileRecordedCommit) throw new IOException("cleanup_recorded_commit_unverified");
-        _projection.Synchronize(_plan, false);
+        Publish(() => _projection.Synchronize(_plan, false));
     }
 
     private CleanupItemState InspectItem(FrozenCleanupItem item, IReadOnlyDictionary<string, CleanupItemState> inspected)
@@ -190,14 +194,20 @@ public sealed class CleanupRecoverySession : ICleanupRecoverySession
 
     private void Synchronize(bool verifiedRecovery)
     {
-        if (_work is null) _projection.Synchronize(_plan, verifiedRecovery);
+        if (_work is null) Publish(() => _projection.Synchronize(_plan, verifiedRecovery));
         else _work.Publish(() => _projection.Synchronize(_plan, verifiedRecovery));
     }
 
     private void Save(JournalPhase phase, string step, string effect, string detail, bool verifiedRecovery = false)
     {
-        if (_work is null) SaveCore(phase, step, effect, detail, verifiedRecovery);
+        if (_work is null) Publish(() => SaveCore(phase, step, effect, detail, verifiedRecovery));
         else _work.Publish(() => SaveCore(phase, step, effect, detail, verifiedRecovery));
+    }
+
+    private void Publish(Action action)
+    {
+        if (_executionLease is not null && _work is null) _executionLease.PublishExecution(action);
+        else action();
     }
 
     private void SaveCore(JournalPhase phase, string step, string effect, string detail, bool verifiedRecovery)

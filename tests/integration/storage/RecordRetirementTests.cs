@@ -103,7 +103,7 @@ public sealed class RecordRetirementTests
             {
                 Assert.Equal(FileCleanupResult.Quarantined,
                     new OwnedCleanupExecutor(source.Instance, new(), source.Database, fixture.Hooks.Base.Index)
-                        .Execute(page.CleanupJournalId, source.Lease, root));
+                        .Execute(page.CleanupJournalId, source.Lease, root, source.PayloadRoots));
                 Assert.Equal(selected.RecordedBytes, held.Length);
                 var bytes = new byte[checked((int)held.Length)]; held.ReadExactly(bytes); Assert.NotEmpty(bytes);
                 Assert.All(description.Parts, part => Assert.True(File.Exists(Path.Combine(source.Instance.RuntimeRoot,
@@ -118,7 +118,8 @@ public sealed class RecordRetirementTests
                 var actual = writers.ObserveForCurrentExecutor(page.CleanupJournalId);
                 return new(source.Instance.InstanceId, page.CleanupJournalId, actual.IsComplete, actual.State);
             }
-            var session = new CleanupRecoverySession(source.Instance, page.CleanupJournalId, new(), source.Database, Observe);
+            var session = new CleanupRecoverySession(source.Instance, page.CleanupJournalId, new(), source.Database, Observe,
+                payloadRoots: source.PayloadRoots);
             Assert.Equal(FileCleanupResult.Cleaned, new FileCleanupRecovery(session).Recover(isExplicitQuarantineRecovery: true));
             return true;
         });

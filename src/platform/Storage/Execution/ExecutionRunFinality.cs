@@ -20,12 +20,13 @@ public sealed class ExecutionRunFinality(RuntimeInstance instance, StateDatabase
     {
         ArgumentNullException.ThrowIfNull(receipt);
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         if (AttemptReceiptStore.ReadInside(connection, transaction, receipt.Facts.AttemptId) != receipt)
             throw new IOException("execution_retry_receipt_unbound");
         var source = StartSourceRows.Read(connection, transaction, receipt.OperationId);
         var journal = RecoveryJournalRegistry.ReadInside(connection, transaction, receipt.JournalId);
-        var attempt = AttemptPreparedBinding.ReadPlan(instance, contracts, journal);
+        var graph = AttemptPreparedBinding.ReadPlanGraph(instance, contracts, journal, database);
+        var attempt = graph.Plan;
         StartSourceRows.RequireAttempt(source, attempt);
         if (journal.Phase != NexusPipeline.Core.Configuration.JournalPhase.Committed ||
             journal.PlanDigest != receipt.PlanDigest || source.RunId != receipt.Facts.RunId ||
@@ -38,8 +39,7 @@ public sealed class ExecutionRunFinality(RuntimeInstance instance, StateDatabase
             throw new IOException("execution_retry_receipt_unbound");
         if (noEffect) JournalEffectGate.Require(connection, transaction, receipt.JournalId,
             NexusPipeline.Core.Configuration.EffectGateState.Sealed);
-        var total = new ExecutionPlanCodec(instance, contracts, new(instance, contracts))
-            .Read(AttemptPlanCodec.Reference(attempt.ExecutionPlan)).ReadWire();
+        var total = graph.Total;
         _ = new RetryHookEvidence(instance, database, contracts).RequireAll(attempt, total, physical.Root, verifyContents: false);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.execution_start_sources WHERE run_id=$run AND attempt_ordinal>$ordinal);";

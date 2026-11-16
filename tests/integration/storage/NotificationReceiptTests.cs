@@ -1,16 +1,93 @@
+using System.Diagnostics;
 using System.Runtime.Versioning;
 using Microsoft.Data.Sqlite;
+using NexusPipeline.Core.Secrets;
 using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Notifications;
 using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace NexusPipeline.StorageTests;
 
 [SupportedOSPlatform("windows")]
-public sealed class NotificationReceiptTests
+public sealed class NotificationReceiptTests(ITestOutputHelper output)
 {
+    [Fact(DisplayName = "Repeated Protected Receipt Reads Reuse Terminal Decoding And Send Each Frozen Route Once")]
+    public async Task ReusesTerminalDecoding()
+    {
+        await using var sink = new NotificationHttpSink((_, _) => Task.FromResult(new NotificationSinkReply(200, "")));
+        var input = new NexusPipeline.Core.Notifications.NotificationTaskInput("receipt decoding", "",
+            NexusPipeline.Core.Notifications.NotificationTaskKind.Webhook, true,
+            NexusPipeline.Core.Notifications.NotificationChannelConfiguration.Default with
+            { WebhookKind = NexusPipeline.Core.Notifications.NotificationWebhookKind.Generic,
+                WebhookTemplate = "{\"text\":{text}}" });
+        using var fixture = new NotificationReceiptFixture(input);
+        using var url = new SecretValue(sink.Address.AbsoluteUri);
+        await fixture.Execute(queueNotifications: false, repetitions: 3,
+            edits: [new(NotificationSecretField.WebhookUrl, 0, SecretDisposition.Set, url)]);
+        var source = fixture.Source;
+        var original = new JournalStore(source.Instance, new()).Read(fixture.Receipt.JournalId).Export();
+        var contents = Directory.EnumerateFiles(Path.Combine(source.Instance.RuntimeRoot, "blobs", "content"))
+            .ToDictionary(path => path, File.ReadAllBytes);
+        using var reads = new NotificationAttemptReads(source.Instance, source.Database, new(), source.Lease);
+        reads.HoldReceipt(fixture.Snapshot.Reference);
+        var first = ReadReceipt(fixture); var last = first;
+        var allocated = GC.GetAllocatedBytesForCurrentThread();
+        var cpu = Process.GetCurrentProcess().TotalProcessorTime; var clock = Stopwatch.StartNew();
+        for (var index = 0; index < 8; index++) last = ReadReceipt(fixture);
+        var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocated;
+        output.WriteLine("Repeated receipt reads: count=8, allocatedBytes={0}, processCpuMilliseconds={1:F3}, elapsedMilliseconds={2:F3}",
+            allocatedBytes, (Process.GetCurrentProcess().TotalProcessorTime - cpu).TotalMilliseconds,
+            clock.Elapsed.TotalMilliseconds);
+        Assert.InRange(allocatedBytes, 0L, 24L * 1024 * 1024);
+        Assert.True(first.Snapshot.Document.OrderedFacts.SequenceEqual(last.Snapshot.Document.OrderedFacts));
+        Assert.Equal(3, last.Routes.Length);
+        for (var ordinal = 0; ordinal < first.Routes.Length; ordinal++)
+            Assert.Equal(NotificationReceiptText.Render(first, ordinal), NotificationReceiptText.Render(last, ordinal));
+        await using var runtime = new NotificationRuntime(source.Instance, source.Database, new(), source.Lease,
+            fixture.Base.Resources, fixture.Base.Index,
+            new(source.Instance, source.Database, source.Lease, fixture.Base.Resources, fixture.Base.Index, new()));
+        runtime.InitializeStartup(); await runtime.RunPassAsync();
+        Assert.False(runtime.HasPendingActivity); Assert.Equal(3, sink.Requests.Count);
+        await runtime.RunPassAsync(); Assert.Equal(3, sink.Requests.Count);
+        Assert.Equal(original, new JournalStore(source.Instance, new()).Read(fixture.Receipt.JournalId).Export());
+        foreach (var content in contents) Assert.Equal(content.Value, File.ReadAllBytes(content.Key));
+        reads.Dispose();
+        var directory = Path.Combine(source.Instance.RuntimeRoot, "journals", fixture.Receipt.JournalId.ToString("D"));
+        using var writable = new FileStream(Directory.EnumerateFiles(directory).Order(StringComparer.Ordinal).Last(),
+            FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
+        Assert.Equal(original.Length, writable.Length);
+    }
+
+    [Fact(DisplayName = "Cached Receipt Decoding Rechecks Sql And Rejects Changed Journal Bytes After Its Owner Releases")]
+    public async Task RechecksReleasedReceiptSources()
+    {
+        using var fixture = new NotificationReceiptFixture(); await fixture.Execute(repetitions: 3);
+        var source = fixture.Source;
+        using (var reads = new NotificationAttemptReads(source.Instance, source.Database, new(), source.Lease))
+        {
+            reads.HoldReceipt(fixture.Snapshot.Reference); _ = ReadReceipt(fixture);
+            fixture.Sql("UPDATE notifications.notification_receipt_sources SET route_count=route_count+1;");
+            try { Assert.Throws<IOException>(() => ReadReceipt(fixture)); }
+            finally { fixture.Sql("UPDATE notifications.notification_receipt_sources SET route_count=route_count-1;"); }
+            _ = ReadReceipt(fixture);
+        }
+        var directory = Path.Combine(source.Instance.RuntimeRoot, "journals", fixture.Receipt.JournalId.ToString("D"));
+        var path = Directory.EnumerateFiles(directory).Order(StringComparer.Ordinal).Last();
+        var original = File.ReadAllBytes(path); File.WriteAllBytes(path, [9]);
+        try
+        {
+            var before = source.Snapshot();
+            Assert.Throws<System.Text.Json.JsonException>(() => ReadReceipt(fixture));
+            var after = source.Snapshot();
+            Assert.Equal(before.Rows, after.Rows); Assert.Equal(before.Files, after.Files);
+        }
+        finally { File.WriteAllBytes(path, original); }
+        _ = ReadReceipt(fixture);
+    }
+
     [Fact(DisplayName = "Terminal Notification Batches Reuse Protected Evidence And Recheck Current Source Bindings")]
     public async Task ReusesTerminalEvidence()
     {
@@ -174,5 +251,15 @@ public sealed class NotificationReceiptTests
             fixture.Source.Database, new(), payload.SecretId, payload.Digest, payload.SizeBytes));
         Assert.ThrowsAny<Exception>(() => fixture.Delivery.ReadPendingForRun(fixture.Receipt.Facts.RunId));
         Assert.Equal(before, fixture.Count("operations"));
+    }
+
+    private static ReceiptReadContext ReadReceipt(NotificationReceiptFixture fixture)
+    {
+        var source = fixture.Source;
+        using var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.All);
+        using var transaction = DatabaseConnections.BeginRead(connection);
+        var result = new NotificationReceiptCodec(source.Instance, source.Database, new())
+            .ReadContext(fixture.Snapshot.Reference, connection, transaction);
+        transaction.Commit(); return result;
     }
 }

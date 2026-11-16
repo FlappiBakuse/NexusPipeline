@@ -37,12 +37,13 @@ internal sealed class ExecutionRuntimeServices : IAsyncDisposable
 
     internal ExecutionRuntimeServices(RuntimeInstance instance, StateDatabase database, ContractReader contracts, InstanceLease lease,
         ResourceLeaseManager resources, HostLifecycle lifecycle, RecoveryIndex recovery, ExecutionProviderRegistry providers, SecretFieldService secrets,
+        NexusPipeline.Platform.Storage.Journals.PayloadApplyRoots payloadRoots,
         NativeClientBinding? nativeBinding = null, NotificationStartupState? notifications = null)
     {
         using var paths = DirectoryAttributeScope.Hold(instance);
         using var blobs = BlobReadScope.Hold(instance);
         var inbox = new ExecutionAdmissionInbox();
-        _retention = new(database, new(instance, database, contracts, lease, resources, recovery));
+        _retention = new(database, new(instance, database, contracts, lease, resources, recovery, payloadRoots));
         Admission = new(instance, database, contracts, lease, resources, recovery, inbox, new(5, 5, 30),
             judgementRuntime: new(PhysicalPathPolicy.RuntimeProcessPath(),
                 JudgementRuntimeDiscovery.FindPython()), providers: providers);

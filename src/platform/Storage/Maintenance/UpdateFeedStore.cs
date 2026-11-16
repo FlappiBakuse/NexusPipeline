@@ -63,13 +63,13 @@ internal sealed class UpdateFeedStore
         {
             SavedUpdateFeed? saved;
             using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System))
-            using (var transaction = connection.BeginTransaction(deferred: true))
+            using (var transaction = DatabaseConnections.BeginRead(connection))
             { saved = UpdateFeedRows.ReadHead(connection, transaction, channel); transaction.Commit(); }
             if (saved is null) return null;
             var verified = _verifier.Verify(Read(saved.Feed), Read(saved.Signature), channel);
             if (verified.Feed.Identity != saved.Identity || verified.KeyId != saved.KeyId) throw Invalid();
             using var fresh = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
-            using var tx = fresh.BeginTransaction(deferred: true);
+            using var tx = DatabaseConnections.BeginRead(fresh);
             if (UpdateFeedRows.ReadHead(fresh, tx, channel) != saved) throw Invalid();
             tx.Commit(); return verified;
         });
@@ -86,7 +86,7 @@ internal sealed class UpdateFeedStore
             var release = current.Feed.Releases.SingleOrDefault(item => item.HostVersion == hostVersion) ?? throw Invalid();
             if (!Version.TryParse(release.MinReaderVersion.Split('-')[0], out var minimum) || minimum > _verifier.ReaderVersion) throw Invalid();
             using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
-            using var transaction = connection.BeginTransaction(deferred: true);
+            using var transaction = DatabaseConnections.BeginRead(connection);
             var saved = UpdateFeedRows.ReadHead(connection, transaction, expected.Channel) ?? throw Invalid();
             if (saved.Identity != expected || saved.KeyId != current.KeyId) throw Invalid();
             transaction.Commit(); return (saved, release, current.Feed);

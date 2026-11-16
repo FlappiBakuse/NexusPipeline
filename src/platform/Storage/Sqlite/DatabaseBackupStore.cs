@@ -17,7 +17,7 @@ internal static class DatabaseBackupStore
             if (File.Exists(target)) throw new IOException("database_backup_destination_exists");
         }
         using var source = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.All);
-        using var transaction = source.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(source);
         foreach (var domain in DatabaseLayout.Domains)
         {
             using var read = source.CreateCommand(); read.Transaction = transaction;

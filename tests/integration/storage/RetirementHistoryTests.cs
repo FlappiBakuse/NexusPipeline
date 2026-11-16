@@ -22,7 +22,7 @@ public sealed class RetirementHistoryTests
         var records = new ExecutionRecordProjection(source.Instance, source.Database, new(), source.Lease,
             new(source.Instance, source.Database, new()));
         var retirement = new ContentRetirementService(source.Instance, source.Database, new(), source.Lease,
-            fixture.Base.Resources, fixture.Base.Index);
+            fixture.Base.Resources, fixture.Base.Index, source.PayloadRoots);
         var logs = new LogCatalogReader(source.Instance, source.Database, new());
         var registry = new RecoveryJournalRegistry(source.Database);
         var cleanup = new OwnedCleanupExecutor(source.Instance, new(), source.Database, fixture.Base.Index);
@@ -42,7 +42,7 @@ public sealed class RetirementHistoryTests
             using var lease = fixture.Base.Resources.TryAcquire(page.OperationId,
                 journal.ResourceKeys.Select(key => new ResourceClaim(key, ResourceClaimMode.Mutation)).ToArray()).Lease;
             Assert.NotNull(lease);
-            Assert.Equal(FileCleanupResult.Cleaned, cleanup.Execute(page.CleanupJournalId, source.Lease, lease));
+            Assert.Equal(FileCleanupResult.Cleaned, cleanup.Execute(page.CleanupJournalId, source.Lease, lease, source.PayloadRoots));
             runs.Add((query, original.Select(item => item with
                 { ContentAvailability = RecordContentAvailability.Retired }).ToArray()));
         }

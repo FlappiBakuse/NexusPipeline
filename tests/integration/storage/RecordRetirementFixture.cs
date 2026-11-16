@@ -18,7 +18,7 @@ internal sealed class RecordRetirementFixture : IDisposable
     internal ExecutionHooksFixture Hooks { get; } = new(false);
     internal PlanBuilderFixture Source => Hooks.Source;
     internal AttemptReceipt Receipt { get; private set; } = null!;
-    internal ContentRetirementService Retirement => new(Source.Instance, Source.Database, new(), Source.Lease, Hooks.Base.Resources, Hooks.Base.Index);
+    internal ContentRetirementService Retirement => new(Source.Instance, Source.Database, new(), Source.Lease, Hooks.Base.Resources, Hooks.Base.Index, Source.PayloadRoots);
     internal ExecutionLogReader Logs => new(Source.Instance, Source.Database, new());
     internal LogCatalogReader Catalog => new(Source.Instance, Source.Database, new());
     internal IReadOnlyList<LogCatalogItem> Items => Catalog.ReadPage(new(Receipt.Facts.RunId, Receipt.Facts.AttemptId)).Items;
@@ -46,7 +46,7 @@ internal sealed class RecordRetirementFixture : IDisposable
 
     internal FileCleanupResult Cleanup(ContentRetirementPage page) => WithCleanupRoot(page, root =>
         new OwnedCleanupExecutor(Source.Instance, new(), Source.Database, Hooks.Base.Index)
-            .Execute(page.CleanupJournalId, Source.Lease, root));
+            .Execute(page.CleanupJournalId, Source.Lease, root, Source.PayloadRoots));
 
     internal T WithCleanupRoot<T>(ContentRetirementPage page, Func<ResourceOperationLease, T> action)
     {

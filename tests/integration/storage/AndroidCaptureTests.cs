@@ -127,7 +127,7 @@ public sealed class AndroidCaptureTests
                 Assert.ThrowsAny<IOException>(() => reader.OpenOriginal(image.Key, image.ResultSha256));
             }
             var retirement = new ContentRetirementService(source.Instance, source.Database, new(), source.Lease,
-                fixture.Base.Resources, fixture.Base.Index);
+                fixture.Base.Resources, fixture.Base.Index, source.PayloadRoots);
             var page = Assert.IsType<ContentRetirementPage>(retirement.RetireImagesPage(Guid.NewGuid(),
                 "generic-image-retirement", receipt.Facts.RunId, limit: 1));
             var journal = new RecoveryJournalRegistry(source.Database).ReadJournal(page.CleanupJournalId);
@@ -138,7 +138,7 @@ public sealed class AndroidCaptureTests
             {
                 Assert.NotNull(root);
                 Assert.Equal(FileCleanupResult.Cleaned, new OwnedCleanupExecutor(source.Instance, new(), source.Database, fixture.Base.Index)
-                    .Execute(page.CleanupJournalId, source.Lease, root!));
+                    .Execute(page.CleanupJournalId, source.Lease, root!, source.PayloadRoots));
             }
             Assert.False(File.Exists(path));
             Assert.Equal(RecordContentAvailability.Retired, Assert.Single(reader.ReadPage(new(image.Key.RunId, image.Key.AttemptId)).Items).ContentAvailability);

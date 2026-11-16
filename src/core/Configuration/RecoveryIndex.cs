@@ -49,25 +49,37 @@ public sealed class RecoveryIndex : IRecoveryIndex
         }
     }
 
-    public void PublishVerified(long expectedRevision, long committedRevision, IReadOnlyList<ResourceIsolation> isolations)
-        => Publish(expectedRevision, committedRevision, isolations, []);
+    internal RecoveryProjection BeginVerification(out object generation)
+    {
+        lock (_gate)
+        {
+            var blocked = BlockUnknown("recovery_verification_in_progress");
+            generation = _snapshotCompletionGeneration;
+            return blocked;
+        }
+    }
 
-    internal void PublishVerifiedCompletions(long expectedRevision, long committedRevision,
+    public void PublishVerified(long expectedRevision, long committedRevision, IReadOnlyList<ResourceIsolation> isolations)
+        => Publish(expectedRevision, committedRevision, isolations, [], null);
+
+    internal void PublishVerifiedCompletions(object generation, long expectedRevision, long committedRevision,
         IReadOnlyList<ResourceIsolation> isolations, ImmutableArray<SnapshotCompletionProjection> completions)
-        => Publish(expectedRevision, committedRevision, isolations, completions);
+        => Publish(expectedRevision, committedRevision, isolations, completions, generation);
 
     private void Publish(long expectedRevision, long committedRevision, IReadOnlyList<ResourceIsolation> isolations,
-        ImmutableArray<SnapshotCompletionProjection> completions)
+        ImmutableArray<SnapshotCompletionProjection> completions, object? generation)
     {
         var frozen = Array.AsReadOnly(isolations.ToArray());
         if (frozen.Any(item => string.IsNullOrWhiteSpace(item.ResourceKey) || item.JournalId == Guid.Empty || string.IsNullOrWhiteSpace(item.ReasonCode) || !Enum.IsDefined(item.Mode)))
             throw new ArgumentException("An isolation must have a verified resource and journal identity");
         lock (_gate)
         {
-            if (_current.Revision != expectedRevision || committedRevision <= expectedRevision)
+            if (committedRevision <= expectedRevision || (generation is null ? _current.Revision != expectedRevision
+                : !ReferenceEquals(_snapshotCompletionGeneration, generation)))
                 throw new InvalidOperationException("recovery_index_revision_conflict");
+            var revision = Math.Max(committedRevision, checked(_current.Revision + 1));
             _snapshotCompletionGeneration = new();
-            Volatile.Write(ref _current, new(true, committedRevision, null, frozen)
+            Volatile.Write(ref _current, new(true, revision, null, frozen)
                 { ResourceHolds = _current.ResourceHolds, SnapshotCompletions = completions });
         }
     }

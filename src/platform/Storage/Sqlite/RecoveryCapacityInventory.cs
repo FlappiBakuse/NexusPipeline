@@ -10,7 +10,7 @@ internal static class RecoveryCapacityInventory
     internal static void Verify(RuntimeInstance instance, StateDatabase database, ContractReader contracts)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         RecoveryCapacityStore.VerifyCounts(connection, transaction);
         foreach (var row in RecoveryCapacityStore.ReadReservations(connection, transaction))
         {

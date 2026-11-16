@@ -19,7 +19,7 @@ internal sealed class ImageRecordAssets(RuntimeInstance instance, StateDatabase 
         if (_family.Count != 0) throw ImageCatalogRows.Invalid();
         IReadOnlyList<AttemptReceipt> receipts;
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             ExecutionRecordWitness.RequireFinalInside(connection, transaction, final);
             receipts = ReadFamily(connection, transaction, final);

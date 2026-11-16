@@ -41,7 +41,7 @@ public sealed class RetirementScopeTests(ITestOutputHelper output)
         var global = Record.Exception(() => new RecoveryJournalRegistry(source.Database).ReadSnapshot());
         Assert.True(global is IOException or InvalidOperationException);
         var retirement = new ContentRetirementService(source.Instance, source.Database, new(), source.Lease,
-            fixture.Base.Resources, fixture.Base.Index);
+            fixture.Base.Resources, fixture.Base.Index, source.PayloadRoots);
         Assert.NotNull(retirement.RetireLogsPage(Guid.NewGuid(), "retirement-local-read", first.Facts.RunId));
         fixture.Base.Execute("UPDATE main.operation_journals SET phase='applying' WHERE journal_id='" + id + "';");
         var commits = source.Database.CommitSequence;
@@ -114,7 +114,7 @@ public sealed class RetirementScopeTests(ITestOutputHelper output)
             new SnapshotCompletionEvidence(source.Instance, source.Database, new(),
                 new(AppContext.BaseDirectory, Path.Combine(source.Instance.RuntimeRoot, "extensions"))), fixture.Base.Index).VerifyAndPublish();
         Assert.True(ready.IsReady);
-        var retirement = new ContentRetirementService(source.Instance, source.Database, new(), source.Lease, fixture.Base.Resources, fixture.Base.Index);
+        var retirement = new ContentRetirementService(source.Instance, source.Database, new(), source.Lease, fixture.Base.Resources, fixture.Base.Index, source.PayloadRoots);
         Assert.NotNull(retirement.RetireLogsPage(Guid.NewGuid(), "retirement-local-read", receipt.Facts.RunId));
         blobs.Verify(checkpoint!);
         Assert.Equal(original, new JournalStore(source.Instance, new()).Read(receipt.JournalId).Export());

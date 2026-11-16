@@ -15,7 +15,7 @@ internal static class ExecutionInvocationHistory
         if (attempt.AttemptOrdinal == 1) return ImmutableDictionary<string, int>.Empty;
         var result = total.Steps.ToDictionary(step => step.StepId, _ => 0, StringComparer.Ordinal);
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var source = StartSourceRows.Read(connection, transaction, Guid.Parse(attempt.OperationId));
         StartSourceRows.RequireAttempt(source, attempt);
         for (var ordinal = attempt.AttemptOrdinal - 1; ordinal >= 1; ordinal--)

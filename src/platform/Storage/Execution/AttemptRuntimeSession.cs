@@ -267,7 +267,7 @@ internal sealed class AttemptRuntimeSession : IExecutionAttemptSession, IDisposa
     {
         if (_readSession is not null) return _readSession.ReadClose(_parent);
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         return ExecutionCancellationRows.Read(connection, transaction, _parent, _attempt);
     }
 

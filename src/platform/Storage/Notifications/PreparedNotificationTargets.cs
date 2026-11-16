@@ -23,7 +23,7 @@ internal sealed class PreparedNotificationTargets : IDisposable
         try
         {
             using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications | DatabaseDomain.System))
-            using (var transaction = connection.BeginTransaction(deferred: true))
+            using (var transaction = DatabaseConnections.BeginRead(connection))
             {
                 var cursor = NotificationCatalogRows.ReadCurrent(connection, transaction);
                 result.Catalog = cursor is null ? new NotificationCatalogCodec(instance, contracts).Persist(NotificationTaskCatalog.Empty) :

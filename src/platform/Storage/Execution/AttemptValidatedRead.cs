@@ -9,6 +9,7 @@ internal sealed class AttemptValidatedRead
     private readonly ImmutableArray<JournalDocument> _history;
     private readonly ImmutableArray<CaptureSavedEvidence> _captures;
     private readonly string _totalSha256;
+    private readonly ExecutionPlan _ownedTotal;
     private readonly object _viewGate = new();
     private ExecutionPlan? _viewTotal;
     private ImmutableArray<StepWriterState> _jobs, _allJobs;
@@ -18,18 +19,18 @@ internal sealed class AttemptValidatedRead
     internal ImmutableArray<CaptureSavedEvidence> Captures => _captures;
 
     internal AttemptValidatedRead(IReadOnlyList<JournalDocument> history,
-        ImmutableArray<CaptureSavedEvidence> captures, string totalSha256, ImmutableDictionary<string, int> previousInvocations)
+        ImmutableArray<CaptureSavedEvidence> captures, ExecutionPlan total, string totalSha256, ImmutableDictionary<string, int> previousInvocations)
     {
         if (history.Count == 0) throw Invalid();
-        _history = history.ToImmutableArray(); _totalSha256 = totalSha256; PreviousInvocations = previousInvocations;
+        _history = history.ToImmutableArray(); _ownedTotal = total; _totalSha256 = totalSha256; PreviousInvocations = previousInvocations;
         _captures = captures.Select(value => value with { Source = value.Source with {
             HelperImage = value.Source.HelperImage with {
                 RuntimeFiles = value.Source.HelperImage.RuntimeFiles.ToImmutableArray() } } }).ToImmutableArray();
     }
 
     private AttemptValidatedRead(ImmutableArray<JournalDocument> history,
-        ImmutableArray<CaptureSavedEvidence> captures, string totalSha256, ImmutableDictionary<string, int> previousInvocations)
-    { _history = history; _captures = captures; _totalSha256 = totalSha256; PreviousInvocations = previousInvocations; }
+        ImmutableArray<CaptureSavedEvidence> captures, ExecutionPlan total, string totalSha256, ImmutableDictionary<string, int> previousInvocations)
+    { _history = history; _captures = captures; _ownedTotal = total; _totalSha256 = totalSha256; PreviousInvocations = previousInvocations; }
 
     internal AttemptValidatedRead WithCoherentFreshHistory(IReadOnlyList<JournalDocument> fresh)
     {
@@ -37,7 +38,17 @@ internal sealed class AttemptValidatedRead
         for (var index = 0; index < fresh.Count; index++)
             if (!fresh[index].HasSameBytes(_history[index])) throw Invalid();
         if (fresh.Select((document, index) => ReferenceEquals(document, _history[index])).All(value => value)) return this;
-        return new(fresh.ToImmutableArray(), _captures, _totalSha256, PreviousInvocations);
+        return new(fresh.ToImmutableArray(), _captures, _ownedTotal, _totalSha256, PreviousInvocations);
+    }
+
+    internal void RequirePreviewHistory(IReadOnlyList<JournalDocument> fresh, ExecutionPlan total)
+    {
+        var samePrefix = ReferenceEquals(total, _ownedTotal) && fresh.Count >= _history.Length;
+        for (var index = 0; samePrefix && index < _history.Length; index++)
+            samePrefix = fresh[index].HasSameBytes(_history[index]);
+        if (samePrefix && fresh.Count == _history.Length) return;
+        PreviewDomainCodec.RequireHistory(samePrefix ? fresh.Skip(_history.Length) : fresh,
+            total, _totalSha256, samePrefix ? _history[^1] : null);
     }
 
     internal ImmutableArray<StepWriterState> Jobs(AttemptWriterState state, bool all)

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 
 namespace NexusPipeline.Platform.Storage.Execution;
 
@@ -19,7 +20,9 @@ internal static class ExecutionFailureTrace
                 .Where(method => method is not null).Select(method => (method!.DeclaringType?.FullName + "." + method.Name))
                 .Select(name => name.Length <= 240 ? name : name[..240]).ToArray();
             var type = current.GetType().FullName ?? current.GetType().Name;
-            failures.Add(new { exceptionType = type[..Math.Min(type.Length, 200)], current.HResult, code, frames });
+            var sqlite = current as SqliteException;
+            failures.Add(new { exceptionType = type[..Math.Min(type.Length, 200)], current.HResult, code,
+                sqliteErrorCode = sqlite?.SqliteErrorCode, sqliteExtendedErrorCode = sqlite?.SqliteExtendedErrorCode, frames });
         }
         Console.Error.WriteLine(JsonSerializer.Serialize(new { kind = "execution.failure", accepted.Identity.OperationId,
             accepted.Receipt.JournalId, failures }));

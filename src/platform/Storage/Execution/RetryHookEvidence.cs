@@ -184,7 +184,7 @@ internal sealed class RetryHookEvidence(RuntimeInstance instance, StateDatabase 
     private IReadOnlyList<Ancestor> Ancestors(RunAttemptPlan attempt)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var source = StartSourceRows.Read(connection, transaction, Guid.Parse(attempt.OperationId));
         StartSourceRows.RequireAttempt(source, attempt);
         var result = new List<Ancestor>();

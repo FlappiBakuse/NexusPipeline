@@ -26,6 +26,7 @@ internal sealed record ExecutionPlanFixture(string Root, string Image, RuntimeIn
         var scriptId = Guid.NewGuid().ToString("D");
         var userId = Guid.NewGuid().ToString("D");
         var bindingId = Guid.NewGuid().ToString("D");
+        var stepId = "binding-" + bindingId + "-0000";
         var bundle = JsonSerializer.SerializeToNode(new
         {
             format = "nexus.automation.bundle", version = 1, bundleId = Guid.NewGuid().ToString("D"),
@@ -53,14 +54,14 @@ internal sealed record ExecutionPlanFixture(string Root, string Image, RuntimeIn
         {
             Format = "nexus.execution.plan", Version = 1, InstanceId = instance.InstanceId.ToString("D"), RunId = runId,
             CreatedAt = "2026-10-19T00:00:00Z", DefinitionBundle = content, SettingsRevision = 1,
-            Selection = [new() { StepId = "first", BindingId = bindingId, ScriptId = scriptId, UserId = userId,
+            Selection = [new() { StepId = stepId, BindingId = bindingId, ScriptId = scriptId, UserId = userId,
                 Disposition = "runnable", ReasonCode = "execution_inputs_verified" }],
             SourceRevisions = new[] { ("root", rootId), ("script", scriptId), ("user", userId), ("binding", bindingId) }
                 .Select(item => new ExecutionPlanSourceRevisionsItem { EntityKind = item.Item1, EntityId = item.Item2, Revision = 1 }).ToArray(),
             RootBindings = [new() { RootId = rootId, Path = scriptRoot, Identity = Wire(identity) }],
             Steps = [new()
             {
-                StepId = "first", ScriptId = scriptId, UserId = userId, BindingId = bindingId, EngineKind = "process", DependsOn = [],
+                StepId = stepId, ScriptId = scriptId, UserId = userId, BindingId = bindingId, EngineKind = "process", DependsOn = [],
                 ExecutablePath = image, ImageSizeBytes = 3, ImageSha256 = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(image))),
                 ImageIdentity = Wire(PhysicalObjectIdentity.Read(image)), ParentIdentity = Wire(identity), WorkingDirectory = scriptRoot,
                 WorkingDirectoryIdentity = Wire(identity), Arguments = ["--fixture"],

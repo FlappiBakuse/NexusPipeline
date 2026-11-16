@@ -52,7 +52,6 @@ internal static class PhysicalPathPolicy
 
     internal static string NormalizeParent(string path)
     {
-        DirectoryAttributeScope.Refresh();
         var full = NormalizeSyntax(path);
         NormalizeWithoutLinks(Path.GetDirectoryName(full) ?? throw new IOException("filesystem_file_path_required"));
         return full;

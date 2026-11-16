@@ -42,7 +42,7 @@ internal static class SecretDocumentBinding
         var plan = frozen.ReadWire(); Structure(plan);
         if (plan.DocumentPublication is not { } binding) return null;
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var parentReference = SecretDocumentRows.Find(connection, transaction, Guid.Parse(binding.ParentOperationId)) ?? throw SecretDocumentFormat.Invalid();
         var parent = new SecretDocumentFormat(instance, contracts).Read(parentReference);
         _ = SecretDocumentRows.Status(connection, transaction, parent);

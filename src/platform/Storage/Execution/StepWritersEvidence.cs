@@ -71,7 +71,7 @@ internal static class StepWritersEvidence
             if (gate.State == EffectGateState.Entered && !represented.SetEquals(ExecutionBindingRoles.Required(input))) throw new IOException("execution_hook_dispatch_pending");
         }
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             ExecutionStepAdmission.RequireJobsInside(connection, transaction, parentId, WriterIntentCodec.ReadAllJobs(document.Root, total)); transaction.Commit();
         }

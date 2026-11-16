@@ -60,7 +60,7 @@ public sealed class NotificationDeliveryService
     {
         if (runId == Guid.Empty) throw new ArgumentException("notification_run_invalid", nameof(runId));
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         BlobReference reference;
         using (var command = NotificationDeliveryRows.Command(connection, transaction,
             "SELECT relative_path,size_bytes,sha256 FROM notifications.notification_receipt_sources WHERE run_id=$0;", runId.ToString("D")))
@@ -96,7 +96,7 @@ public sealed class NotificationDeliveryService
         _lease.VerifyHeld(_instance);
         ReceiptReadContext source;
         using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System | DatabaseDomain.Content))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             source = new NotificationReceiptCodec(_instance, _database, _contracts).ReadContext(reference, connection, transaction);
             transaction.Commit();

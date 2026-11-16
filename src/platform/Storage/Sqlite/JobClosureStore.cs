@@ -104,7 +104,7 @@ internal sealed class JobClosureStore(RuntimeInstance instance, StateDatabase da
             verifiedParent = ReadAttemptBinding(closure); expectedReference = reference;
         }
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var result = ReadInside(connection, transaction, journalId, writerId, jobName, sessionId, executionEvidence, verifiedParent, expectedReference, closure);
         transaction.Commit(); return result;
     }
@@ -178,7 +178,7 @@ internal sealed class JobClosureStore(RuntimeInstance instance, StateDatabase da
         {
             var keys = new List<(Guid Journal, Guid Writer, string Job, int Session)>();
             using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime))
-            using (var transaction = connection.BeginTransaction(deferred: true))
+            using (var transaction = DatabaseConnections.BeginRead(connection))
             {
                 using var command = connection.CreateCommand(); command.Transaction = transaction;
                 command.CommandText = "SELECT c.journal_id,c.writer_id,c.job_name,j.session_id FROM main.journal_writer_job_closures c LEFT JOIN main.journal_writer_jobs j " +
@@ -206,7 +206,7 @@ internal sealed class JobClosureStore(RuntimeInstance instance, StateDatabase da
     {
         _ = state.RequireValidatedRead();
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT c.writer_id,c.job_name,j.session_id FROM main.journal_writer_job_closures c LEFT JOIN main.journal_writer_jobs j " +
             "ON j.journal_id=c.journal_id AND j.writer_id=c.writer_id AND j.job_name=c.job_name " +
@@ -286,7 +286,7 @@ internal sealed class JobClosureStore(RuntimeInstance instance, StateDatabase da
     internal void RequireAttemptStart(AttemptWriterState state, StepWriterState step)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         RequireAttemptOpen(connection, transaction, state, step);
         transaction.Commit();
     }

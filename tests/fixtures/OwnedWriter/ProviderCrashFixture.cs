@@ -32,8 +32,8 @@ internal static class ProviderCrashFixture
             using var lease = InstanceLease.Acquire(instance, new());
             var database = StateDatabase.OpenExisting(instance, Path.Combine(Path.GetDirectoryName(inputPath)!, "owner-diagnostics"),
                 new JournalStartupAdmission(instance, new()));
-            var index = new StartupJournalRecovery(instance, new(), database,
-                new(Path.GetDirectoryName(inputPath)!, Path.Combine(runtime, "extensions"))).Recover(lease);
+            var payloadRoots = new PayloadApplyRoots(Path.GetDirectoryName(inputPath)!, Path.Combine(runtime, "extensions"));
+            var index = new StartupJournalRecovery(instance, new(), database, payloadRoots).Recover(lease);
             var resources = new ResourceLeaseManager(new HostLifecycle(index, TimeProvider.System)); var inbox = new ExecutionAdmissionInbox();
             var registry = new ExecutionProviderRegistry(); await using var scope = new ExtensionScope("provider-fixture");
             var package = VerifiedProviderPackage.VerifyControlled(archive, deployed, "provider-fixture", new());
@@ -64,7 +64,7 @@ internal static class ProviderCrashFixture
                     if (point is "retirementAccepted" or "retirementMaterialized")
                     {
                         new ExecutionRecordProjection(instance, database, new(), lease, new(instance, database, new())).OnCommitted(committed);
-                        var retirement = new ContentRetirementService(instance, database, new(), lease, resources, index,
+                        var retirement = new ContentRetirementService(instance, database, new(), lease, resources, index, payloadRoots,
                             new RetirementBarrier(instance, database, accepted.Receipt.JournalId, point, report));
                         _ = retirement.RetireLogsPage(Guid.NewGuid(), "provider-retirement-crash", committed.Facts.RunId)
                             ?? throw new IOException("fixture_retirement_content_missing");

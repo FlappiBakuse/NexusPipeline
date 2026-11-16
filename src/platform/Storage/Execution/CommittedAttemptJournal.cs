@@ -15,7 +15,7 @@ internal static class CommittedAttemptJournal
         if (registered is not { Kind: JournalKind.RunAttempt, Phase: JournalPhase.Committed } ||
             registered.Revision is < 1 or > JournalCapacityLimits.MaximumRevisions) throw Invalid();
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var current = RecoveryJournalRegistry.ReadInside(connection, transaction, registered.JournalId);
         AttemptPreparedBinding.RequireRegistration(current, attempt);
         var receipt = AttemptReceiptStore.ReadInside(connection, transaction, Guid.Parse(attempt.AttemptId)) ?? throw Invalid();

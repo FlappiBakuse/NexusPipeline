@@ -18,7 +18,7 @@ internal static class ProjectSaveClosure
     internal static bool IsClosed(StateDatabase database, Guid operation, string subject, string digest)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = "SELECT operation_kind FROM main.operations WHERE operation_id=$id;";

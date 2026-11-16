@@ -17,7 +17,7 @@ public sealed class AutomationDefinitionStore(StateDatabase database) : IAutomat
     public AutomationCatalog Read()
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Content);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var result = Configuration.BindingConfigurationSource.Read(database, connection, transaction, AutomationRows.Read(connection, transaction));
         VerifyRoots(result.Roots);
         transaction.Commit();
@@ -43,7 +43,7 @@ public sealed class AutomationDefinitionStore(StateDatabase database) : IAutomat
     {
         if (operation.Kind != "automation.change" || operation.RequestDigest != Digest(changes)) throw new OperationConflictException();
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         return OperationRows.ReadExisting(connection, transaction, operation) is null ? null : ReadResult(connection, transaction, operation.OperationId);
     }
 
@@ -57,7 +57,7 @@ public sealed class AutomationDefinitionStore(StateDatabase database) : IAutomat
     {
         VerifySavedRoots(changes);
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Notifications | DatabaseDomain.Content))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
             if (OperationRows.ReadExisting(connection, transaction, operation) is not null) return ReadResult(connection, transaction, operation.OperationId);
         var current = Read();
         foreach (var updated in changes.Scripts)

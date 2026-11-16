@@ -14,7 +14,7 @@ internal sealed class RunProgressStore(RuntimeInstance instance, StateDatabase d
     internal RunSyncResult? Lookup(Guid operationId, string subject, Guid sessionId, ConfigurationRunPhase? terminal = null)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT subject_id,operation_kind,status FROM main.operations WHERE operation_id=$operation;";
         command.Parameters.AddWithValue("$operation", operationId.ToString("D"));

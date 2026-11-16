@@ -96,7 +96,7 @@ public sealed class ExecutionRecordProjection(RuntimeInstance instance, StateDat
         if (command.ExecuteScalar() is not long kind || kind != (int)EndTimeKind.ReconciledTerminalObservation) return false;
         var timing = RecoveredRecordTiming.Capture(instance, database, contracts, receipt);
         var expected = new ExecutionRecordWitness(instance, database, contracts).Read(receipt, timing);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         RunRecordStore.RequirePublishedInside(connection, transaction, expected);
         return true;
     }

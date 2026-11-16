@@ -14,7 +14,7 @@ internal sealed class ExecutionRecordWitness(RuntimeInstance instance, StateData
     internal CompletedRunRecord Read(AttemptReceipt receipt, RecoveredRecordTiming? recovery = null)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         RequireFinalInside(connection, transaction, receipt);
         var source = StartSourceRows.Read(connection, transaction, receipt.OperationId);
         var original = StartSourceRows.Original(connection, transaction, source);

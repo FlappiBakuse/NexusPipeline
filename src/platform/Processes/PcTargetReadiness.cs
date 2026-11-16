@@ -1,7 +1,6 @@
 using System.Collections.Immutable;
 using System.ComponentModel;
 using System.Runtime.Versioning;
-using System.Security.Cryptography;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Platform.Storage;
@@ -16,14 +15,14 @@ internal sealed record PcTargetImage(string Path, long SizeBytes, string Sha256,
 internal sealed class PcTargetReadiness : IDisposable
 {
     private sealed record Held(ProcessIdentity Identity, SafeKernelHandle Handle);
-    private readonly FileStream _image;
+    private readonly ProcessIdentityLease _image;
     private readonly ImmutableArray<Held> _processes;
     private readonly PcReadinessMode _mode;
     private readonly PcTargetImage _expected;
     private bool _disposed;
     internal ExecutionTargetReadiness State { get; }
 
-    private PcTargetReadiness(FileStream image, ImmutableArray<Held> processes, bool complete, PcReadinessMode mode, PcTargetImage expected)
+    private PcTargetReadiness(ProcessIdentityLease image, ImmutableArray<Held> processes, bool complete, PcReadinessMode mode, PcTargetImage expected)
     {
         _image = image; _processes = processes; _mode = mode; _expected = expected with { };
         State = !complete ? ExecutionTargetReadiness.Unknown : processes.IsEmpty ? ExecutionTargetReadiness.NotReady : ExecutionTargetReadiness.Ready;
@@ -34,12 +33,12 @@ internal sealed class PcTargetReadiness : IDisposable
         if (expected is null || !Enum.IsDefined(mode) || !FileTreePolicy.Digest(expected.Sha256) || expected.SizeBytes < 1 ||
             !Path.IsPathFullyQualified(expected.Path) || expected.Identity is null) throw new ArgumentException("execution_target_image_invalid");
         var path = PhysicalPathPolicy.NormalizeWithoutLinks(expected.Path);
-        var image = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var image = ProcessIdentityLease.HoldImage(path);
         var held = ImmutableArray.CreateBuilder<Held>();
         try
         {
-            if (image.Length != expected.SizeBytes || PhysicalObjectIdentity.Read(image.SafeFileHandle) != expected.Identity ||
-                Convert.ToHexStringLower(SHA256.HashData(image)) != expected.Sha256) throw new IOException("execution_target_image_changed");
+            if (new FileInfo(path).Length != expected.SizeBytes || PhysicalObjectIdentity.Read(path) != expected.Identity ||
+                image.Sha256 != expected.Sha256) throw new IOException("execution_target_image_changed");
             var snapshot = ProcessSnapshotProbe.Capture(null, Path.GetFileName(path), cancellation);
             var complete = !snapshot.Truncated;
             foreach (var candidate in snapshot.Processes.Where(item => StringComparer.OrdinalIgnoreCase.Equals(item.Name, Path.GetFileName(path))))
@@ -49,14 +48,14 @@ internal sealed class PcTargetReadiness : IDisposable
                 try
                 {
                     if (handle.IsInvalid) { complete = false; continue; }
-                    var identity = ProcessIdentityReader.Read(handle, candidate.Pid);
-                    if (candidate.StartTimeUtc is null || identity.CreatedAtUtc != candidate.StartTimeUtc)
+                    var metadata = ProcessIdentityReader.ReadMetadata(handle, candidate.Pid);
+                    if (candidate.StartTimeUtc is null || metadata.CreatedAtUtc != candidate.StartTimeUtc)
                     { complete = false; continue; }
                     var wait = JobNative.WaitForSingleObject(handle, 0);
                     if (wait == 0) continue;
                     if (wait != 258) { complete = false; continue; }
-                    if (!StringComparer.OrdinalIgnoreCase.Equals(identity.ImagePath, path)) continue;
-                    if (identity.ImageSha256 != expected.Sha256) { complete = false; continue; }
+                    if (!StringComparer.OrdinalIgnoreCase.Equals(metadata.ImagePath, path)) continue;
+                    var identity = image.Read(handle, candidate.Pid);
                     if (mode == PcReadinessMode.VisibleWindow)
                     {
                         var windows = WindowSnapshotProbe.Capture(candidate.Pid, "", cancellation);
@@ -78,8 +77,7 @@ internal sealed class PcTargetReadiness : IDisposable
     internal void RequireExpected(PcTargetImage expected, PcReadinessMode mode)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (expected != _expected || mode != _mode || _image.Length != expected.SizeBytes ||
-            PhysicalObjectIdentity.Read(_image.SafeFileHandle) != expected.Identity)
+        if (expected != _expected || mode != _mode || _image.Sha256 != expected.Sha256)
             throw new IOException("execution_target_readiness_source_unbound");
     }
 
@@ -90,7 +88,7 @@ internal sealed class PcTargetReadiness : IDisposable
         if (State != ExecutionTargetReadiness.Ready) throw new IOException("execution_target_not_ready");
         foreach (var item in _processes)
             if (JobNative.WaitForSingleObject(item.Handle, 0) != 258 ||
-                ProcessIdentityReader.Read(item.Handle, item.Identity.ProcessId) != item.Identity)
+                _image.Read(item.Handle, item.Identity.ProcessId) != item.Identity)
                 throw new IOException("execution_target_readiness_expired");
         if (_mode == PcReadinessMode.VisibleWindow)
             foreach (var item in _processes)

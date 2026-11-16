@@ -216,7 +216,7 @@ public sealed class ImageRetirementTests
                 {
                     Assert.Equal(FileCleanupResult.Quarantined,
                         new OwnedCleanupExecutor(source.Instance, new(), source.Database, fixture.Fixture.Base.Index)
-                            .Execute(page.CleanupJournalId, source.Lease, root));
+                            .Execute(page.CleanupJournalId, source.Lease, root, source.PayloadRoots));
                     Assert.True(File.Exists(path)); Assert.Equal(image.SizeBytes!.Value, stream.Length);
                     var buffer = new byte[128]; Assert.True(stream.Read(buffer) > 0);
                 }
@@ -228,7 +228,8 @@ public sealed class ImageRetirementTests
                     var actual = writers.ObserveForCurrentExecutor(page.CleanupJournalId);
                     return new(source.Instance.InstanceId, page.CleanupJournalId, actual.IsComplete, actual.State);
                 }
-                var recovery = new CleanupRecoverySession(source.Instance, page.CleanupJournalId, new(), source.Database, Observe);
+                var recovery = new CleanupRecoverySession(source.Instance, page.CleanupJournalId, new(), source.Database, Observe,
+                    payloadRoots: source.PayloadRoots);
                 Assert.Equal(FileCleanupResult.Cleaned, new FileCleanupRecovery(recovery).Recover(isExplicitQuarantineRecovery: true));
                 Assert.False(File.Exists(path)); return true;
             });

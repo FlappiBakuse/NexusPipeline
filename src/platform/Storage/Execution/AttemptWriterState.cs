@@ -36,6 +36,7 @@ internal sealed record AttemptWriterState(RegisteredJournal Journal, RunAttemptP
         if (!latest.HasSameBytes(bound.ValidatedRead.History[^1])) throw new IOException("execution_writer_journal_changed");
         var validated = bound.ValidatedRead.WithCoherentFreshHistory(history);
         var total = bound.Total;
+        using var parsedHistory = new AttemptReadScope(history, total, database.AttemptReads?.Find(journalId)?.ParsedHistory);
         return HistoryReadScope.ReadDatabase(database, (connection, transaction) =>
         {
             var journal = RecoveryJournalRegistry.ReadJournalInside(connection, transaction, journalId);

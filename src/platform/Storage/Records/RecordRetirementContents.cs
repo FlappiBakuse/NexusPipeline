@@ -15,7 +15,7 @@ internal sealed class RecordRetirementContents(RuntimeInstance instance, StateDa
     {
         IReadOnlyList<BlobReference> proofs;
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             proofs = RecordRetirementRows.ProofsFor(connection, transaction, runId, candidates);
             transaction.Commit();

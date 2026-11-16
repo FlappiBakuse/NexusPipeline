@@ -12,6 +12,7 @@ internal sealed class StartupQueueDispatch(RuntimeInstance instance, StateDataba
     StartupQueueStore store, ExecutionAdmissionService execution, TimeProvider clock)
 {
     private bool _registered;
+    private bool _drained;
     internal void Initialize()
     {
         if (!_registered) { _ = store.Commit(); _registered = true; }
@@ -21,7 +22,11 @@ internal sealed class StartupQueueDispatch(RuntimeInstance instance, StateDataba
     {
         cancellation.ThrowIfCancellationRequested();
         if (canCommit) Initialize();
-        foreach (var saved in store.ReadWaiting())
+        if (_drained) return;
+        var waiting = store.ReadWaiting();
+        // A committed generation freezes its occurrences; accepted and blocked members never wait again.
+        if (_registered && waiting.Count == 0) _drained = true;
+        foreach (var saved in waiting)
         {
             cancellation.ThrowIfCancellationRequested();
             try

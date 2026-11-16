@@ -295,7 +295,7 @@ internal static class AttemptPreparedBinding
             AttemptWriterState.VerifySql(database, registered, projected, total, plan.ExecutionPlan.Sha256, gate);
             _ = ExecutionCancellationRows.Verify(database, registered, plan, total, history[^1].Root, projected.Root);
             using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-            using var transaction = connection.BeginTransaction(deferred: true);
+            using var transaction = DatabaseConnections.BeginRead(connection);
             ExecutionStepAdmission.RequireUndispatchedInside(connection, transaction,
                 new(registered, plan, total, history[^1], gate, WriterIntentCodec.Read(history[^1].Root, total)) { IsExecutionStart = true }, history[^1]);
             transaction.Commit();
@@ -306,7 +306,7 @@ internal static class AttemptPreparedBinding
             registered.Phase == JournalPhase.Committed && receipt is null) throw new IOException("attempt_receipt_projection_unbound");
         owner?.RememberHistory(prefix, history, gate.State);
         return new(plan, history[^1], start, total,
-            new AttemptValidatedRead(history, captures, plan.ExecutionPlan.Sha256, previousInvocations));
+            new AttemptValidatedRead(history, captures, total, plan.ExecutionPlan.Sha256, previousInvocations));
     }
 
     private static void VerifyHistoricalEvidence(RuntimeInstance instance, StateDatabase database, ContractReader contracts,

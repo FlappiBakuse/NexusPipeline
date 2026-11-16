@@ -37,7 +37,7 @@ internal static class PreviewDomainEvidence
     {
         PreviewDomainCodec.RequireHistory(state.RequireValidatedRead().History, state.Total, state.Attempt.ExecutionPlan.Sha256);
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         foreach (var item in PreviewDomainCodec.Read(state.Latest.Root, state.Total, state.Attempt.ExecutionPlan.Sha256)
             .Where(item => stepId is null || item.Source.Primary.StepId == stepId))
         {

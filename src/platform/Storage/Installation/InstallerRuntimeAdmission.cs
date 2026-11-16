@@ -49,7 +49,7 @@ internal sealed class InstallerRuntimeAdmission(RuntimeInstance instance, Contra
             snapshot.Journals.Any(journal => journal.Phase != JournalPhase.Committed))
             throw new IOException("installer_runtime_recovery_pending");
         using var connection = DatabaseConnections.Open(Path.Combine(inspection.DiagnosticCopyRoot, "runtime.db"), readOnly: true, domains: DatabaseDomain.All);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         if (Maintenance.MaintenanceOperationRows.ReadAll(connection, transaction).Any(row => row.State is not (HostUpdateState.Completed or HostUpdateState.Cancelled)) ||
             StartupIntentRows.ReadAll(connection, transaction, instance.InstanceId, pendingOnly: true).Count != 0)
             throw new IOException("installer_runtime_recovery_pending");

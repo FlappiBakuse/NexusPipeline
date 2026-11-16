@@ -62,17 +62,18 @@ public sealed class JournalDocument
         var key = new TextKey(bytes.Length, Convert.ToHexStringLower(SHA256.HashData(bytes.Span)));
         lock (MemoGate)
             if (Memo.TryGetValue(key, out var cached) && cached._bytes.AsSpan().SequenceEqual(bytes.Span)) return cached;
-        return ReadOwned(bytes.ToArray(), contracts);
+        return ReadOwned(bytes.ToArray(), contracts, key);
     }
 
-    private static JournalDocument ReadOwned(byte[] ownedBytes, ContractReader contracts)
+    private static JournalDocument ReadOwned(byte[] ownedBytes, ContractReader contracts, TextKey? textKey = null)
     {
-        var key = new TextKey(ownedBytes.Length, Convert.ToHexStringLower(SHA256.HashData(ownedBytes)));
+        var key = textKey ?? new TextKey(ownedBytes.Length, Convert.ToHexStringLower(SHA256.HashData(ownedBytes)));
         // Reusing immutable parsed text grants no authority over freshly read files, SQL or native ownership.
         lock (MemoGate)
             if (Memo.TryGetValue(key, out var cached) && cached._bytes.AsSpan().SequenceEqual(ownedBytes)) return cached;
         using var timing = StartupProfile.Measure("history.text.parse");
-        using var document = contracts.Read(ownedBytes, "execution-journal.schema.json");
+        using var document = StrictJson.Parse(ownedBytes);
+        contracts.RequireSchema(document, ownedBytes, "execution-journal.schema.json", key.Sha256);
         var result = new JournalDocument(ownedBytes, document.RootElement.Clone(), key);
         if (result.InstanceId == Guid.Empty || result.JournalId == Guid.Empty ||
             result.Root.GetProperty("operationId").GetGuid() == Guid.Empty ||

@@ -79,7 +79,7 @@ internal sealed class MaintenancePayloadBinding(RuntimeInstance instance, StateD
                 throw Invalid();
         }
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var operation = RequireOperationInside(connection, transaction, registered, source);
         var result = new BoundMaintenancePayload(plan, reference, source, registered, operation, history, physical, restoration, commit);
         RequireInside(connection, transaction, result);

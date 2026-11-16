@@ -140,7 +140,7 @@ public sealed class ExecutionLogReader(RuntimeInstance instance, StateDatabase d
         RegisteredJournal registered;
         NexusPipeline.Core.Execution.AttemptReceipt receipt;
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             receipt = AttemptReceiptStore.ReadInside(connection, transaction, attemptId) ?? throw Invalid();
             if (receipt.Facts.RunId != runId) throw Invalid();
@@ -243,7 +243,7 @@ public sealed class ExecutionLogReader(RuntimeInstance instance, StateDatabase d
         if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot) throw Invalid();
         _ = state.RequireValidatedRead();
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         AttemptWriterState.RequireCursor(connection, transaction, state.Journal, state.Gate.State);
         var source = StartSourceRows.Read(connection, transaction, expected.OperationId);
         StartSourceRows.RequireAttempt(source, state.Attempt);
@@ -260,7 +260,7 @@ public sealed class ExecutionLogReader(RuntimeInstance instance, StateDatabase d
     {
         if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot) throw Invalid();
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var current = RecoveryJournalRegistry.ReadInside(connection, transaction, registered.JournalId);
         AttemptPreparedBinding.RequireRegistration(current, attempt);
         var source = StartSourceRows.Read(connection, transaction, expected.OperationId);

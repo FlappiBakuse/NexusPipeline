@@ -52,7 +52,7 @@ internal sealed class StartupQueueStore(RuntimeInstance instance, StateDatabase 
         RequireInstance();
         if (limit is < 1 or > 64) throw new ArgumentOutOfRangeException(nameof(limit));
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT c.occurrence_id FROM main.startup_queue_occurrences c LEFT JOIN main.operations o ON o.operation_id=c.start_operation_id LEFT JOIN main.startup_queue_outcomes b ON b.occurrence_id=c.occurrence_id WHERE c.generation=$generation AND o.operation_id IS NULL AND b.occurrence_id IS NULL ORDER BY c.queue_id LIMIT $limit;";
         command.Parameters.AddWithValue("$generation", lease.StartupGeneration.ToString("D")); command.Parameters.AddWithValue("$limit", limit);

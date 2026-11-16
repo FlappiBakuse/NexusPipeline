@@ -42,7 +42,7 @@ public sealed class ExecutionNotificationRegistration : IAttemptTerminalObserver
                 using var prepared = PreparedNotificationReceipt.Capture(_instance, _database, _contracts, source);
                 var accepted = prepared.Accept(_database, _lease);
                 using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-                using var transaction = connection.BeginTransaction(deferred: true);
+                using var transaction = DatabaseConnections.BeginRead(connection);
                 var saved = new NotificationReceiptCodec(_instance, _database, _contracts).Read(accepted, connection, transaction);
                 if (saved.Document.Receipt != receipt) throw NotificationReceiptCodec.Invalid();
                 transaction.Commit();
@@ -93,7 +93,7 @@ public sealed class ExecutionNotificationRegistration : IAttemptTerminalObserver
     private bool Existing(AttemptReceipt receipt)
     {
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         var reference = NotificationReceiptRows.Find(connection, transaction, receipt.Facts.AttemptId);
         if (reference is null) return false;
         var saved = new NotificationReceiptCodec(_instance, _database, _contracts).Read(reference, connection, transaction);

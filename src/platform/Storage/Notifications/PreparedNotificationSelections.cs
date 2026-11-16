@@ -48,7 +48,7 @@ internal sealed class PreparedNotificationSelections : IDisposable
     internal void RequireChanges(AutomationCatalog before, AutomationChanges changes)
     {
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications);
-        using var transaction = connection.BeginTransaction(deferred: true);
+        using var transaction = DatabaseConnections.BeginRead(connection);
         RequireChangesInside(connection, transaction, before, changes);
         transaction.Commit();
     }

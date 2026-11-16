@@ -7,6 +7,48 @@ namespace NexusPipeline.StorageTests;
 
 public sealed class InstanceScopeTests
 {
+    [Fact(DisplayName = "Borrowed Instance Reads Keep Lease Identity Protected And Reject Foreign Or Released Owners")]
+    public void BorrowsLiveIdentity()
+    {
+        var contracts = new ContractReader();
+        var root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "instance-borrowed-" + Guid.NewGuid().ToString("N"));
+        var instance = new InstanceRoot(contracts).OpenOrCreate(root);
+        var path = Path.Combine(root, "instance.json");
+        var bytes = File.ReadAllBytes(path);
+        var lease = InstanceLease.Acquire(instance, contracts);
+        try
+        {
+            Assert.Throws<IOException>(() => Directory.Move(root, root + "-moved"));
+            Assert.Throws<IOException>(() => File.WriteAllText(path, "changed"));
+            Assert.Throws<IOException>(() => File.Delete(path));
+            Assert.Throws<IOException>(() => InstanceReadScope.Hold(instance with { InstanceId = Guid.NewGuid() }, lease));
+            using var borrowed = InstanceReadScope.Hold(instance, lease);
+            Assert.Equal(instance, new InstanceRoot(contracts).OpenExisting(root));
+            using (InstanceReadScope.Hold(instance, lease))
+                Assert.Equal(instance, new InstanceRoot(contracts).OpenExisting(root));
+            Assert.Equal(bytes, File.ReadAllBytes(path));
+            lease.Dispose();
+            Assert.Throws<IOException>(() => new InstanceRoot(contracts).OpenExisting(root));
+            Assert.Throws<IOException>(() => InstanceReadScope.Hold(instance, lease));
+        }
+        finally { lease.Dispose(); }
+        File.WriteAllText(path, "changed");
+        Directory.Move(root, root + "-moved");
+    }
+
+    [Fact(DisplayName = "Failed Instance Lease Acquisition Releases Every Ancestor Protection")]
+    public void ReleasesFailedLease()
+    {
+        var contracts = new ContractReader();
+        var root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "instance-lease-failure-" + Guid.NewGuid().ToString("N"));
+        var instance = new InstanceRoot(contracts).OpenOrCreate(root);
+        Assert.Throws<IOException>(() => InstanceLease.Acquire(instance with { InstanceId = Guid.NewGuid() }, contracts));
+        File.WriteAllText(Path.Combine(root, "instance.lock"), "unknown-lock");
+        Assert.Throws<IOException>(() => InstanceLease.Acquire(instance, contracts));
+        File.WriteAllText(Path.Combine(root, "instance.json"), "changed");
+        Directory.Move(root, root + "-moved");
+    }
+
     [Fact(DisplayName = "Protected Instance Reads Keep Exact Identity Bytes And Names Until Release And Reject Cold Changes")]
     public void ProtectsIdentityReads()
     {

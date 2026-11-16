@@ -22,7 +22,7 @@ internal sealed class ImageCatalogCapture(RuntimeInstance instance, StateDatabas
         RegisteredJournal registered;
         FrozenStartSource source;
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
-        using (var transaction = connection.BeginTransaction(deferred: true))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             if (AttemptReceiptStore.ReadInside(connection, transaction, expected.Facts.AttemptId) != expected)
                 throw ImageCatalogRows.Invalid();

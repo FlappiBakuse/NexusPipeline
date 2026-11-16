@@ -33,7 +33,7 @@ public sealed class RetentionResumeTests
             operation.ToString("D"), phase, report, manual ? "local:manual-retention" : "host:history-retention"], source.Root, source.Instance.InstanceId, operation,
             Path.Combine(source.Root, "retirement-child.json"));
         var stoppedAt = await child.ReadReportAsync(report, TimeSpan.FromSeconds(30));
-        Assert.Equal("faultReady", stoppedAt.GetProperty("status").GetString());
+        Assert.True(stoppedAt.GetProperty("status").GetString() == "faultReady", stoppedAt.ToString());
         var journalId = stoppedAt.GetProperty("journalId").GetGuid();
         var stopped = await child.StopAsync();
         Assert.True(stopped.CompleteJobStopped);
@@ -56,7 +56,7 @@ public sealed class RetentionResumeTests
         Assert.Equal(JournalPhase.Committed, registry.ReadJournal(journalId).Phase);
         Assert.All(outbox.Read(journalId), item => Assert.Equal(FileEffectState.NotExecuted, item.State));
         var service = new ContentRetirementService(source.Instance, database, new(), lease,
-            new ResourceLeaseManager(new(index, TimeProvider.System)), index);
+            new ResourceLeaseManager(new(index, TimeProvider.System)), index, roots);
         var retention = new RecordHistoryRetention(database, service, new Clock());
         if (changeRetention)
         {
