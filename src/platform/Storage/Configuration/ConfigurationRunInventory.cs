@@ -113,12 +113,11 @@ internal static class ConfigurationRunInventory
         }
         if (groups.IsEmpty || registered.Any(item => expected.ContainsKey(item.JournalId) && !covered.Contains(item.JournalId)))
             throw new IOException("attempt_configuration_membership_unbound");
-        var states = new RunStateCodec(instance, contracts, blobs);
         foreach (var journal in registered.Where(item => item.Kind == JournalKind.ConfigExchange))
         {
-            var child = plans.ReadStructure(new(journal.PlanPath, new FileInfo(Path.Combine(instance.RuntimeRoot, journal.PlanPath)).Length, journal.PlanDigest));
+            var child = plans.ReadStructure(new(journal.PlanPath, new FileInfo(Path.Combine(instance.RuntimeRoot, journal.PlanPath)).Length, journal.PlanDigest), out var state);
             if (child.RunState is null) continue;
-            var state = states.ReadStructure(child.RunState);
+            if (state is null) throw new IOException("attempt_configuration_membership_unbound");
             if (state.OwnerOperationId == parent.OperationId && (!expected.ContainsKey(journal.JournalId) || !covered.Contains(journal.JournalId)))
                 throw new IOException("attempt_configuration_membership_unbound");
         }

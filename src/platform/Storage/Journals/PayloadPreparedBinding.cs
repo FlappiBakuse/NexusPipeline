@@ -82,7 +82,7 @@ internal static class PayloadPreparedBinding
             item.IntentDigest != registered.PlanDigest || item.State is not (FileEffectState.Pending or FileEffectState.NotExecuted)))
             throw new IOException("payload_outbox_inventory_unbound");
         foreach (var effect in actual.Where(item => item.State == FileEffectState.NotExecuted))
-            if (!history.Any(item => Convert.ToHexStringLower(SHA256.HashData(item.Export())) == effect.ReceiptDigest && HasUnexecutedReceipt(item.Root)))
+            if (!history.Any(item => item.Sha256 == effect.ReceiptDigest && HasUnexecutedReceipt(item.Root)))
                 throw new IOException("payload_outbox_receipt_unbound");
     }
 

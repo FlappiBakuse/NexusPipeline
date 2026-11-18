@@ -28,10 +28,8 @@ public sealed class EventFeedTests
         recovery++;
         Assert.Equal(sequence + 1, Assert.Single(feed.Read(stream, sequence)).Sequence);
         long progress = 0;
-        var statistics = new ControlEventStatistics(() => mutation, () =>
-            new(mutation, mutation, mutation, mutation, mutation));
         var progressFeed = new ControlEventFeed(Guid.NewGuid(), () => new(mutation, recovery, progress),
-            () => new { statistics = statistics.Read(), progress });
+            () => new { mutation, progress });
         AssertProgress();
         for (var tick = 0; tick < 100; tick++) { progress++; AssertProgress(); }
         mutation++; AssertProgress();
@@ -40,8 +38,7 @@ public sealed class EventFeedTests
         {
             var state = JsonSerializer.SerializeToElement(progressFeed.Snapshot()).GetProperty("state");
             Assert.Equal(progress, state.GetProperty("progress").GetInt64());
-            Assert.Equal(new ControlPersistentState(mutation, mutation, mutation, mutation, mutation),
-                state.GetProperty("statistics").Deserialize<ControlPersistentState>());
+            Assert.Equal(mutation, state.GetProperty("mutation").GetInt64());
         }
     }
 

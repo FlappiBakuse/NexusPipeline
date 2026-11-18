@@ -89,13 +89,15 @@ public sealed class JournalStore
         }
     }
 
-    public JournalDocument Read(Guid journalId)
+    public JournalDocument Read(Guid journalId) => Read(journalId, null);
+
+    internal JournalDocument Read(Guid journalId, ConfigurationPlanCodec.OpenedPlan? plan)
     {
         JournalReadScope.SelectActiveParent(_instance, _contracts, journalId);
         lock (_gate)
         {
             using var publication = JournalPublicationGate.Acquire(_instance, journalId);
-            return ReadHistory(journalId);
+            return ReadHistory(journalId, configurationPlan: plan);
         }
     }
 
@@ -151,17 +153,19 @@ public sealed class JournalStore
     }
 
     private JournalDocument ReadHistory(Guid journalId, List<JournalDocument>? snapshots = null,
-        JournalHistoryProtection? initialProtection = null)
+        JournalHistoryProtection? initialProtection = null, ConfigurationPlanCodec.OpenedPlan? configurationPlan = null)
     {
         var protectedDocuments = ReadProtectedHistory(journalId) ?? JournalReadScope.Read(this, journalId);
         if (protectedDocuments is not null)
         {
+            configurationPlan?.RequireReference(_instance, protectedDocuments[^1]);
             snapshots?.AddRange(protectedDocuments);
             return protectedDocuments[^1];
         }
         var directory = JournalDirectory(journalId);
         var files = Directory.EnumerateFileSystemEntries(directory).Take(MaximumRevisions + 1).Order(StringComparer.Ordinal).ToArray();
         if (files.Length is 0 or > MaximumRevisions) throw new IOException("journal_history_limit_or_missing");
+        using var paths = HoldHistoryDirectory(directory, files.Length);
         JournalDocument? previous = null;
         long total = 0;
         foreach (var file in files)
@@ -194,9 +198,13 @@ public sealed class JournalStore
             previous = current;
         }
         // Protected admission binds and hashes the plan before publishing the retained history.
-        if (initialProtection is null) VerifyPlan(previous!);
+        if (configurationPlan is not null) configurationPlan.RequireReference(_instance, previous!);
+        else if (initialProtection is null) VerifyPlan(previous!);
         return previous!;
     }
+
+    internal static DirectoryAttributeScope? HoldHistoryDirectory(string directory, int revisions) =>
+        revisions >= 5 && OperatingSystem.IsWindows() ? DirectoryAttributeScope.HoldDirectories([directory]) : null;
 
     private JournalDocument Parse(ReadOnlyMemory<byte> bytes)
     {

@@ -26,22 +26,22 @@ internal static class PcStageCodec
         _ = Decode(participant); return true;
     }
 
-    internal static ImmutableArray<PcStageIntent> Read(JsonElement journal, ExecutionPlan total, string totalSha256) => ReadCore(journal, total, totalSha256);
+    internal static ImmutableArray<PcStageIntent> Read(AttemptJournalView journal, ExecutionPlan total, string totalSha256) => ReadCore(journal, total, totalSha256);
 
-    internal static ImmutableArray<PcStageIntent> ReadStructure(JsonElement journal, ExecutionPlan total) => ReadCore(journal, total, null);
+    internal static ImmutableArray<PcStageIntent> ReadStructure(AttemptJournalView journal, ExecutionPlan total) => ReadCore(journal, total, null);
 
-    private static ImmutableArray<PcStageIntent> ReadCore(JsonElement journal, ExecutionPlan total, string? totalSha256)
+    private static ImmutableArray<PcStageIntent> ReadCore(AttemptJournalView journal, ExecutionPlan total, string? totalSha256)
     {
         journal = ExecutionInvocationCodec.Current(journal);
         var values = ImmutableArray.CreateBuilder<PcStageIntent>();
-        foreach (var participant in journal.GetProperty("participants").EnumerateArray().Where(IsParticipant))
+        foreach (var participant in journal.Participants.Where(IsParticipant))
         {
             var item = Decode(participant);
             var binding = item.Binding;
             var step = total.Steps.SingleOrDefault(step => step.StepId == binding.StepId) ?? throw Invalid();
-            if (binding.InstanceId.ToString("D") != total.InstanceId || binding.ParentJournalId.ToString("D") != journal.GetProperty("journalId").GetString() ||
-                binding.ParentOperationId.ToString("D") != journal.GetProperty("operationId").GetString() ||
-                binding.AttemptId.ToString("D") != journal.GetProperty("attemptId").GetString() || totalSha256 is not null && binding.TotalPlanSha256 != totalSha256 ||
+            if (binding.InstanceId.ToString("D") != total.InstanceId || binding.ParentJournalId.ToString("D") != journal.Root.GetProperty("journalId").GetString() ||
+                binding.ParentOperationId.ToString("D") != journal.Root.GetProperty("operationId").GetString() ||
+                binding.AttemptId.ToString("D") != journal.Root.GetProperty("attemptId").GetString() || totalSha256 is not null && binding.TotalPlanSha256 != totalSha256 ||
                 step.Target is not { Kind: "pc", Pc: not null, Android: null } || values.Any(value => value.Binding.StepId == binding.StepId) ||
                 participant.GetProperty("resourceKey").GetString() != "automation:" + step.ScriptId ||
                 step.Target.LaunchByHost && item.Outcome == TargetExecutionOutcome.Skipped ||

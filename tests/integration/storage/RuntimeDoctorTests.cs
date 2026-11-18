@@ -11,17 +11,68 @@ namespace NexusPipeline.StorageTests;
 
 public sealed class RuntimeDoctorTests
 {
+    [Fact(DisplayName = "Control Statistics Advance For Their Own Committed Facts And Preserve Their Revision Across Unrelated Writes And Rollback")]
+    public void TracksControlRevision()
+    {
+        var fixture = Create();
+        using var owner = InstanceLease.Acquire(fixture.Instance, new());
+        var database = StateDatabase.OpenCurrent(fixture.Instance, owner);
+        var doctor = new RuntimeDoctor(fixture.Instance, database, new RecoveryIndex());
+        long Revision() => database.ReadControlVersion()!.Value.Revision;
+        var initial = doctor.ReadControlSnapshot(); var revision = Revision();
+        var sequence = database.CommitSequence;
+        var registry = new RecoveryJournalRegistry(database);
+        _ = registry.PublishVerified(registry.ReadSnapshot().Revision);
+        Assert.True(database.CommitSequence > sequence);
+        Assert.Equal(revision, Revision());
+        Assert.Equal(initial, doctor.ReadControlSnapshot());
+        database.Write((connection, transaction) =>
+        {
+            HostSettingsRows.Insert(connection, transaction, new(1, HostSettings.Default));
+            using var command = DatabaseConnections.Command(connection, transaction,
+                "UPDATE system.settings_current SET revision=1 WHERE singleton=1; " +
+                "UPDATE automation.automation_catalog_state SET revision=1 WHERE singleton=1;");
+            return command.ExecuteNonQuery();
+        });
+        Assert.Equal(++revision, Revision());
+        Assert.Equal(1, doctor.ReadControlSnapshot().SettingsRevision);
+        Assert.Equal(1, doctor.ReadControlSnapshot().CatalogRevision);
+        Assert.Throws<InvalidOperationException>(() => database.Write<int>((connection, transaction) =>
+        {
+            using var command = DatabaseConnections.Command(connection, transaction,
+                "UPDATE automation.automation_catalog_state SET revision=2 WHERE singleton=1;");
+            command.ExecuteNonQuery(); throw new InvalidOperationException("rollback");
+        }));
+        Assert.Equal(revision, Revision());
+        Assert.Equal(1, doctor.ReadControlSnapshot().CatalogRevision);
+        database.Write((connection, transaction) =>
+        {
+            OperationRows.Accept(connection, transaction,
+                new OperationIdentity(Guid.NewGuid(), "control-revision", new string('a', 64), "fixture.control"), DateTimeOffset.UtcNow);
+            return true;
+        });
+        Assert.Equal(++revision, Revision());
+        Assert.Equal(1, doctor.ReadControlSnapshot().Counts.PendingOperations);
+        var pending = database.ReadControlVersion()!.Value;
+        new RunRecordStore(database).AppendCompleted([RecordStoreFixture.Record(1, Guid.NewGuid())]);
+        Assert.Equal(++revision, Revision());
+        Assert.Equal(1, doctor.ReadControlSnapshot().Counts.CompletedRuns);
+        Assert.Equal(ControlStatisticsFields.Runs, database.ReadControlVersion()!.Value.ChangedSince(pending));
+    }
+
     [Fact(DisplayName = "Control Snapshots Keep Catalog Settings And Counts Together Across Atomic Commits")]
     public async Task ReadsControlSnapshot()
     {
-        var fixture = Create();
-        var doctor = new RuntimeDoctor(fixture.Instance, fixture.Database, new RecoveryIndex());
+        var (instance, _) = Create();
+        using var owner = InstanceLease.Acquire(instance, new());
+        var database = StateDatabase.OpenCurrent(instance, owner);
+        var doctor = new RuntimeDoctor(instance, database, new RecoveryIndex());
         var original = doctor.ReadControlSnapshot();
         var automation = Guid.NewGuid();
         var writer = Task.Run(() =>
         {
             for (var revision = 1; revision <= 24; revision++)
-                fixture.Database.Write((connection, transaction) =>
+                database.Write((connection, transaction) =>
                 {
                     HostSettingsRows.Insert(connection, transaction, new(revision, HostSettings.Default));
                     using var command = DatabaseConnections.Command(connection, transaction,
@@ -131,6 +182,22 @@ public sealed class RuntimeDoctorTests
         var doctor = new RuntimeDoctor(fixture.Instance, fixture.Database, index);
         Assert.Throws<OperationCanceledException>(() => doctor.Read(new CancellationToken(true)));
         Assert.Equal(0, doctor.Read().CompletedRunCount);
+    }
+
+    [Theory(DisplayName = "Status Reads Current Operations With The Records Domain Unavailable")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ReadsStatusWithoutRecords(bool changed)
+    {
+        var (instance, database) = Create();
+        database.Accept(new(Guid.NewGuid(), "control-status", new string('a', 64), "fixture.control"), DateTimeOffset.UtcNow);
+        File.Move(Path.Combine(instance.RuntimeRoot, "state", "records.db"),
+            Path.Combine(instance.RuntimeRoot, "state", "records.held"));
+        var status = new RuntimeDoctor(instance, database, new ChangingIndex(changed)).ReadStatus();
+        Assert.Equal(instance.InstanceId, status.InstanceId);
+        Assert.Equal(changed ? DiagnosticAdmissionState.ChangedDuringRead : DiagnosticAdmissionState.Blocked, status.Admission);
+        Assert.Equal(3, status.RecoveryRevision);
+        Assert.Equal(1, status.PendingOperationCount);
     }
 
     private static (RuntimeInstance Instance, StateDatabase Database) Create()

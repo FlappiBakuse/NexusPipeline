@@ -19,12 +19,12 @@ internal static class AndroidStartupCodec
     internal static bool IsParticipant(JsonElement participant) => participant.GetProperty("identity")
         .TryGetProperty("format", out var value) && value.GetString() == Format;
 
-    internal static ImmutableArray<AndroidStartupIntent> Read(JsonElement journal, ExecutionPlan total, string totalSha256)
+    internal static ImmutableArray<AndroidStartupIntent> Read(AttemptJournalView journal, ExecutionPlan total, string totalSha256)
     {
         journal = ExecutionInvocationCodec.Current(journal);
         var result = ImmutableArray.CreateBuilder<AndroidStartupIntent>();
         var registrations = AndroidControlCodec.Read(journal, total, totalSha256);
-        foreach (var participant in journal.GetProperty("participants").EnumerateArray().Where(IsParticipant))
+        foreach (var participant in journal.Participants.Where(IsParticipant))
         {
             var identity = participant.GetProperty("identity");
             var decoded = ExecutionParticipantText.Read<AndroidStartupIntent>(identity, StepResultCodec.Options, Invalid);
@@ -49,14 +49,14 @@ internal static class AndroidStartupCodec
         return result.ToImmutable();
     }
 
-    internal static void RequireBinding(JsonElement journal, ExecutionPlan total, string totalSha256, JsonElement participant,
+    internal static void RequireBinding(AttemptJournalView journal, ExecutionPlan total, string totalSha256, JsonElement participant,
         AndroidControlBinding binding)
     {
         var input = total.Steps.SingleOrDefault(step => step.StepId == binding.StepId) ?? throw Invalid();
         if (input.Target?.Kind != "android" || binding.InstanceId.ToString("D") != total.InstanceId ||
-            binding.ParentJournalId != journal.GetProperty("journalId").GetGuid() ||
-            binding.ParentOperationId != journal.GetProperty("operationId").GetGuid() ||
-            binding.AttemptId != journal.GetProperty("attemptId").GetGuid() || binding.TotalPlanSha256 != totalSha256 ||
+            binding.ParentJournalId != journal.Root.GetProperty("journalId").GetGuid() ||
+            binding.ParentOperationId != journal.Root.GetProperty("operationId").GetGuid() ||
+            binding.AttemptId != journal.Root.GetProperty("attemptId").GetGuid() || binding.TotalPlanSha256 != totalSha256 ||
             participant.GetProperty("kind").GetString() != "process" ||
             participant.GetProperty("resourceKey").GetString() != "automation:" + input.ScriptId) throw Invalid();
     }

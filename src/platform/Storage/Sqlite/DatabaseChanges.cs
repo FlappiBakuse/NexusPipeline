@@ -6,6 +6,7 @@ internal sealed class DatabaseChanges : IDisposable
 {
     private readonly SqliteConnection _connection;
     internal DatabaseDomain Domains { get; private set; }
+    internal ControlStatisticsFields ControlStatistics { get; private set; }
     internal Dictionary<string, HashSet<long>> Rows { get; } = new(StringComparer.Ordinal);
     internal HashSet<string> DeletedParents { get; } = new(StringComparer.Ordinal);
 
@@ -18,6 +19,15 @@ internal sealed class DatabaseChanges : IDisposable
             if (name == "temp") return;
             Domains |= DatabaseLayout.Parse(name);
             var target = table.utf8_to_string();
+            ControlStatistics |= target switch
+            {
+                "operations" => ControlStatisticsFields.Pending,
+                "attempt_receipts" => ControlStatisticsFields.Attempts,
+                "run_records" => ControlStatisticsFields.Runs,
+                "automation_catalog_state" => ControlStatisticsFields.Catalog,
+                "settings_current" or "settings_snapshots" or "settings_extensions" => ControlStatisticsFields.Settings,
+                _ => 0
+            };
             if (operation == SQLitePCL.raw.SQLITE_DELETE)
             {
                 if (DatabaseRelations.TracksParent(target)) DeletedParents.Add(target);

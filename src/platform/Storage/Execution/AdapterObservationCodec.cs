@@ -52,19 +52,25 @@ internal static class AdapterObservationCodec
     }
 
     internal static ExecutionAdapterObservation Read(ImmutableBlobStore blobs, StepEvidenceBinding binding,
-        BlobReference raw, ExecutionPlanStep step, BlobReference reference, int depth = 0)
+        BlobReference raw, ExecutionPlanStep step, BlobReference reference, int depth = 0,
+        List<BlobReference>? references = null)
     {
         if (depth is < 0 or > 98) throw Invalid();
         StepEvidenceCodec.Plan(reference);
-        using var input = blobs.OpenVerified(reference); var bytes = new byte[checked((int)input.Length)]; input.ReadExactly(bytes);
-        using var parsed = StrictJson.Parse(bytes);
-        var document = parsed.RootElement.Deserialize<ExecutionAdapterObservation>(Options) ?? throw Invalid();
-        if (!JsonElement.DeepEquals(parsed.RootElement, JsonSerializer.SerializeToElement(document, Options))) throw Invalid();
-        Validate(blobs, binding, raw, step, document, depth); return document;
+        using var input = blobs.OpenVerified(reference);
+        var document = BlobReadStream.ReadEvidence(input, () =>
+        {
+            var bytes = new byte[checked((int)input.Length)]; input.ReadExactly(bytes);
+            using var parsed = StrictJson.Parse(bytes);
+            var value = parsed.RootElement.Deserialize<ExecutionAdapterObservation>(Options) ?? throw Invalid();
+            if (!JsonElement.DeepEquals(parsed.RootElement, JsonSerializer.SerializeToElement(value, Options))) throw Invalid();
+            return value;
+        });
+        Validate(blobs, binding, raw, step, document, depth, references); return document;
     }
 
     private static void Validate(ImmutableBlobStore blobs, StepEvidenceBinding binding, BlobReference raw,
-        ExecutionPlanStep step, ExecutionAdapterObservation document, int depth)
+        ExecutionPlanStep step, ExecutionAdapterObservation document, int depth, List<BlobReference>? references = null)
     {
         if (document.Format != "nexus.execution.adapter-observation" || document.Version != 1 || document.Binding != binding ||
             document.RawOutput != raw || step.StepId != binding.StepId || step.Adapter is null ||
@@ -77,7 +83,8 @@ internal static class AdapterObservationCodec
             if (document.CurrentObservations is not { } fresh || retry.PreviousBinding is null || retry.PreviousBinding.JobName == binding.JobName ||
                 retry.PreviousBinding with { JobName = binding.JobName, WriterId = binding.WriterId, SessionId = binding.SessionId } != binding)
                 throw Invalid();
-            var previous = Read(blobs, retry.PreviousBinding, retry.PreviousRaw, step, retry.PreviousObservation, depth + 1);
+            references?.Add(retry.PreviousObservation); references?.Add(retry.PreviousRaw);
+            var previous = Read(blobs, retry.PreviousBinding, retry.PreviousRaw, step, retry.PreviousObservation, depth + 1, references);
             var expected = AdapterRetryPolicy.Select(tasks, previous.Observations, previous.ProposedRetry);
             if (!TaskRetryEvidence.Same(expected, retry.Selection) ||
                 !AdapterRetryPolicy.Merge(tasks, previous.Observations, retry.Selection, fresh).SequenceEqual(document.Observations)) throw Invalid();
@@ -87,23 +94,11 @@ internal static class AdapterObservationCodec
         var output = RawOutputCodec.Read(blobs, binding, raw);
         if (!output.IsFinal || !output.IsComplete && (document.ProposedRetry.Length != 0 ||
             current.Any(item => item.State != AdapterObservationState.Unknown))) throw Invalid();
-    }
-
-    internal static IReadOnlyList<BlobReference> References(ImmutableBlobStore blobs, ExecutionPlanStep step,
-        ExecutionAdapterObservation document)
-    {
-        var result = new List<BlobReference>();
-        var depth = 0;
-        while (document.Retry is { } retry)
+        if (depth > 0 && references is not null)
         {
-            if (++depth > 98) throw Invalid();
-            result.Add(retry.PreviousObservation); result.Add(retry.PreviousRaw);
-            var raw = RawOutputCodec.Read(blobs, retry.PreviousBinding, retry.PreviousRaw);
-            result.AddRange(raw.Parts.Select(part => part.Content));
-            result.AddRange(FileLogEvidence.References(blobs, raw));
-            document = Read(blobs, retry.PreviousBinding, retry.PreviousRaw, step, retry.PreviousObservation);
+            references.AddRange(output.Parts.Select(part => part.Content));
+            references.AddRange(FileLogEvidence.References(blobs, output));
         }
-        return result.Distinct().ToArray();
     }
 
     private static string Digest<T>(T value) => Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(value)));

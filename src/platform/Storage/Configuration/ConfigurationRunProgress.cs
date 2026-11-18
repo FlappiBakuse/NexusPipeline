@@ -24,6 +24,8 @@ internal sealed class RunProgressCapture(RuntimeInstance instance, StateDatabase
 {
     internal ConfigurationRunProgress Read(ConfigurationRunStatus session, RunWriterProcess writer, bool sealedOutput)
     {
+        using var history = new HistoryReadScope(instance, database, contracts);
+        using var parents = JournalReadScope.HoldParents(instance, contracts, database.AttemptReads);
         writer.RequireScope(instance, session.SessionId);
         writer.RequireSampling(session, sealedOutput);
         var elapsed = writer.ElapsedSinceStart;
@@ -31,18 +33,21 @@ internal sealed class RunProgressCapture(RuntimeInstance instance, StateDatabase
         var stopped = new RunStopEvidence(instance, database, contracts).ReadClosed(session);
         if (elapsed.Ticks / TimeSpan.TicksPerMillisecond != stopped.Elapsed.Ticks / TimeSpan.TicksPerMillisecond)
             throw new IOException("configuration_run_stop_duration_unbound");
-        return Read(session, stopped.Elapsed, sealedOutput: true, stopped.WasExecuted);
+        return Read(session, stopped.Elapsed, sealedOutput: true, stopped.WasExecuted, stopped.Binding);
     }
 
     internal ConfigurationRunProgress ReadRestored(ConfigurationRunStatus session)
     {
+        using var history = new HistoryReadScope(instance, database, contracts);
+        using var parents = JournalReadScope.HoldParents(instance, contracts, database.AttemptReads);
         var stopped = new RunStopEvidence(instance, database, contracts).ReadRestored(session);
-        return Read(session, stopped.Elapsed, sealedOutput: true, stopped.WasExecuted);
+        return Read(session, stopped.Elapsed, sealedOutput: true, stopped.WasExecuted, stopped.Binding);
     }
 
-    private ConfigurationRunProgress Read(ConfigurationRunStatus session, TimeSpan elapsed, bool sealedOutput, bool wasExecuted)
+    private ConfigurationRunProgress Read(ConfigurationRunStatus session, TimeSpan elapsed, bool sealedOutput, bool wasExecuted,
+        BoundConfigurationRun? bound = null)
     {
-        var binding = ConfigurationRunBinding.Read(instance, database, contracts, session);
+        var binding = bound ?? ConfigurationRunBinding.Read(instance, database, contracts, session);
         var blobs = new ImmutableBlobStore(instance, contracts);
         var archive = new FileTreeArchive(new(SnapshotBudget.Default), blobs);
         var revisions = new ConfigurationRevisionStore(instance, database, contracts);
@@ -69,7 +74,9 @@ internal sealed class RunProgressCapture(RuntimeInstance instance, StateDatabase
                     throw new IOException("configuration_run_sampling_closed");
                 var workspace = ConfigurationJournalBinding.Read(instance, physical, contracts, database).Prepared ?? throw new IOException("configuration_run_workspace_missing");
                 using var backup = sealedOutput ? null : new ConfigurationSwap(new(SnapshotBudget.Default), archive).HoldWritableWorkspace(workspace);
-                var raw = sealedOutput ? Sealed(resource) : archive.Capture(frozen.Plan.TargetPath, default);
+                if (sealedOutput && physical.Root.GetProperty("participants").GetArrayLength() != 2)
+                    throw new IOException("configuration_run_output_not_sealed");
+                var raw = sealedOutput ? workspace.Plan.Candidate : archive.Capture(frozen.Plan.TargetPath, default);
                 using var scene = sealedOutput ? null : TreeReadLease.Acquire(frozen.Plan.TargetPath, frozen.Plan.ParentIdentity, raw);
                 if (!sealedOutput) PhysicalTreeIdentity.RequireSingleLinks(frozen.Plan.TargetPath, raw.Snapshot);
                 ConfigurationOutputEvidence.Require(workspace, raw);
@@ -95,11 +102,4 @@ internal sealed class RunProgressCapture(RuntimeInstance instance, StateDatabase
         return sample.Batch is { } batch ? sample with { Prepared = new ConfigurationBatchStore(instance, database, contracts).Prepare(batch) } : sample;
     }
 
-    private ArchivedFileTree Sealed(RunResourceStatus resource)
-    {
-        var physical = new JournalStore(instance, contracts).Read(resource.JournalId);
-        if (physical.Root.GetProperty("participants").GetArrayLength() != 2) throw new IOException("configuration_run_output_not_sealed");
-        var binding = ConfigurationJournalBinding.Read(instance, physical, contracts, database);
-        return (binding.Prepared ?? throw new IOException("configuration_run_output_not_sealed")).Plan.Candidate;
-    }
 }

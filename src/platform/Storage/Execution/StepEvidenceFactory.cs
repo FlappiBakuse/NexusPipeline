@@ -66,14 +66,24 @@ internal sealed class StepEvidenceFactory(RuntimeInstance instance, StateDatabas
         _ = FileLogEvidence.Require(instance, contracts, _blobs, context.Total, binding, context.Job.FileLogBaseline, raw);
         var definition = _reader.Judgement(context.Total, binding.StepId);
         var judgement = definition.Language == NexusPipeline.Core.Automation.AutomationJudgementLanguage.Keywords ? new AttemptBusinessJudgement(binding.AttemptId, definition) : null;
-        var continuous = judgement is not null && RawOutputReplay.Read(_blobs, raw, line => judgement.ObserveLine(judgement.InputIdentity, line));
+        var continuous = false;
+        RawReplayResult? replay = null;
+        if (judgement is { Mode: ExecutionJudgementMode.None })
+            foreach (var part in raw.Parts) _blobs.Verify(part.Content);
+        else if (judgement is not null && database.AttemptReads?.Find(binding.ParentJournalId) is { } owner)
+        {
+            replay = owner.Replay(binding, rawOutput, raw, definition);
+            continuous = replay.Continuous;
+        }
+        else if (judgement is not null)
+            continuous = RawOutputReplay.Read(_blobs, raw, line => judgement.ObserveLine(judgement.InputIdentity, line));
         var script = judgementEvidence is null ? null : new JudgementEvidenceReader(instance, database, contracts).Read(context.Total, binding, judgementEvidence, collected);
         var decision = script is null ? judgement?.Decision : new JudgementEvidenceReader(instance, database, contracts).Replay(context.Total, script, definition);
-        var business = script is not null ? decision?.Outcome ?? BusinessOutcome.Unverified : continuous ? judgement!.Business : BusinessOutcome.Unverified;
+        var business = script is not null ? decision?.Outcome ?? BusinessOutcome.Unverified : continuous ? replay?.Business ?? judgement!.Business : BusinessOutcome.Unverified;
         if (root is null) business = BusinessOutcome.Unverified;
         var engine = root is null ? EngineOutcome.NotStarted : exitCode is null ? collected ? EngineOutcome.Unknown : EngineOutcome.Running :
             exitCode == 0 ? EngineOutcome.Succeeded : EngineOutcome.Failed;
-        var reason = business != BusinessOutcome.Unverified ? decision!.ReasonCode : engine switch
+        var reason = business != BusinessOutcome.Unverified ? replay?.ReasonCode ?? decision!.ReasonCode : engine switch
         {
             EngineOutcome.Succeeded => "execution_engine_succeeded", EngineOutcome.Failed => "execution_engine_failed",
             EngineOutcome.NotStarted => "execution_not_started", _ => "execution_output_unverified"

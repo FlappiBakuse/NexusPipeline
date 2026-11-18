@@ -18,6 +18,7 @@ internal sealed class InstallationReadLease : IDisposable
     private IReadOnlyList<FileEffect> _effects = [];
     private ExtensionInstalledMetadata _expected = null!;
     private DatabaseValidationLease? _sql;
+    private string? _catalogOperation;
     private bool _disposed;
 
     private InstallationReadLease(RuntimeInstance instance, StateDatabase database, InstanceLease lease,
@@ -62,7 +63,7 @@ internal sealed class InstallationReadLease : IDisposable
                 result._bound = bound;
                 result._effects = PayloadEffectCursor.ExpectedEffects(bound.Registered, bound.Plan, bound.History, bound.Physical, bound.Restoration);
                 result._expected = ExtensionPayloadBinding.DerivedInstallation(bound.Plan, bound.Commit, bound.Footprint);
-                result._sql = new(database);
+                result._sql = new(database, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System);
                 result.RequireCurrent();
                 return result;
             }
@@ -90,13 +91,15 @@ internal sealed class InstallationReadLease : IDisposable
         using var paths = DirectoryAttributeScope.Enter(_paths);
         _lease.VerifyHeld(_instance);
         _ = _history.Read();
-        _sql!.RequireCurrent((connection, transaction) =>
+        _sql!.RequireInstallation((connection, transaction) =>
         {
-            _binding.RequireInside(connection, transaction, _bound, _effects);
+            var catalogOperation = _binding.RequireInside(connection, transaction, _bound, _effects);
             if (ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, _expected.ExtensionId) != _expected ||
                 HostSettingsRows.ReadCurrent(connection, transaction).Values.Extensions
                     .SingleOrDefault(item => item.ExtensionId == _expected.ExtensionId)?.Enabled != true) throw Invalid();
-        });
+            _catalogOperation = catalogOperation;
+        }, (connection, transaction) =>
+            _binding.RequireInstalledRuntime(connection, transaction, _bound, _effects, _catalogOperation));
     }
 
     public void Dispose()

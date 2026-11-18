@@ -5,29 +5,45 @@ namespace NexusPipeline.Platform.Storage.Records;
 
 internal static class RetiredAssetReferences
 {
-    internal static bool IsReferenced(RuntimeInstance instance, StateDatabase database, ContractReader contracts, BlobReference content)
+    internal static HashSet<BlobReference> ReadReferenced(RuntimeInstance instance, StateDatabase database,
+        ContractReader contracts, IReadOnlySet<BlobReference> content)
     {
-        string afterRun = ""; var afterKind = -1;
+        var referenced = new HashSet<BlobReference>();
+        if (content.Count == 0) return referenced;
+        var digests = content.GroupBy(item => item.Sha256).ToDictionary(group => group.Key, group => group.ToArray());
+        string afterDigest = "", afterRun = ""; var afterKind = -1;
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true,
+            domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Content);
         while (true)
         {
-            var rows = new List<(Guid Run, int Kind)>();
-            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
-            using (var command = RecordRetirementRows.Command(connection, null,
-                "SELECT a.run_id,a.kind,b.size_bytes,b.relative_path FROM records.record_assets a LEFT JOIN content.blobs b USING(digest) " +
-                "WHERE a.digest=$0 AND (a.run_id,a.kind)>($1,$2) ORDER BY a.run_id,a.kind LIMIT 128;",
-                content.Sha256, afterRun, afterKind))
-            using (var reader = command.ExecuteReader())
-                while (reader.Read())
+            var rows = new List<(string Digest, Guid Run, int Kind)>();
+            using (var command = connection.CreateCommand())
+            {
+                var parameters = digests.Keys.Select((digest, index) =>
                 {
-                    if (reader.IsDBNull(2) || reader.IsDBNull(3) || reader.GetInt64(2) != content.SizeBytes || reader.GetString(3) != content.RelativePath ||
-                        reader.GetInt32(1) is < 0 or > 2) throw RecordRetirementCodec.Invalid();
-                    rows.Add((Guid.ParseExact(reader.GetString(0), "D"), reader.GetInt32(1)));
-                }
+                    var name = "$digest" + index; command.Parameters.AddWithValue(name, digest); return name;
+                }).ToArray();
+                command.CommandText = "SELECT a.digest,a.run_id,a.kind,b.size_bytes,b.relative_path FROM records.record_assets a " +
+                    "LEFT JOIN content.blobs b USING(digest) WHERE a.digest IN (" + string.Join(',', parameters) + ") " +
+                    "AND (a.digest,a.run_id,a.kind)>($afterDigest,$afterRun,$afterKind) ORDER BY a.digest,a.run_id,a.kind LIMIT 128;";
+                command.Parameters.AddWithValue("$afterDigest", afterDigest);
+                command.Parameters.AddWithValue("$afterRun", afterRun);
+                command.Parameters.AddWithValue("$afterKind", afterKind);
+                using (var reader = command.ExecuteReader())
+                    while (reader.Read())
+                    {
+                        if (reader.IsDBNull(3) || reader.IsDBNull(4) || reader.GetInt32(2) is < 0 or > 2 ||
+                            digests[reader.GetString(0)].Any(item => item.SizeBytes != reader.GetInt64(3) || item.RelativePath != reader.GetString(4)))
+                            throw RecordRetirementCodec.Invalid();
+                        rows.Add((reader.GetString(0), Guid.ParseExact(reader.GetString(1), "D"), reader.GetInt32(2)));
+                    }
+            }
             foreach (var row in rows)
-                if (row.Kind != 0 || VerifiedImageRetirement.ForAsset(instance, database, contracts, row.Run, content) is null)
-                    return true;
-            if (rows.Count < 128) return false;
-            afterRun = rows[^1].Run.ToString("D"); afterKind = rows[^1].Kind;
+                foreach (var item in digests[row.Digest])
+                    if (row.Kind != 0 || VerifiedImageRetirement.ForAsset(instance, database, contracts, row.Run, item) is null)
+                        referenced.Add(item);
+            if (rows.Count < 128) return referenced;
+            afterDigest = rows[^1].Digest; afterRun = rows[^1].Run.ToString("D"); afterKind = rows[^1].Kind;
         }
     }
 }

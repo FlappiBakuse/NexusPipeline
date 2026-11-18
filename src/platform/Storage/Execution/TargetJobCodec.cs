@@ -22,16 +22,16 @@ internal static class TargetJobCodec
         return identity.TryGetProperty("format", out var format) && format.GetString() == Format;
     }
 
-    internal static ImmutableArray<TargetJobState> Read(JsonElement journal, ExecutionPlan total, string totalPlanSha256)
+    internal static ImmutableArray<TargetJobState> Read(AttemptJournalView journal, ExecutionPlan total, string totalPlanSha256)
         => ReadCore(journal, total, totalPlanSha256, null);
 
-    private static ImmutableArray<TargetJobState> ReadCore(JsonElement journal, ExecutionPlan total, string totalPlanSha256,
+    private static ImmutableArray<TargetJobState> ReadCore(AttemptJournalView journal, ExecutionPlan total, string totalPlanSha256,
         ImmutableArray<TargetJobIntent>.Builder? intents)
     {
         journal = ExecutionInvocationCodec.Current(journal);
         var states = new Dictionary<string, TargetJobState>(StringComparer.Ordinal);
         var retentionCounts = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var participant in journal.GetProperty("participants").EnumerateArray().Where(IsParticipant))
+        foreach (var participant in journal.Participants.Where(IsParticipant))
         {
             var identity = participant.GetProperty("identity");
             var decoded = ExecutionParticipantText.Read<TargetJobIntent>(identity, Options, Invalid);
@@ -39,9 +39,9 @@ internal static class TargetJobCodec
             intents?.Add(item);
             var binding = item.Binding ?? throw Invalid();
             if (!decoded.MatchesOriginal || item.Format != Format || item.Version != 1 ||
-                binding.InstanceId.ToString("D") != total.InstanceId || binding.ParentJournalId.ToString("D") != journal.GetProperty("journalId").GetString() ||
-                binding.ParentOperationId.ToString("D") != journal.GetProperty("operationId").GetString() ||
-                binding.AttemptId.ToString("D") != journal.GetProperty("attemptId").GetString() || binding.TargetId == Guid.Empty ||
+                binding.InstanceId.ToString("D") != total.InstanceId || binding.ParentJournalId.ToString("D") != journal.Root.GetProperty("journalId").GetString() ||
+                binding.ParentOperationId.ToString("D") != journal.Root.GetProperty("operationId").GetString() ||
+                binding.AttemptId.ToString("D") != journal.Root.GetProperty("attemptId").GetString() || binding.TargetId == Guid.Empty ||
                 binding.OwnerWriterId == Guid.Empty || binding.SessionId < 0 ||
                 binding.TotalPlanSha256 != totalPlanSha256 ||
                 binding.JobName is null || binding.JobName.Length != 50 || !binding.JobName.StartsWith("Local\\NexusWorker-", StringComparison.Ordinal) ||
@@ -77,17 +77,17 @@ internal static class TargetJobCodec
         ["identity"] = JsonSerializer.SerializeToNode(item, Options)
     };
 
-    internal static ImmutableArray<TargetJobIntent> ReadAll(JsonElement journal, ExecutionPlan total, string totalPlanSha256)
+    internal static ImmutableArray<TargetJobIntent> ReadAll(AttemptJournalView journal, ExecutionPlan total, string totalPlanSha256)
     {
         var intents = ImmutableArray.CreateBuilder<TargetJobIntent>();
         _ = ReadCore(journal, total, totalPlanSha256, intents);
         return intents.ToImmutable();
     }
 
-    internal static ImmutableArray<TargetJobIntent> ReadHistory(JsonElement journal, ExecutionPlan total, string sha)
+    internal static ImmutableArray<TargetJobIntent> ReadHistory(AttemptJournalView journal, ExecutionPlan total, string sha)
     {
         foreach (var view in ExecutionInvocationCodec.Views(journal)) _ = Read(view, total, sha);
-        return journal.GetProperty("participants").EnumerateArray().Where(IsParticipant)
+        return journal.Participants.Where(IsParticipant)
             .Select(item => item.GetProperty("identity").Deserialize<TargetJobIntent>(Options) ?? throw Invalid()).ToImmutableArray();
     }
 

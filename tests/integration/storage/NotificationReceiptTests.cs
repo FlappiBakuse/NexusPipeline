@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.Versioning;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Secrets;
+using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Notifications;
@@ -14,6 +15,54 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class NotificationReceiptTests(ITestOutputHelper output)
 {
+    [Fact(DisplayName = "Pending Notification Reads Reuse Protected Catalog Bytes And The Held Instance Identity")]
+    public async Task ReusesPendingCatalog()
+    {
+        using var fixture = new NotificationReceiptFixture();
+        await fixture.Execute(taskCount: 2, queueNotifications: false, repetitions: 3);
+        Assert.Equal(3, fixture.Delivery.MaterializePending());
+        var source = fixture.Source;
+        string[] paths;
+        using (var scope = BlobReadScope.Hold(source.Instance))
+        {
+            var catalog = new NotificationCatalogCodec(source.Instance, new()).Read(fixture.Snapshot.Document.Catalog);
+            paths = catalog.Document.Tasks.Select(item => Path.Combine(source.Instance.RuntimeRoot, item.Definition.RelativePath))
+                .Append(Path.Combine(source.Instance.RuntimeRoot, catalog.Reference.RelativePath)).ToArray();
+            Assert.Equal(6, fixture.Delivery.ReadPendingForRun(fixture.Receipt.Facts.RunId).Queued);
+            var locks = new List<FileStream>();
+            try
+            {
+                foreach (var path in paths.Append(Path.Combine(source.Instance.RuntimeRoot, "instance.json")))
+                {
+                    var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+                    locks.Add(file); file.Lock(0, file.Length);
+                }
+                var allocated = GC.GetAllocatedBytesForCurrentThread();
+                var clock = Stopwatch.StartNew();
+                for (var index = 0; index < 8; index++)
+                {
+                    var status = fixture.Delivery.ReadPendingForRun(fixture.Receipt.Facts.RunId);
+                    Assert.True(status.IsExpanded); Assert.Equal(6, status.Queued);
+                }
+                var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocated;
+                output.WriteLine("Protected pending reads: count=8, routes=3, targets=6, lockedCatalogFiles={0}, allocatedBytes={1}, elapsedMilliseconds={2:F3}",
+                    paths.Length, allocatedBytes, clock.Elapsed.TotalMilliseconds);
+                fixture.Sql("UPDATE notifications.notification_delivery_secrets SET revision=revision+1;");
+                try { Assert.ThrowsAny<Exception>(() => fixture.Delivery.ReadPendingForRun(fixture.Receipt.Facts.RunId)); }
+                finally { fixture.Sql("UPDATE notifications.notification_delivery_secrets SET revision=revision-1;"); }
+            }
+            finally
+            {
+                foreach (var file in locks) { file.Unlock(0, file.Length); file.Dispose(); }
+            }
+        }
+        var original = File.ReadAllBytes(paths[0]);
+        File.WriteAllBytes(paths[0], [9]);
+        try { Assert.Throws<IOException>(() => fixture.Delivery.ReadPendingForRun(fixture.Receipt.Facts.RunId)); }
+        finally { File.WriteAllBytes(paths[0], original); }
+        Assert.Equal(6, fixture.Delivery.ReadPendingForRun(fixture.Receipt.Facts.RunId).Queued);
+    }
+
     [Fact(DisplayName = "Repeated Protected Receipt Reads Reuse Terminal Decoding And Send Each Frozen Route Once")]
     public async Task ReusesTerminalDecoding()
     {

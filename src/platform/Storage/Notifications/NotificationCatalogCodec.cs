@@ -55,18 +55,21 @@ internal sealed class NotificationCatalogCodec(RuntimeInstance instance, Contrac
             throw new IOException("notification_delivery_catalog_unbound");
     }
 
-    internal T ReadDocument<T>(BlobReference reference)
+    internal T ReadDocument<T>(BlobReference reference) where T : class
     {
         RequirePlan(reference);
         using var input = new ImmutableBlobStore(instance, contracts).OpenVerified(reference);
-        var bytes = new byte[checked((int)input.Length)]; input.ReadExactly(bytes);
-        return Decode<T>(bytes);
+        return BlobReadStream.ReadEvidence(input, () =>
+        {
+            var bytes = new byte[checked((int)input.Length)]; input.ReadExactly(bytes);
+            return Decode<T>(bytes);
+        });
     }
 
     internal static T Decode<T>(ReadOnlyMemory<byte> bytes)
     {
         using var parsed = StrictJson.Parse(bytes);
-        RequireRequiredMembers(parsed.RootElement, typeof(T));
+        RequireRequiredMembers(parsed.RootElement, RequiredMembers<T>.Shape);
         return JsonSerializer.Deserialize<T>(bytes.Span, StoredPlanFormat.Options) ?? throw new JsonException("notification_document_missing");
     }
 
@@ -83,22 +86,40 @@ internal sealed class NotificationCatalogCodec(RuntimeInstance instance, Contrac
             throw new IOException("notification_plan_reference_invalid");
     }
 
-    private static void RequireRequiredMembers(JsonElement element, Type type)
+    private static void RequireRequiredMembers(JsonElement element, RequiredShape shape)
     {
         // Absent false/zero members must not acquire authority in persisted documents.
         if (element.ValueKind == JsonValueKind.Null) return;
-        if (type == typeof(string) || type == typeof(Guid) || type.IsPrimitive || type.IsEnum || type == typeof(decimal)) return;
-        if (Nullable.GetUnderlyingType(type) is { } underlying) { RequireRequiredMembers(element, underlying); return; }
-        if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(ImmutableArray<>))
+        if (shape.Item is { } itemShape)
         {
-            foreach (var item in element.EnumerateArray()) RequireRequiredMembers(item, type.GenericTypeArguments[0]);
+            foreach (var item in element.EnumerateArray()) RequireRequiredMembers(item, itemShape);
             return;
         }
-        foreach (var property in type.GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public).Where(property => property.CanRead && property.GetIndexParameters().Length == 0))
+        foreach (var member in shape.Members)
         {
-            var name = JsonNamingPolicy.CamelCase.ConvertName(property.Name);
-            if (!element.TryGetProperty(name, out var value)) throw new JsonException("notification_required_member_missing");
-            RequireRequiredMembers(value, property.PropertyType);
+            if (!element.TryGetProperty(member.Name, out var value)) throw new JsonException("notification_required_member_missing");
+            RequireRequiredMembers(value, member.Shape);
+        }
+    }
+
+    private static class RequiredMembers<T>
+    {
+        internal static readonly RequiredShape Shape = RequiredShape.Create(typeof(T));
+    }
+
+    private sealed record RequiredMember(string Name, RequiredShape Shape);
+    private sealed record RequiredShape(ImmutableArray<RequiredMember> Members, RequiredShape? Item = null)
+    {
+        internal static RequiredShape Create(Type type)
+        {
+            if (type == typeof(string) || type == typeof(Guid) || type.IsPrimitive || type.IsEnum || type == typeof(decimal)) return new([]);
+            if (Nullable.GetUnderlyingType(type) is { } underlying) return Create(underlying);
+            if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(ImmutableArray<>))
+                return new([], Create(type.GenericTypeArguments[0]));
+            return new(type.GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public)
+                .Where(property => property.CanRead && property.GetIndexParameters().Length == 0)
+                .Select(property => new RequiredMember(JsonNamingPolicy.CamelCase.ConvertName(property.Name), Create(property.PropertyType)))
+                .ToImmutableArray());
         }
     }
 }

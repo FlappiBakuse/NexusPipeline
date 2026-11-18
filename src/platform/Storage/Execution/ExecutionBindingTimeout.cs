@@ -24,17 +24,17 @@ internal static class BindingTimeoutCodec
         _ = Decode(participant); return true;
     }
 
-    internal static ImmutableArray<ExecutionBindingTimeout> Read(JsonElement journal, ExecutionPlan total)
+    internal static ImmutableArray<ExecutionBindingTimeout> Read(AttemptJournalView journal, ExecutionPlan total)
     {
         journal = ExecutionInvocationCodec.Current(journal);
         var result = ImmutableArray.CreateBuilder<ExecutionBindingTimeout>();
-        foreach (var participant in journal.GetProperty("participants").EnumerateArray().Where(IsParticipant))
+        foreach (var participant in journal.Participants.Where(IsParticipant))
         {
             var item = Decode(participant);
             var step = total.Steps.SingleOrDefault(step => step.StepId == item.StepId) ?? throw Invalid();
             var jobs = WriterIntentCodec.ReadJobs(journal, total).Where(job => job.StepId == item.StepId).ToArray();
             if (step.TotalTimeoutSeconds is not > 0 || item.ConsumedMilliseconds < step.TotalTimeoutSeconds * 1000 ||
-                item.BeforeRevision >= journal.GetProperty("revision").GetInt64() ||
+                item.BeforeRevision >= journal.Root.GetProperty("revision").GetInt64() ||
                 item.InvocationOrdinal != ExecutionInvocationCodec.Ordinal(journal, item.StepId) || jobs.Length == 0 ||
                 jobs.Any(job => job.ClosedElapsedMilliseconds is null) || result.Any(prior => prior.StepId == item.StepId) ||
                 participant.GetProperty("resourceKey").GetString() != "automation:" + step.ScriptId) throw Invalid();

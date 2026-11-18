@@ -38,8 +38,54 @@ public sealed class ConfigurationSwapTests
         fixture.Swap.RetireCandidate(prepared, fixture.Stopped);
         fixture.Swap.RestoreOriginal(prepared, fixture.Stopped);
         fixture.Swap.RestoreOriginal(prepared, fixture.Stopped);
-        fixture.Swap.VerifyRestored(prepared, fixture.Stopped);
-        AssertOriginal(fixture);
+        using (fixture.Swap.HoldRestored(prepared, fixture.Stopped))
+        {
+            AssertOriginal(fixture);
+            var original = plan.Before.Snapshot.Entries.FirstOrDefault(entry => entry.Kind == FileObjectKind.File);
+            if (original is not null)
+            {
+                var path = Path.Combine(plan.TargetPath, original.RelativePath);
+                Assert.Throws<IOException>(() => File.Open(path, FileMode.Open, FileAccess.Write, FileShare.Read));
+            }
+        }
+        if (plan.Before.Snapshot.Shape != FileObjectKind.Missing)
+        {
+            File.WriteAllText(Path.Combine(prepared.WorkPath, "before"), "unexpected backup");
+            Assert.Throws<IOException>(() => fixture.Swap.HoldRestored(prepared, fixture.Stopped));
+        }
+    }
+
+    [Fact(DisplayName = "A Held Configuration Plan Serves Journal Reads Until Release And Still Checks The Revision Directory")]
+    public void ReusesHeldPlan()
+    {
+        var fixture = Create("file", "file");
+        var plan = fixture.Plan;
+        var contracts = new ContractReader();
+        var instance = new InstanceRoot(contracts).OpenExisting(fixture.RuntimeRoot);
+        var store = new JournalStore(instance, contracts);
+        var reference = fixture.PersistPlan();
+        store.Create(JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            format = "nexus.execution.journal", version = 1, instanceId = plan.InstanceId, journalId = plan.JournalId,
+            operationId = plan.OperationId, operationKind = "configExchange", phase = "prepared", revision = 1,
+            updatedAt = "2026-11-18T00:00:00Z", planPath = reference.RelativePath, planDigest = reference.Sha256,
+            resourceKeys = new[] { "fixture:configuration" }, participants = Array.Empty<object>(), receipts = Array.Empty<object>()
+        }));
+        var path = Path.Combine(instance.RuntimeRoot, reference.RelativePath);
+        using (var opened = fixture.Plans.OpenStructure(reference))
+        using (var locked = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            locked.Lock(0, locked.Length);
+            Assert.Throws<IOException>(() => store.Read(plan.JournalId));
+            var physical = store.Read(plan.JournalId, opened);
+            Assert.Equal(plan.JournalId, opened.ReadContents(instance, physical).JournalId);
+            var unknown = Path.Combine(instance.RuntimeRoot, "journals", plan.JournalId.ToString("D"), "unknown");
+            File.WriteAllText(unknown, "unexpected journal entry");
+            Assert.Throws<IOException>(() => store.Read(plan.JournalId, opened));
+            File.Delete(unknown);
+        }
+        File.WriteAllText(path, "changed after release");
+        Assert.Throws<IOException>(() => fixture.Plans.OpenStructure(reference));
     }
 
     [Theory(DisplayName = "A New Effect Adapter Can Restore From The Persisted Plan At Every Completed Physical Boundary")]

@@ -40,20 +40,20 @@ internal static class PreviewDomainCodec
         return value;
     }
 
-    internal static ImmutableArray<PreviewDomainState> Read(JsonElement journal, ExecutionPlan total, string totalSha256)
+    internal static ImmutableArray<PreviewDomainState> Read(AttemptJournalView journal, ExecutionPlan total, string totalSha256)
     {
         journal = ExecutionInvocationCodec.Current(journal);
         var states = new Dictionary<string, PreviewDomainState>(StringComparer.Ordinal);
         var jobs = WriterIntentCodec.ReadJobs(journal, total);
         long priorRevision = 0;
-        foreach (var participant in journal.GetProperty("participants").EnumerateArray().Where(IsParticipant))
+        foreach (var participant in journal.Participants.Where(IsParticipant))
         {
             var item = Decode(participant); var source = item.Source; var primary = source.Primary;
             var step = total.Steps.SingleOrDefault(step => step.StepId == primary.StepId) ?? throw Invalid();
             var main = jobs.SingleOrDefault(job => job.StepId == primary.StepId && job.Role == "process") ?? throw Invalid();
             if (total.CaptureRuntime is null || !ExecutionCaptureInputs.IsSupported(step) ||
                 source.TotalPlanSha256 != totalSha256 || StepResultCodec.Binding(journal, main) != primary ||
-                item.BeforeRevision <= priorRevision || item.BeforeRevision >= journal.GetProperty("revision").GetInt64() ||
+                item.BeforeRevision <= priorRevision || item.BeforeRevision >= journal.Root.GetProperty("revision").GetInt64() ||
                 participant.GetProperty("kind").GetString() != "process" ||
                 participant.GetProperty("resourceKey").GetString() != "automation:" + step.ScriptId) throw Invalid();
             priorRevision = item.BeforeRevision;
@@ -86,7 +86,7 @@ internal static class PreviewDomainCodec
         }
     }
 
-    internal static void RequireResolved(JsonElement journal, ExecutionPlan total, string totalSha256, string? stepId = null)
+    internal static void RequireResolved(AttemptJournalView journal, ExecutionPlan total, string totalSha256, string? stepId = null)
     {
         if (Read(journal, total, totalSha256).Any(value => !value.Closed && (stepId is null || value.Source.Primary.StepId == stepId)))
             throw new IOException("execution_preview_domain_collection_pending");

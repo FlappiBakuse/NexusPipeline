@@ -64,7 +64,7 @@ internal sealed class AndroidControlEvidence(RuntimeInstance instance, StateData
         ExecutionInvocationCodec.Views(journal).Select(ExecutionInvocationCodec.Current)
             .SelectMany(view => ReadCurrentReferences(view, total, totalSha256)).Distinct().ToArray();
 
-    private IReadOnlyList<BlobReference> ReadCurrentReferences(System.Text.Json.JsonElement journal, ExecutionPlan total, string totalSha256)
+    private IReadOnlyList<BlobReference> ReadCurrentReferences(AttemptJournalView journal, ExecutionPlan total, string totalSha256)
     {
         var references = new List<BlobReference>();
         var prior = new Dictionary<string, AndroidCommandRegistration>(StringComparer.Ordinal);
@@ -88,7 +88,7 @@ internal sealed class AndroidControlEvidence(RuntimeInstance instance, StateData
         return references.Distinct().ToArray();
     }
 
-    internal long OutputBytes(System.Text.Json.JsonElement journal, ExecutionPlan total, string totalSha256, string stepId)
+    internal long OutputBytes(AttemptJournalView journal, ExecutionPlan total, string totalSha256, string stepId)
     {
         var registrations = AndroidControlCodec.Read(journal, total, totalSha256)
             .Where(item => item.Binding.StepId == stepId).ToArray();

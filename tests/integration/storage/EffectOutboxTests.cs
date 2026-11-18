@@ -78,6 +78,61 @@ public sealed class EffectOutboxTests
         Assert.Equal(fixture.Effect with { State = FileEffectState.Completed, ReceiptDigest = completed }, Assert.Single(fixture.Outbox.Read(journal.JournalId)));
     }
 
+    [Theory(DisplayName = "Recovery Revisions Write The Isolation Reason Only When Its Stored Value Changes")]
+    [InlineData("recovery_pending", 0)]
+    [InlineData("recovery_quarantined", 1)]
+    public void UpdatesChangedIsolation(string oldReason, int expectedUpdates)
+    {
+        var fixture = Create();
+        var journal = fixture.Journal;
+        fixture.Registry.AcceptPrepared(fixture.Operation, journal, [fixture.Effect], DateTimeOffset.UtcNow);
+        new JournalEffectGate(fixture.Database).Enter(journal, 1);
+        using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, domains: DatabaseDomain.Runtime);
+        using var transaction = connection.BeginTransaction();
+        using var command = connection.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "UPDATE main.resource_isolations SET reason_code=$reason; " +
+            "CREATE TEMP TABLE isolation_changes(reason TEXT); " +
+            "CREATE TEMP TRIGGER count_isolation_update AFTER UPDATE ON main.resource_isolations " +
+            "BEGIN INSERT INTO isolation_changes VALUES(new.reason_code); END;";
+        command.Parameters.AddWithValue("$reason", oldReason);
+        command.ExecuteNonQuery();
+        var before = RecoveryJournalRegistry.ReadSnapshot(connection, transaction);
+        fixture.Registry.AdvanceInside(connection, transaction, journal with { Revision = 2, Phase = JournalPhase.Applying }, 1);
+        command.CommandText = "SELECT count(*) FROM temp.isolation_changes;";
+        Assert.Equal((long)expectedUpdates, (long)command.ExecuteScalar()!);
+        var after = RecoveryJournalRegistry.ReadSnapshot(connection, transaction);
+        Assert.Equal(before.Revision + 1, after.Revision);
+        Assert.Equal("recovery_pending", Assert.Single(after.Isolations).ReasonCode);
+        Assert.Equal(2, Assert.Single(after.Journals).Revision);
+    }
+
+    [Theory(DisplayName = "Batched Recovery Membership Rejects Missing Resources And Per Journal Overflow")]
+    [InlineData("missing")]
+    [InlineData("resources")]
+    [InlineData("effects")]
+    public void RejectsInvalidMembers(string fault)
+    {
+        var fixture = Create();
+        fixture.Registry.AcceptPrepared(fixture.Operation, fixture.Journal, [fixture.Effect], DateTimeOffset.UtcNow);
+        using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, domains: DatabaseDomain.Runtime);
+        using var transaction = connection.BeginTransaction();
+        using var command = connection.CreateCommand(); command.Transaction = transaction;
+        command.Parameters.AddWithValue("$id", fixture.Journal.JournalId.ToString("D"));
+        const string rows = " WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<4096) ";
+        command.CommandText = fault switch
+        {
+            "missing" => "DELETE FROM main.journal_resource_claims WHERE journal_id=$id; " +
+                "DELETE FROM main.journal_resources WHERE journal_id=$id;",
+            "resources" => "INSERT INTO main.journal_resources" + rows + "SELECT $id,'fixture:extra-'||i FROM n;",
+            _ => "UPDATE main.recovery_capacity_reservations SET effect_limit=4097,remaining_effects=4096 WHERE owner_journal_id=$id; " +
+                "INSERT INTO main.file_effects" + rows +
+                "SELECT journal_id,'extra-'||i,action,state,intent_digest,receipt_digest FROM main.file_effects,n WHERE journal_id=$id;"
+        };
+        command.ExecuteNonQuery();
+        Assert.Equal(fault == "effects" ? "file_effect_limit" : "recovery_registry_resource_limit",
+            Assert.Throws<IOException>(() => RecoveryJournalRegistry.ReadSnapshot(connection, transaction, fixture.Journal.JournalId)).Message);
+    }
+
     [Fact(DisplayName = "An Applied Journal With Pending Effect Stays Isolated And Cannot Start Late Effects")]
     public void RejectsLateEffects()
     {
@@ -129,7 +184,11 @@ public sealed class EffectOutboxTests
         Assert.Null(fixture.Registry.FindJournal(proposed.JournalId));
         Assert.Equal(fixture.Operation.OperationId, fixture.Registry.ReadJournal(independent.JournalId).OperationId);
         Assert.Empty(fixture.Outbox.Read(independent.JournalId));
-        Assert.Equal(before, fixture.Registry.ReadSnapshot().Isolations);
+        var snapshot = fixture.Registry.ReadSnapshot();
+        Assert.Equal(before, snapshot.Isolations);
+        Assert.Equal(fixture.Effect, Assert.Single(snapshot.FileEffects));
+        Assert.Equal(2, snapshot.Journals.Count);
+        Assert.All(snapshot.Journals, journal => Assert.Equal(fixture.Journal.ResourceKeys, journal.ResourceKeys));
     }
 
     [Fact(DisplayName = "Cleanup Cannot Commit While Its Primary Remove Owned Effects Remain Open")]

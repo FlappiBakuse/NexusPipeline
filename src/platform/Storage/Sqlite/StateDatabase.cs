@@ -17,6 +17,8 @@ public sealed class StateDatabase
     private readonly DatabaseWriteGate _writer = new(64, TimeSpan.FromSeconds(2));
     private readonly bool _readOnly;
     private readonly long[] _domainSequences = new long[8];
+    private long _committedReadSequence;
+    private ControlStatisticsVersion _controlStatisticsVersion;
     public string DatabasePath { get; }
     public string RuntimeRoot { get; }
     public Guid InstanceId { get; }
@@ -149,6 +151,31 @@ public sealed class StateDatabase
         using var changes = new DatabaseChanges(connection);
         var result = operation(connection, transaction);
         DatabaseRelations.VerifyChanges(connection, transaction, changes);
+        var versioned = (changes.Domains & (DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System)) != 0 ||
+            changes.ControlStatistics != 0;
+        // An odd sequence keeps readers from reusing cached facts during COMMIT and version publication.
+        if (versioned) Interlocked.Increment(ref _committedReadSequence);
+        try { CommitChanges(transaction, changes); }
+        finally { if (versioned) Interlocked.Increment(ref _committedReadSequence); }
+        return result;
+    }
+
+    internal ControlStatisticsVersion? ReadControlVersion() =>
+        ReadCommittedVersion(static database => database._controlStatisticsVersion);
+
+    internal DatabaseVersion? ReadInstallationVersion(DatabaseDomain domains) =>
+        ReadCommittedVersion(database => DatabaseVersion.Read(database, null, domains));
+
+    private T? ReadCommittedVersion<T>(Func<StateDatabase, T> read) where T : struct
+    {
+        var sequence = Interlocked.Read(ref _committedReadSequence);
+        if ((sequence & 1) != 0) return null;
+        var result = read(this);
+        return Interlocked.Read(ref _committedReadSequence) == sequence ? result : null;
+    }
+
+    private void CommitChanges(SqliteTransaction transaction, DatabaseChanges changes)
+    {
         // A busy COMMIT leaves the transaction active; retry it without repeating the operation.
         for (var attempt = 0; ; attempt++)
         {
@@ -158,11 +185,12 @@ public sealed class StateDatabase
         }
         if (changes.Domains != 0)
         {
+            if (changes.ControlStatistics != 0)
+                _controlStatisticsVersion = _controlStatisticsVersion.Advance(changes.ControlStatistics);
             for (var index = 0; index < DatabaseLayout.Domains.Length; index++)
                 if ((changes.Domains & DatabaseLayout.Domains[index]) != 0) Interlocked.Increment(ref _domainSequences[index]);
             Interlocked.Increment(ref _commitSequence);
         }
-        return result;
     }
 
     internal long DomainSequence(DatabaseDomain domain) => Interlocked.Read(ref _domainSequences[Array.IndexOf(DatabaseLayout.Domains, domain)]);

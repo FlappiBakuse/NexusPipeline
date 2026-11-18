@@ -26,6 +26,7 @@ internal sealed class JournalHistoryProtection : IDisposable
         var names = Directory.EnumerateFileSystemEntries(directory).Take(MaximumProtectedRevisions + 1)
             .Order(StringComparer.Ordinal).ToArray();
         if (names.Length > MaximumProtectedRevisions) return null;
+        using var paths = JournalStore.HoldHistoryDirectory(directory, names.Length);
         var result = new JournalHistoryProtection(directory);
         try
         {

@@ -53,14 +53,10 @@ public sealed class BlobReferenceIndex
                     blob.Sha256.Any(character => character is not (>= '0' and <= '9' or >= 'a' and <= 'f')))
                     throw new ArgumentException("blob_reference_query_invalid");
                 content.Add(blob);
-                using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.All);
-                using var command = connection.CreateCommand();
-                command.CommandText = "SELECT EXISTS(SELECT 1 FROM automation.automation_assets WHERE digest=$digest) " +
-                    "OR EXISTS(SELECT 1 FROM configuration.configuration_revision_assets WHERE digest=$digest);";
-                command.Parameters.AddWithValue("$digest", blob.Sha256);
-                if ((long)command.ExecuteScalar()! != 0 || RetiredAssetReferences.IsReferenced(_instance, _database, _contracts, blob))
-                    referenced.Add(blob);
             }
+            ReadDirectReferences(content, referenced);
+            referenced.UnionWith(RetiredAssetReferences.ReadReferenced(_instance, _database, _contracts,
+                content.Where(item => !referenced.Contains(item)).ToHashSet()));
             InventoryRead?.Invoke();
             if (scan?.NotificationsRead != true)
             {
@@ -101,6 +97,26 @@ public sealed class BlobReferenceIndex
         {
             throw new IOException("blob_reference_evidence_unrecognized", error);
         }
+    }
+
+    private void ReadDirectReferences(IReadOnlySet<BlobReference> content, HashSet<BlobReference> referenced)
+    {
+        if (content.Count == 0) return;
+        var digests = content.GroupBy(item => item.Sha256).ToDictionary(group => group.Key, group => group.ToArray());
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true,
+            domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration);
+        using var transaction = DatabaseConnections.BeginRead(connection);
+        using var command = connection.CreateCommand(); command.Transaction = transaction;
+        var parameters = digests.Keys.Select((digest, index) =>
+        {
+            var name = "$digest" + index; command.Parameters.AddWithValue(name, digest); return name;
+        }).ToArray();
+        var selected = string.Join(',', parameters);
+        command.CommandText = "SELECT digest FROM automation.automation_assets WHERE digest IN (" + selected + ") " +
+            "UNION SELECT digest FROM configuration.configuration_revision_assets WHERE digest IN (" + selected + ");";
+        using (var rows = command.ExecuteReader())
+            while (rows.Read()) referenced.UnionWith(digests[rows.GetString(0)]);
+        transaction.Commit();
     }
 
     private void VisitJournalReferences(IEnumerable<RegisteredJournal> journals, Action<BlobReference> include, Func<bool> complete,

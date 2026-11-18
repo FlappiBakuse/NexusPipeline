@@ -72,7 +72,7 @@ internal static class CleanupJournalBinding
                 !physical.Root.GetProperty("resourceKeys").EnumerateArray().Select(item => item.GetString()!).Order(StringComparer.Ordinal).SequenceEqual(registered.ResourceKeys))
                 throw new IOException("cleanup_journal_unbound");
             VerifyReceipts(steps, physical.Root.GetProperty("receipts"));
-            if (!byDigest.TryAdd(Convert.ToHexStringLower(SHA256.HashData(physical.Export())), physical))
+            if (!byDigest.TryAdd(physical.Sha256, physical))
                 throw new IOException("cleanup_history_digest_ambiguous");
         }
         if (effects.Count != steps.Count || effects.Any(effect => effect.Action != FileEffectAction.RemoveOwned ||

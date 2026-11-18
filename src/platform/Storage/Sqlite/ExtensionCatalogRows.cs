@@ -34,18 +34,30 @@ internal static class ExtensionCatalogRows
         return saved;
     }
 
-    internal static void RequireAcceptedInside(SqliteConnection connection, SqliteTransaction transaction,
+    internal static string RequireAcceptedInside(SqliteConnection connection, SqliteTransaction transaction,
         ExtensionCatalogSaved expected)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT c.generation_id,c.sequence,c.catalog_sha,c.key_id," +
-            "c.pointer_sha,c.pointer_size,c.catalog_size,c.signature_sha,c.signature_size,o.request_digest,o.operation_kind,o.status " +
+            "c.pointer_sha,c.pointer_size,c.catalog_size,c.signature_sha,c.signature_size,o.request_digest,o.operation_kind,o.status,c.first_operation_id " +
             "FROM extensions.extension_catalog_acceptances c LEFT JOIN main.operations o ON o.operation_id=c.first_operation_id " +
             "WHERE c.format='nexus.store.catalog' AND c.channel=$channel AND c.sequence=$sequence;";
         command.Parameters.AddWithValue("$channel", Channel(expected.Identity.Channel));
         command.Parameters.AddWithValue("$sequence", expected.Identity.Sequence);
         using var row = command.ExecuteReader();
         if (!row.Read() || Read(row, expected.Identity.Channel) != expected) throw Invalid();
+        return row.GetString(12);
+    }
+
+    internal static void RequireAcceptanceOperation(SqliteConnection connection, SqliteTransaction transaction,
+        ExtensionCatalogSaved expected, string? operation)
+    {
+        if (operation is null) throw Invalid();
+        using var command = DatabaseConnections.Command(connection, transaction,
+            "SELECT request_digest,operation_kind,status FROM main.operations WHERE operation_id=$0;", operation);
+        using var row = command.ExecuteReader();
+        if (!row.Read() || row.GetString(0) != RequestDigest(expected) ||
+            row.GetString(1) != "extension.catalog.accept" || row.GetString(2) != "completed") throw Invalid();
     }
 
     internal static void AcceptInside(SqliteConnection connection, SqliteTransaction transaction,

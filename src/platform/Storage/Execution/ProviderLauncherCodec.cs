@@ -18,19 +18,19 @@ internal static class ProviderLauncherCodec
         _ = Decode(participant); return true;
     }
 
-    internal static ImmutableArray<ProviderLauncherIntent> ReadAll(JsonElement journal, ExecutionPlan total, string totalSha)
+    internal static ImmutableArray<ProviderLauncherIntent> ReadAll(AttemptJournalView journal, ExecutionPlan total, string totalSha)
     {
         journal = ExecutionInvocationCodec.Current(journal);
         var result = ImmutableArray.CreateBuilder<ProviderLauncherIntent>();
         var states = new Dictionary<string, ProviderLauncherIntent>(StringComparer.Ordinal);
-        foreach (var participant in journal.GetProperty("participants").EnumerateArray().Where(IsParticipant))
+        foreach (var participant in journal.Participants.Where(IsParticipant))
         {
             var item = Decode(participant); var binding = item.Binding;
             var step = total.Steps.SingleOrDefault(step => step.StepId == binding.StepId) ?? throw Invalid();
             if (binding.InstanceId.ToString("D") != total.InstanceId ||
-                binding.ParentJournalId.ToString("D") != journal.GetProperty("journalId").GetString() ||
-                binding.ParentOperationId.ToString("D") != journal.GetProperty("operationId").GetString() ||
-                binding.AttemptId.ToString("D") != journal.GetProperty("attemptId").GetString() ||
+                binding.ParentJournalId.ToString("D") != journal.Root.GetProperty("journalId").GetString() ||
+                binding.ParentOperationId.ToString("D") != journal.Root.GetProperty("operationId").GetString() ||
+                binding.AttemptId.ToString("D") != journal.Root.GetProperty("attemptId").GetString() ||
                 binding.TotalPlanSha256 != totalSha || step.EngineKind != "extensionWorker" ||
                 step.Provider is not { Launcher: not null } provider || provider.ExtensionId != binding.ExtensionId ||
                 provider.ActivationId != binding.ActivationId.ToString("D") || provider.EntryId != binding.EntryId ||
@@ -50,13 +50,13 @@ internal static class ProviderLauncherCodec
         return result.ToImmutable();
     }
 
-    internal static ImmutableArray<ProviderLauncherIntent> ReadHistory(JsonElement journal, ExecutionPlan total, string sha)
+    internal static ImmutableArray<ProviderLauncherIntent> ReadHistory(AttemptJournalView journal, ExecutionPlan total, string sha)
     {
         foreach (var view in ExecutionInvocationCodec.Views(journal)) _ = ReadAll(view, total, sha);
-        return journal.GetProperty("participants").EnumerateArray().Where(IsParticipant).Select(Decode).ToImmutableArray();
+        return journal.Participants.Where(IsParticipant).Select(Decode).ToImmutableArray();
     }
 
-    internal static ImmutableArray<ProviderLauncherState> Read(JsonElement journal, ExecutionPlan total, string sha) =>
+    internal static ImmutableArray<ProviderLauncherState> Read(AttemptJournalView journal, ExecutionPlan total, string sha) =>
         ReadAll(journal, total, sha).GroupBy(item => item.Binding.StepId, StringComparer.Ordinal)
             .Select(group => group.Last()).Select(item => new ProviderLauncherState(item.Binding, item.Stage, item.Artifact, item.LaunchEngine)).ToImmutableArray();
 
@@ -66,7 +66,7 @@ internal static class ProviderLauncherCodec
         ["identity"] = JsonSerializer.SerializeToNode(value, StepResultCodec.Options)
     };
 
-    internal static void RequireResolved(JsonElement journal, ExecutionPlan total, string sha, string? stepId = null)
+    internal static void RequireResolved(AttemptJournalView journal, ExecutionPlan total, string sha, string? stepId = null)
     {
         if (Read(journal, total, sha).Any(item => (stepId is null || item.Binding.StepId == stepId) &&
             item.Stage is not ("stopped" or "retained" or "recoveredStopped" or "recoveredRetained"))) throw new IOException("execution_provider_launcher_collection_pending");

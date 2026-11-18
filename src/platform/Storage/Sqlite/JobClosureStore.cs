@@ -77,18 +77,20 @@ internal sealed class JobClosureStore(RuntimeInstance instance, StateDatabase da
     }
 
     internal FrozenJobClosure? Read(Guid journalId, Guid writerId, string jobName, int sessionId)
-        => ReadCore(journalId, writerId, jobName, sessionId, executionEvidence: false);
+        => ReadCore(journalId, writerId, jobName, sessionId);
 
     internal FrozenJobClosure? ReadForExecutionEvidence(Guid journalId, Guid writerId, string jobName, int sessionId,
         BlobReference? expectedReference = null)
-        => ReadCore(journalId, writerId, jobName, sessionId, executionEvidence: true, expectedReference: expectedReference);
+        => HistoryReadScope.ReadDatabase(database, (connection, transaction) =>
+            ReadInside(connection, transaction, journalId, writerId, jobName, sessionId, executionEvidence: true,
+                expectedReference: expectedReference));
 
-    private FrozenJobClosure? ReadCore(Guid journalId, Guid writerId, string jobName, int sessionId, bool executionEvidence,
+    private FrozenJobClosure? ReadCore(Guid journalId, Guid writerId, string jobName, int sessionId,
         AttemptWriterState? verifiedParent = null, BlobReference? expectedReference = null)
     {
         _ = verifiedParent?.RequireValidatedRead();
         FrozenJobClosure? closure = null;
-        if (!executionEvidence && verifiedParent is null)
+        if (verifiedParent is null)
         {
             BlobReference reference;
             using (var stored = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime))
@@ -105,7 +107,8 @@ internal sealed class JobClosureStore(RuntimeInstance instance, StateDatabase da
         }
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration);
         using var transaction = DatabaseConnections.BeginRead(connection);
-        var result = ReadInside(connection, transaction, journalId, writerId, jobName, sessionId, executionEvidence, verifiedParent, expectedReference, closure);
+        var result = ReadInside(connection, transaction, journalId, writerId, jobName, sessionId, executionEvidence: false,
+            verifiedParent, expectedReference, closure);
         transaction.Commit(); return result;
     }
 
@@ -141,7 +144,7 @@ internal sealed class JobClosureStore(RuntimeInstance instance, StateDatabase da
 
     internal void RequireReference(Guid journalId, FrozenJobClosure closure, BlobReference expected, AttemptWriterState? verifiedParent = null)
     {
-        var actual = ReadCore(journalId, closure.WriterId, closure.JobName, closure.SessionId, executionEvidence: false,
+        var actual = ReadCore(journalId, closure.WriterId, closure.JobName, closure.SessionId,
             verifiedParent: verifiedParent, expectedReference: expected) ?? throw new IOException("writer_job_closure_missing");
         if (actual.OperationId != closure.OperationId) throw new IOException("writer_job_closure_reference_unbound");
     }
@@ -195,8 +198,8 @@ internal sealed class JobClosureStore(RuntimeInstance instance, StateDatabase da
                 }
                 transaction.Commit();
             }
-            foreach (var key in keys) _ = store.ReadCore(key.Journal, key.Writer, key.Job, key.Session,
-                executionEvidence: false) ?? throw new IOException("writer_job_closure_missing");
+            foreach (var key in keys) _ = store.ReadCore(key.Journal, key.Writer, key.Job, key.Session)
+                ?? throw new IOException("writer_job_closure_missing");
             if (keys.Count < pageSize) break;
             var last = keys[^1]; after = (last.Journal.ToString("D"), last.Writer.ToString("D"), last.Job);
         }

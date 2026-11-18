@@ -55,6 +55,34 @@ public sealed class InstalledActivationTests
         Assert.Equal(before.Latest.Export(), fixture.Binding().Read(fixture.Accepted.JournalId, fixture.Accepted.Plan).Latest.Export());
     }
 
+    [Fact(DisplayName = "An Installed Read Lease Rechecks Its Catalog Acceptance After A Runtime Only Commit")]
+    public async Task RechecksCatalogOperation()
+    {
+        using var fixture = new InstallRuntimeFixture(savedEnabled: false);
+        _ = await fixture.Session().ApplyAsync(fixture.Prepared, default);
+        fixture.Prepared.Dispose(); fixture.Verified.Dispose(); fixture.Root.Dispose(); Enable(fixture);
+        var catalog = fixture.Package.Catalog;
+        var reader = new ExtensionInstalledEvidence(catalog.Instance, catalog.Database, catalog.Contracts, fixture.Roots);
+        using var evidence = reader.ProtectCurrent("fixture-plugin", catalog.Lease)!;
+        var accepted = evidence.ReadCurrent().Source.Package!.Catalog;
+        var operation = catalog.Database.Write((connection, transaction) =>
+            ExtensionCatalogRows.RequireAcceptedInside(connection, transaction, accepted));
+        void WriteDigest(string digest) => catalog.Database.Write((connection, transaction) =>
+        {
+            using var command = DatabaseConnections.Command(connection, transaction,
+                "UPDATE main.operations SET request_digest=$0 WHERE operation_id=$1;", digest, operation);
+            return command.ExecuteNonQuery();
+        });
+        WriteDigest(new string('a', 64));
+        try
+        {
+            Assert.Equal("extension_catalog_cache_unbound", Assert.Throws<IOException>(evidence.RequireCurrent).Message);
+        }
+        finally { WriteDigest(ExtensionCatalogRows.RequestDigest(accepted)); }
+        evidence.RequireCurrent();
+        await Close(fixture);
+    }
+
     [Fact(DisplayName = "A Current Revoked Key Cannot Activate The Previously Installed Signed Package")]
     public async Task RejectsRevokedKeys()
     {

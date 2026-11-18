@@ -13,6 +13,58 @@ namespace NexusPipeline.StorageTests;
 
 public sealed class RunStateTests
 {
+    [Fact(DisplayName = "Protected Run State Reuses Its Bytes While Revalidating Snapshot References And Instance Ownership")]
+    public void RevalidatesProtectedSnapshots()
+    {
+        var fixture = Create(); BlobReference reference;
+        using (var prepared = fixture.Codec.Freeze(fixture.State)) reference = prepared.Reference;
+        using var protection = fixture.Blobs.OpenVerified(reference);
+        var state = fixture.Codec.ReadStructure(reference);
+        var snapshot = state.SnapshotReference!;
+        var bodyPath = Path.Combine(fixture.Instance.RuntimeRoot, reference.RelativePath);
+        using (var locked = new FileStream(bodyPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            locked.Lock(0, locked.Length);
+            try
+            {
+                Assert.Equal(state.Source.Address, fixture.Codec.ReadStructure(reference).Source.Address);
+                var foreign = new RunStateCodec(fixture.Instance with { InstanceId = Guid.NewGuid() }, new(), fixture.Blobs);
+                Assert.Equal("configuration_run_state_identity_invalid", Assert.Throws<IOException>(() => foreign.ReadStructure(reference)).Message);
+            }
+            finally { locked.Unlock(0, locked.Length); }
+        }
+        var snapshotPath = Path.Combine(fixture.Instance.RuntimeRoot, snapshot.RelativePath);
+        var bytes = File.ReadAllBytes(snapshotPath);
+        try
+        {
+            File.WriteAllBytes(snapshotPath, [1]);
+            Assert.Throws<IOException>(() => fixture.Codec.ReadStructure(reference));
+        }
+        finally { File.WriteAllBytes(snapshotPath, bytes); }
+        Assert.Equal(state.Source.Tree.Entries, fixture.Codec.ReadStructure(reference).Source.Tree.Entries);
+    }
+
+    [Fact(DisplayName = "Repeated Frozen Configuration Plan Reads Keep Large Task Maps Within A Bounded Allocation Budget")]
+    public void BoundsPlanReadAllocation()
+    {
+        var fixture = Create(taskCount: 256);
+        using var state = fixture.Codec.Freeze(fixture.State);
+        var candidate = new ConfigurationTaskTransformation(fixture.Blobs).Select(fixture.State.ConfigurationOperationId,
+            fixture.State.Source, fixture.State.Tasks);
+        var codec = new ConfigurationPlanCodec(fixture.Instance, new(), fixture.Blobs);
+        using var prepared = codec.Freeze(Exchange(fixture, state.Reference, candidate));
+        _ = codec.Read(prepared.Reference);
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var index = 0; index < 8; index++)
+        {
+            var reopened = codec.Read(prepared.Reference);
+            Assert.Equal(fixture.State.ConfigurationOperationId, reopened.OperationId);
+            Assert.Equal(candidate.Entries, reopened.Candidate.Snapshot.Entries);
+        }
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.True(allocated <= 12 * 1024 * 1024, $"Frozen plan reads allocated {allocated} bytes");
+    }
+
     [Theory(DisplayName = "Independent Frozen Synchronization Triggers Survive Manifest Reopening")]
     [InlineData(false, false, false)]
     [InlineData(true, false, false)]
@@ -185,17 +237,19 @@ public sealed class RunStateTests
     private static ArchivedFileTree Archive(FileTreeSnapshot tree) => new(tree, [], tree.Entries.Where(item => item.Kind == FileObjectKind.File)
         .Select(item => new BlobReference($"blobs/content/{item.Sha256}.bin", item.SizeBytes, item.Sha256!)).Distinct().ToArray());
 
-    private static Fixture Create()
+    private static Fixture Create(int taskCount = 1)
     {
         var root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "run-state-" + Guid.NewGuid().ToString("N"));
         var instance = new InstanceRoot(new()).OpenOrCreate(Path.Combine(root, "runtime"));
         var database = StateDatabase.CreateFresh(instance); var blobs = new ImmutableBlobStore(instance, new());
-        var sourcePath = Path.Combine(root, "source.json"); File.WriteAllText(sourcePath, "{\"tasks\":{\"daily\":true},\"count\":7}");
+        var taskIds = Enumerable.Range(0, taskCount).Select(index => taskCount == 1 ? "daily" : $"daily{index:000}").ToImmutableArray();
+        var sourcePath = Path.Combine(root, "source.json");
+        File.WriteAllBytes(sourcePath, JsonSerializer.SerializeToUtf8Bytes(new { tasks = taskIds.ToDictionary(id => id, _ => true), count = 7 }));
         var tree = new FileTreeArchive(new(SnapshotBudget.Default), blobs).Capture(sourcePath, default).Snapshot;
         var source = new ConfigurationRevision(new(Guid.NewGuid(), "main"), 3, Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), Guid.NewGuid(), new(1, new('a', 64), null, false), tree);
         var selector = new ConfigurationSelector([new ConfigurationProperty("tasks")]);
         var access = new ConfigurationDocumentAccess([new(selector, true)], [new(selector, true)], []);
-        var rule = new RunTaskRule("", ConfigurationSyntax.Json, access, new(new ConfigurationMapTasks(selector), ["daily"]), []);
+        var rule = new RunTaskRule("", ConfigurationSyntax.Json, access, new(new ConfigurationMapTasks(selector), taskIds), []);
         var configurationOperationId = Guid.NewGuid();
         var tasks = new ConfigurationTaskTransformation(blobs).Capture(configurationOperationId, source, [rule]);
         var state = new FrozenRunState(instance.InstanceId, Guid.NewGuid(), configurationOperationId, source, 2, true, tasks);

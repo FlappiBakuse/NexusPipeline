@@ -14,11 +14,11 @@ internal sealed class ProviderLauncherEvidence(RuntimeInstance instance, StateDa
     internal IReadOnlyList<BlobReference> RequireAll(AttemptWriterState state, bool verifyContents)
         => RequireAll(state.Latest.Root, state.Total, state.Attempt.ExecutionPlan.Sha256, verifyContents);
 
-    internal IReadOnlyList<BlobReference> RequireAll(JsonElement journal, ExecutionPlan total, string totalSha, bool verifyContents) =>
+    internal IReadOnlyList<BlobReference> RequireAll(AttemptJournalView journal, ExecutionPlan total, string totalSha, bool verifyContents) =>
         ExecutionInvocationCodec.Views(journal).Select(ExecutionInvocationCodec.Current)
             .SelectMany(view => RequireCurrent(view, total, totalSha, verifyContents)).Distinct().ToArray();
 
-    private IReadOnlyList<BlobReference> RequireCurrent(JsonElement journal, ExecutionPlan total, string totalSha, bool verifyContents)
+    private IReadOnlyList<BlobReference> RequireCurrent(AttemptJournalView journal, ExecutionPlan total, string totalSha, bool verifyContents)
     {
         var result = new List<BlobReference>();
         foreach (var item in ProviderLauncherCodec.ReadAll(journal, total, totalSha))
@@ -26,7 +26,7 @@ internal sealed class ProviderLauncherEvidence(RuntimeInstance instance, StateDa
         return result.Distinct().ToArray();
     }
 
-    internal IReadOnlyList<BlobReference> Require(JsonElement journal, ExecutionPlan total, ProviderLauncherIntent item, bool verifyContents)
+    internal IReadOnlyList<BlobReference> Require(AttemptJournalView journal, ExecutionPlan total, ProviderLauncherIntent item, bool verifyContents)
     {
         var references = new List<BlobReference>();
         if (item.Stage == "registered") return references;
@@ -88,7 +88,7 @@ internal sealed class ProviderLauncherEvidence(RuntimeInstance instance, StateDa
                 var recovered = Read<ProviderLauncherRecovered>(artifact);
                 Header(recovered.Format, recovered.Version, recovered.Binding, "recovered", binding);
                 if (recovered.Creator != ProviderLauncherRows.Creator(database, binding) || recovered.Root != root ||
-                    recovered.BeforeRevision < 0 || recovered.BeforeRevision >= journal.GetProperty("revision").GetInt64()) throw Invalid();
+                    recovered.BeforeRevision < 0 || recovered.BeforeRevision >= journal.Root.GetProperty("revision").GetInt64()) throw Invalid();
                 var prior = new JournalStore(instance, contracts).ReadAllRevisions(binding.ParentJournalId)
                     .SingleOrDefault(revision => revision.Revision == recovered.BeforeRevision) ?? throw Invalid();
                 var previous = ProviderLauncherCodec.Read(prior.Root, total, binding.TotalPlanSha256).SingleOrDefault(job => job.Binding == binding) ?? throw Invalid();
@@ -129,11 +129,11 @@ internal sealed class ProviderLauncherEvidence(RuntimeInstance instance, StateDa
         return references;
     }
 
-    private void RequireRetention(JsonElement journal, ExecutionPlan total, ProviderLauncherRetention document,
+    private void RequireRetention(AttemptJournalView journal, ExecutionPlan total, ProviderLauncherRetention document,
         ProcessIdentity? root, ExecutionPlanInterpreterImage image, List<BlobReference> references, bool verifyContents)
     {
         TargetJobEvidence.RequireInventory(document.Inventory);
-        if (root is null || document.Root != root || document.BeforeRevision < 0 || document.BeforeRevision >= journal.GetProperty("revision").GetInt64() ||
+        if (root is null || document.Root != root || document.BeforeRevision < 0 || document.BeforeRevision >= journal.Root.GetProperty("revision").GetInt64() ||
             document.Inventory.ActiveProcesses == 0 || document.Inventory.LimitFlags != 0x00002000 ||
             !document.Inventory.AllFamily.Contains(root) ||
             document.Inventory.LivingFamily.Any(member => member.UserSid != root.UserSid || member.IsElevated != root.IsElevated ||
@@ -173,7 +173,7 @@ internal sealed class ProviderLauncherEvidence(RuntimeInstance instance, StateDa
         }
     }
 
-    internal void RequireResolved(JsonElement journal, ExecutionPlan total, string sha, string? stepId = null)
+    internal void RequireResolved(AttemptJournalView journal, ExecutionPlan total, string sha, string? stepId = null)
     {
         _ = RequireAll(journal, total, sha, verifyContents: true);
         foreach (var item in ProviderLauncherCodec.Read(journal, total, sha).Where(item => stepId is null || item.Binding.StepId == stepId))

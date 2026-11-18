@@ -49,7 +49,7 @@ internal sealed class AttemptWriterScope : IConfigurationWriterScope
         return scope;
     }
 
-    public void RequirePrepared() { _parent.RequirePrepared(); _configuration.RequirePrepared(); }
+    public void RequirePrepared() => _configuration.RequireAttemptPrepared(_parent);
     public void RequireStart()
     {
         if (!_parentRegistered || !_configurationRegistered) throw new IOException("configuration_writer_registration_incomplete");

@@ -33,11 +33,14 @@ public sealed class ConfigurationEditExchange
         _writers = new(database); _journals = new(instance, contracts); _registry = new(database); _effects = new(database);
     }
 
-    public void Materialize(Guid journalId)
+    public void Materialize(Guid journalId) => MaterializeRegistered(journalId);
+
+    private RegisteredJournal MaterializeRegistered(Guid journalId)
     {
         var registered = _registry.ReadJournal(journalId);
         if (registered.Kind is not (JournalKind.ConfigEdit or JournalKind.ConfigExchange)) throw new IOException("configuration_edit_journal_unbound");
         new InitialConfigurationJournal(_instance, _contracts, _database).MaterializeIfAbsent(registered);
+        return registered;
     }
 
     public void Install(Guid journalId, CancellationToken cancellationToken = default)
@@ -45,6 +48,7 @@ public sealed class ConfigurationEditExchange
         if (!_writers.IsRegistered(journalId, JournalWriterStore.CurrentWriter.WriterId))
             throw new IOException("configuration_edit_executor_unbound");
         Materialize(journalId);
+        using var history = _journals.ProtectReadHistory(journalId);
         var physical = _journals.Read(journalId);
         var binding = ConfigurationJournalBinding.Read(_instance, physical, _contracts, _database);
         if (physical.Phase != JournalPhase.Prepared || binding.Prepared is not null)
@@ -79,9 +83,11 @@ public sealed class ConfigurationEditExchange
 
     public ConfigurationRecoveryResult Restore(Guid journalId)
     {
-        Materialize(journalId);
+        var registered = MaterializeRegistered(journalId);
+        using var history = registered.Phase is JournalPhase.Committed or JournalPhase.Quarantined
+            ? null : _journals.ProtectReadHistory(journalId);
         return new ConfigurationRecovery(new ConfigurationRecoverySession(_instance, journalId, _contracts, _database,
-            () => Observation(journalId))).Recover();
+            () => Observation(journalId), null, _journals)).Recover();
     }
 
     private ConfigurationWriterObservation Observation(Guid journalId)

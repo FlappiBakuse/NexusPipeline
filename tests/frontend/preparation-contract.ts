@@ -3,6 +3,7 @@ import { createStore } from '../../apps/web/src/app/store';
 import { interfacePreparation } from '../../apps/web/src/app/interface-preparation';
 import { preparePages } from '../../apps/web/src/app/page-preparation';
 import { HostSnapshots } from '../../apps/web/src/app/host-snapshots';
+import { completionRefresh } from './completion-refresh-contract';
 import { FrontendRegistry } from '../../apps/web/src/extensions/frontend-registry';
 import type { FrontendLoader } from '../../apps/web/src/extensions/frontend-loader';
 import { prepareExtensionIcons, extensionIcon, clearExtensionIcons } from '../../apps/web/src/control/extension-icons';
@@ -72,6 +73,7 @@ export async function preparationContract(check: (value: unknown, name: string) 
   await routePreparation(check);
   await preparationCancellation(check);
   await eventRevision(check);
+  await completionRefresh(check);
 }
 
 async function iconPreparation(check: (value: unknown, name: string) => void): Promise<void> {

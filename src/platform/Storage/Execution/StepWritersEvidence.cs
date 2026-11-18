@@ -16,7 +16,7 @@ internal static class StepWritersEvidence
     internal static void RequireConfigurationStopped(RuntimeInstance instance, StateDatabase database, ContractReader contracts, Guid childJournalId, AttemptWriterState? verifiedParent = null)
     {
         Guid parentId; string stepId;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration))
         using (var command = connection.CreateCommand())
         {
             command.CommandText = "SELECT s.parent_journal_id,s.step_id,o.operation_kind FROM configuration.configuration_run_resources r " +
@@ -55,40 +55,41 @@ internal static class StepWritersEvidence
         new ProviderLauncherEvidence(instance, database, contracts).RequireResolved(document.Root, total, attempt.ExecutionPlan.Sha256, stepId);
         new AndroidControlEvidence(instance, database, contracts).RequireStopped(document.Root, total, attempt.ExecutionPlan.Sha256, stepId);
         var jobs = WriterIntentCodec.ReadJobs(document.Root, total);
-        foreach (var primary in jobs.Where(item => item.StepId == stepId && item.Role == "process"))
-        {
-            var closure = new JobClosureStore(instance, database, contracts).ReadForExecutionEvidence(parentId,
-                primary.WriterId, primary.JobName, primary.SessionId);
-            if (closure?.WasExecuted == true) ExecutionStepAdmission.RequireRequiredRoles(total, jobs, stepId, "process", document.Root);
-        }
+        var stepJobs = jobs.Where(item => item.StepId == stepId).ToArray();
+        var primary = stepJobs.SingleOrDefault(item => item.Role == "process");
+        var closures = new JobClosureStore(instance, database, contracts);
+        var primaryClosure = primary is null ? null : ReadClosure(closures, parentId, primary);
+        if (primaryClosure?.WasExecuted == true) ExecutionStepAdmission.RequireRequiredRoles(total, jobs, stepId, "process", document.Root);
         var input = total.Steps.Single(step => step.StepId == stepId);
         if (input.Hooks is { Count: > 0 })
         {
             var gate = new JournalEffectGate(database).Read(parentId);
             if (gate.State is not (EffectGateState.Entered or EffectGateState.Sealed))
                 throw new IOException("execution_hook_dispatch_pending");
-            var represented = GroupRoles(document.Root, total, stepId, jobs.Where(job => job.StepId == stepId));
+            var represented = GroupRoles(document.Root, total, stepId, stepJobs);
             if (gate.State == EffectGateState.Entered && !represented.SetEquals(ExecutionBindingRoles.Required(input))) throw new IOException("execution_hook_dispatch_pending");
         }
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
-        using (var transaction = DatabaseConnections.BeginRead(connection))
+        HistoryReadScope.ReadDatabase(database, (connection, transaction) =>
         {
-            ExecutionStepAdmission.RequireJobsInside(connection, transaction, parentId, WriterIntentCodec.ReadAllJobs(document.Root, total)); transaction.Commit();
-        }
-        RequireStopped(instance, database, contracts, parentId, jobs.Where(item => item.StepId == stepId));
+            ExecutionStepAdmission.RequireJobsInside(connection, transaction, parentId, WriterIntentCodec.ReadAllJobs(document.Root, total));
+            return true;
+        });
+        foreach (var job in stepJobs)
+            _ = RequireStopped(job, job == primary ? primaryClosure : ReadClosure(closures, parentId, job));
     }
 
     [SupportedOSPlatform("windows")]
-    internal static StepWriterState[] ReadStoppedGroup(RuntimeInstance instance, StateDatabase database,
+    internal static (StepWriterState[] Jobs, Dictionary<string, FrozenJobClosure> Closures) ReadStoppedGroup(RuntimeInstance instance, StateDatabase database,
         ContractReader contracts, Guid parentId, string stepId)
     {
         var state = AttemptWriterState.Read(instance, database, contracts, parentId);
         var jobs = state.Jobs.Where(job => job.StepId == stepId).ToArray();
-        RequireStopped(instance, database, contracts, parentId, jobs);
+        var store = new JobClosureStore(instance, database, contracts);
+        var closures = jobs.ToDictionary(job => job.JobName, job => RequireStopped(job, ReadClosure(store, parentId, job)), StringComparer.Ordinal);
         if (state.Gate.State == EffectGateState.Entered && !GroupRoles(state.Latest.Root, state.Total, stepId, jobs)
                 .SetEquals(ExecutionBindingRoles.Required(state.Total.Steps.Single(step => step.StepId == stepId))))
             throw new IOException("configuration_group_dispatch_pending");
-        return jobs;
+        return (jobs, closures);
     }
 
     private static HashSet<string> GroupRoles(JsonElement journal, ExecutionPlan total, string stepId, IEnumerable<StepWriterState> jobs)
@@ -104,16 +105,23 @@ internal static class StepWritersEvidence
     {
         var closures = new JobClosureStore(instance, database, contracts);
         foreach (var job in jobs)
-        {
-            var closure = closures.ReadForExecutionEvidence(parentJournalId, job.WriterId, job.JobName, job.SessionId)
-                ?? throw new IOException("writer_job_closure_missing");
-            if (job.ClosedElapsedMilliseconds is null || closure.RunElapsedMilliseconds != job.ClosedElapsedMilliseconds ||
-                WriterStopEvidence.ObserveJob(job.JobName, job.SessionId) == WriterState.Running ||
-                closure.Family.Any(member => WriterStopEvidence.ObserveProcess(member) != WriterState.Stopped))
-                throw new IOException("execution_step_writer_stop_unconfirmed");
-            var creator = JournalWriterStore.CurrentWriter.Process;
-            if (closure.Creator != creator && WriterStopEvidence.ObserveProcess(closure.Creator) != WriterState.Stopped)
-                throw new IOException("execution_step_writer_owner_running");
-        }
+            _ = RequireStopped(job, ReadClosure(closures, parentJournalId, job));
+    }
+
+    private static FrozenJobClosure? ReadClosure(JobClosureStore closures, Guid parentId, StepWriterState job) =>
+        closures.ReadForExecutionEvidence(parentId, job.WriterId, job.JobName, job.SessionId);
+
+    [SupportedOSPlatform("windows")]
+    private static FrozenJobClosure RequireStopped(StepWriterState job, FrozenJobClosure? closure)
+    {
+        if (closure is null) throw new IOException("writer_job_closure_missing");
+        if (job.ClosedElapsedMilliseconds is null || closure.RunElapsedMilliseconds != job.ClosedElapsedMilliseconds ||
+            WriterStopEvidence.ObserveJob(job.JobName, job.SessionId) == WriterState.Running ||
+            closure.Family.Any(member => WriterStopEvidence.ObserveProcess(member) != WriterState.Stopped))
+            throw new IOException("execution_step_writer_stop_unconfirmed");
+        var creator = JournalWriterStore.CurrentWriter.Process;
+        if (closure.Creator != creator && WriterStopEvidence.ObserveProcess(closure.Creator) != WriterState.Stopped)
+            throw new IOException("execution_step_writer_owner_running");
+        return closure;
     }
 }

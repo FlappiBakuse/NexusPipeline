@@ -199,6 +199,46 @@ public sealed class DatabaseScopeTests
         Assert.Equal(1, ReadValue(final, null));
     }
 
+    [Fact(DisplayName = "Installation Rechecks Runtime On Queue Writes And Rechecks All Domains When Its Settings Change")]
+    public void SeparatesInstallationReads()
+    {
+        var root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "installation-domains-" + Guid.NewGuid().ToString("N"));
+        var instance = new InstanceRoot(new()).OpenOrCreate(root);
+        using var owner = InstanceLease.Acquire(instance, new());
+        var database = StateDatabase.CreateFresh(instance, owner);
+        var domains = DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System;
+        using var proof = new DatabaseValidationLease(database, domains: domains);
+        var full = 0;
+        var runtime = 0;
+        var retention = -1L;
+        void Check() => proof.RequireInstallation((connection, transaction) =>
+        {
+            Assert.Equal(domains, DatabaseConnections.Domains(connection));
+            retention = ReadValue(connection, transaction);
+            full++;
+        }, (connection, transaction) =>
+        {
+            Assert.Equal(DatabaseDomain.Runtime, DatabaseConnections.Domains(connection));
+            using var query = DatabaseConnections.Command(connection, transaction, "SELECT count(*) FROM main.operations;");
+            Assert.Equal(1L, query.ExecuteScalar());
+            runtime++;
+        });
+        Check();
+        database.Accept(Operation(), DateTimeOffset.UtcNow);
+        Check();
+        Check();
+        Assert.Equal((1, 1), (full, runtime));
+        database.Write((connection, transaction) =>
+        {
+            using var update = DatabaseConnections.Command(connection, transaction,
+                "UPDATE system.settings_snapshots SET retention_days=2 WHERE revision=0;");
+            return update.ExecuteNonQuery();
+        });
+        Check();
+        Assert.Equal(2, retention);
+        Assert.Equal((2, 1), (full, runtime));
+    }
+
     [Theory(DisplayName = "Nested Database Readers Observe New Commits And Keep The Original File Protected Until Its Owner Exits")]
     [InlineData(false)]
     [InlineData(true)]

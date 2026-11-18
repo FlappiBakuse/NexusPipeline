@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Security.Cryptography;
+using System.Text;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Platform.Serialization;
 
@@ -31,6 +32,8 @@ public sealed class JournalDocument
     public string PlanPath { get; }
     public byte[] Export() => _bytes.ToArray();
     internal int ByteLength => _bytes.Length;
+    internal int TextLength => Encoding.UTF8.GetCharCount(_bytes);
+    internal string Sha256 => _textKey.Sha256;
     internal void WriteTo(Stream output) => output.Write(_bytes);
     internal bool HasSameBytes(JournalDocument other) => other is not null && _bytes.AsSpan().SequenceEqual(other._bytes);
 
@@ -72,22 +75,37 @@ public sealed class JournalDocument
         lock (MemoGate)
             if (Memo.TryGetValue(key, out var cached) && cached._bytes.AsSpan().SequenceEqual(ownedBytes)) return cached;
         using var timing = StartupProfile.Measure("history.text.parse");
-        using var document = StrictJson.Parse(ownedBytes);
-        contracts.RequireSchema(document, ownedBytes, "execution-journal.schema.json", key.Sha256);
-        var result = new JournalDocument(ownedBytes, document.RootElement.Clone(), key);
-        if (result.InstanceId == Guid.Empty || result.JournalId == Guid.Empty ||
-            result.Root.GetProperty("operationId").GetGuid() == Guid.Empty ||
-            result.Root.TryGetProperty("runId", out var run) && run.GetGuid() == Guid.Empty ||
-            result.Root.TryGetProperty("attemptId", out var attempt) && attempt.GetGuid() == Guid.Empty ||
-            result.PlanPath != $"blobs/plans/{result.PlanDigest}.json")
+        var document = StrictJson.Parse(ownedBytes);
+        try
+        {
+            contracts.RequireSchema(document, ownedBytes, "execution-journal.schema.json", key.Sha256);
+            // Root owns the parse metadata for as long as any derived element is in use.
+            // The original bytes are private and also serve as the document's UTF-8 backing.
+            var result = new JournalDocument(ownedBytes, document.RootElement, key);
+            result.RequireBinding();
+            Remember(key, result);
+            return result;
+        }
+        catch
+        {
+            document.Dispose();
+            throw;
+        }
+    }
+
+    private void RequireBinding()
+    {
+        if (InstanceId == Guid.Empty || JournalId == Guid.Empty ||
+            Root.GetProperty("operationId").GetGuid() == Guid.Empty ||
+            Root.TryGetProperty("runId", out var run) && run.GetGuid() == Guid.Empty ||
+            Root.TryGetProperty("attemptId", out var attempt) && attempt.GetGuid() == Guid.Empty ||
+            PlanPath != $"blobs/plans/{PlanDigest}.json")
             throw new JsonException("journal_identity_invalid");
-        ValidateUniqueIds(result.Root, "participants", "participantId");
-        ValidateUniqueIds(result.Root, "receipts", "receiptId");
-        var resources = result.Root.GetProperty("resourceKeys").EnumerateArray().Select(item => item.GetString()).ToHashSet();
-        if (result.Root.GetProperty("participants").EnumerateArray().Any(item => !resources.Contains(item.GetProperty("resourceKey").GetString())))
+        ValidateUniqueIds(Root, "participants", "participantId");
+        ValidateUniqueIds(Root, "receipts", "receiptId");
+        var resources = Root.GetProperty("resourceKeys").EnumerateArray().Select(item => item.GetString()).ToHashSet();
+        if (Root.GetProperty("participants").EnumerateArray().Any(item => !resources.Contains(item.GetProperty("resourceKey").GetString())))
             throw new JsonException("journal_participant_resource_unbound");
-        Remember(key, result);
-        return result;
     }
 
     private static void Remember(TextKey key, JournalDocument result)

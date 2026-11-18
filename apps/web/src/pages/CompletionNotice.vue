@@ -52,6 +52,8 @@ const phaseName = computed(
   () => phaseLabels[completion.value?.phase || ''] || completion.value?.phase || '待处理'
 );
 let completionOwner: AbortController | undefined;
+let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+let lastReadAt = -Infinity;
 async function readCompletion(): Promise<boolean> {
   completionOwner?.abort();
   if (
@@ -60,6 +62,8 @@ async function readCompletion(): Promise<boolean> {
     !props.store.can('control.status.read')
   )
     return false;
+  clearTimeout(refreshTimer); refreshTimer = undefined;
+  lastReadAt = Date.now();
   const owner = new AbortController();
   completionOwner = owner;
   try {
@@ -114,22 +118,39 @@ watch(
   (visible) => {
     clearInterval(clock);
     clearInterval(polling);
+    clearTimeout(refreshTimer); refreshTimer = undefined;
     completionOwner?.abort();
     if (!visible) return;
     now.value = Date.now();
     void readCompletion();
-    clock = setInterval(() => {
-      now.value = Date.now();
-    }, 1000);
-    polling = setInterval(() => {
-      void readCompletion();
-    }, 5000);
   },
   { immediate: true }
+);
+watch(
+  [() => props.visible, () => completion.value?.operationId, () => completion.value?.notBeforeUtc,
+    () => completionError.value],
+  ([visible, operation, deadline, error]) => {
+    clearInterval(clock); clock = undefined;
+    clearInterval(polling); polling = undefined;
+    if (!visible || (!operation && !error)) return;
+    now.value = Date.now();
+    if (deadline) clock = setInterval(() => { now.value = Date.now(); }, 1000);
+    polling = setInterval(() => { void readCompletion(); }, 5000);
+  }
+);
+watch(
+  () => props.store.state.events,
+  () => {
+    if (!props.visible || refreshTimer !== undefined) return;
+    const delay = Math.min(5000, Math.max(0, 5000 - (Date.now() - lastReadAt)));
+    if (!delay) { void readCompletion(); return; }
+    refreshTimer = setTimeout(() => { refreshTimer = undefined; void readCompletion(); }, delay);
+  }
 );
 onBeforeUnmount(() => {
   clearInterval(clock);
   clearInterval(polling);
+  clearTimeout(refreshTimer);
   completionOwner?.abort();
 });
 </script>

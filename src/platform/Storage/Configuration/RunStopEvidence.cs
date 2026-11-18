@@ -9,7 +9,7 @@ using NexusPipeline.Platform.Storage.Execution;
 
 namespace NexusPipeline.Platform.Storage.Configuration;
 
-internal sealed record RunStoppedFacts(TimeSpan Elapsed, bool WasExecuted);
+internal sealed record RunStoppedFacts(TimeSpan Elapsed, bool WasExecuted, BoundConfigurationRun Binding);
 
 internal sealed class RunStopEvidence(RuntimeInstance instance, StateDatabase database, ContractReader contracts)
 {
@@ -19,11 +19,13 @@ internal sealed class RunStopEvidence(RuntimeInstance instance, StateDatabase da
     [SupportedOSPlatform("windows")]
     internal RunStoppedFacts ReadClosed(ConfigurationRunStatus session, bool requireRestored = false)
     {
+        using var history = new HistoryReadScope(instance, database, contracts);
+        using var parents = JournalReadScope.HoldParents(instance, contracts, database.AttemptReads);
         if (!session.IsWriterAdmissionClosed || session.ClosedElapsedMilliseconds is not { } elapsed ||
             elapsed is < 0 or > long.MaxValue / TimeSpan.TicksPerMillisecond)
             throw new IOException("configuration_run_stop_duration_missing");
-        if (ConfigurationRunBinding.Read(instance, database, contracts, session).Evidence.HasHooks)
-            return ReadGroup(session, requireRestored);
+        var binding = ConfigurationRunBinding.Read(instance, database, contracts, session);
+        if (binding.Evidence.HasHooks) return ReadGroup(session, requireRestored, binding);
         var allJobs = Jobs(session);
         var groupJobs = session.Resources.Select(resource => (Resource: resource, Jobs: allJobs[resource.JournalId])).ToArray();
         var noJobs = groupJobs.All(item => item.Jobs.Count == 0);
@@ -57,7 +59,7 @@ internal sealed class RunStopEvidence(RuntimeInstance instance, StateDatabase da
             if (!session.EnteredRunning && closure.WasExecuted) throw new IOException("configuration_run_unstarted_evidence_unbound");
             _ = ConfigurationJournalBinding.Read(instance, physical, contracts, database);
         }
-        return new(TimeSpan.FromTicks(checked(elapsed * TimeSpan.TicksPerMillisecond)), common?.WasExecuted == true);
+        return new(TimeSpan.FromTicks(checked(elapsed * TimeSpan.TicksPerMillisecond)), common?.WasExecuted == true, binding);
     }
 
     internal static bool HasExecutedWriter(SqliteConnection connection, SqliteTransaction transaction, ConfigurationRunStatus session)
@@ -112,13 +114,12 @@ internal sealed class RunStopEvidence(RuntimeInstance instance, StateDatabase da
     }
 
     [SupportedOSPlatform("windows")]
-    private RunStoppedFacts ReadGroup(ConfigurationRunStatus session, bool requireRestored)
+    private RunStoppedFacts ReadGroup(ConfigurationRunStatus session, bool requireRestored, BoundConfigurationRun binding)
     {
-        var jobs = StepWritersEvidence.ReadStoppedGroup(instance, database, contracts, session.ParentJournalId, session.StepId);
-        var closures = new JobClosureStore(instance, database, contracts);
+        var (jobs, parent) = StepWritersEvidence.ReadStoppedGroup(instance, database, contracts, session.ParentJournalId, session.StepId);
         var allJobs = Jobs(session);
-        var parent = jobs.ToDictionary(job => job.JobName, job => closures.ReadForExecutionEvidence(session.ParentJournalId,
-            job.WriterId, job.JobName, job.SessionId) ?? throw new IOException("writer_job_closure_missing"), StringComparer.Ordinal);
+        var closures = new JobClosureStore(instance, database, contracts);
+        var journals = new JournalStore(instance, contracts);
         var childJobs = new HashSet<string>(StringComparer.Ordinal);
         var executed = false;
         foreach (var resource in session.Resources)
@@ -127,7 +128,7 @@ internal sealed class RunStopEvidence(RuntimeInstance instance, StateDatabase da
             var names = actual.Select(job => job.Name).ToHashSet(StringComparer.Ordinal);
             if (resource == session.Resources[0]) childJobs = names;
             else if (!childJobs.SetEquals(names)) throw new IOException("configuration_group_job_unbound");
-            var physical = new JournalStore(instance, contracts).Read(resource.JournalId);
+            var physical = journals.Read(resource.JournalId);
             if (requireRestored && physical.Phase != JournalPhase.Committed) throw new IOException("configuration_run_restoration_required");
             foreach (var job in actual)
             {
@@ -156,6 +157,6 @@ internal sealed class RunStopEvidence(RuntimeInstance instance, StateDatabase da
         if (session.PrimaryJobName != primaryName || session.ClosedElapsedMilliseconds != (primary?.ClosedElapsedMilliseconds ?? 0))
             throw new IOException("configuration_primary_runtime_unbound");
         if (primary is not null) executed = parent[primary.JobName].WasExecuted;
-        return new(TimeSpan.FromMilliseconds(session.ClosedElapsedMilliseconds!.Value), executed);
+        return new(TimeSpan.FromMilliseconds(session.ClosedElapsedMilliseconds!.Value), executed, binding);
     }
 }

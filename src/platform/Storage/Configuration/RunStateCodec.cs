@@ -47,9 +47,14 @@ public sealed class RunStateCodec(RuntimeInstance instance, ContractReader contr
     public FrozenRunState Read(BlobReference reference)
     {
         var state = ReadStructure(reference);
+        VerifyContents(state);
+        return state;
+    }
+
+    internal void VerifyContents(FrozenRunState state)
+    {
         foreach (var content in Contents(state)) blobs.Verify(content);
         new ConfigurationTaskTransformation(blobs).ValidateInitial(state.ConfigurationOperationId, state.Source, state.Tasks);
-        return state;
     }
 
     internal FrozenRunState ReadStructure(BlobReference reference)
@@ -57,8 +62,7 @@ public sealed class RunStateCodec(RuntimeInstance instance, ContractReader contr
         if (reference.SizeBytes is < 1 or > StrictJson.MaximumBytes || reference.RelativePath != $"blobs/plans/{reference.Sha256}.json")
             throw new IOException("configuration_run_state_reference_invalid");
         using var input = blobs.OpenVerified(reference);
-        var bytes = new byte[checked((int)input.Length)]; input.ReadExactly(bytes);
-        return Decode(bytes);
+        return ReadProtected(input, null);
     }
 
     internal FrozenRunState ReadHeld(BlobReference reference, List<IDisposable> held)
@@ -67,9 +71,27 @@ public sealed class RunStateCodec(RuntimeInstance instance, ContractReader contr
             throw new IOException("configuration_run_state_reference_invalid");
         var input = blobs.OpenVerified(reference);
         held.Add(input);
-        var bytes = new byte[checked((int)input.Length)];
-        input.ReadExactly(bytes);
-        return Decode(bytes, held);
+        return ReadProtected(input, held);
+    }
+
+    private FrozenRunState ReadProtected(FileStream input, List<IDisposable>? held)
+    {
+        var decoded = false;
+        var state = BlobReadStream.ReadEvidence(input, () =>
+        {
+            var bytes = new byte[checked((int)input.Length)]; input.ReadExactly(bytes);
+            decoded = true;
+            return Decode(bytes, held);
+        }, value => ((value.SnapshotReference?.SizeBytes ?? 0) + (value.InputReference?.SizeBytes ?? 0)) * 8);
+        if (state.InstanceId != instance.InstanceId || blobs.Instance.InstanceId != instance.InstanceId || blobs.Instance.RuntimeRoot != instance.RuntimeRoot)
+            throw new IOException("configuration_run_state_identity_invalid");
+        if (!decoded)
+            foreach (var reference in new[] { state.SnapshotReference, state.InputReference }.OfType<BlobReference>())
+            {
+                var snapshot = blobs.OpenVerified(reference);
+                if (held is null) snapshot.Dispose(); else held.Add(snapshot);
+            }
+        return state;
     }
 
     internal static IReadOnlyList<BlobReference> Contents(FrozenRunState state) => state.Source.Tree.Entries.Concat(state.InputTree?.Entries ?? [])

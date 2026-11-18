@@ -28,8 +28,8 @@ internal static class AndroidRetentionEvidence
         return [reference, retained.Intent, intent.Primary];
     }
 
-    internal static BlobReference? Last(JsonElement journal, ExecutionTargetBinding binding, string stage) =>
-        journal.GetProperty("participants").EnumerateArray().Select(item => item.GetProperty("identity")).Where(value =>
+    internal static BlobReference? Last(AttemptJournalView journal, ExecutionTargetBinding binding, string stage) =>
+        journal.Participants.Select(item => item.GetProperty("identity")).Where(value =>
             value.TryGetProperty("format", out var format) && format.GetString() == AndroidRetentionCodec.Format &&
             value.GetProperty("binding").Deserialize<ExecutionTargetBinding>(StepResultCodec.Options) == binding && value.GetProperty("stage").GetString() == stage)
             .Select(value => value.GetProperty("artifact").Deserialize<BlobReference>(StepResultCodec.Options)).LastOrDefault();

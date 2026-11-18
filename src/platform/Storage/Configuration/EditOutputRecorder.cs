@@ -31,7 +31,6 @@ public sealed class EditOutputRecorder(RuntimeInstance instance, StateDatabase d
         lease.VerifyHeld(instance);
         var session = RunRecoveryBinding.Read(instance, database, contracts, journalId);
         if (session is null) return;
-        _ = ConfigurationRunBinding.Read(instance, database, contracts, session);
         var physical = new JournalStore(instance, contracts).Read(journalId);
         if (physical.Phase != JournalPhase.Applied || physical.Root.GetProperty("participants").GetArrayLength() != 1) return;
         var state = AttemptWriterState.Read(instance, database, contracts, session.ParentJournalId);

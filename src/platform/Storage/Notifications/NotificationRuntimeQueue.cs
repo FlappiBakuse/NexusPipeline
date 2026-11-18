@@ -40,6 +40,7 @@ internal sealed class NotificationRuntimeQueue(RuntimeInstance instance, StateDa
     internal IReadOnlyList<(Guid Operation, BlobReference Reference)> Read(string state, Guid? after = null,
         NotificationAttemptReads? reads = null)
     {
+        using var capture = reads?.CaptureMetadata();
         if (state is not ("queued" or "sending")) throw new ArgumentException("notification_pending_state_invalid");
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System);
         using var transaction = DatabaseConnections.BeginRead(connection);

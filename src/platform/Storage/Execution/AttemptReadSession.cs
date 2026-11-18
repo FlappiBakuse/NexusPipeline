@@ -28,11 +28,12 @@ internal sealed class AttemptReadSession : IDisposable
     private ExecutionCancellationIntent? _close;
     private readonly Action _released;
     private readonly DirectoryAttributeProtection _paths;
-    private readonly Dictionary<string, IDisposable> _verified = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (IDisposable Lease, long Bytes, LinkedListNode<string> Node)> _verified = new(StringComparer.OrdinalIgnoreCase);
+    private readonly LinkedList<string> _recent = new();
     private long _verifiedBytes;
     private bool _cacheable = true;
     private readonly Dictionary<BlobReference, FileStream> _rawFiles = [];
-    private readonly Dictionary<(StepEvidenceBinding, BlobReference), RawReplayResult> _replays = [];
+    private readonly Dictionary<(StepEvidenceBinding, BlobReference), (AutomationJudgement Definition, RawReplayResult Result)> _replays = [];
     private AutomationBundle? _definitions;
     private FileStream? _definitionFile;
     private BoundPreparedAttempt? _bound;
@@ -93,6 +94,7 @@ internal sealed class AttemptReadSession : IDisposable
         lock (_gate)
         {
             if (_disposed) return read(null, null);
+            _cacheable = true;
             using var paths = DirectoryAttributeScope.Enter(_paths);
             using var instance = _database.RuntimeLease is { } owner
                 ? InstanceReadScope.Hold(_instance, owner) : InstanceReadScope.Hold(_instance, _contracts);
@@ -103,8 +105,10 @@ internal sealed class AttemptReadSession : IDisposable
             if (_revision != history[^1].Revision)
             { _bound = null; _revision = history[^1].Revision; }
             if (_bound is not null) RequireBinding(new RecoveryJournalRegistry(_database).ReadJournal(JournalId));
-            _bound ??= read(_journals, _inputs);
-            return _bound ?? throw new IOException("attempt_read_binding_missing");
+            if (_bound is not null) return _bound;
+            var current = read(_journals, _inputs) ?? throw new IOException("attempt_read_binding_missing");
+            if (_cacheable) _bound = current;
+            return current;
         }
     }
 
@@ -148,14 +152,23 @@ internal sealed class AttemptReadSession : IDisposable
 
     private void RetainVerified(string path)
     {
-        if (!_cacheable || _verified.ContainsKey(path)) return;
+        if (_verified.TryGetValue(path, out var prior))
+        { _recent.Remove(prior.Node); _recent.AddLast(prior.Node); return; }
         var held = BlobReadStream.Retain(path, out var reference);
-        if (_verified.Count == 256 || reference.SizeBytes > 16777216 - _verifiedBytes)
-        { held.Dispose(); _cacheable = false; return; }
+        if (reference.SizeBytes > 16777216)
+        { held.Dispose(); _cacheable = false; _bound = null; _prefix = null; return; }
         try
         {
+            while (_verified.Count >= 256 || reference.SizeBytes > 16777216 - _verifiedBytes)
+            {
+                var oldest = _recent.First!;
+                var removed = _verified[oldest.Value];
+                _recent.RemoveFirst(); _verified.Remove(oldest.Value);
+                _verifiedBytes -= removed.Bytes; removed.Lease.Dispose();
+                _cacheable = false; _bound = null; _prefix = null;
+            }
             _paths.Include([Path.GetDirectoryName(path)!]);
-            _verified.Add(path, held); _verifiedBytes += reference.SizeBytes;
+            _verified.Add(path, (held, reference.SizeBytes, _recent.AddLast(path))); _verifiedBytes += reference.SizeBytes;
         }
         catch { held.Dispose(); throw; }
     }
@@ -194,20 +207,31 @@ internal sealed class AttemptReadSession : IDisposable
         lock (_gate)
         {
             var key = (binding, reference);
-            if (_replays.TryGetValue(key, out var previous)) return previous;
-            var judgement = new AttemptBusinessJudgement(binding.AttemptId, definition);
-            var continuous = RawOutputReplay.Read(_blobs, raw, line => judgement.ObserveLine(judgement.InputIdentity, line));
-            var result = new RawReplayResult(continuous, judgement.Business, judgement.Decision?.ReasonCode);
+            if (_replays.TryGetValue(key, out var previous) && previous.Definition.Language == definition.Language &&
+                previous.Definition.Script == definition.Script &&
+                previous.Definition.SuccessKeywords.IsDefault == definition.SuccessKeywords.IsDefault &&
+                previous.Definition.FailureKeywords.IsDefault == definition.FailureKeywords.IsDefault &&
+                previous.Definition.SuccessKeywords.AsSpan().SequenceEqual(definition.SuccessKeywords.AsSpan()) &&
+                previous.Definition.FailureKeywords.AsSpan().SequenceEqual(definition.FailureKeywords.AsSpan())) return previous.Result;
             var added = raw.Parts.Select(item => item.Content).Distinct().Where(item => !_rawFiles.ContainsKey(item)).ToArray();
-            if (_disposed || _replays.Count >= 64 || added.Length > 128 - _rawFiles.Count || added.Sum(item => item.SizeBytes) > 16777216 - _rawBytes)
-                return result;
-            foreach (var part in added)
+            var retain = !_disposed && (_replays.ContainsKey(key) || _replays.Count < 64) && added.Length <= 128 - _rawFiles.Count &&
+                added.Sum(item => item.SizeBytes) <= 16777216 - _rawBytes;
+            var opened = new List<(BlobReference Reference, FileStream Input)>();
+            try
             {
-                _rawFiles.Add(part, _blobs.OpenVerified(part));
-                _rawBytes += part.SizeBytes;
+                if (retain)
+                    foreach (var part in added) opened.Add((part, _blobs.OpenVerified(part)));
+                var judgement = new AttemptBusinessJudgement(binding.AttemptId, definition);
+                var continuous = RawOutputReplay.Read(_blobs, raw, line => judgement.ObserveLine(judgement.InputIdentity, line));
+                var result = new RawReplayResult(continuous, judgement.Business, judgement.Decision?.ReasonCode);
+                if (retain)
+                {
+                    foreach (var part in opened) { _rawFiles.Add(part.Reference, part.Input); _rawBytes += part.Reference.SizeBytes; }
+                    opened.Clear(); _replays[key] = (definition, result);
+                }
+                return result;
             }
-            _replays.Add(key, result);
-            return result;
+            finally { foreach (var part in opened) part.Input.Dispose(); }
         }
     }
 
@@ -222,8 +246,8 @@ internal sealed class AttemptReadSession : IDisposable
                 _definitionFile?.Dispose();
                 foreach (var file in _rawFiles.Values) file.Dispose();
                 _rawFiles.Clear(); _replays.Clear(); _bound = null; _prefix = null; _definitions = null;
-                foreach (var held in _verified.Values) held.Dispose();
-                _verified.Clear();
+                foreach (var held in _verified.Values) held.Lease.Dispose();
+                _verified.Clear(); _recent.Clear();
                 ParsedHistory.Dispose();
                 _cancellationSql.Dispose(); _history.Dispose(); _inputs.Dispose(); _paths.Dispose();
             }

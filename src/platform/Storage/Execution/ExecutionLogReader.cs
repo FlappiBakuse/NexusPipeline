@@ -16,7 +16,7 @@ public sealed class ExecutionLogReader(RuntimeInstance instance, StateDatabase d
     {
         if (runId == Guid.Empty || attemptId == Guid.Empty || database.InstanceId != instance.InstanceId ||
             database.RuntimeRoot != instance.RuntimeRoot) throw Invalid();
-        var saved = Context(runId, attemptId);
+        using var saved = Context(runId, attemptId);
         var blobs = new ImmutableBlobStore(instance, contracts);
         var main = saved.Main;
         var steps = saved.Total.Steps.Select(step =>
@@ -27,7 +27,7 @@ public sealed class ExecutionLogReader(RuntimeInstance instance, StateDatabase d
             {
                 var reader = new StepEvidenceReader(instance, database, contracts);
                 var context = reader.ContextFromValidatedRead(result.Binding, saved.Registered, saved.Attempt, saved.Total, saved.Journal);
-                _ = reader.ReadValidatedReferences(result.Binding, result.Latest.Artifact, context);
+                _ = reader.ReadValidatedReferences(result.Binding, result.Latest.Artifact, context, saved.Terminal);
                 var document = StepEvidenceCodec.Read(blobs, result.Binding, result.Latest.Artifact);
                 if (document.TaskAdapter is { } reference)
                     observed = AdapterObservationCodec.Read(blobs, result.Binding, document.RawOutput ?? throw Invalid(), step, reference);
@@ -132,7 +132,8 @@ public sealed class ExecutionLogReader(RuntimeInstance instance, StateDatabase d
             throw new ArgumentException("record_log_query_invalid");
         if (database.InstanceId != instance.InstanceId || !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath,
             Path.Combine(instance.RuntimeRoot, "state", "runtime.db"))) throw Invalid();
-        return ReadSource(key, Context(key.RunId, key.AttemptId)) ?? throw new IOException("record_log_not_captured");
+        using var saved = Context(key.RunId, key.AttemptId);
+        return ReadSource(key, saved) ?? throw new IOException("record_log_not_captured");
     }
 
     private SavedContext Context(Guid runId, Guid attemptId)
@@ -150,16 +151,20 @@ public sealed class ExecutionLogReader(RuntimeInstance instance, StateDatabase d
                 throw Invalid();
             transaction.Commit();
         }
-        using var history = JournalReadScope.HoldAttempt(instance, contracts, database, registered.JournalId);
-        var metadata = database.AttemptReads?.Find(registered.JournalId)?
-            .ReadPlanMetadata(registered, AttemptPreparedBinding.Reference(instance, registered));
-        var attempt = metadata?.Plan ?? AttemptPreparedBinding.ReadPlan(instance, contracts, registered);
-        var total = metadata?.Total ?? new ExecutionPlanCodec(instance, contracts, new(instance, contracts))
-            .Read(AttemptPlanCodec.Reference(attempt.ExecutionPlan)).ReadWire();
-        var journal = new JournalStore(instance, contracts).Read(registered.JournalId);
-        if (journal.Revision != registered.Revision || journal.Phase != registered.Phase ||
-            AttemptPreparedBinding.ExpectedReceipt(attempt, journal) != receipt) throw Invalid();
-        return new(receipt, registered, attempt, total, journal);
+        var history = JournalReadScope.HoldAttempt(instance, contracts, database, registered.JournalId);
+        try
+        {
+            var metadata = database.AttemptReads?.Find(registered.JournalId)?
+                .ReadPlanMetadata(registered, AttemptPreparedBinding.Reference(instance, registered));
+            var attempt = metadata?.Plan ?? AttemptPreparedBinding.ReadPlan(instance, contracts, registered);
+            var total = metadata?.Total ?? new ExecutionPlanCodec(instance, contracts, new(instance, contracts))
+                .Read(AttemptPlanCodec.Reference(attempt.ExecutionPlan)).ReadWire();
+            var journal = new JournalStore(instance, contracts).Read(registered.JournalId);
+            if (journal.Revision != registered.Revision || journal.Phase != registered.Phase ||
+                AttemptPreparedBinding.ExpectedReceipt(attempt, journal) != receipt) throw Invalid();
+            return new(receipt, registered, attempt, total, journal) { History = history, Terminal = () => history.ReadTerminal(journal) };
+        }
+        catch { history.Dispose(); throw; }
     }
 
     private ExecutionLogContent? ReadSource(RunLogKey key, SavedContext savedContext, bool materialize = false)
@@ -203,7 +208,7 @@ public sealed class ExecutionLogReader(RuntimeInstance instance, StateDatabase d
             binding = result.Binding;
             var reader = new StepEvidenceReader(instance, database, contracts);
             var context = reader.ContextFromValidatedRead(binding, registered, attempt, total, journal);
-            _ = reader.ReadValidatedReferences(binding, result.Latest.Artifact, context);
+            _ = reader.ReadValidatedReferences(binding, result.Latest.Artifact, context, savedContext.Terminal);
             var document = StepEvidenceCodec.Read(new(instance, contracts), binding, result.Latest.Artifact);
             for (var depth = 0; document.RawOutput is null && document.PreviousObservation is { } previous; depth++)
             {
@@ -233,7 +238,7 @@ public sealed class ExecutionLogReader(RuntimeInstance instance, StateDatabase d
     internal LogCatalogSnapshot CaptureCatalog(NexusPipeline.Core.Execution.AttemptReceipt expected, bool materialize = false)
     {
         if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot) throw Invalid();
-        var context = Context(expected.Facts.RunId, expected.Facts.AttemptId);
+        using var context = Context(expected.Facts.RunId, expected.Facts.AttemptId);
         if (context.Receipt != expected) throw Invalid();
         return CaptureCatalog(expected, context, materialize);
     }
@@ -301,12 +306,16 @@ public sealed class ExecutionLogReader(RuntimeInstance instance, StateDatabase d
             }
         if (entries.Count > 4096) throw Invalid();
         return new(expected, context.Journal.Revision,
-            Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(context.Journal.Export())), entries.AsReadOnly()) { ContentAvailability = availability };
+            context.Journal.Sha256, entries.AsReadOnly()) { ContentAvailability = availability };
     }
 
     private sealed record SavedContext(NexusPipeline.Core.Execution.AttemptReceipt Receipt, RegisteredJournal Registered,
-        RunAttemptPlan Attempt, ExecutionPlan Total, JournalDocument Journal)
+        RunAttemptPlan Attempt, ExecutionPlan Total, JournalDocument Journal) : IDisposable
     {
+        internal JournalReadScope? History { get; init; }
+        internal Func<JournalDocument?>? Terminal { get; init; }
+        public void Dispose() => History?.Dispose();
+
         internal IReadOnlyDictionary<string, StepResultState> Main { get; } =
             ExecutionInvocationCodec.Views(Journal.Root).SelectMany(view => StepResultCodec.Read(view, Total))
                 .GroupBy(item => item.Binding.StepId).ToDictionary(group => group.Key, group => group.Last(), StringComparer.Ordinal);

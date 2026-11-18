@@ -91,6 +91,7 @@ internal sealed class RunBindingEvidence
     internal static RegisteredJournal ReadAdmission(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
         Guid journalId, Guid owner, string stepId, IEnumerable<BlobReference> references)
     {
+        using var reads = new HistoryReadScope(instance, database, contracts);
         using var history = JournalReadScope.HoldAttempt(instance, contracts, database, journalId);
         var registry = new RecoveryJournalRegistry(database).ReadSnapshot(journalId).Journals;
         var journal = registry.SingleOrDefault(item => item.JournalId == journalId && item.Kind == JournalKind.RunAttempt && item.OperationId == owner)

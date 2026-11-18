@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Text.Json;
 using NexusPipeline.Extensibility.Protocol;
+using NexusPipeline.Platform.Storage.Journals;
 
 namespace NexusPipeline.Platform.Storage.Execution;
 
@@ -9,8 +10,8 @@ internal sealed class AttemptReadMemo(ExecutionPlan total) : IDisposable
     private static readonly object Gate = new();
     private static long _retainedBytes;
     private readonly Dictionary<(JsonElement, Type), object> _values = [];
-    private readonly Dictionary<JsonElement, JsonElement> _projections = [];
-    private readonly Dictionary<JsonElement, IReadOnlyList<JsonElement>> _views = [];
+    private readonly Dictionary<JsonElement, AttemptJournalView> _projections = [];
+    private readonly Dictionary<JsonElement, IReadOnlyList<AttemptJournalView>> _views = [];
     private readonly HashSet<JsonElement> _roots = [];
     private long _bytes;
     private bool _disposed;
@@ -25,20 +26,17 @@ internal sealed class AttemptReadMemo(ExecutionPlan total) : IDisposable
         }
     }
 
-    internal void Remember<T>(JsonElement original, ExecutionPlan ownedTotal, ImmutableArray<T> values)
+    internal void Remember<T>(JournalDocument original, ExecutionPlan ownedTotal, ImmutableArray<T> values)
     {
         lock (Gate)
         {
             if (_disposed || !ReferenceEquals(total, ownedTotal) || _values.Count >= 1024 || values.Length > 1024 ||
-                _values.ContainsKey((original, typeof(T)))) return;
-            var bytes = 64L + values.Length * 128L + (_roots.Contains(original) ? 0 : original.GetRawText().Length * 8L);
-            if (bytes > 67108864 - _retainedBytes) return;
-            _values.Add((original, typeof(T)), values); _roots.Add(original);
-            _bytes += bytes; _retainedBytes += bytes;
+                _values.ContainsKey((original.Root, typeof(T))) || !Reserve(original, 64L + values.Length * 128L)) return;
+            _values.Add((original.Root, typeof(T)), values);
         }
     }
 
-    internal bool TryProjection(JsonElement original, ExecutionPlan ownedTotal, out JsonElement value)
+    internal bool TryProjection(JsonElement original, ExecutionPlan ownedTotal, out AttemptJournalView value)
     {
         lock (Gate)
         {
@@ -47,18 +45,17 @@ internal sealed class AttemptReadMemo(ExecutionPlan total) : IDisposable
         }
     }
 
-    internal void RememberProjection(JsonElement original, ExecutionPlan ownedTotal, JsonElement value)
+    internal void RememberProjection(JournalDocument original, ExecutionPlan ownedTotal, AttemptJournalView value)
     {
         lock (Gate)
         {
-            if (_disposed || !ReferenceEquals(total, ownedTotal) || _projections.Count >= 256 || _projections.ContainsKey(original)) return;
-            var bytes = 64L + (original.Equals(value) ? 0 : value.GetRawText().Length * 4L);
-            if (bytes > 67108864 - _retainedBytes) return;
-            _projections.Add(original, value); _bytes += bytes; _retainedBytes += bytes;
+            if (_disposed || !ReferenceEquals(total, ownedTotal) || _projections.Count >= 256 ||
+                _projections.ContainsKey(original.Root) || !Reserve(original, 64L + value.RetainedSelectionBytes)) return;
+            _projections.Add(original.Root, value);
         }
     }
 
-    internal bool TryViews(JsonElement original, ExecutionPlan ownedTotal, out IReadOnlyList<JsonElement> value)
+    internal bool TryViews(JsonElement original, ExecutionPlan ownedTotal, out IReadOnlyList<AttemptJournalView> value)
     {
         lock (Gate)
         {
@@ -67,15 +64,24 @@ internal sealed class AttemptReadMemo(ExecutionPlan total) : IDisposable
         }
     }
 
-    internal void RememberViews(JsonElement original, ExecutionPlan ownedTotal, IReadOnlyList<JsonElement> value)
+    internal void RememberViews(JournalDocument original, ExecutionPlan ownedTotal, IReadOnlyList<AttemptJournalView> value)
     {
         lock (Gate)
         {
-            if (_disposed || !ReferenceEquals(total, ownedTotal) || _views.Count >= 256 || value.Count > 32 || _views.ContainsKey(original)) return;
-            var bytes = 64L + value.Count * 32L + value.Where(item => !item.Equals(original)).Sum(item => item.GetRawText().Length * 4L);
-            if (bytes > 67108864 - _retainedBytes) return;
-            _views.Add(original, Array.AsReadOnly(value.ToArray())); _bytes += bytes; _retainedBytes += bytes;
+            if (_disposed || !ReferenceEquals(total, ownedTotal) || _views.Count >= 256 || value.Count > 32 ||
+                _views.ContainsKey(original.Root) || !Reserve(original, 64L + value.Count * 64L)) return;
+            _views.Add(original.Root, value);
         }
+    }
+
+    private bool Reserve(JournalDocument original, long bytes)
+    {
+        // All views of one root share its bytes and parse metadata.
+        if (!_roots.Contains(original.Root)) bytes += original.TextLength * 8L;
+        if (bytes > 67108864 - _retainedBytes) return false;
+        _roots.Add(original.Root);
+        _bytes += bytes; _retainedBytes += bytes;
+        return true;
     }
 
     public void Dispose()

@@ -5,6 +5,8 @@ namespace NexusPipeline.Platform.Storage.Sqlite;
 
 internal static class FileEffectRows
 {
+    internal const string Select = "SELECT journal_id,step_id,action,state,intent_digest,receipt_digest FROM main.file_effects";
+
     internal static void Insert(SqliteConnection connection, SqliteTransaction transaction, Guid journalId, IReadOnlyList<FileEffect> effects)
     {
         if (effects.Count > 4096 || effects.Select(item => item.StepId).Distinct(StringComparer.Ordinal).Count() != effects.Count)
@@ -33,19 +35,36 @@ internal static class FileEffectRows
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT journal_id,step_id,action,state,intent_digest,receipt_digest FROM main.file_effects " +
-            (journalId is null ? "ORDER BY journal_id,step_id LIMIT 65537;" : "WHERE journal_id=$journal ORDER BY step_id LIMIT 4097;");
+        command.CommandText = Select +
+            (journalId is null ? " ORDER BY journal_id,step_id LIMIT 65537;" : " WHERE journal_id=$journal ORDER BY step_id LIMIT 4097;");
         if (journalId is not null) command.Parameters.AddWithValue("$journal", journalId.Value.ToString("D"));
         using var reader = command.ExecuteReader();
         var result = new List<FileEffect>();
         while (reader.Read())
         {
             if (result.Count >= (journalId is null ? 65536 : 4096)) throw new IOException("file_effect_limit");
-            result.Add(new(Guid.Parse(reader.GetString(0)), reader.GetString(1), Enum.Parse<FileEffectAction>(reader.GetString(2), true),
-                Enum.Parse<FileEffectState>(reader.GetString(3), true), reader.GetString(4), reader.IsDBNull(5) ? null : reader.GetString(5)));
+            result.Add(Decode(reader, Guid.Parse(reader.GetString(0))));
         }
         return result.AsReadOnly();
     }
+
+    internal static void AppendMembers(SqliteCommand command, List<FileEffect> effects)
+    {
+        using var reader = command.ExecuteReader();
+        var journal = Guid.Empty;
+        var count = 0;
+        while (reader.Read())
+        {
+            var id = Guid.Parse(reader.GetString(0));
+            if (id != journal) { journal = id; count = 0; }
+            if (++count > 4096 || effects.Count >= RecoveryCapacityBudget.MaximumFileEffects) throw new IOException("file_effect_limit");
+            effects.Add(Decode(reader, id));
+        }
+    }
+
+    private static FileEffect Decode(SqliteDataReader reader, Guid journal) => new(journal, reader.GetString(1),
+        Enum.Parse<FileEffectAction>(reader.GetString(2), true), Enum.Parse<FileEffectState>(reader.GetString(3), true),
+        reader.GetString(4), reader.IsDBNull(5) ? null : reader.GetString(5));
 
     internal static bool IsDigest(string value) => value.Length == 64 && value.All(character => character is >= 'a' and <= 'f' or >= '0' and <= '9');
     internal static string Wire<T>(T value) where T : Enum

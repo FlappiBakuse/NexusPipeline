@@ -13,11 +13,11 @@ internal sealed class TargetJobEvidence(RuntimeInstance instance, StateDatabase 
     private ImmutableBlobStore? _blobs;
     private ImmutableBlobStore Blobs => _blobs ??= new(instance, contracts);
 
-    internal IReadOnlyList<BlobReference> RequireAll(JsonElement journal, ExecutionPlan total, string totalPlanSha256) =>
+    internal IReadOnlyList<BlobReference> RequireAll(AttemptJournalView journal, ExecutionPlan total, string totalPlanSha256) =>
         ExecutionInvocationCodec.Views(journal).Select(ExecutionInvocationCodec.Current)
             .SelectMany(view => RequireCurrent(view, total, totalPlanSha256)).Distinct().ToArray();
 
-    private IReadOnlyList<BlobReference> RequireCurrent(JsonElement journal, ExecutionPlan total, string totalPlanSha256)
+    private IReadOnlyList<BlobReference> RequireCurrent(AttemptJournalView journal, ExecutionPlan total, string totalPlanSha256)
     {
         var references = new List<BlobReference>();
         foreach (var item in TargetJobCodec.ReadAll(journal, total, totalPlanSha256))
@@ -25,7 +25,7 @@ internal sealed class TargetJobEvidence(RuntimeInstance instance, StateDatabase 
         return references.Distinct().ToArray();
     }
 
-    internal void RequireResolved(JsonElement journal, ExecutionPlan total, string totalPlanSha256, string? stepId = null)
+    internal void RequireResolved(AttemptJournalView journal, ExecutionPlan total, string totalPlanSha256, string? stepId = null)
     {
         _ = RequireAll(journal, total, totalPlanSha256);
         foreach (var item in TargetJobCodec.Read(journal, total, totalPlanSha256).Where(item => stepId is null || item.Binding.StepId == stepId))
@@ -62,7 +62,7 @@ internal sealed class TargetJobEvidence(RuntimeInstance instance, StateDatabase 
         return result;
     }
 
-    internal IReadOnlyList<BlobReference> Require(TargetJobState item, ExecutionPlan total, JsonElement journal)
+    internal IReadOnlyList<BlobReference> Require(TargetJobState item, ExecutionPlan total, AttemptJournalView journal)
     {
         var binding = item.Binding;
         var references = new List<BlobReference>();
@@ -127,7 +127,7 @@ internal sealed class TargetJobEvidence(RuntimeInstance instance, StateDatabase 
     }
 
     private void RequireRecovery(TargetRecoveryDocument value, TargetJobState item, ExecutionPlan total,
-        JsonElement journal, ProcessIdentity? root, ExecutionTargetPc pc)
+        AttemptJournalView journal, ProcessIdentity? root, ExecutionTargetPc pc)
     {
         RequireHeader(value.Format, value.Version, value.Binding, "recovery", item.Binding);
         var observed = value.Observation;
@@ -178,18 +178,18 @@ internal sealed class TargetJobEvidence(RuntimeInstance instance, StateDatabase 
                 throw new IOException("execution_target_stop_unconfirmed");
     }
 
-    private static void RequirePreviousRetention(JsonElement journal, ExecutionPlan total, TargetJobState item, BlobReference intent)
+    private static void RequirePreviousRetention(AttemptJournalView journal, ExecutionPlan total, TargetJobState item, BlobReference intent)
     {
         var previous = Previous(journal, total, item);
         if (previous?.Stage != "retentionPrepared" || previous.Evidence != intent) throw Invalid();
     }
 
-    private static TargetJobIntent? Previous(JsonElement journal, ExecutionPlan total, TargetJobState item) =>
+    private static TargetJobIntent? Previous(AttemptJournalView journal, ExecutionPlan total, TargetJobState item) =>
         TargetJobCodec.ReadAll(journal, total, item.Binding.TotalPlanSha256)
             .TakeWhile(candidate => candidate.Stage != item.Stage || candidate.Evidence != item.Evidence)
             .LastOrDefault(candidate => candidate.Binding == item.Binding);
 
-    private void RequireNecessary(TargetRetentionDocument intent, ExecutionPlan total, JsonElement journal)
+    private void RequireNecessary(TargetRetentionDocument intent, ExecutionPlan total, AttemptJournalView journal)
     {
         var stepId = intent.Binding.StepId;
         var jobs = WriterIntentCodec.ReadJobs(journal, total).Where(job => job.StepId == stepId && job.Role != "postHook")

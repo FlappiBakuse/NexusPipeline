@@ -51,15 +51,15 @@ internal static class DispatchIntentCodec
         _ = Decode(participant); return true;
     }
 
-    internal static DispatchCloseIntent? Read(JsonElement journal, ExecutionPlan total)
+    internal static DispatchCloseIntent? Read(AttemptJournalView journal, ExecutionPlan total)
     {
         DispatchCloseIntent? result = null;
-        foreach (var participant in journal.GetProperty("participants").EnumerateArray().Where(IsParticipant))
+        foreach (var participant in journal.Participants.Where(IsParticipant))
         {
             var item = Decode(participant);
-            if (result is not null || item.ParentOperationId != journal.GetProperty("operationId").GetGuid() ||
-                item.ParentJournalId != journal.GetProperty("journalId").GetGuid() || item.ParentPlanDigest != journal.GetProperty("planDigest").GetString() ||
-                item.RunId != journal.GetProperty("runId").GetGuid() || item.AttemptId != journal.GetProperty("attemptId").GetGuid() ||
+            if (result is not null || item.ParentOperationId != journal.Root.GetProperty("operationId").GetGuid() ||
+                item.ParentJournalId != journal.Root.GetProperty("journalId").GetGuid() || item.ParentPlanDigest != journal.Root.GetProperty("planDigest").GetString() ||
+                item.RunId != journal.Root.GetProperty("runId").GetGuid() || item.AttemptId != journal.Root.GetProperty("attemptId").GetGuid() ||
                 participant.GetProperty("resourceKey").GetString() != "automation:" + total.Steps[0].ScriptId) throw Invalid();
             result = item;
         }

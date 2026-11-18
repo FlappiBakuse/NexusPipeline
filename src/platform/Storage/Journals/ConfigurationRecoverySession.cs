@@ -27,12 +27,18 @@ public sealed class ConfigurationRecoverySession : IConfigurationRecoverySession
 
     public ConfigurationRecoverySession(RuntimeInstance instance, Guid journalId, ContractReader contracts, StateDatabase database,
         Func<ConfigurationWriterObservation> observeWriters, IConfigurationPersistenceObserver? observer = null)
+        : this(instance, journalId, contracts, database, observeWriters, observer, new(instance, contracts))
+    {
+    }
+
+    internal ConfigurationRecoverySession(RuntimeInstance instance, Guid journalId, ContractReader contracts, StateDatabase database,
+        Func<ConfigurationWriterObservation> observeWriters, IConfigurationPersistenceObserver? observer, JournalStore store)
     {
         if (database.InstanceId != instance.InstanceId) throw new IOException("configuration_database_instance_unbound");
         _instance = instance; _database = database; _contracts = contracts;
         _observeWriters = observeWriters;
         _observer = observer;
-        _store = new(instance, contracts);
+        _store = store;
         _registry = new(database);
         _outbox = new(database);
         var physical = _store.Read(journalId);
@@ -108,8 +114,11 @@ public sealed class ConfigurationRecoverySession : IConfigurationRecoverySession
     {
         var prepared = _prepared ?? throw new IOException("configuration_workspace_unverified");
         Save(JournalPhase.Reverting, "restore-original", "started");
-        _swap.RestoreOriginal(prepared, RequireStopped());
-        _swap.VerifyRestored(prepared, RequireStopped());
+        using (var history = new HistoryReadScope(_instance, _database, _contracts))
+        {
+            _swap.RestoreOriginal(prepared, RequireStopped());
+            _swap.VerifyRestored(prepared, RequireStopped());
+        }
         Save(JournalPhase.Reverted, "restore-original", "reverted");
     }
 
@@ -189,7 +198,7 @@ public sealed class ConfigurationRecoverySession : IConfigurationRecoverySession
 
     private void CloseInterruptedEffects()
     {
-        var digest = Convert.ToHexStringLower(SHA256.HashData(_store.Read(_plan.JournalId).Export()));
+        var digest = _store.Read(_plan.JournalId).Sha256;
         foreach (var effect in _outbox.Read(_plan.JournalId))
         {
             if (effect.State == FileEffectState.Pending)
@@ -217,7 +226,7 @@ public sealed class ConfigurationRecoverySession : IConfigurationRecoverySession
         if (pending is not null && pending.State is FileEffectState.Pending or FileEffectState.Started)
         {
             var state = effect == "started" ? FileEffectState.Started : FileEffectState.Completed;
-            if (state != pending.State) _outbox.Record(_plan.JournalId, step, pending.State, state, Convert.ToHexStringLower(SHA256.HashData(next.Export())));
+            if (state != pending.State) _outbox.Record(_plan.JournalId, step, pending.State, state, next.Sha256);
         }
         var registered = _registry.ReadJournal(_plan.JournalId);
         _registry.Advance(registered with { Revision = next.Revision, Phase = next.Phase }, previous, noEffect, recoveryVerified);

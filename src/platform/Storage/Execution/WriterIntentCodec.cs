@@ -45,10 +45,10 @@ internal static class WriterIntentCodec
         return identity.TryGetProperty("format", out var format) && format.GetString() == Format;
     }
 
-    internal static ImmutableArray<StepWriterState> Read(JsonElement journal, ExecutionPlan total)
+    internal static ImmutableArray<StepWriterState> Read(AttemptJournalView journal, ExecutionPlan total)
         => ReadJobs(journal, total).Where(item => item.Role == "process").ToImmutableArray();
 
-    internal static ImmutableArray<StepWriterState> ReadJobs(JsonElement journal, ExecutionPlan total)
+    internal static ImmutableArray<StepWriterState> ReadJobs(AttemptJournalView journal, ExecutionPlan total)
     {
         if (AttemptReadScope.TryRead<StepWriterState>(journal, total, out var saved)) return saved;
         var original = journal;
@@ -57,7 +57,7 @@ internal static class WriterIntentCodec
         var states = new Dictionary<(string Step, string Role), StepWriterState>();
         var dispatched = new List<string>();
         var lastRole = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var participant in journal.GetProperty("participants").EnumerateArray())
+        foreach (var participant in journal.Participants)
         {
             if (BindingSkipCodec.Matches(participant))
             {
@@ -102,15 +102,20 @@ internal static class WriterIntentCodec
                 .Select(role => states[(step.StepId, role)])).ToImmutableArray());
     }
 
-    internal static ImmutableArray<StepWriterState> ReadAllJobs(JsonElement journal, ExecutionPlan total)
+    internal static ImmutableArray<StepWriterState> ReadAllJobs(AttemptJournalView journal, ExecutionPlan total)
     {
         var jobs = new Dictionary<string, (int Ordinal, StepWriterState Job)>(StringComparer.Ordinal);
         foreach (var view in ExecutionInvocationCodec.Views(journal))
-        foreach (var job in ReadJobs(view, total))
         {
-            var ordinal = ExecutionInvocationCodec.Ordinal(view, job.StepId);
-            if (jobs.TryGetValue(job.JobName, out var old) && (old.Ordinal != ordinal || old.Job.StepId != job.StepId || old.Job.Role != job.Role)) throw Invalid();
-            jobs[job.JobName] = (ordinal, job);
+            var viewJobs = ReadJobs(view, total);
+            if (viewJobs.IsEmpty) continue;
+            var ordinals = ExecutionInvocationCodec.ReadOrdinals(view);
+            foreach (var job in viewJobs)
+            {
+                var ordinal = ordinals.GetValueOrDefault(job.StepId, 1);
+                if (jobs.TryGetValue(job.JobName, out var old) && (old.Ordinal != ordinal || old.Job.StepId != job.StepId || old.Job.Role != job.Role)) throw Invalid();
+                jobs[job.JobName] = (ordinal, job);
+            }
         }
         return jobs.Values.Select(item => item.Job).ToImmutableArray();
     }

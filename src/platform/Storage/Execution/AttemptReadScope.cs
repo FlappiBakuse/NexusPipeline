@@ -12,24 +12,25 @@ internal sealed class AttemptReadScope : IDisposable
     private readonly int _thread = Environment.CurrentManagedThreadId;
     private readonly ExecutionPlan _total;
     private readonly AttemptReadMemo? _memo;
-    private readonly HashSet<JsonElement> _history;
+    private readonly Dictionary<JsonElement, JournalDocument> _history = [];
     private readonly HashSet<JsonElement> _originals = [];
-    private readonly Dictionary<(JsonElement, Type), object> _values = [];
-    private readonly HashSet<JsonElement> _owned = [];
+    private readonly Dictionary<(AttemptJournalView, Type), object> _values = [];
+    private readonly HashSet<AttemptJournalView> _owned = [];
     private readonly HashSet<JsonElement> _participants = [];
     private readonly Dictionary<JsonElement, ExecutionInvocation> _invocations = [];
-    private readonly Dictionary<JsonElement, JsonElement> _projections = [];
-    private readonly Dictionary<JsonElement, IReadOnlyList<JsonElement>> _views = [];
+    private readonly Dictionary<AttemptJournalView, AttemptJournalView> _projections = [];
+    private readonly Dictionary<AttemptJournalView, IReadOnlyList<AttemptJournalView>> _views = [];
     private int _viewBytes;
     private bool _disposed;
 
     internal AttemptReadScope(IReadOnlyList<JournalDocument> history, ExecutionPlan ownedTotal, AttemptReadMemo? memo = null)
     {
-        _total = ownedTotal; _memo = memo; _history = history.Select(item => item.Root).ToHashSet();
+        _total = ownedTotal; _memo = memo;
+        foreach (var document in history) _history.TryAdd(document.Root, document);
         _current = this;
     }
 
-    private bool Owns<T>(JsonElement journal, ExecutionPlan total)
+    private bool Owns<T>(AttemptJournalView journal, ExecutionPlan total)
     {
         if (typeof(T) != typeof(StepWriterState) && typeof(T) != typeof(StepResultState) &&
             typeof(T) != typeof(ExecutionStepCompletion) && typeof(T) != typeof(ExecutionInvocation))
@@ -37,25 +38,26 @@ internal sealed class AttemptReadScope : IDisposable
         return ReferenceEquals(total, _total) && Owns(journal);
     }
 
-    private bool Owns(JsonElement journal)
+    private bool Owns(AttemptJournalView journal)
     {
-        if (!_history.Contains(journal)) return _owned.Contains(journal);
-        if (!_originals.Contains(journal))
+        if (!journal.IsOriginal || !_history.ContainsKey(journal.Root)) return _owned.Contains(journal);
+        if (!_originals.Contains(journal.Root))
         {
             if (_originals.Count == 2) Clear();
-            _originals.Add(journal); Register(journal);
+            _originals.Add(journal.Root);
+            _participants.UnionWith(journal.Participants);
+            Register(journal);
         }
         return true;
     }
 
-    private bool Register(JsonElement value)
+    private bool Register(AttemptJournalView value)
     {
         if (_owned.Contains(value)) return true;
         if (_owned.Count >= 32) return false;
-        var bytes = _history.Contains(value) ? 0 : value.GetRawText().Length * 2;
+        var bytes = value.RetainedSelectionBytes;
         if (bytes > 4194304 - _viewBytes) return false;
         _viewBytes += bytes; _owned.Add(value);
-        _participants.UnionWith(value.GetProperty("participants").EnumerateArray());
         return true;
     }
 
@@ -71,60 +73,60 @@ internal sealed class AttemptReadScope : IDisposable
         return value;
     }
 
-    internal static bool TryProjection(JsonElement journal, out JsonElement value)
+    internal static bool TryProjection(AttemptJournalView journal, out AttemptJournalView value)
     {
         value = default;
         if (_current is not { } scope || !scope.Owns(journal)) return false;
-        if (scope._history.Contains(journal) && scope._memo?.TryProjection(journal, scope._total, out value) == true)
+        if (journal.IsOriginal && scope._memo?.TryProjection(journal.Root, scope._total, out value) == true)
         { scope.Register(value); return true; }
         return scope._projections.TryGetValue(journal, out value);
     }
 
-    internal static JsonElement RememberProjection(JsonElement journal, JsonElement value)
+    internal static AttemptJournalView RememberProjection(AttemptJournalView journal, AttemptJournalView value)
     {
         if (_current is { } scope && scope.Owns(journal) && scope.Register(value))
         {
-            scope._projections[journal] = value; scope._projections[value] = value;
-            if (scope._history.Contains(journal)) scope._memo?.RememberProjection(journal, scope._total, value);
+            scope._projections[journal] = value;
+            if (journal.IsOriginal) scope._memo?.RememberProjection(scope._history[journal.Root], scope._total, value);
         }
         return value;
     }
 
-    internal static bool TryViews(JsonElement journal, out IReadOnlyList<JsonElement> value)
+    internal static bool TryViews(AttemptJournalView journal, out IReadOnlyList<AttemptJournalView> value)
     {
         value = null!;
         if (_current is not { } scope || !scope.Owns(journal)) return false;
-        if (scope._history.Contains(journal) && scope._memo?.TryViews(journal, scope._total, out value) == true)
+        if (journal.IsOriginal && scope._memo?.TryViews(journal.Root, scope._total, out value) == true)
         { foreach (var view in value) scope.Register(view); return true; }
         return scope._views.TryGetValue(journal, out value!);
     }
 
-    internal static IReadOnlyList<JsonElement> RememberViews(JsonElement journal, IReadOnlyList<JsonElement> value)
+    internal static IReadOnlyList<AttemptJournalView> RememberViews(AttemptJournalView journal, IReadOnlyList<AttemptJournalView> value)
     {
         if (_current is { } scope && scope.Owns(journal) && value.Count <= 32 && value.All(scope.Register))
         {
             scope._views[journal] = value;
-            if (scope._history.Contains(journal)) scope._memo?.RememberViews(journal, scope._total, value);
+            if (journal.IsOriginal) scope._memo?.RememberViews(scope._history[journal.Root], scope._total, value);
         }
         return value;
     }
 
-    internal static bool TryRead<T>(JsonElement journal, ExecutionPlan total, out ImmutableArray<T> values)
+    internal static bool TryRead<T>(AttemptJournalView journal, ExecutionPlan total, out ImmutableArray<T> values)
     {
         values = default;
         if (_current is not { } scope || !scope.Owns<T>(journal, total)) return false;
-        if (scope._history.Contains(journal) && scope._memo?.TryRead(journal, total, out values) == true) return true;
+        if (journal.IsOriginal && scope._memo?.TryRead(journal.Root, total, out values) == true) return true;
         if (!scope._values.TryGetValue((journal, typeof(T)), out var saved)) return false;
         values = (ImmutableArray<T>)saved; return true;
     }
 
-    internal static ImmutableArray<T> Remember<T>(JsonElement journal, ExecutionPlan total, ImmutableArray<T> values)
+    internal static ImmutableArray<T> Remember<T>(AttemptJournalView journal, ExecutionPlan total, ImmutableArray<T> values)
     {
         // Retained views derive only from the protected originals and the same owned wire plan.
         if (values.Length <= 1024 && _current is { } scope && scope.Owns<T>(journal, total))
         {
             scope._values[(journal, typeof(T))] = values;
-            if (scope._history.Contains(journal)) scope._memo?.Remember(journal, total, values);
+            if (journal.IsOriginal) scope._memo?.Remember(scope._history[journal.Root], total, values);
         }
         return values;
     }

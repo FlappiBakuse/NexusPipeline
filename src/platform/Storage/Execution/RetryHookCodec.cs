@@ -32,19 +32,19 @@ internal static class RetryHookCodec
         _ = Decode(participant); return true;
     }
 
-    internal static ImmutableArray<RetryHookIntent> Read(JsonElement journal, ExecutionPlan total)
+    internal static ImmutableArray<RetryHookIntent> Read(AttemptJournalView journal, ExecutionPlan total)
     {
         journal = ExecutionInvocationCodec.Current(journal);
         var result = ImmutableArray.CreateBuilder<RetryHookIntent>();
         var jobs = WriterIntentCodec.ReadJobs(journal, total);
-        foreach (var participant in journal.GetProperty("participants").EnumerateArray().Where(IsParticipant))
+        foreach (var participant in journal.Participants.Where(IsParticipant))
         {
             var item = Decode(participant);
             var step = total.Steps.SingleOrDefault(step => step.StepId == item.StepId) ?? throw Invalid();
             var hook = ExecutionBindingRoles.Hook(step, item.Role);
-            if (item.RunId.ToString("D") != total.RunId || item.ParentJournalId != journal.GetProperty("journalId").GetGuid() ||
-                item.AttemptId != journal.GetProperty("attemptId").GetGuid() ||
-                item.BeforeRevision >= journal.GetProperty("revision").GetInt64() ||
+            if (item.RunId.ToString("D") != total.RunId || item.ParentJournalId != journal.Root.GetProperty("journalId").GetGuid() ||
+                item.AttemptId != journal.Root.GetProperty("attemptId").GetGuid() ||
+                item.BeforeRevision >= journal.Root.GetProperty("revision").GetInt64() ||
                 result.Any(prior => prior.StepId == item.StepId && prior.Role == item.Role) ||
                 jobs.Any(job => job.StepId == item.StepId && job.Role == item.Role) ||
                 JsonSerializer.SerializeToUtf8Bytes(participant, StepResultCodec.Options).Length > ExecutionHookInputs.MaximumJournalEventBytes ||
@@ -55,7 +55,7 @@ internal static class RetryHookCodec
         return result.ToImmutable();
     }
 
-    internal static ImmutableArray<string> ResolvedRoles(JsonElement journal, ExecutionPlan total, string stepId) =>
+    internal static ImmutableArray<string> ResolvedRoles(AttemptJournalView journal, ExecutionPlan total, string stepId) =>
         Read(journal, total).Where(item => item.StepId == stepId).Select(item => item.Role).ToImmutableArray();
 
     internal static JsonObject Participant(RetryHookIntent value, string scriptId) => new()

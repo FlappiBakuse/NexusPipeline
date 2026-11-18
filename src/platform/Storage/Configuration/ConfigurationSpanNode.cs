@@ -86,8 +86,13 @@ internal static class ConfigurationSpanAccess
         { return root.Missing(selector).Path; }
     }
 
-    internal static bool Prefix(IReadOnlyList<object> parent, IReadOnlyList<object> child) =>
-        parent.Count <= child.Count && parent.Select((step, index) => Equals(step, child[index])).All(equal => equal);
+    internal static bool Prefix(IReadOnlyList<object> parent, IReadOnlyList<object> child)
+    {
+        if (parent.Count > child.Count) return false;
+        for (var index = 0; index < parent.Count; index++)
+            if (!Equals(parent[index], child[index])) return false;
+        return true;
+    }
 
     private static bool MayOverlap(ConfigurationSelector left, ConfigurationSelector right)
     {

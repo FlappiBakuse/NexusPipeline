@@ -41,7 +41,7 @@ internal sealed class StepWriterScope : IConfigurationWriterScope
     internal StepWriterScope(RuntimeInstance instance, StateDatabase database, ContractReader contracts, InstanceLease lease,
         Guid parentJournalId, string stepId, string role = "process", Guid? judgementOwnerId = null, ExecutionProviderRegistry.PreparedExecutionProvider? provider = null)
     {
-        lease.VerifyHeld(instance);
+        using var identity = InstanceReadScope.Hold(instance, lease);
         _instance = instance; _database = database; _contracts = contracts; _lease = lease; _journalId = parentJournalId; _stepId = stepId;
         if (role is not ("preHook" or "process" or "judgement" or "postHook") || (role == "judgement") != judgementOwnerId.HasValue || judgementOwnerId == Guid.Empty)
             throw new IOException("execution_writer_role_unbound");
@@ -50,7 +50,7 @@ internal sealed class StepWriterScope : IConfigurationWriterScope
         _captureRunId = Guid.Parse(state.Attempt.RunId); _capturePlanDigest = state.Journal.PlanDigest;
         _captureAttemptOrdinal = checked((int)state.Attempt.AttemptOrdinal);
         using var ownerProcess = System.Diagnostics.Process.GetCurrentProcess(); _captureSessionId = ownerProcess.SessionId;
-        RequireAdmission(state);
+        using (HoldAdmission(state)) { }
         var step = state.Total.Steps.SingleOrDefault(step => step.StepId == stepId) ?? throw new IOException("execution_writer_step_unbound");
         if (step.EngineKind is not ("process" or "extensionWorker") || (step.EngineKind == "extensionWorker") != (_provider is not null))
             throw new IOException("execution_writer_engine_unavailable");
@@ -64,7 +64,11 @@ internal sealed class StepWriterScope : IConfigurationWriterScope
         _ = new JournalWriterStore(database).RequireRegisteredExecutor(parentJournalId, lease.ExecutorIdentity);
     }
 
-    public void RequirePrepared() => RequirePrepared(Read());
+    public void RequirePrepared()
+    {
+        using var identity = InstanceReadScope.Hold(_instance, _lease);
+        using var prior = HoldPrepared(Read());
+    }
 
     public void RequirePreviousWriter(RunWriterProcess previous, StoppedConfigurationEditor stopped)
     {
@@ -73,9 +77,9 @@ internal sealed class StepWriterScope : IConfigurationWriterScope
         previous.UseStepEvidence(StepResultCodec.Binding(parent.Latest.Root, job), stopped, (_, _) => true);
     }
 
-    private void RequirePrepared(AttemptWriterState state)
+    private IDisposable HoldPrepared(AttemptWriterState state)
     {
-        if (_jobName is null) { RequireAdmission(state); return; }
+        if (_jobName is null) return HoldAdmission(state);
         var step = RequiredStep(state);
         if (state.IsDispatchClosed || state.Latest.Revision != state.Journal.Revision || step.ClosedElapsedMilliseconds is not null ||
             state.Journal.Phase is not (JournalPhase.Prepared or JournalPhase.Applying) ||
@@ -83,7 +87,7 @@ internal sealed class StepWriterScope : IConfigurationWriterScope
             throw new IOException("execution_writer_registration_closed");
         var ordinal = state.Total.Steps.ToList().FindIndex(item => item.StepId == _stepId);
         if (BindingSkipCodec.Processed(state.Latest.Root, state.Total, state.Jobs).Length != ordinal + 1) throw new IOException("execution_writer_job_unbound");
-        using var prior = ExecutionStepAdmission.HoldPredecessors(_instance, _database, _contracts, state, ordinal);
+        return ExecutionStepAdmission.HoldPredecessors(_instance, _database, _contracts, state, ordinal);
     }
 
     public void RegisterJob(OwnedWorkerJob job)
@@ -91,7 +95,13 @@ internal sealed class StepWriterScope : IConfigurationWriterScope
 
     private void RegisterJobCore(OwnedWorkerJob job)
     {
-        var state = Read(); RequirePrepared(state);
+        var state = Read();
+        using (HoldPrepared(state)) RegisterPreparedJob(job, state);
+        Synchronize();
+    }
+
+    private void RegisterPreparedJob(OwnedWorkerJob job, AttemptWriterState state)
+    {
         if (job.GetAccounting().TotalProcesses != 0 || _jobName is not null && _jobName != job.Name) throw new IOException("execution_writer_job_unbound");
         var writer = JournalWriterStore.CurrentWriter;
         using var current = System.Diagnostics.Process.GetCurrentProcess();
@@ -100,8 +110,7 @@ internal sealed class StepWriterScope : IConfigurationWriterScope
         var existing = state.Jobs.SingleOrDefault(step => step.StepId == _stepId && step.Role == _role);
         if (existing is null)
         {
-            var ordinal = ExecutionStepAdmission.RequireNext(state.Latest, state.Total, _stepId, _role);
-            using var prior = ExecutionStepAdmission.HoldPredecessors(_instance, _database, _contracts, state, ordinal);
+            if (_jobName is not null) throw new IOException("execution_writer_job_unbound");
             var held = new List<IDisposable>();
             try
             {
@@ -114,7 +123,6 @@ internal sealed class StepWriterScope : IConfigurationWriterScope
         }
         else if (existing.JobName != job.Name || existing.WriterId != writer.WriterId || existing.SessionId != current.SessionId || existing.ClosedElapsedMilliseconds is not null)
             throw new IOException("execution_writer_job_unbound");
-        Synchronize();
     }
 
     internal void EnterApplying()
@@ -329,13 +337,13 @@ internal sealed class StepWriterScope : IConfigurationWriterScope
             hook.Arguments.ToImmutableArray(), hook.WorkingDirectory));
     }
 
-    private void RequireAdmission(AttemptWriterState state)
+    private IDisposable HoldAdmission(AttemptWriterState state)
     {
         if (state.IsDispatchClosed || state.Latest.Revision != state.Journal.Revision ||
             state.Gate.State != (state.Journal.Phase == JournalPhase.Prepared ? EffectGateState.Unentered : EffectGateState.Entered))
             throw new IOException("execution_writer_registration_closed");
         var ordinal = ExecutionStepAdmission.RequireNext(state.Latest, state.Total, _stepId, _role);
-        using var previous = ExecutionStepAdmission.HoldPredecessors(_instance, _database, _contracts, state, ordinal);
+        return ExecutionStepAdmission.HoldPredecessors(_instance, _database, _contracts, state, ordinal);
     }
     private AttemptWriterState Read()
     {

@@ -21,11 +21,11 @@ internal static class AndroidCollectedCodec
     internal static bool IsParticipant(JsonElement participant) =>
         participant.GetProperty("identity").TryGetProperty("format", out var value) && value.GetString() == Format;
 
-    internal static ImmutableArray<AndroidCollectedIntent> Read(JsonElement journal, ExecutionPlan total, string totalSha256)
+    internal static ImmutableArray<AndroidCollectedIntent> Read(AttemptJournalView journal, ExecutionPlan total, string totalSha256)
     {
         journal = ExecutionInvocationCodec.Current(journal);
         var result = ImmutableArray.CreateBuilder<AndroidCollectedIntent>();
-        foreach (var participant in journal.GetProperty("participants").EnumerateArray().Where(IsParticipant))
+        foreach (var participant in journal.Participants.Where(IsParticipant))
         {
             var identity = participant.GetProperty("identity");
             var decoded = ExecutionParticipantText.Read<AndroidCollectedIntent>(identity, StepResultCodec.Options, Invalid);
@@ -34,8 +34,8 @@ internal static class AndroidCollectedCodec
             AndroidStartupCodec.RequireBinding(journal, total, totalSha256, participant, binding);
             if (!decoded.MatchesOriginal ||
                 item.Format != Format || item.Version != 1 || participant.GetProperty("kind").GetString() != "process" ||
-                binding.InstanceId.ToString("D") != total.InstanceId || binding.ParentJournalId != journal.GetProperty("journalId").GetGuid() ||
-                binding.ParentOperationId != journal.GetProperty("operationId").GetGuid() || binding.AttemptId != journal.GetProperty("attemptId").GetGuid() ||
+                binding.InstanceId.ToString("D") != total.InstanceId || binding.ParentJournalId != journal.Root.GetProperty("journalId").GetGuid() ||
+                binding.ParentOperationId != journal.Root.GetProperty("operationId").GetGuid() || binding.AttemptId != journal.Root.GetProperty("attemptId").GetGuid() ||
                 binding.TotalPlanSha256 != totalSha256 || result.Any(value => value.Binding.StepId == binding.StepId))
                 throw Invalid();
             var step = total.Steps.SingleOrDefault(step => step.StepId == binding.StepId) ?? throw Invalid();
@@ -53,7 +53,7 @@ internal static class AndroidCollectedCodec
         return result.ToImmutable();
     }
 
-    internal static IReadOnlyList<BlobReference> References(JsonElement journal, ExecutionPlan total, string totalSha256,
+    internal static IReadOnlyList<BlobReference> References(AttemptJournalView journal, ExecutionPlan total, string totalSha256,
         AndroidControlEvidence reader, AndroidCollectedIntent intent, bool verifyContent)
     {
         var document = reader.Read<AndroidCollectedDocument>(intent.Artifact);
@@ -97,7 +97,7 @@ internal static class AndroidCollectedCodec
         ["identity"] = JsonSerializer.SerializeToNode(item, StepResultCodec.Options)
     };
 
-    internal static void RequireResolved(JsonElement journal, ExecutionPlan total, string totalSha256, string? stepId = null)
+    internal static void RequireResolved(AttemptJournalView journal, ExecutionPlan total, string totalSha256, string? stepId = null)
     {
         var registrations = AndroidControlCodec.Read(journal, total, totalSha256);
         var startups = AndroidStartupCodec.Read(journal, total, totalSha256);

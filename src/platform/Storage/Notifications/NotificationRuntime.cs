@@ -186,12 +186,13 @@ public sealed class NotificationRuntime : IAttemptTerminalObserver, IAsyncDispos
         try
         {
             if (!_activity.IsActive) return;
+            using var reads = new NotificationAttemptReads(_instance, _database, _contracts, _lease);
             if (Volatile.Read(ref _registrationPending))
             {
+                using var capture = reads.CaptureMetadata();
                 using var registering = _activity.BeginRegistration();
                 Volatile.Write(ref _registrationPending, _registration.ReconcilePending(64, cancellation) == 64);
             }
-            using var reads = new NotificationAttemptReads(_instance, _database, _contracts, _lease);
             _sender.ReconcilePendingResults(reads);
             using (var materialization = _activity.Continue(Guid.NewGuid()))
             {
@@ -204,7 +205,7 @@ public sealed class NotificationRuntime : IAttemptTerminalObserver, IAsyncDispos
                 using var root = _activity.Continue(item.Operation);
                 if (root is null) return;
                 reads.HoldDelivery(item.Operation);
-                _sender.ReconcileStoppedOwner(root, _resources, item.Reference);
+                _sender.ReconcileStoppedOwner(root, _resources, item.Reference, reads);
             }
             _sendingAfter = sending.Count == 4 ? sending[^1].Operation : null;
             foreach (var item in _queue.Read("queued", reads: reads))
@@ -213,7 +214,7 @@ public sealed class NotificationRuntime : IAttemptTerminalObserver, IAsyncDispos
                 using var root = _activity.Continue(item.Operation);
                 if (root is null) return;
                 reads.HoldDelivery(item.Operation);
-                await _sender.SendOwnedAsync(root, _resources, item.Reference, cancellation).ConfigureAwait(false);
+                await _sender.SendOwnedAsync(root, _resources, item.Reference, cancellation, reads).ConfigureAwait(false);
             }
             TryReleaseSettled();
         }

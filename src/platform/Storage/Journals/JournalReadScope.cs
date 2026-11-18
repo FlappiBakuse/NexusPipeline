@@ -97,6 +97,18 @@ internal sealed class JournalReadScope : IDisposable
     internal static JournalStore? WriteOwner(JournalStore requested, Guid journalId) =>
         _current is { } scope && scope.Matches(requested, journalId) && scope.Owner._store.ProtectedJournalId == journalId ? scope.Owner._store : null;
 
+    internal JournalDocument? ReadTerminal(JournalDocument expected)
+    {
+        var owner = Owner;
+        if (_disposed || !ReferenceEquals(_current, this) ||
+            expected.InstanceId != owner._store.Instance.InstanceId || expected.JournalId != owner._journalId ||
+            expected.Phase != NexusPipeline.Core.Configuration.JournalPhase.Committed)
+            throw new IOException("execution_terminal_history_unbound");
+        if (owner._store.ReadProtectedHistory(expected.JournalId) is not { } history) return null;
+        if (!history[^1].HasSameBytes(expected)) throw new IOException("execution_terminal_history_unbound");
+        return history[^1];
+    }
+
     public void Dispose()
     {
         if (_disposed) return;

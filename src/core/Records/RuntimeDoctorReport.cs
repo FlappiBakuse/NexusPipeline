@@ -7,8 +7,12 @@ public sealed record RuntimeDoctorReport(string Format, int Version, Guid Report
     int IsolatedResourceCount, int HeldResourceCount, long PendingOperationCount,
     long AttemptReceiptCount, long CompletedRunCount, RuntimeDiagnosticDetails? Details = null);
 
+public readonly record struct RuntimeStatus(Guid InstanceId, DiagnosticAdmissionState Admission,
+    long RecoveryRevision, long PendingOperationCount);
+
 public interface IRuntimeDoctor
 {
     RuntimeDoctorReport Read(CancellationToken cancellationToken = default);
     RuntimeDoctorReport ReadSupport(CancellationToken cancellationToken = default);
+    RuntimeStatus ReadStatus(CancellationToken cancellationToken = default);
 }

@@ -61,6 +61,14 @@ internal sealed class ReceiptRouteCodec(RuntimeInstance instance, StateDatabase 
         var document = delivery.Document;
         if (document.Registration is null || document.RouteOrdinal is null) throw NotificationReceiptCodec.Invalid();
         var source = new NotificationReceiptCodec(instance, database, contracts).ReadContext(document.Registration, connection, transaction);
+        RequireOrigin(delivery, source, connection, transaction);
+    }
+
+    internal void RequireOrigin(NotificationDeliverySnapshot delivery, ReceiptReadContext source,
+        SqliteConnection connection, SqliteTransaction transaction)
+    {
+        var document = delivery.Document;
+        if (document.Registration != source.Snapshot.Reference || document.RouteOrdinal is null) throw NotificationReceiptCodec.Invalid();
         RequireDelivery(delivery, source, document.RouteOrdinal.Value);
         ReceiptRouteRows.RequireMembership(connection, transaction, delivery);
         var reference = ReceiptRouteRows.Find(connection, transaction, source.Snapshot.Document.OperationId,

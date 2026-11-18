@@ -11,6 +11,35 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class AttemptScopeTests
 {
+    [Fact(DisplayName = "An Attempt Evicts Excess Blob Reads And Reuses A Later Small Working Set Without Keeping Released Evidence")]
+    public void RecoversReadBudget()
+    {
+        using var fixture = new StepWriterFixture();
+        var source = fixture.Base.Source;
+        var blobs = new NexusPipeline.Platform.Storage.ImmutableBlobStore(source.Instance, new());
+        var original = AttemptPreparedBinding.Read(source.Instance, new(), source.Database, fixture.JournalId);
+        var overflow = Enumerable.Range(0, 260).Select(index => blobs.PersistContent(BitConverter.GetBytes(index), default)).ToArray();
+        using (var active = source.Lease.BindAttemptReads(source.Database).Start(source.Instance, source.Database, new(), fixture.JournalId)!)
+        {
+            active.ReadBinding((_, _) =>
+            {
+                foreach (var reference in overflow) using (blobs.OpenVerified(reference)) { }
+                return original;
+            });
+            _ = AttemptPreparedBinding.Read(source.Instance, new(), source.Database, fixture.JournalId);
+            var first = AttemptPreparedBinding.Read(source.Instance, new(), source.Database, fixture.JournalId);
+            var next = AttemptPreparedBinding.Read(source.Instance, new(), source.Database, fixture.JournalId);
+            Assert.Same(first, next);
+            var path = Path.Combine(source.Instance.RuntimeRoot, overflow[0].RelativePath);
+            var bytes = File.ReadAllBytes(path);
+            File.WriteAllBytes(path, [7]);
+            try { Assert.Throws<IOException>(() => blobs.Verify(overflow[0])); }
+            finally { File.WriteAllBytes(path, bytes); }
+        }
+        using var released = new FileStream(Path.Combine(source.Instance.RuntimeRoot, overflow[^1].RelativePath),
+            FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
+    }
+
     [Theory(DisplayName = "Terminal Readers Reuse Protected Plans And Still Reject Changed Sql And Released Inputs")]
     [InlineData(false)]
     [InlineData(true)]

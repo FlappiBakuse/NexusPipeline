@@ -20,13 +20,13 @@ internal static class ProviderTerminalCodec
         _ = Decode(participant); return true;
     }
 
-    internal static ImmutableArray<ProviderTerminalIntent> Read(JsonElement journal, ExecutionPlan total)
+    internal static ImmutableArray<ProviderTerminalIntent> Read(AttemptJournalView journal, ExecutionPlan total)
     {
         journal = ExecutionInvocationCodec.Current(journal);
         var jobs = WriterIntentCodec.Read(journal, total).ToDictionary(item => item.StepId);
         var result = ImmutableArray.CreateBuilder<ProviderTerminalIntent>();
         var closed = false;
-        foreach (var participant in journal.GetProperty("participants").EnumerateArray())
+        foreach (var participant in journal.Participants)
         {
             if (DispatchIntentCodec.IsParticipant(participant)) closed = true;
             if (!IsParticipant(participant)) continue;
@@ -37,17 +37,17 @@ internal static class ProviderTerminalCodec
                 step.EngineKind != "extensionWorker" || step.Provider is null ||
                 Guid.Parse(step.Provider.ActivationId) != item.ActivationId || step.Provider.EntryId != item.EntryId ||
                 participant.GetProperty("resourceKey").GetString() != "automation:" + step.ScriptId ||
-                item.BeforeRevision >= journal.GetProperty("revision").GetInt64() ||
+                item.BeforeRevision >= journal.Root.GetProperty("revision").GetInt64() ||
                 result.Any(prior => prior.Binding.StepId == step.StepId)) throw Invalid();
             result.Add(item);
         }
         return result.ToImmutable();
     }
 
-    internal static ImmutableArray<ProviderTerminalIntent> ReadHistory(JsonElement journal, ExecutionPlan total)
+    internal static ImmutableArray<ProviderTerminalIntent> ReadHistory(AttemptJournalView journal, ExecutionPlan total)
     {
         foreach (var view in ExecutionInvocationCodec.Views(journal)) _ = Read(view, total);
-        return journal.GetProperty("participants").EnumerateArray().Where(IsParticipant).Select(Decode).ToImmutableArray();
+        return journal.Participants.Where(IsParticipant).Select(Decode).ToImmutableArray();
     }
 
     internal static JsonObject Participant(ProviderTerminalIntent value, string scriptId) => new()

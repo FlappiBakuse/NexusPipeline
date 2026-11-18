@@ -39,12 +39,12 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
     }
 
     internal IReadOnlyList<BlobReference> ReadValidatedReferences(StepEvidenceBinding binding, BlobReference artifact,
-        (ExecutionPlan Total, StepWriterState Job, ProcessIdentity? Root) context)
+        (ExecutionPlan Total, StepWriterState Job, ProcessIdentity? Root) context, Func<JournalDocument?>? terminal = null)
     {
         // The caller owns the validated snapshot; this path verifies its artifacts and current SQL bindings.
         var references = new List<BlobReference>();
         var document = StepEvidenceCodec.Read(_blobs, binding, artifact);
-        _ = ReadDocument(binding, artifact, document.Stage == "collected", context, verifyContents: false, 0, references);
+        _ = ReadDocument(binding, artifact, document.Stage == "collected", context, verifyContents: false, 0, references, terminal: terminal);
         return references.Distinct().ToArray();
     }
 
@@ -112,6 +112,7 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
     {
         _ = Context(binding);
         var parent = new RecoveryJournalRegistry(database).ReadJournal(binding.ParentJournalId);
+        if (database.AttemptReads?.Find(binding.ParentJournalId) is { } owner) return owner.ReadClose(parent);
         var attempt = ReadPlan<RunAttemptPlan>(AttemptPreparedBinding.Reference(instance, parent), "run-attempt-plan.schema.json");
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = DatabaseConnections.BeginRead(connection);
@@ -145,7 +146,7 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
 
     private StepEvidenceDocument ReadDocument(StepEvidenceBinding binding, BlobReference artifact, bool collected,
         (ExecutionPlan Total, StepWriterState Job, ProcessIdentity? Root) context, bool verifyContents, int depth,
-        List<BlobReference>? references = null, VerifiedRecordRetirement? retirement = null)
+        List<BlobReference>? references = null, VerifiedRecordRetirement? retirement = null, Func<JournalDocument?>? terminal = null)
     {
         if (depth > 2) throw Invalid();
         var document = StepEvidenceCodec.Read(_blobs, binding, artifact);
@@ -163,7 +164,7 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
         StepEvidenceDocument? prior = null;
         if (document.PreviousObservation is { } previous)
         {
-            prior = ReadDocument(binding, previous, false, context, verifyContents, depth + 1, references, retirement);
+            prior = ReadDocument(binding, previous, false, context, verifyContents, depth + 1, references, retirement, terminal);
             if (document.Engine != prior.Engine && prior.Engine is not (EngineOutcome.Running or EngineOutcome.Unknown) ||
                 document.Business != prior.Business && prior.Business != BusinessOutcome.Unverified) throw Invalid();
         }
@@ -199,13 +200,15 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
                 .SingleOrDefault(item => item.Binding == binding);
             if (published is not null) throw Invalid();
         }
+        ExecutionAdapterObservation? adapterObservation = null;
         if (document.TaskAdapter is { } adapter)
         {
             var step = context.Total.Steps.Single(item => item.StepId == binding.StepId);
-            var observed = AdapterObservationCodec.Read(_blobs, binding, document.RawOutput ?? throw Invalid(), step, adapter);
-            TaskRetryEvidence.RequireInvocation(instance, contracts, context.Total, observed);
+            var observed = AdapterObservationCodec.Read(_blobs, binding, document.RawOutput ?? throw Invalid(), step, adapter,
+                references: references);
+            adapterObservation = observed;
+            TaskRetryEvidence.RequireInvocation(instance, contracts, context.Total, observed, terminal?.Invoke());
             references?.Add(adapter);
-            references?.AddRange(AdapterObservationCodec.References(_blobs, step, observed));
         }
         if (document.WorkspaceOutput is { } workspaceOutput)
         {
@@ -264,11 +267,11 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
             }
             else continuous = RawOutputReplay.Read(_blobs, raw, line => judgement.ObserveLine(judgement.InputIdentity, line));
         }
-        if (judgement.Mode == ExecutionJudgementMode.None && document.TaskAdapter is { } adapterReference &&
+        if (judgement.Mode == ExecutionJudgementMode.None && document.TaskAdapter is not null &&
             document.Business != BusinessOutcome.Unverified && prior?.Business != document.Business)
         {
             var step = context.Total.Steps.Single(item => item.StepId == binding.StepId);
-            var observed = AdapterObservationCodec.Read(_blobs, binding, document.RawOutput ?? throw Invalid(), step, adapterReference);
+            var observed = adapterObservation ?? throw Invalid();
             var decision = AdapterBusinessPolicy.Decide(step.Tasks.Select(TaskAdapterProtocol.ReadTask).ToImmutableArray(), observed.Observations);
             if (document.Root is null || document.Stage != "collected" || document.Business != decision.Outcome ||
                 document.ReasonCode != decision.ReasonCode && document.ReasonCode != document.Stop?.ReasonCode) throw Invalid();

@@ -20,14 +20,15 @@ internal sealed class NotificationDeliveryEvidence(RuntimeInstance instance, Sta
     }
 
     internal NotificationDeliverySnapshot ReadMetadata(BlobReference reference,
-        Microsoft.Data.Sqlite.SqliteConnection connection, Microsoft.Data.Sqlite.SqliteTransaction transaction)
+        Microsoft.Data.Sqlite.SqliteConnection connection, Microsoft.Data.Sqlite.SqliteTransaction transaction,
+        NotificationCatalogSnapshot? catalog = null)
     {
         if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot)
             throw new IOException("notification_delivery_instance_unbound");
         var snapshot = new NotificationDeliveryCodec(instance, contracts).Read(reference);
         var document = snapshot.Document;
-        var catalog = new NotificationCatalogCodec(instance, contracts).Read(document.Catalog);
-        if (catalog.Catalog.Revision != document.CatalogRevision || !catalog.Document.Tasks.Contains(document.Task))
+        catalog ??= new NotificationCatalogCodec(instance, contracts).Read(document.Catalog);
+        if (catalog.Reference != document.Catalog || catalog.Catalog.Revision != document.CatalogRevision || !catalog.Document.Tasks.Contains(document.Task))
             throw new IOException("notification_delivery_catalog_unbound");
         NotificationDeliveryRows.RequireSaved(connection, transaction, snapshot);
         NotificationDeliveryRows.RequireSource(connection, transaction, document);
@@ -54,11 +55,12 @@ internal sealed class NotificationDeliveryEvidence(RuntimeInstance instance, Sta
     }
 
     internal NotificationDeliverySnapshot ReadFromSnapshot(BlobReference reference,
-        Microsoft.Data.Sqlite.SqliteConnection connection, Microsoft.Data.Sqlite.SqliteTransaction transaction)
+        Microsoft.Data.Sqlite.SqliteConnection connection, Microsoft.Data.Sqlite.SqliteTransaction transaction,
+        ReceiptReadContext? source = null)
     {
-        var snapshot = ReadMetadata(reference, connection, transaction);
+        var snapshot = ReadMetadata(reference, connection, transaction, source?.Catalog);
         var document = snapshot.Document;
-        if (document.Source.Kind == "executionReceipt") RequireExecutionSource(snapshot, connection, transaction);
+        if (document.Source.Kind == "executionReceipt") RequireExecutionSource(snapshot, connection, transaction, source);
         else new ExplicitSourceEvidence(instance, database, contracts).RequireDelivery(snapshot, connection, transaction);
         return snapshot;
     }
@@ -81,8 +83,14 @@ internal sealed class NotificationDeliveryEvidence(RuntimeInstance instance, Sta
     }
 
     private void RequireExecutionSource(NotificationDeliverySnapshot snapshot,
-        Microsoft.Data.Sqlite.SqliteConnection connection, Microsoft.Data.Sqlite.SqliteTransaction transaction)
+        Microsoft.Data.Sqlite.SqliteConnection connection, Microsoft.Data.Sqlite.SqliteTransaction transaction,
+        ReceiptReadContext? context)
     {
+        if (context is not null)
+        {
+            new ReceiptRouteCodec(instance, database, contracts).RequireOrigin(snapshot, context, connection, transaction);
+            return;
+        }
         var document = snapshot.Document;
         var receipt = document.Source.Receipt;
         var registered = RecoveryJournalRegistry.ReadInside(connection, transaction, receipt.JournalId);

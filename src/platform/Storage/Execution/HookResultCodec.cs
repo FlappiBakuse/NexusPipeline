@@ -19,12 +19,12 @@ internal static class HookResultCodec
         _ = Decode(participant); return true;
     }
 
-    internal static ImmutableArray<HookResultIntent> Read(JsonElement journal, NexusPipeline.Platform.Serialization.Protocol.ExecutionPlan total)
+    internal static ImmutableArray<HookResultIntent> Read(AttemptJournalView journal, NexusPipeline.Platform.Serialization.Protocol.ExecutionPlan total)
     {
         journal = ExecutionInvocationCodec.Current(journal);
         var jobs = WriterIntentCodec.ReadJobs(journal, total);
         var result = ImmutableArray.CreateBuilder<HookResultIntent>();
-        foreach (var participant in journal.GetProperty("participants").EnumerateArray().Where(IsParticipant))
+        foreach (var participant in journal.Participants.Where(IsParticipant))
         {
             var item = Decode(participant);
             var step = total.Steps.SingleOrDefault(step => step.StepId == item.StepId) ?? throw Invalid();
@@ -38,7 +38,7 @@ internal static class HookResultCodec
         return result.ToImmutable();
     }
 
-    internal static ImmutableArray<HookResultIntent> ReadHistory(JsonElement journal, NexusPipeline.Platform.Serialization.Protocol.ExecutionPlan total) =>
+    internal static ImmutableArray<HookResultIntent> ReadHistory(AttemptJournalView journal, NexusPipeline.Platform.Serialization.Protocol.ExecutionPlan total) =>
         ExecutionInvocationCodec.Views(journal).SelectMany(view => Read(view, total)).DistinctBy(item => item.Binding.JobName).ToImmutableArray();
 
     internal static JsonObject Participant(HookResultIntent item, string scriptId) => new()

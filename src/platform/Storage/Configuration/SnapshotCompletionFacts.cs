@@ -15,7 +15,7 @@ internal static class SnapshotCompletionFacts
         {
             resource.Address, resource.OperationId, resource.JournalId, resource.ExpectedRevision, resource.Contract,
             resource.PlanPath, resource.PlanDigest,
-            JournalDigest = Convert.ToHexStringLower(SHA256.HashData(journals.Read(resource.JournalId).Export()))
+            JournalDigest = journals.Read(resource.JournalId).Sha256
         }).ToArray();
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration);
         using var command = ConfigurationRunRows.Command(connection, null, session.SessionId);

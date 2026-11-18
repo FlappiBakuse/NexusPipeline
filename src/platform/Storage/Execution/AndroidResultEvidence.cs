@@ -27,7 +27,7 @@ internal sealed class AndroidResultEvidence(RuntimeInstance instance, StateDatab
         AndroidStartupIntent intent, bool verifyContent) =>
         RequireStartup(state.Latest.Root, state.Total, state.Attempt.ExecutionPlan.Sha256, intent, verifyContent);
 
-    internal IReadOnlyList<BlobReference> RequireStartup(JsonElement journal, ExecutionPlan total, string totalSha256,
+    internal IReadOnlyList<BlobReference> RequireStartup(AttemptJournalView journal, ExecutionPlan total, string totalSha256,
         AndroidStartupIntent intent, bool verifyContent)
     {
         var value = _reader.Read<AndroidStartupDocument>(intent.Artifact);
@@ -62,7 +62,7 @@ internal sealed class AndroidResultEvidence(RuntimeInstance instance, StateDatab
         AndroidCollectedIntent intent, bool verifyContent) =>
         RequireCollected(state.Latest.Root, state.Total, state.Attempt.ExecutionPlan.Sha256, intent, verifyContent);
 
-    internal IReadOnlyList<BlobReference> RequireCollected(JsonElement journal, ExecutionPlan total, string totalSha256,
+    internal IReadOnlyList<BlobReference> RequireCollected(AttemptJournalView journal, ExecutionPlan total, string totalSha256,
         AndroidCollectedIntent intent, bool verifyContent)
     {
         var references = AndroidCollectedCodec.References(journal, total, totalSha256, _reader, intent, verifyContent).ToList();
@@ -112,7 +112,7 @@ internal sealed class AndroidResultEvidence(RuntimeInstance instance, StateDatab
         if (!valid) throw Invalid();
     }
 
-    private static void RequireCleanup(JsonElement journal, ExecutionPlan total, string totalSha256,
+    private static void RequireCleanup(AttemptJournalView journal, ExecutionPlan total, string totalSha256,
         AndroidCollectedIntent intent,
         IReadOnlyList<(AndroidCommandRegistration Request, ExecutionAndroidObservation Meaning)> observed)
     {

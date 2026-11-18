@@ -35,6 +35,9 @@ public sealed class NotificationDeliveryService
     {
         _lease.VerifyHeld(_instance);
         if (maximumRoutes is < 1 or > 200) throw new ArgumentOutOfRangeException(nameof(maximumRoutes));
+        using var paths = DirectoryAttributeScope.Hold(_instance);
+        using var identity = InstanceReadScope.Hold(_instance, _lease);
+        using var blobs = reads.CaptureMetadata();
         var pending = new List<(BlobReference Source, int Ordinal)>();
         using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System | DatabaseDomain.Content))
         using (var command = NotificationDeliveryRows.Command(connection, null,
@@ -59,6 +62,10 @@ public sealed class NotificationDeliveryService
     public RunDeliveryStatus ReadPendingForRun(Guid runId)
     {
         if (runId == Guid.Empty) throw new ArgumentException("notification_run_invalid", nameof(runId));
+        using var paths = DirectoryAttributeScope.Hold(_instance);
+        using var identity = InstanceReadScope.Hold(_instance, _lease);
+        using var blobs = BlobReadScope.Hold(_instance);
+        using var reads = new NotificationAttemptReads(_instance, _database, _contracts, _lease);
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System);
         using var transaction = DatabaseConnections.BeginRead(connection);
         BlobReference reference;
@@ -69,6 +76,7 @@ public sealed class NotificationDeliveryService
             if (!row.Read()) return new(false, false, 0, 0, 0, 0, 0, 0);
             reference = new(row.GetString(0), row.GetInt64(1), row.GetString(2));
         }
+        reads.HoldReceipt(reference, connection, transaction);
         var source = new NotificationReceiptCodec(_instance, _database, _contracts).ReadContext(reference, connection, transaction);
         var counts = new int[Enum.GetValues<NotificationDeliveryState>().Length];
         var expanded = true;
@@ -80,7 +88,7 @@ public sealed class NotificationDeliveryService
             foreach (var target in route.Targets)
             {
                 if (target.Delivery is null) { counts[(int)NotificationDeliveryState.Skipped]++; continue; }
-                var delivery = new NotificationDeliveryEvidence(_instance, _database, _contracts).ReadFromSnapshot(target.Delivery, connection, transaction);
+                var delivery = new NotificationDeliveryEvidence(_instance, _database, _contracts).ReadFromSnapshot(target.Delivery, connection, transaction, source);
                 var state = NotificationDeliveryRows.ReadState(connection, transaction, delivery.Document.OperationId);
                 counts[(int)state.State]++;
             }

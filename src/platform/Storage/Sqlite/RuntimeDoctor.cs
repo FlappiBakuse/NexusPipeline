@@ -13,6 +13,9 @@ public sealed class RuntimeDoctor : IRuntimeDoctor
     private readonly StateDatabase _database;
     private readonly IRecoveryIndex _recovery;
     private readonly TimeProvider _clock;
+    private readonly object _controlGate = new();
+    private RuntimeControlSnapshot? _controlSnapshot;
+    private ControlStatisticsVersion _controlVersion;
 
     public RuntimeDoctor(RuntimeInstance instance, StateDatabase database, IRecoveryIndex recovery, TimeProvider? clock = null)
     {
@@ -26,6 +29,19 @@ public sealed class RuntimeDoctor : IRuntimeDoctor
 
     public RuntimeDoctorReport Read(CancellationToken cancellationToken = default) => ReadCore(false, cancellationToken);
     public RuntimeDoctorReport ReadSupport(CancellationToken cancellationToken = default) => ReadCore(true, cancellationToken);
+
+    public RuntimeStatus ReadStatus(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var recovery = _recovery.Current;
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
+        using var transaction = DatabaseConnections.BeginRead(connection);
+        RequireIdentity(connection, transaction);
+        var pending = ReadPendingOperations(connection, transaction);
+        transaction.Commit();
+        cancellationToken.ThrowIfCancellationRequested();
+        return new(_instance.InstanceId, Admission(recovery), recovery.Revision, pending);
+    }
 
     private RuntimeDoctorReport ReadCore(bool support, CancellationToken cancellationToken)
     {
@@ -58,14 +74,17 @@ public sealed class RuntimeDoctor : IRuntimeDoctor
         }
         transaction.Commit();
         cancellationToken.ThrowIfCancellationRequested();
-        var admission = !ReferenceEquals(recovery, _recovery.Current) ? DiagnosticAdmissionState.ChangedDuringRead :
-            recovery.IsReady && recovery.Isolations.Count == 0 && recovery.ResourceHolds.Count == 0
-                ? DiagnosticAdmissionState.Ready : DiagnosticAdmissionState.Blocked;
+        var admission = Admission(recovery);
         // Unknown owner reasons and resource names can contain private input; the report carries only typed state and counts.
         return new("nexus.runtime.diagnostic", 1, Guid.NewGuid(), _instance.InstanceId, _clock.GetUtcNow(), admission,
             recovery.Revision, recovery.Isolations.Count, recovery.ResourceHolds.Count, pending, attempts, runs,
             details is null || admission != DiagnosticAdmissionState.ChangedDuringRead ? details : details with { RecoveryState = "changedDuringRead" });
     }
+
+    private DiagnosticAdmissionState Admission(RecoveryProjection recovery) =>
+        !ReferenceEquals(recovery, _recovery.Current) ? DiagnosticAdmissionState.ChangedDuringRead :
+        recovery.IsReady && recovery.Isolations.Count == 0 && recovery.ResourceHolds.Count == 0
+            ? DiagnosticAdmissionState.Ready : DiagnosticAdmissionState.Blocked;
 
     public RuntimeRecordCounts ReadCounts()
     {
@@ -77,21 +96,53 @@ public sealed class RuntimeDoctor : IRuntimeDoctor
 
     public RuntimeControlSnapshot ReadControlSnapshot()
     {
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true,
-            domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Records | DatabaseDomain.System);
+        var owner = _database.RuntimeLease;
+        if (owner is null) return ReadControlSnapshot(ControlStatisticsFields.All, null);
+        owner.VerifyHeld(_instance);
+        lock (_controlGate)
+        {
+            var version = _database.ReadControlVersion();
+            var previous = version is not null ? _controlSnapshot : null;
+            var fields = previous is null ? ControlStatisticsFields.All : version!.Value.ChangedSince(_controlVersion);
+            if (fields == 0) return previous!;
+            var result = ReadControlSnapshot(fields, previous);
+            if (version is { } stable && _database.ReadControlVersion() == stable)
+            {
+                _controlVersion = stable; _controlSnapshot = result;
+            }
+            else if (fields != ControlStatisticsFields.All)
+                result = ReadControlSnapshot(ControlStatisticsFields.All, null);
+            return result;
+        }
+    }
+
+    private RuntimeControlSnapshot ReadControlSnapshot(ControlStatisticsFields fields, RuntimeControlSnapshot? previous)
+    {
+        var domains = DatabaseDomain.Runtime;
+        if ((fields & (ControlStatisticsFields.Attempts | ControlStatisticsFields.Runs)) != 0) domains |= DatabaseDomain.Records;
+        if (fields.HasFlag(ControlStatisticsFields.Catalog)) domains |= DatabaseDomain.Automation;
+        if (fields.HasFlag(ControlStatisticsFields.Settings)) domains |= DatabaseDomain.System;
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: domains);
         using var transaction = DatabaseConnections.BeginRead(connection);
         RequireIdentity(connection, transaction);
-        long catalog;
-        using (var command = connection.CreateCommand())
-        {
-            command.Transaction = transaction;
-            command.CommandText = "SELECT revision FROM automation.automation_catalog_state WHERE singleton=1;";
-            catalog = Convert.ToInt64(command.ExecuteScalar() ?? throw new IOException("automation_catalog_revision_missing"), CultureInfo.InvariantCulture);
-        }
-        var settings = HostSettingsRows.ReadCurrent(connection, transaction);
-        var counts = ReadCounts(connection, transaction);
+        var catalog = fields.HasFlag(ControlStatisticsFields.Catalog)
+            ? ReadCatalogRevision(connection, transaction) : previous!.CatalogRevision;
+        var settings = fields.HasFlag(ControlStatisticsFields.Settings)
+            ? HostSettingsRows.ReadCurrent(connection, transaction).Revision : previous!.SettingsRevision;
+        var counts = new RuntimeRecordCounts(
+            fields.HasFlag(ControlStatisticsFields.Pending) ? ReadPendingOperations(connection, transaction) : previous!.Counts.PendingOperations,
+            fields.HasFlag(ControlStatisticsFields.Attempts) ? ReadAttemptCount(connection, transaction) : previous!.Counts.Attempts,
+            fields.HasFlag(ControlStatisticsFields.Runs) ? ReadRunCount(connection, transaction) : previous!.Counts.CompletedRuns);
         transaction.Commit();
-        return new(catalog, settings.Revision, counts);
+        return new(catalog, settings, counts);
+    }
+
+    private static long ReadCatalogRevision(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT revision FROM automation.automation_catalog_state WHERE singleton=1;";
+        return Convert.ToInt64(command.ExecuteScalar() ?? throw new IOException("automation_catalog_revision_missing"), CultureInfo.InvariantCulture);
     }
 
     private void RequireIdentity(SqliteConnection connection, SqliteTransaction transaction)
@@ -107,9 +158,16 @@ public sealed class RuntimeDoctor : IRuntimeDoctor
     }
 
     private static RuntimeRecordCounts ReadCounts(SqliteConnection connection, SqliteTransaction transaction) => new(
-        Count(connection, transaction, "SELECT COUNT(*) FROM main.operations WHERE status='accepted';"),
-        Count(connection, transaction, "SELECT COUNT(*) FROM records.attempt_receipts;"),
-        Count(connection, transaction, "SELECT COUNT(*) FROM records.run_records;"));
+        ReadPendingOperations(connection, transaction), ReadAttemptCount(connection, transaction), ReadRunCount(connection, transaction));
+
+    private static long ReadPendingOperations(SqliteConnection connection, SqliteTransaction transaction) =>
+        Count(connection, transaction, "SELECT COUNT(*) FROM main.operations WHERE status='accepted';");
+
+    private static long ReadAttemptCount(SqliteConnection connection, SqliteTransaction transaction) =>
+        Count(connection, transaction, "SELECT COUNT(*) FROM records.attempt_receipts;");
+
+    private static long ReadRunCount(SqliteConnection connection, SqliteTransaction transaction) =>
+        Count(connection, transaction, "SELECT COUNT(*) FROM records.run_records;");
 
     private static IReadOnlyList<DiagnosticExtension> ReadExtensions(SqliteConnection connection,
         SqliteTransaction transaction, string installed)

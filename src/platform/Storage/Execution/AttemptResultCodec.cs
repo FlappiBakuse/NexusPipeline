@@ -58,7 +58,7 @@ internal static class AttemptResultCodec
     };
 
     internal static AttemptReceipt Receipt(RunAttemptPlan plan, JournalDocument document, AttemptFacts facts) => new(document.JournalId,
-        Guid.Parse(plan.OperationId), document.PlanDigest, Convert.ToHexStringLower(SHA256.HashData(document.Export())), facts);
+        Guid.Parse(plan.OperationId), document.PlanDigest, document.Sha256, facts);
 
     private static ExecutionOutcomes Outcomes(AttemptFacts facts) => new()
     {

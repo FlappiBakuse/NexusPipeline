@@ -51,11 +51,11 @@ internal static class BindingSkipCodec
         return value;
     }
 
-    internal static ImmutableArray<ExecutionBindingSkip> Read(JsonElement journal, NexusPipeline.Platform.Serialization.Protocol.ExecutionPlan total)
+    internal static ImmutableArray<ExecutionBindingSkip> Read(AttemptJournalView journal, NexusPipeline.Platform.Serialization.Protocol.ExecutionPlan total)
     {
-        var values = journal.GetProperty("participants").EnumerateArray().Where(Matches).Select(item => Decode(item, total)).ToImmutableArray();
+        var values = journal.Participants.Where(Matches).Select(item => Decode(item, total)).ToImmutableArray();
         if (values.Select(value => value.StepId).Distinct(StringComparer.Ordinal).Count() != values.Length ||
-            values.Any(value => journal.GetProperty("participants").EnumerateArray().Any(participant =>
+            values.Any(value => journal.Participants.Any(participant =>
                 WriterIntentCodec.IsParticipant(participant) &&
                 participant.GetProperty("identity").GetProperty("stepId").GetString() == value.StepId))) throw Invalid();
         return values;
@@ -67,7 +67,7 @@ internal static class BindingSkipCodec
         ["identity"] = JsonSerializer.SerializeToNode(value, StepResultCodec.Options)
     };
 
-    internal static string[] Processed(JsonElement journal, NexusPipeline.Platform.Serialization.Protocol.ExecutionPlan total,
+    internal static string[] Processed(AttemptJournalView journal, NexusPipeline.Platform.Serialization.Protocol.ExecutionPlan total,
         IReadOnlyList<StepWriterState> jobs)
     {
         var represented = jobs.Select(job => job.StepId).Concat(Read(journal, total).Select(value => value.StepId)).ToHashSet(StringComparer.Ordinal);

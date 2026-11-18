@@ -59,7 +59,7 @@ internal sealed class RuntimeUseCases(IRuntimeDoctor doctor, ExecutionRuntimeCon
     internal object Status(AuthenticatedControlRequest request, CancellationToken cancellation = default, int? currentWebPort = null)
     {
         request.Require(ControlCapability.StatusRead);
-        var report = doctor.Read(cancellation);
+        var report = doctor.ReadStatus(cancellation);
         return new
         {
             format = "nexus.control.status", version = 1, report.InstanceId,

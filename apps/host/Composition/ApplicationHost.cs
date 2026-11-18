@@ -254,26 +254,19 @@ internal static class ApplicationHost
             new ImageCatalogReader(instance, runtime.Database, contracts),
             new NexusPipeline.Platform.Storage.Records.ContentRetirementService(instance, runtime.Database,
                 contracts, instanceLease, resources, runtime.Recovery, payloadRoots), services.History);
-        var eventStatistics = new NexusPipeline.Host.Control.Events.ControlEventStatistics(
-            () => runtime.Database.CommitSequence, () =>
-            {
-                var snapshot = doctor.ReadControlSnapshot();
-                return new(snapshot.CatalogRevision, snapshot.SettingsRevision,
-                    snapshot.Counts.PendingOperations, snapshot.Counts.Attempts, snapshot.Counts.CompletedRuns);
-            });
         var eventFeed = new NexusPipeline.Host.Control.Events.ControlEventFeed(instance.InstanceId,
             () => new(runtime.Database.CommitSequence, runtime.Recovery.Current.Revision, execution.ProgressRevision,
                 interfacePreferences.ChangeVersion, ExtensionFrontendControl.Identity(extensions.Activator)), () =>
         {
-            var statistics = eventStatistics.Read();
+            var statistics = doctor.ReadControlSnapshot();
             var recovery = runtime.Recovery.Current;
             return new { mutationSequence = runtime.Database.CommitSequence, executionRevision = execution.ProgressRevision,
                 catalogRevision = statistics.CatalogRevision, settingsRevision = statistics.SettingsRevision,
                 interfaceRevision = interfacePreferences.PublishedRevision,
                 extensionGeneration = ExtensionFrontendControl.Identity(extensions.Activator),
                 admission = recovery.IsReady && recovery.Isolations.Count == 0 && recovery.ResourceHolds.Count == 0 ? "Ready" : "Blocked",
-                recoveryRevision = recovery.Revision, pendingOperations = statistics.PendingOperations,
-                attempts = statistics.Attempts, completedRuns = statistics.CompletedRuns };
+                recoveryRevision = recovery.Revision, pendingOperations = statistics.Counts.PendingOperations,
+                attempts = statistics.Counts.Attempts, completedRuns = statistics.Counts.CompletedRuns };
         });
         new ControlEvents(controlAuthority, eventFeed).Map(app);
         new ExecutionReadControl(controlAuthority, execution, new LiveLogReader(instance, instanceLease)).Map(app);

@@ -30,14 +30,14 @@ internal static class ConfigurationRunBinding
             var path = Path.Combine(instance.RuntimeRoot, resource.PlanPath);
             var reference = new BlobReference(resource.PlanPath, new FileInfo(path).Length, resource.PlanDigest);
             if (!expected.Remove(reference)) throw new IOException("configuration_run_parent_coverage_invalid");
-            var plan = codec.ReadStructure(reference);
+            var plan = codec.ReadStructure(reference, out var state);
             if (plan.RunState is null || plan.EditPolicy is null || plan.Editor is not null || plan.PhysicalClaims.IsDefaultOrEmpty ||
                 plan.Kind != JournalKind.ConfigExchange || plan.OperationId != resource.OperationId || plan.JournalId != resource.JournalId ||
                 !registered.TryGetValue(resource.JournalId, out var journal) || journal.OperationId != resource.OperationId || journal.Kind != plan.Kind ||
                 journal.PlanPath != resource.PlanPath || journal.PlanDigest != resource.PlanDigest ||
                 !journal.ResourceKeys.Contains(ConfigurationRevisionService.ResourceKey(resource.Address), StringComparer.Ordinal))
                 throw new IOException("configuration_run_resource_unbound");
-            var state = new RunStateCodec(instance, contracts, blobs).ReadStructure(plan.RunState);
+            if (state is null) throw new IOException("configuration_run_resource_unbound");
             evidence.RequireResource(state, plan.TargetPath);
             if (state.Source.Address != resource.Address || state.InitialPublicationRevision != resource.ExpectedRevision || state.Source.Contract != resource.Contract ||
                 state.BindingRevision != session.ExpectedBindingRevision) throw new IOException("configuration_run_baseline_unbound");

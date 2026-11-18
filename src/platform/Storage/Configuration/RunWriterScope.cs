@@ -53,8 +53,22 @@ internal sealed class RunWriterScope : IConfigurationWriterScope
         _admission.RequireRunAdmission(sessionId);
     }
 
-    public void RequirePrepared()
-    { var session = Required(); RequireGroupAdmission(session); RequireParentAdmission(session); _admission.RequireRunAdmission(OperationId); }
+    public void RequirePrepared() => RequirePrepared(requireParent: false);
+
+    internal void RequireAttemptPrepared(IConfigurationWriterScope parent)
+    {
+        if (!ReferenceEquals(_parentScope, parent)) throw new IOException("attempt_configuration_writer_unbound");
+        RequirePrepared(requireParent: true);
+    }
+
+    private void RequirePrepared(bool requireParent)
+    {
+        var session = Required();
+        RequireGroupAdmission(session);
+        RequireParentAdmission(session, requireParent);
+        _admission.RequireRunAdmission(OperationId);
+    }
+
     internal void RequireTargetInstallation()
     {
         var session = Required();
@@ -87,11 +101,11 @@ internal sealed class RunWriterScope : IConfigurationWriterScope
         _writers.RegisterJob(JournalIds, job, parent, session.StepId); _jobName = job.Name;
     }
 
-    private void RequireParentAdmission(ConfigurationRunStatus session)
+    private void RequireParentAdmission(ConfigurationRunStatus session, bool requireParent = false)
     {
-        var binding = _runs.ReadBound(session);
-        if (binding.ParentJournal.Phase == JournalPhase.Prepared) return;
-        if (binding.ParentJournal.Phase != JournalPhase.Applying || _parentScope is null ||
+        var phase = _runs.ReadBound(session).ParentJournal.Phase;
+        if (phase == JournalPhase.Prepared && !requireParent) return;
+        if (phase is not (JournalPhase.Prepared or JournalPhase.Applying) || _parentScope is null ||
             _parentScope.OperationId != OwnerOperationId || _parentScope.ProcessScopeId != ProcessScopeId ||
             !_parentScope.JournalIds.SequenceEqual(new[] { session.ParentJournalId }) || _parentScope.Command is null ||
             !EditorCommandPolicy.Equal(_parentScope.Command, Command)) throw new IOException("configuration_run_parent_admission_closed");

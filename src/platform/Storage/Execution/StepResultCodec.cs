@@ -35,7 +35,7 @@ internal static class StepResultCodec
         _ = Decode(participant); return true;
     }
 
-    internal static ImmutableArray<StepResultState> Read(JsonElement journal, ExecutionPlan total)
+    internal static ImmutableArray<StepResultState> Read(AttemptJournalView journal, ExecutionPlan total)
     {
         if (AttemptReadScope.TryRead<StepResultState>(journal, total, out var saved)) return saved;
         var original = journal;
@@ -43,7 +43,7 @@ internal static class StepResultCodec
         var jobs = WriterIntentCodec.Read(journal, total).ToDictionary(item => item.StepId);
         var results = new Dictionary<string, StepResultState>(StringComparer.Ordinal);
         var observations = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var participant in journal.GetProperty("participants").EnumerateArray().Where(IsParticipant))
+        foreach (var participant in journal.Participants.Where(IsParticipant))
         {
             var item = Decode(participant); var binding = item.Binding;
             var step = total.Steps.SingleOrDefault(value => value.StepId == binding.StepId) ?? throw Invalid();
@@ -74,15 +74,15 @@ internal static class StepResultCodec
         _ = DecodeUndispatched(participant); return true;
     }
 
-    internal static ExecutionUndispatchedSteps? ReadUndispatched(JsonElement journal, ExecutionPlan total)
+    internal static ExecutionUndispatchedSteps? ReadUndispatched(AttemptJournalView journal, ExecutionPlan total)
     {
-        var participants = journal.GetProperty("participants").EnumerateArray().Where(IsUndispatchedParticipant).ToArray();
+        var participants = journal.Participants.Where(IsUndispatchedParticipant).ToArray();
         if (participants.Length == 0) return null;
         if (participants.Length != 1) throw Invalid();
         var item = DecodeUndispatched(participants[0]); var close = DispatchIntentCodec.Read(journal, total);
         var jobs = BindingSkipCodec.Processed(journal, total, WriterIntentCodec.ReadJobs(journal, total));
-        if (close is null || item.ParentJournalId != journal.GetProperty("journalId").GetGuid() ||
-            item.ParentOperationId != journal.GetProperty("operationId").GetGuid() || item.PlanDigest != journal.GetProperty("planDigest").GetString() ||
+        if (close is null || item.ParentJournalId != journal.Root.GetProperty("journalId").GetGuid() ||
+            item.ParentOperationId != journal.Root.GetProperty("operationId").GetGuid() || item.PlanDigest != journal.Root.GetProperty("planDigest").GetString() ||
             item.DispatchOperationId != close.CancellationOperationId || item.ReasonCode != close.ReasonCode ||
             jobs.Length >= total.Steps.Count ||
             !item.StepIds.SequenceEqual(total.Steps.Skip(jobs.Length).Select(step => step.StepId)) ||
@@ -90,7 +90,7 @@ internal static class StepResultCodec
         return item;
     }
 
-    internal static ImmutableArray<ExecutionStepCompletion> Coverage(JsonElement journal, ExecutionPlan total)
+    internal static ImmutableArray<ExecutionStepCompletion> Coverage(AttemptJournalView journal, ExecutionPlan total)
     {
         if (AttemptReadScope.TryRead<ExecutionStepCompletion>(journal, total, out var saved)) return saved;
         var writers = WriterIntentCodec.ReadJobs(journal, total);
@@ -115,7 +115,7 @@ internal static class StepResultCodec
         }).ToImmutableArray());
     }
 
-    internal static ImmutableArray<ExecutionStepFact> CompletedFacts(JsonElement journal, ExecutionPlan total, string? totalPlanSha256 = null) => Coverage(journal, total)
+    internal static ImmutableArray<ExecutionStepFact> CompletedFacts(AttemptJournalView journal, ExecutionPlan total, string? totalPlanSha256 = null) => Coverage(journal, total)
         .Select(item => item.Kind switch
         {
             StepCompletionKind.Collected => ExecutionBindingRoles.Combine(journal, total, item, totalPlanSha256),
@@ -142,13 +142,12 @@ internal static class StepResultCodec
         return item;
     }
 
-    internal static StepEvidenceBinding Binding(JsonElement journal, StepWriterState job) => new(
-        journal.GetProperty("instanceId").GetGuid(), journal.GetProperty("journalId").GetGuid(), journal.GetProperty("operationId").GetGuid(),
-        journal.GetProperty("runId").GetGuid(), journal.GetProperty("attemptId").GetGuid(), job.StepId, job.JobName, job.WriterId, job.SessionId,
-        journal.GetProperty("planDigest").GetString()!);
+    internal static StepEvidenceBinding Binding(AttemptJournalView journal, StepWriterState job) => new(
+        journal.Root.GetProperty("instanceId").GetGuid(), journal.Root.GetProperty("journalId").GetGuid(), journal.Root.GetProperty("operationId").GetGuid(),
+        journal.Root.GetProperty("runId").GetGuid(), journal.Root.GetProperty("attemptId").GetGuid(), job.StepId, job.JobName, job.WriterId, job.SessionId,
+        journal.Root.GetProperty("planDigest").GetString()!);
 
-    internal static IReadOnlyList<StepResultIntent> ReadAll(JsonElement journal) => journal.GetProperty("participants")
-        .EnumerateArray().Where(IsParticipant).Select(Decode).ToArray();
+    internal static IReadOnlyList<StepResultIntent> ReadAll(AttemptJournalView journal) => journal.Participants.Where(IsParticipant).Select(Decode).ToArray();
 
     internal static JsonObject Participant(StepResultIntent item, string scriptId) => new()
     {

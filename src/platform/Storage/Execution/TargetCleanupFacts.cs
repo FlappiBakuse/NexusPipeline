@@ -1,6 +1,4 @@
 using NexusPipeline.Core.Execution;
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using NexusPipeline.Extensibility.Protocol;
 
 namespace NexusPipeline.Platform.Storage.Execution;
@@ -10,19 +8,21 @@ internal static class TargetCleanupFacts
     internal static ExecutionTargetCleanup Read(AttemptWriterState state, string stepId) =>
         Read(state.Total, state.Latest.Root, state.Attempt.ExecutionPlan.Sha256, stepId);
 
-    internal static ExecutionTargetCleanup ReadAtAndroidCollection(ExecutionPlan total, JsonElement journal, string totalSha256, string stepId)
+    internal static ExecutionTargetCleanup ReadAtAndroidCollection(ExecutionPlan total, AttemptJournalView journal, string totalSha256, string stepId)
     {
-        var participants = journal.GetProperty("participants").EnumerateArray().ToArray();
-        var prefix = participants.TakeWhile(item => !AndroidCollectedCodec.IsParticipant(item) ||
-            item.GetProperty("identity").GetProperty("binding").GetProperty("stepId").GetString() != stepId).ToArray();
-        if (prefix.Length == participants.Length) return Read(total, journal, totalSha256, stepId);
         // Append-only participants preserve the facts that authorized cleanup before any later close.
-        var context = JsonNode.Parse(journal.GetRawText())!.AsObject();
-        context["participants"] = new JsonArray(prefix.Select(item => JsonNode.Parse(item.GetRawText())).ToArray());
-        return Read(total, JsonSerializer.SerializeToElement(context), totalSha256, stepId);
+        var prefix = 0;
+        foreach (var item in journal.Participants)
+        {
+            if (AndroidCollectedCodec.IsParticipant(item) &&
+                item.GetProperty("identity").GetProperty("binding").GetProperty("stepId").GetString() == stepId)
+                return Read(total, journal with { Limit = prefix }, totalSha256, stepId);
+            prefix++;
+        }
+        return Read(total, journal, totalSha256, stepId);
     }
 
-    internal static ExecutionTargetCleanup Read(ExecutionPlan total, JsonElement journal, string totalSha256, string stepId)
+    internal static ExecutionTargetCleanup Read(ExecutionPlan total, AttemptJournalView journal, string totalSha256, string stepId)
     {
         var step = total.Steps.Single(item => item.StepId == stepId);
         if (step.Target is not { } target || target.Kind == "pc" && (!target.LaunchByHost || target.Pc is null || target.Android is not null) ||

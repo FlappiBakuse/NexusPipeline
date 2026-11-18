@@ -348,7 +348,7 @@ internal static class AttemptPreparedBinding
     }
 
     internal static AttemptReceipt ExpectedReceipt(RunAttemptPlan plan, JournalDocument document) => new(document.JournalId,
-        Guid.Parse(plan.OperationId), document.PlanDigest, Convert.ToHexStringLower(SHA256.HashData(document.Export())),
+        Guid.Parse(plan.OperationId), document.PlanDigest, document.Sha256,
         AttemptResultCodec.Read(document.Root, plan)?.Facts ?? NoEffectReceipt.Facts(plan));
 
     private static void VerifyTerminal(RunAttemptPlan plan, ExecutionPlan total, JsonElement journal, EffectGateSnapshot gate, DispatchCloseIntent? close,

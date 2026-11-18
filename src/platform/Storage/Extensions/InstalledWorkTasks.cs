@@ -25,12 +25,11 @@ internal sealed class InstalledWorkTasks(InstalledExtensionConsumption consumpti
         use.RequireCurrent(); return ValueTask.FromResult(result);
     }
 
-    public ValueTask<WorkClock> ReadClockAsync(CancellationToken cancellationToken)
+    public async ValueTask<WorkClock> ReadClockAsync(CancellationToken cancellationToken)
     {
-        Require(); cancellationToken.ThrowIfCancellationRequested();
-        using var use = consumption.Begin();
+        Require(); using var use = await consumption.BeginAsync(cancellationToken).ConfigureAwait(false);
         var current = scheduling.ReadClock();
-        use.RequireCurrent(); return ValueTask.FromResult(new WorkClock(current.UtcNow, current.TimeZoneId));
+        use.RequireCurrent(); return new WorkClock(current.UtcNow, current.TimeZoneId);
     }
 
     public ValueTask<WorkInvocation> ReadCurrentAsync(CancellationToken cancellationToken)

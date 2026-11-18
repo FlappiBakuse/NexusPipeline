@@ -63,6 +63,7 @@ internal sealed class HistoryReadScope : IDisposable
         _ = DatabaseReadScope.ProtectedPath(database.DatabasePath);
         RequireSql(scope, DatabaseDomain.Runtime);
         var version = ReadVersion(scope);
+        if (version is null) return ReadDatabase(database, read);
         if (scope._snapshotVersion != version) { scope._snapshots.Clear(); scope._snapshotVersion = version; }
         var key = required ?? Guid.Empty;
         if (scope._snapshots.TryGetValue(key, out var saved)) return saved;
@@ -72,8 +73,8 @@ internal sealed class HistoryReadScope : IDisposable
         return value;
     }
 
-    private static long ReadVersion(HistoryReadScope scope) => scope._database.RuntimeLease is not null
-        ? scope._database.DomainSequence(DatabaseDomain.Runtime)
+    private static long? ReadVersion(HistoryReadScope scope) => scope._database.RuntimeLease is not null
+        ? scope._database.ReadInstallationVersion(DatabaseDomain.Runtime)?.Runtime
         : (long)DatabaseConnections.Scalar(scope._sql!, "PRAGMA main.data_version;");
 
     private static void RequireSql(HistoryReadScope scope, DatabaseDomain domains)

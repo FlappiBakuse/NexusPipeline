@@ -47,10 +47,12 @@ internal sealed class NotificationSender : IAsyncDisposable
     }
 
     internal async Task<NotificationDeliveryState> SendOwnedAsync(ResourceOperationLease actualSenderRoot,
-        ResourceLeaseManager expectedOwner, BlobReference reference, CancellationToken cancellation = default)
+        ResourceLeaseManager expectedOwner, BlobReference reference, CancellationToken cancellation = default,
+        NotificationAttemptReads? reads = null)
     {
         _lease.VerifyHeld(_instance);
-        var snapshot = new NotificationDeliveryEvidence(_instance, _database, _contracts).Read(reference);
+        NotificationDeliverySnapshot snapshot;
+        using (reads?.CaptureMetadata()) snapshot = new NotificationDeliveryEvidence(_instance, _database, _contracts).Read(reference);
         if (NotificationDeliveryOrigins.Reference(snapshot.Document) is null) throw new IOException("notification_delivery_registration_required");
         var id = snapshot.Document.OperationId;
         var completed = Enter(id);
@@ -60,8 +62,12 @@ internal sealed class NotificationSender : IAsyncDisposable
             borrow = actualSenderRoot.Borrow(expectedOwner, id, Claims);
             borrow.VerifyHeld();
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation, _stopping.Token);
-            var catalog = new NotificationCatalogCodec(_instance, _contracts).Read(snapshot.Document.Catalog);
-            var task = catalog.Catalog.Tasks.Single(item => item.Id == snapshot.Document.Task.TaskId);
+            NotificationTaskDefinition task;
+            using (reads?.CaptureMetadata())
+            {
+                var catalog = new NotificationCatalogCodec(_instance, _contracts).Read(snapshot.Document.Catalog);
+                task = catalog.Catalog.Tasks.Single(item => item.Id == snapshot.Document.Task.TaskId);
+            }
             timeout.CancelAfter(TimeSpan.FromSeconds(task.Configuration.TimeoutSeconds));
             NotificationDeliveryNetwork network;
             using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
@@ -73,7 +79,8 @@ internal sealed class NotificationSender : IAsyncDisposable
                 transaction.Commit();
             }
             timeout.Token.ThrowIfCancellationRequested();
-            var claimed = _store.Claim(snapshot, network);
+            NotificationDeliveryTransition claimed;
+            using (reads?.CaptureMetadata()) claimed = _store.Claim(snapshot, network);
             NotificationTransportResult outcome;
             var dispatched = false;
             try
@@ -101,7 +108,7 @@ internal sealed class NotificationSender : IAsyncDisposable
             { outcome = new(dispatched ? NotificationTransportOutcome.Unknown : NotificationTransportOutcome.Rejected, null); }
             try
             {
-                _store.Publish(snapshot, claimed, outcome);
+                using (reads?.CaptureMetadata()) _store.Publish(snapshot, claimed, outcome);
                 return outcome.State;
             }
             catch (SqliteException)
@@ -121,6 +128,7 @@ internal sealed class NotificationSender : IAsyncDisposable
 
     internal int ReconcilePendingResults(NotificationAttemptReads? reads = null)
     {
+        using var capture = reads?.CaptureMetadata();
         _lease.VerifyHeld(_instance);
         PendingResult[] saved; lock (_gate) saved = _pending.Values.ToArray();
         foreach (var item in saved)
@@ -135,8 +143,10 @@ internal sealed class NotificationSender : IAsyncDisposable
         return saved.Length;
     }
 
-    internal bool ReconcileStoppedOwner(ResourceOperationLease actualSenderRoot, ResourceLeaseManager expectedOwner, BlobReference reference)
+    internal bool ReconcileStoppedOwner(ResourceOperationLease actualSenderRoot, ResourceLeaseManager expectedOwner, BlobReference reference,
+        NotificationAttemptReads? reads = null)
     {
+        using var capture = reads?.CaptureMetadata();
         var snapshot = new NotificationDeliveryEvidence(_instance, _database, _contracts).Read(reference);
         if (NotificationDeliveryOrigins.Reference(snapshot.Document) is null) throw new IOException("notification_delivery_registration_required");
         using var borrow = actualSenderRoot.Borrow(expectedOwner, snapshot.Document.OperationId, Claims);

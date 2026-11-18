@@ -31,7 +31,7 @@ internal static class ExecutionBindingRoles
         _ => throw new IOException("execution_writer_role_unbound")
     };
 
-    internal static bool IsComplete(System.Text.Json.JsonElement journal, ExecutionPlan total, string stepId,
+    internal static bool IsComplete(AttemptJournalView journal, ExecutionPlan total, string stepId,
         ImmutableArray<StepWriterState>? knownJobs = null, IReadOnlyDictionary<string, StepResultState>? knownResults = null)
     {
         var step = total.Steps.Single(step => step.StepId == stepId);
@@ -49,7 +49,7 @@ internal static class ExecutionBindingRoles
         return jobs.Where(job => IsHook(job.Role)).All(job => hooks.Any(result => result.StepId == stepId && result.Role == job.Role));
     }
 
-    internal static ExecutionStepFact Combine(System.Text.Json.JsonElement journal, ExecutionPlan total, ExecutionStepCompletion item, string? totalPlanSha256 = null)
+    internal static ExecutionStepFact Combine(AttemptJournalView journal, ExecutionPlan total, ExecutionStepCompletion item, string? totalPlanSha256 = null)
     {
         var skipped = BindingSkipCodec.Read(journal, total).SingleOrDefault(value => value.StepId == item.StepId);
         if (skipped is not null) return BindingSkipCodec.Fact(skipped);

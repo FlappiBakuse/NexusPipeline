@@ -11,6 +11,48 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class NotificationRuntimeTests
 {
+    [Fact(DisplayName = "One Async Notification Pass Reuses Protected Catalog Bytes Across Acknowledgements And Releases Them")]
+    public async Task ReusesPassCatalog()
+    {
+        var locks = new List<FileStream>(); string[] paths = []; var requests = 0;
+        await using var sink = new NotificationHttpSink((_, _) =>
+        {
+            if (Interlocked.Increment(ref requests) == 1)
+                foreach (var path in paths)
+                {
+                    var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+                    locks.Add(file); file.Lock(0, file.Length);
+                }
+            return Task.FromResult(new NotificationSinkReply(200, ""));
+        });
+        await using var fixture = new RuntimeFixture();
+        await fixture.Save(sink.Address);
+        var accepted = fixture.Enqueue(); _ = fixture.Enqueue();
+        var source = fixture.Base.Source;
+        var snapshot = new NotificationDeliveryEvidence(source.Instance, source.Database, new()).Read(accepted.Delivery);
+        var catalog = new NotificationCatalogCodec(source.Instance, new()).Read(snapshot.Document.Catalog);
+        paths = catalog.Document.Tasks.Select(item => Path.Combine(source.Instance.RuntimeRoot, item.Definition.RelativePath))
+            .Append(Path.Combine(source.Instance.RuntimeRoot, catalog.Reference.RelativePath)).ToArray();
+        try
+        {
+            await fixture.Runtime.RunPassAsync();
+            Assert.Equal(2, sink.Requests.Count);
+            Assert.False(fixture.Runtime.HasPendingActivity);
+            Assert.Null(fixture.Runtime.FailureCode);
+        }
+        finally
+        {
+            foreach (var file in locks) { file.Unlock(0, file.Length); file.Dispose(); }
+        }
+        var original = File.ReadAllBytes(paths[0]);
+        try
+        {
+            File.WriteAllBytes(paths[0], [1]);
+            Assert.ThrowsAny<Exception>(() => new NotificationCatalogCodec(source.Instance, new()).Read(catalog.Reference));
+        }
+        finally { File.WriteAllBytes(paths[0], original); }
+    }
+
     [Fact(DisplayName = "An Idle Notification Worker Wakes For Each Committed Queue Registration Without Duplicating Delivery")]
     public async Task WakesForCommittedWork()
     {

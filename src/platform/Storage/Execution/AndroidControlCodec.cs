@@ -16,12 +16,12 @@ internal static class AndroidControlCodec
     internal static bool IsParticipant(JsonElement participant) =>
         participant.GetProperty("identity").TryGetProperty("format", out var value) && value.GetString() == RegistrationFormat;
 
-    internal static ImmutableArray<AndroidCommandRegistration> Read(JsonElement journal, ExecutionPlan total, string totalSha256)
+    internal static ImmutableArray<AndroidCommandRegistration> Read(AttemptJournalView journal, ExecutionPlan total, string totalSha256)
     {
         journal = ExecutionInvocationCodec.Current(journal);
         var result = ImmutableArray.CreateBuilder<AndroidCommandRegistration>();
         var ids = new HashSet<Guid>(); var names = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var participant in journal.GetProperty("participants").EnumerateArray().Where(IsParticipant))
+        foreach (var participant in journal.Participants.Where(IsParticipant))
         {
             var identity = participant.GetProperty("identity");
             var decoded = ExecutionParticipantText.Read<AndroidCommandRegistration>(identity, StepResultCodec.Options, Invalid);
@@ -36,9 +36,9 @@ internal static class AndroidControlCodec
                 participant.GetProperty("kind").GetString() != "process" ||
                 participant.GetProperty("resourceKey").GetString() != "automation:" + step.ScriptId ||
                 binding.InstanceId.ToString("D") != total.InstanceId ||
-                binding.ParentJournalId != journal.GetProperty("journalId").GetGuid() ||
-                binding.ParentOperationId != journal.GetProperty("operationId").GetGuid() ||
-                binding.AttemptId != journal.GetProperty("attemptId").GetGuid() ||
+                binding.ParentJournalId != journal.Root.GetProperty("journalId").GetGuid() ||
+                binding.ParentOperationId != journal.Root.GetProperty("operationId").GetGuid() ||
+                binding.AttemptId != journal.Root.GetProperty("attemptId").GetGuid() ||
                 binding.TotalPlanSha256 != totalSha256 || binding.TargetId == Guid.Empty ||
                 binding.OwnerWriterId == Guid.Empty || binding.SessionId < 0 ||
                 !ids.Add(binding.TargetId) || !names.Add(binding.JobName) || !JobName(binding.JobName) ||

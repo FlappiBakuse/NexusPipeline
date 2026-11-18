@@ -35,16 +35,23 @@ internal static class TaskRetryEvidence
 
     internal static ExecutionTaskRetry? ForJob(RuntimeInstance instance, ContractReader contracts,
         ExecutionPlan total, StepEvidenceBinding binding)
+        => ForJob(new JournalStore(instance, contracts).Read(binding.ParentJournalId), total, binding);
+
+    private static ExecutionTaskRetry? ForJob(JournalDocument latest, ExecutionPlan total, StepEvidenceBinding binding)
     {
-        var latest = new JournalStore(instance, contracts).Read(binding.ParentJournalId);
+        if (latest.InstanceId != binding.InstanceId || latest.JournalId != binding.ParentJournalId ||
+            latest.Kind != JournalKind.RunAttempt || latest.PlanDigest != binding.PlanDigest ||
+            latest.Root.GetProperty("operationId").GetGuid() != binding.ParentOperationId)
+            throw ExecutionInvocationCodec.Invalid();
         var view = ExecutionInvocationCodec.ForJob(latest.Root, total, binding.JobName);
         return ExecutionInvocationCodec.Read(view, total).LastOrDefault(item => item.StepId == binding.StepId)?.TaskRetry;
     }
 
     internal static void RequireInvocation(RuntimeInstance instance, ContractReader contracts, ExecutionPlan total,
-        ExecutionAdapterObservation observation)
+        ExecutionAdapterObservation observation, JournalDocument? terminal = null)
     {
-        if (!Same(ForJob(instance, contracts, total, observation.Binding), observation.Retry)) throw ExecutionInvocationCodec.Invalid();
+        var retry = terminal is null ? ForJob(instance, contracts, total, observation.Binding) : ForJob(terminal, total, observation.Binding);
+        if (!Same(retry, observation.Retry)) throw ExecutionInvocationCodec.Invalid();
     }
 
     internal static ImmutableArray<AdapterTask> Tasks(ExecutionPlanStep step) =>

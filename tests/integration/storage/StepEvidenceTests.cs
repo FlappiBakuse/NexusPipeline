@@ -45,6 +45,7 @@ public sealed class StepEvidenceTests
             Assert.Throws<IOException>(() => new JournalStore(source.Instance, new()).Read(fixture.JournalId));
             var context = new StepEvidenceReader(source.Instance, source.Database, new()).Context(binding);
             Assert.Equal(state.Total.RunId, context.Total.RunId);
+            Assert.Null(new StepEvidenceReader(source.Instance, source.Database, new()).AcceptedClose(binding));
             Assert.Equal(expected, new StepEvidenceReader(source.Instance, source.Database, new()).Read(binding, expected.Artifact, true));
             Assert.Equal(state.Latest.Revision, AttemptWriterState.Read(source.Instance, source.Database, new(), fixture.JournalId).Latest.Revision);
         }
@@ -55,6 +56,11 @@ public sealed class StepEvidenceTests
         var blobs = new ImmutableBlobStore(source.Instance, new());
         var evidence = StepEvidenceCodec.Read(blobs, binding, expected.Artifact);
         var raw = RawOutputCodec.Read(blobs, binding, evidence.RawOutput!);
+        var owner = source.Database.AttemptReads!.Find(fixture.JournalId)!;
+        Assert.Equal(BusinessOutcome.Failed, owner.Replay(binding, evidence.RawOutput!, raw,
+            new(AutomationJudgementLanguage.Keywords, [], ["ready"], null)).Business);
+        Assert.Equal(BusinessOutcome.Succeeded, owner.Replay(binding, evidence.RawOutput!, raw,
+            new(AutomationJudgementLanguage.Keywords, ["ready"], [], null)).Business);
         var path = Path.Combine(source.Instance.RuntimeRoot, raw.Parts[0].Content.RelativePath);
         Assert.Throws<IOException>(() => File.WriteAllBytes(path, [1]));
         using (var connection = NexusPipeline.Platform.Storage.Sqlite.DatabaseConnections.Open(source.Database.DatabasePath, domains: Sqlite.DatabaseDomain.Runtime | Sqlite.DatabaseDomain.Automation | Sqlite.DatabaseDomain.Configuration | Sqlite.DatabaseDomain.Records | Sqlite.DatabaseDomain.Extensions | Sqlite.DatabaseDomain.System | Sqlite.DatabaseDomain.Content))

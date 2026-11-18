@@ -81,7 +81,8 @@ public sealed class ConfigurationDocument : IDisposable, IConfigurationValueRead
                 targets.Add(selected);
                 if (edit.ExpectedExists && !JsonNode.DeepEquals(selected.Node.Value, Value(edit.Expected)))
                     throw new ConfigurationException("configuration_patch_expected_mismatch");
-                if (edit.ExpectedExists && JsonNode.DeepEquals(selected.Node.Value, Value(edit.Value))) continue;
+                var value = Value(edit.Value);
+                if (edit.ExpectedExists && JsonNode.DeepEquals(selected.Node.Value, value)) continue;
                 byte[] replacement;
                 if (edit.ExpectedExists) replacement = BoundedJson.Serialize(edit.Value);
                 else
@@ -92,10 +93,10 @@ public sealed class ConfigurationDocument : IDisposable, IConfigurationValueRead
                     selected = new(new(insertion.Offset, insertion.Offset, null), selected.Path);
                     replacement = insertion.Bytes;
                 }
-                edits.Add(new(selected, edit.Value, replacement));
+                edits.Add(new(selected, value, replacement));
             }
             var expected = root.Value?.DeepClone();
-            foreach (var edit in edits) Replace(expected, edit.Target.Path, Value(edit.Value));
+            foreach (var edit in edits) Replace(expected, edit.Target.Path, edit.Value);
             var result = Splice(edits);
             try
             {
@@ -160,6 +161,8 @@ public sealed class ConfigurationDocument : IDisposable, IConfigurationValueRead
 
     private static JsonNode? Value(JsonElement element)
     {
+        if (element.ValueKind is JsonValueKind.True or JsonValueKind.False) return JsonValue.Create(element.GetBoolean());
+        if (element.ValueKind == JsonValueKind.Null) return null;
         var bytes = BoundedJson.Serialize(element);
         using var parsed = StrictJson.Parse(bytes);
         return JsonNode.Parse(bytes);
@@ -199,5 +202,5 @@ public sealed class ConfigurationDocument : IDisposable, IConfigurationValueRead
             CryptographicOperations.ZeroMemory(_source); _source = null; _root = null;
         }
     }
-    private sealed record BoundEdit(ResolvedConfigurationNode Target, JsonElement Value, byte[] Replacement);
+    private sealed record BoundEdit(ResolvedConfigurationNode Target, JsonNode? Value, byte[] Replacement);
 }

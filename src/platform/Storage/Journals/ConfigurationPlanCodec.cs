@@ -23,12 +23,12 @@ public sealed class ConfigurationPlanCodec(RuntimeInstance instance, ContractRea
     {
         Validate(plan);
         var bytes = JsonSerializer.SerializeToUtf8Bytes(ToWire(plan));
-        var frozen = Decode(bytes);
-        VerifyContents(frozen);
+        var frozen = Decode(bytes, null, out var state);
+        VerifyContents(frozen, state);
         var held = new List<FileStream>();
         try
         {
-            foreach (var reference in References(frozen).OrderBy(item => item.Sha256, StringComparer.Ordinal))
+            foreach (var reference in References(frozen, state).OrderBy(item => item.Sha256, StringComparer.Ordinal))
                 held.Add(blobs.OpenVerified(reference));
             var referenceToPlan = blobs.PersistPlan(bytes);
             held.Add(blobs.OpenVerified(referenceToPlan));
@@ -43,31 +43,78 @@ public sealed class ConfigurationPlanCodec(RuntimeInstance instance, ContractRea
 
     public FrozenConfigurationExchange Read(BlobReference reference)
     {
-        var plan = ReadStructure(reference);
-        VerifyContents(plan);
+        var plan = ReadStructure(reference, out var state);
+        VerifyContents(plan, state);
         return plan;
     }
 
-    internal FrozenConfigurationExchange ReadStructure(BlobReference reference)
+    internal FrozenConfigurationExchange ReadStructure(BlobReference reference) => ReadStructure(reference, out _);
+
+    internal FrozenConfigurationExchange ReadStructure(BlobReference reference, out FrozenRunState? state)
     {
-        if (reference.SizeBytes > StrictJson.MaximumBytes || reference.RelativePath != $"blobs/plans/{reference.Sha256}.json")
+        using var input = OpenPlan(reference);
+        return DecodeStream(input, null, out state);
+    }
+
+    internal OpenedPlan OpenStructure(BlobReference reference) => new(this, reference);
+
+    internal sealed class OpenedPlan : IDisposable
+    {
+        private readonly ConfigurationPlanCodec _owner;
+        private readonly BlobReference _reference;
+        private readonly List<IDisposable> _held = [];
+        internal FrozenConfigurationExchange Plan { get; }
+        internal FrozenRunState? State { get; }
+
+        internal OpenedPlan(ConfigurationPlanCodec owner, BlobReference reference)
+        {
+            _owner = owner; _reference = reference;
+            try
+            {
+                var input = owner.OpenPlan(reference);
+                _held.Add(input);
+                Plan = owner.DecodeStream(input, _held, out var state);
+                State = state;
+            }
+            catch { Dispose(); throw; }
+        }
+
+        internal void RequireReference(RuntimeInstance runtime, JournalDocument physical)
+        {
+            ObjectDisposedException.ThrowIf(_held.Count == 0, this);
+            if (_owner.Instance != runtime || Plan.JournalId != physical.JournalId || _reference.RelativePath != physical.PlanPath ||
+                _reference.Sha256 != physical.PlanDigest) throw new IOException("configuration_journal_plan_unbound");
+        }
+
+        internal FrozenConfigurationExchange ReadContents(RuntimeInstance runtime, JournalDocument physical)
+        {
+            RequireReference(runtime, physical);
+            _owner.VerifyContents(Plan, State);
+            return Plan;
+        }
+
+        public void Dispose()
+        {
+            for (var index = _held.Count - 1; index >= 0; index--) _held[index].Dispose();
+            _held.Clear();
+        }
+    }
+
+    private RuntimeInstance Instance => instance;
+
+    private FileStream OpenPlan(BlobReference reference)
+    {
+        if (reference.SizeBytes is < 1 or > StrictJson.MaximumBytes || reference.RelativePath != $"blobs/plans/{reference.Sha256}.json")
             throw new IOException("configuration_plan_reference_invalid");
-        using var input = blobs.OpenVerified(reference);
-        var bytes = new byte[checked((int)input.Length)];
-        input.ReadExactly(bytes);
-        return Decode(bytes);
+        return blobs.OpenVerified(reference);
     }
 
     internal FrozenConfigurationExchange ReadHeld(BlobReference reference, List<IDisposable> held, bool metadataOnly,
         out FrozenRunState? state)
     {
-        if (reference.SizeBytes is < 1 or > StrictJson.MaximumBytes || reference.RelativePath != $"blobs/plans/{reference.Sha256}.json")
-            throw new IOException("configuration_plan_reference_invalid");
-        var input = blobs.OpenVerified(reference);
+        var input = OpenPlan(reference);
         held.Add(input);
-        var bytes = new byte[checked((int)input.Length)];
-        input.ReadExactly(bytes);
-        var plan = Decode(bytes, held, out state);
+        var plan = DecodeStream(input, held, out state);
         if (metadataOnly) return plan;
         var references = plan.Before.Contents.Concat(plan.Candidate.Contents);
         if (state is not null) references = references.Concat(RunStateCodec.Contents(state));
@@ -77,7 +124,12 @@ public sealed class ConfigurationPlanCodec(RuntimeInstance instance, ContractRea
         return plan;
     }
 
-    private FrozenConfigurationExchange Decode(ReadOnlyMemory<byte> bytes) => Decode(bytes, null, out _);
+    private FrozenConfigurationExchange DecodeStream(FileStream input, List<IDisposable>? held, out FrozenRunState? state)
+    {
+        var bytes = new byte[checked((int)input.Length)];
+        input.ReadExactly(bytes);
+        return Decode(bytes, held, out state);
+    }
 
     private FrozenConfigurationExchange Decode(ReadOnlyMemory<byte> bytes, List<IDisposable>? held, out FrozenRunState? state)
     {
@@ -155,21 +207,24 @@ public sealed class ConfigurationPlanCodec(RuntimeInstance instance, ContractRea
         return relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) && !Path.IsPathRooted(relative);
     }
 
-    private void VerifyContents(FrozenConfigurationExchange plan)
+    private void VerifyContents(FrozenConfigurationExchange plan, FrozenRunState? state)
     {
-        foreach (var blob in References(plan)) blobs.Verify(blob);
-        if (plan.RunState is null) return;
-        var state = new RunStateCodec(instance, contracts, blobs).Read(plan.RunState);
+        var contents = plan.Before.Contents.Concat(plan.Candidate.Contents);
+        if (state is not null) contents = contents.Concat(RunStateCodec.Contents(state));
+        foreach (var blob in contents.Distinct()) blobs.Verify(blob);
+        if (state is null) return;
         new ConfigurationTaskTransformation(blobs).ValidateSelected(state.ConfigurationOperationId, state.Source, state.Tasks, plan.Candidate.Snapshot, inputTree: state.InputTree);
     }
 
     internal IReadOnlyList<BlobReference> References(FrozenConfigurationExchange plan)
+        => References(plan, plan.RunState is { } reference ? new RunStateCodec(instance, contracts, blobs).ReadStructure(reference) : null);
+
+    private static IReadOnlyList<BlobReference> References(FrozenConfigurationExchange plan, FrozenRunState? state)
     {
         var references = plan.Before.Contents.Concat(plan.Candidate.Contents);
         if (plan.RunState is { } reference)
         {
-            var state = new RunStateCodec(instance, contracts, blobs).ReadStructure(reference);
-            if (plan.Kind != JournalKind.ConfigExchange || state.ConfigurationOperationId != plan.OperationId)
+            if (state is null || plan.Kind != JournalKind.ConfigExchange || state.ConfigurationOperationId != plan.OperationId)
                 throw new IOException("configuration_run_state_plan_unbound");
             references = references.Concat(RunStateCodec.References(state)).Append(reference);
         }

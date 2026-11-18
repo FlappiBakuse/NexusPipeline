@@ -38,19 +38,19 @@ internal sealed class ExecutionNotificationSource
         var decision = finality.ReadDecision(receipt);
         if (!decision.IsFinal && !ExecutionRecordProjection.RequireRecoveredRecord(instance, database, contracts, receipt)) return null;
         var bound = AttemptPreparedBinding.Read(instance, contracts, database, receipt.JournalId);
-        using var parsed = StrictJson.Parse(JsonSerializer.SerializeToUtf8Bytes(bound.Document));
+        var document = bound.ValidatedRead.History[^1];
         if (!bound.IsExecutionStart || bound.Plan.OperationId != receipt.OperationId.ToString("D") ||
             bound.Plan.AttemptId != receipt.Facts.AttemptId.ToString("D") ||
             bound.Plan.RunId != receipt.Facts.RunId.ToString("D") ||
             AttemptPreparedBinding.ExpectedReceipt(bound.Plan,
-                new NexusPipeline.Platform.Storage.Journals.JournalStore(instance, contracts).Read(receipt.JournalId)) != receipt)
+                document) != receipt)
             throw Invalid();
         var total = bound.Total;
         if (ProjectInitializationPlan.IsInitialization(total)) return null;
         var definition = new BlobReference(total.DefinitionBundle.RelativePath, total.DefinitionBundle.SizeBytes, total.DefinitionBundle.Sha256);
         var bundle = ReadBundle(instance, contracts, definition);
         var routes = ReadRoutes(total, bundle);
-        var facts = OrderedFacts(bound.Plan, total, parsed.RootElement, receipt);
+        var facts = OrderedFacts(bound.Plan, total, document.Root, receipt);
         string subject;
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var transaction = DatabaseConnections.BeginRead(connection))

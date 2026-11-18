@@ -44,11 +44,11 @@ internal sealed class RetryHookEvidence(RuntimeInstance instance, StateDatabase 
         return null;
     }
 
-    internal IReadOnlyList<BlobReference> RequireAll(RunAttemptPlan attempt, ExecutionPlan total, JsonElement journal, bool verifyContents) =>
+    internal IReadOnlyList<BlobReference> RequireAll(RunAttemptPlan attempt, ExecutionPlan total, AttemptJournalView journal, bool verifyContents) =>
         ExecutionInvocationCodec.Views(journal).Select(ExecutionInvocationCodec.Current)
             .SelectMany(view => RequireCurrent(attempt, total, view, verifyContents)).Distinct().ToArray();
 
-    private IReadOnlyList<BlobReference> RequireCurrent(RunAttemptPlan attempt, ExecutionPlan total, JsonElement journal, bool verifyContents)
+    private IReadOnlyList<BlobReference> RequireCurrent(RunAttemptPlan attempt, ExecutionPlan total, AttemptJournalView journal, bool verifyContents)
     {
         var references = new List<BlobReference>();
         var jobs = WriterIntentCodec.ReadJobs(journal, total);
@@ -219,7 +219,7 @@ internal sealed class RetryHookEvidence(RuntimeInstance instance, StateDatabase 
         return contracts.Read<RunAttemptPlan>(bytes, "run-attempt-plan.schema.json");
     }
 
-    internal static ImmutableArray<RetryHookFact> Facts(JsonElement journal, ExecutionPlan total, string stepId)
+    internal static ImmutableArray<RetryHookFact> Facts(AttemptJournalView journal, ExecutionPlan total, string stepId)
     {
         var actual = HookResultCodec.Read(journal, total).Where(item => item.StepId == stepId)
             .Select(item => new RetryHookFact(item.Role == "preHook" ? ExecutionHookRole.Pre : ExecutionHookRole.Post,
@@ -242,7 +242,7 @@ internal sealed class RetryHookEvidence(RuntimeInstance instance, StateDatabase 
         return facts.OrderBy(item => item.Role).ToImmutableArray();
     }
 
-    internal static bool CanRetry(JsonElement journal, ExecutionPlan total) => total.Steps.All(step =>
+    internal static bool CanRetry(AttemptJournalView journal, ExecutionPlan total) => total.Steps.All(step =>
         RetryHookPolicy.CanRetry(ExecutionRetryAuthority.Hooks(step), Facts(journal, total, step.StepId)));
 
     internal static IOException Invalid() => new("execution_retry_hook_evidence_unbound");

@@ -53,6 +53,37 @@ internal sealed class DatabaseValidationLease : IDisposable
         }
     }
 
+    internal void RequireInstallation(Action<SqliteConnection, SqliteTransaction> validate,
+        Action<SqliteConnection, SqliteTransaction> validateRuntime)
+    {
+        lock (_gate)
+        {
+            RequireIdentity();
+            if (_database.RuntimeLease is null) { RequireCurrent(validate); return; }
+            var version = _database.ReadInstallationVersion(_domains);
+            if (version is not null && _validated == version) return;
+            var runtimeOnly = version is { } current && _validated is { } prior && (prior with { Runtime = current.Runtime }) == current;
+            _validated = null;
+            if (runtimeOnly)
+            {
+                ValidateInstallation(validateRuntime, DatabaseDomain.Runtime);
+                if (_database.ReadInstallationVersion(_domains) == version) { _validated = version; return; }
+                version = _database.ReadInstallationVersion(_domains);
+            }
+            ValidateInstallation(validate, _domains);
+            if (_database.ReadInstallationVersion(_domains) == version) _validated = version;
+        }
+    }
+
+    private void ValidateInstallation(Action<SqliteConnection, SqliteTransaction> validate, DatabaseDomain domains)
+    {
+        using var timing = StartupProfile.Measure(_measurement);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: domains);
+        using var transaction = DatabaseConnections.BeginRead(connection);
+        validate(connection, transaction);
+        transaction.Commit();
+    }
+
     internal T Read<T>(Func<SqliteConnection, SqliteTransaction, T> read)
     {
         lock (_gate)

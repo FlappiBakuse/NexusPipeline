@@ -159,19 +159,31 @@ public sealed class ManagedExtension(ExtensionActivationContext context) : IExte
         }
     }
 
-    private sealed record Input(string Directory, string Nonce, string Mode, string? ScheduledTaskId = null, DateTimeOffset? ScheduledUtc = null);
+    private sealed record Input(string Directory, string Nonce, string Mode, string? ScheduledTaskId = null, DateTimeOffset? ScheduledUtc = null,
+        bool HoldPlanning = false);
     private sealed class HeldSchedule(ExtensionActivationContext context, Input input, string directory)
         : IScheduledWorkPlanningHandler, IAsyncDisposable
     {
         private Task? _late;
-        public ValueTask<ScheduledWorkPlans> ReadPlansAsync(CancellationToken cancellationToken)
+        public async ValueTask<ScheduledWorkPlans> ReadPlansAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var when = input.ScheduledUtc ?? throw new IOException("fixture_schedule_time_missing");
-            return ValueTask.FromResult(new ScheduledWorkPlans { Format = "nexus.schedule.work-plans", Version = 1, Revision = 1,
+            if (input.HoldPlanning)
+            {
+                WriteNew(Path.Combine(directory, "scheduled-planning"), [1]);
+                await Wait("scheduled-planning-release");
+                try { when = (await context.WorkTasks!.ReadClockAsync(cancellationToken)).UtcNow; }
+                catch (IOException error)
+                {
+                    WriteNew(Path.Combine(directory, "scheduled-planning-error"), Encoding.UTF8.GetBytes(error.Message));
+                    throw;
+                }
+            }
+            return new ScheduledWorkPlans { Format = "nexus.schedule.work-plans", Version = 1, Revision = 1,
                 Tasks = [new() { TaskId = input.ScheduledTaskId!, Revision = 1, IsEnabled = true, TimeZoneId = "UTC",
                     Weekdays = [(long)when.DayOfWeek], LocalMinute = when.Hour * 60 + when.Minute, TimeoutSeconds = 120,
-                    NotificationTaskIds = [] }] });
+                    NotificationTaskIds = [] }] };
         }
         public ValueTask<ScheduledWorkResult> ExecuteAsync(ScheduledInvocation invocation, CancellationToken cancellationToken) =>
             throw new IOException("fixture_unplanned_execution_forbidden");

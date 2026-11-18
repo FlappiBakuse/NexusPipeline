@@ -91,6 +91,20 @@ public sealed class ConfigurationSwap(FileTreeScanner scanner, FileTreeArchive a
         RequireMissing(Path.Combine(prepared.WorkPath, "before"));
     }
 
+    internal TreeReadLease HoldRestored(PreparedConfigurationExchange prepared, ConfigurationWriterObservation writers)
+    {
+        using var pathLease = StableDirectoryLease.Acquire(prepared.WorkPath);
+        VerifyPrepared(prepared, writers);
+        var plan = prepared.Plan;
+        var target = TreeReadLease.Acquire(plan.TargetPath, plan.ParentIdentity, plan.Before);
+        try
+        {
+            RequireMissing(Path.Combine(prepared.WorkPath, "before"));
+            return target;
+        }
+        catch { target.Dispose(); throw; }
+    }
+
     internal void VerifyEditableScene(PreparedConfigurationExchange prepared, ConfigurationWriterObservation writers)
     {
         VerifyWriters(prepared.Plan, writers);

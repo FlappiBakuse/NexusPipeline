@@ -49,6 +49,32 @@ public sealed class JournalStoreTests
         Assert.Equal(previous, Directory.GetFiles(fixture.Directory).Select(File.ReadAllBytes).ToArray());
     }
 
+    [Fact(DisplayName = "Escaped Journal Elements Keep Owned Bytes After The Original Text Memo Evicts Them")]
+    public void RetainsElementsAfterEviction()
+    {
+        var fixture = NewFixture();
+        var contracts = new ContractReader();
+        var original = Bytes(fixture.Document);
+        var borrowed = original.ToArray();
+        var document = JournalDocument.ReadBorrowed(borrowed, contracts);
+        var plan = document.Root.GetProperty("planPath");
+        var expected = plan.GetString();
+        Array.Fill(borrowed, (byte)'x');
+        var exported = document.Export();
+        Array.Fill(exported, (byte)'y');
+        var padded = new byte[1024 * 1024];
+        for (var index = 0; index < 5; index++)
+        {
+            fixture.Document["journalId"] = Guid.NewGuid().ToString("D");
+            Array.Fill(padded, (byte)' ');
+            Bytes(fixture.Document).CopyTo(padded, 0);
+            _ = JournalDocument.ReadBorrowed(padded, contracts);
+        }
+        Assert.NotSame(document, JournalDocument.ReadBorrowed(original, contracts));
+        Assert.Equal(expected, plan.GetString());
+        Assert.Equal(original, document.Export());
+    }
+
     [Fact(DisplayName = "A No Effect Commit Requires Both Positive Evidence And An Explicit Receipt")]
     public void RequiresUnexecutedReceipt()
     {

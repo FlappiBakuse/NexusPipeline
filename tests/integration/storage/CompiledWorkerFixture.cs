@@ -176,6 +176,20 @@ internal static class CompiledWorkerFixture
                 await Assert.ThrowsAsync<UnauthorizedAccessException>(() => adapters.ObserveOwnedAsync(accepted,
                     binding with { ParentOperationId = Guid.NewGuid() }, document.RawOutput!,
                     () => throw new InvalidOperationException("foreign_binding_reached_step")).AsTask());
+                var installation = _total.Steps.Single(item => item.StepId == stepId).Adapter!;
+                var installedPath = Path.Combine(catalog.Instance.RuntimeRoot, "journals", installation.InstalledJournalId, "0000000001.json");
+                using var installed = new FileStream(installedPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                var locked = false;
+                try
+                {
+                    var observed = await adapters.ObserveOwnedAsync(accepted, binding, document.RawOutput!, () =>
+                    {
+                        if (!locked) { installed.Lock(0, installed.Length); locked = true; }
+                        _ = AttemptWriterState.Read(catalog.Instance, catalog.Database, new(), journalId);
+                    });
+                    Assert.NotNull(observed);
+                }
+                finally { if (locked) installed.Unlock(0, installed.Length); }
                 return reason;
             }
             finally { blocked.Unlock(0, blocked.Length); }

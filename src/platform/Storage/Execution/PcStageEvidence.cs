@@ -10,11 +10,11 @@ internal sealed class PcStageEvidence(RuntimeInstance instance, StateDatabase da
     ExecutionSqlScope? readScope = null)
 {
     private readonly TargetJobEvidence _targets = new(instance, database, contracts, readScope);
-    internal IReadOnlyList<BlobReference> RequireAll(JsonElement journal, ExecutionPlan total, string totalSha256) =>
+    internal IReadOnlyList<BlobReference> RequireAll(AttemptJournalView journal, ExecutionPlan total, string totalSha256) =>
         ExecutionInvocationCodec.Views(journal).Select(ExecutionInvocationCodec.Current)
             .SelectMany(view => RequireCurrent(view, total, totalSha256)).Distinct().ToArray();
 
-    private IReadOnlyList<BlobReference> RequireCurrent(JsonElement journal, ExecutionPlan total, string totalSha256)
+    private IReadOnlyList<BlobReference> RequireCurrent(AttemptJournalView journal, ExecutionPlan total, string totalSha256)
     {
         var references = new List<BlobReference>();
         foreach (var item in PcStageCodec.Read(journal, total, totalSha256))

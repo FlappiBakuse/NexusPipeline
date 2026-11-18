@@ -118,6 +118,8 @@ internal sealed class AdapterObserver
             binding.RunId.ToString("D") != total.RunId || binding.AttemptId.ToString("D") != accepted.Prepared.Attempt.Plan.ReadWire().AttemptId)
             throw new UnauthorizedAccessException("adapter_attempt_owner_unbound");
         using var held = accepted.Root.Borrow(_resources, accepted.Identity.OperationId, ExecutionPlanResources.Claims(total));
+        using var installation = new ExtensionInstalledEvidence(_instance, _database, _contracts, _roots)
+            .ProtectCurrent(step.ExtensionId!, _lease);
         var context = new StepEvidenceReader(_instance, _database, _contracts).Context(binding);
         if (context.Job.JobName != binding.JobName || context.Job.WriterId != binding.WriterId || context.Job.SessionId != binding.SessionId)
             throw new UnauthorizedAccessException("adapter_step_writer_unbound");
@@ -136,7 +138,7 @@ internal sealed class AdapterObserver
         {
             // Immutable compiled reads use the held operation; revalidate writer evidence before and after the bounded invocation.
             Live(); requireActualStep();
-            RequireInstallation(step);
+            RequireInstallation(step, installation);
             var definitions = new AutomationDefinitionStore(_database).Read();
             var bindingNow = definitions.Bindings.SingleOrDefault(item => item.Id.ToString("D") == step.BindingId);
             var scriptNow = definitions.Scripts.SingleOrDefault(item => item.Id.ToString("D") == step.ScriptId);
@@ -258,13 +260,16 @@ internal sealed class AdapterObserver
         }).ToArray();
     }
 
-    private void RequireInstallation(ExecutionPlanStep step)
+    private void RequireInstallation(ExecutionPlanStep step, InstallationReadLease? installation)
     {
-        var source = new ExtensionInstalledEvidence(_instance, _database, _contracts, _roots).ReadCurrent(step.ExtensionId!) ?? throw new IOException("adapter_installed_source_missing");
+        var bound = installation?.ReadCurrent();
+        var metadata = bound is null ? new ExtensionInstalledEvidence(_instance, _database, _contracts, _roots).ReadCurrent(step.ExtensionId!)?.Metadata :
+            ExtensionPayloadBinding.DerivedInstallation(bound.Plan, bound.Commit!, bound.Footprint!);
+        if (metadata is null) throw new IOException("adapter_installed_source_missing");
         var adapter = step.Adapter!;
-        if (source.Metadata.Revision != adapter.InstalledRevision || source.Metadata.JournalId.ToString("D") != adapter.InstalledJournalId ||
-            source.Metadata.Footprint.RelativePath != adapter.InstalledFootprint.RelativePath || source.Metadata.Footprint.Sha256 != adapter.InstalledFootprint.Sha256 ||
-            source.Metadata.Footprint.SizeBytes != adapter.InstalledFootprint.SizeBytes || source.Metadata.Package.ManifestSha256 != adapter.Manifest.Sha256)
+        if (metadata.Revision != adapter.InstalledRevision || metadata.JournalId.ToString("D") != adapter.InstalledJournalId ||
+            metadata.Footprint.RelativePath != adapter.InstalledFootprint.RelativePath || metadata.Footprint.Sha256 != adapter.InstalledFootprint.Sha256 ||
+            metadata.Footprint.SizeBytes != adapter.InstalledFootprint.SizeBytes || metadata.Package.ManifestSha256 != adapter.Manifest.Sha256)
             throw new IOException("adapter_installed_source_changed");
     }
 

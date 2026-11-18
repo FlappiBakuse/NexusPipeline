@@ -91,10 +91,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = DatabaseConnections.BeginRead(connection);
-        using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operation_journals WHERE journal_id=$id);";
-        command.Parameters.AddWithValue("$id", journalId.ToString("D"));
-        return (long)command.ExecuteScalar()! == 0 ? null : ReadJournalInside(connection, transaction, journalId);
+        return FindJournalInside(connection, transaction, journalId);
     }
 
     internal RegisteredJournal ReadOperationJournal(Guid operationId)
@@ -137,7 +134,10 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
         }
     }
 
-    internal static RegisteredJournal ReadJournalInside(SqliteConnection connection, SqliteTransaction transaction, Guid journalId)
+    internal static RegisteredJournal ReadJournalInside(SqliteConnection connection, SqliteTransaction transaction, Guid journalId) =>
+        FindJournalInside(connection, transaction, journalId) ?? throw new IOException("journal_not_registered");
+
+    private static RegisteredJournal? FindJournalInside(SqliteConnection connection, SqliteTransaction transaction, Guid journalId)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT operation_id,operation_kind,phase,revision,plan_path,plan_digest FROM main.operation_journals WHERE journal_id=$id;";
@@ -145,7 +145,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
         RegisteredJournal result;
         using (var row = command.ExecuteReader())
         {
-            if (!row.Read()) throw new IOException("journal_not_registered");
+            if (!row.Read()) return null;
             if (!Enum.TryParse<JournalKind>(row.GetString(1), true, out var kind) ||
                 !Enum.TryParse<JournalPhase>(row.GetString(2), true, out var phase)) throw new IOException("recovery_registry_journal_invalid");
             result = new(journalId, Guid.ParseExact(row.GetString(0), "D"), kind, phase,
@@ -293,7 +293,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
             }
             else
             {
-                command.CommandText = "UPDATE main.resource_isolations SET reason_code=$reason WHERE journal_id=$id;";
+                command.CommandText = "UPDATE main.resource_isolations SET reason_code=$reason WHERE journal_id=$id AND reason_code<>$reason;";
                 command.Parameters.AddWithValue("$reason", journal.Phase == JournalPhase.Quarantined ? "recovery_quarantined" : "recovery_pending");
                 command.ExecuteNonQuery();
             }
@@ -344,12 +344,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
         using var timing = StartupProfile.Measure("history.sql-snapshot");
         if (requiredJournalId is null) RecoveryCapacityStore.VerifyGlobal(connection, transaction);
         var journals = ReadJournals(connection, transaction, requiredJournalId, includeHistory);
-        var effects = new List<FileEffect>();
-        foreach (var journal in journals)
-        {
-            effects.AddRange(FileEffectRows.Read(connection, journal.JournalId, transaction));
-            if (effects.Count > RecoveryCapacityBudget.MaximumFileEffects) throw new IOException("file_effect_limit");
-        }
+        var effects = RecoveryJournalMembers.Read(connection, transaction, journals);
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = "SELECT i.resource_key,i.journal_id,i.reason_code,i.scope_quality,COALESCE(c.mode,1) FROM " +
@@ -373,12 +368,12 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
         command.CommandText = "SELECT ready,revision FROM main.recovery_index_state WHERE singleton=1;";
         using var state = command.ExecuteReader();
         if (!state.Read()) throw new IOException("recovery_registry_state_missing");
-        var result = new RecoveryRegistrySnapshot(state.GetInt64(1), state.GetInt64(0) == 1, journals, isolations.AsReadOnly(), effects.AsReadOnly());
+        var result = new RecoveryRegistrySnapshot(state.GetInt64(1), state.GetInt64(0) == 1, journals.AsReadOnly(), isolations.AsReadOnly(), effects);
         RecoveryRegistryPolicy.Verify(result);
         return result;
     }
 
-    private static IReadOnlyList<RegisteredJournal> ReadJournals(SqliteConnection connection, SqliteTransaction transaction, Guid? requiredJournalId, bool includeHistory)
+    private static List<RegisteredJournal> ReadJournals(SqliteConnection connection, SqliteTransaction transaction, Guid? requiredJournalId, bool includeHistory)
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -402,18 +397,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
         }
         if (requiredJournalId is { } familyJournal && !result.Any(item => item.JournalId == familyJournal))
             throw new IOException("recovery_family_unbound");
-        command.CommandText = "SELECT resource_key FROM main.journal_resources WHERE journal_id=$id ORDER BY resource_key LIMIT 4097;";
-        var id = command.Parameters.Add("$id", SqliteType.Text);
-        for (var index = 0; index < result.Count; index++)
-        {
-            id.Value = result[index].JournalId.ToString("D");
-            using var reader = command.ExecuteReader();
-            var resources = new List<string>();
-            while (reader.Read()) resources.Add(reader.GetString(0));
-            if (resources.Count is 0 or > 4096) throw new IOException("recovery_registry_resource_limit");
-            result[index] = result[index] with { ResourceKeys = resources.AsReadOnly() };
-        }
-        return result.AsReadOnly();
+        return result;
     }
 
     internal const string FamilyQuery = "SELECT j.journal_id,j.operation_id,j.operation_kind,j.phase,j.revision,j.plan_path,j.plan_digest " +

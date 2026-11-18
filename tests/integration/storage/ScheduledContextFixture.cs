@@ -16,7 +16,7 @@ internal sealed class ScheduledContextFixture : IAsyncDisposable
     internal InstallRuntimeFixture Installed { get; }
     private readonly Clock _clock = new();
 
-    internal ScheduledContextFixture()
+    internal ScheduledContextFixture(bool holdPlanning = false)
     {
         var source = Base.Source;
         Schedules = new(source.Instance, source.Database, source.Lease, Base.Resources, Base.Lifecycle, Base.Index,
@@ -29,20 +29,21 @@ internal sealed class ScheduledContextFixture : IAsyncDisposable
                 var node = JsonNode.Parse(File.ReadAllBytes(path))!.AsObject();
                 node["ScheduledTaskId"] = Guid.NewGuid().ToString("D");
                 node["ScheduledUtc"] = _clock.GetUtcNow();
+                node["HoldPlanning"] = holdPlanning;
                 File.WriteAllBytes(path, System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(node));
             });
     }
 
     internal string Marker(string name) => Path.Combine(Installed.ActivationDirectory, name);
     internal void Release(string name) => File.WriteAllText(Marker(name), "release");
-    internal async Task Start()
+    internal async Task Start(bool waitForInvocation = true)
     {
         _ = await Installed.Session().ApplyAsync(Installed.Prepared, default);
         Installed.Prepared.Dispose(); Installed.Verified.Dispose(); Installed.Root.Dispose();
         ExtensionProjectionPublication.PublishIfDirty(Base.Source.Instance, Base.Source.Database, Base.Source.Lease,
             Installed.Package.Catalog.Contracts, Installed.Roots, Base.Resources, Base.Index);
         Schedules.Start();
-        await WaitFile("scheduled-entered");
+        if (waitForInvocation) await WaitFile("scheduled-entered");
     }
     internal void Disable()
     {
@@ -73,7 +74,7 @@ internal sealed class ScheduledContextFixture : IAsyncDisposable
     }
     public async ValueTask DisposeAsync()
     {
-        Release("scheduled-release"); Release("scheduled-late-release");
+        Release("scheduled-planning-release"); Release("scheduled-release"); Release("scheduled-late-release");
         try { await Schedules.StopAsync(); }
         finally
         {

@@ -189,6 +189,47 @@ public sealed class RetryRuntimeTests
 
     private static long BudgetCount(ProviderRuntimeFixture fixture) => fixture.Base.Count("execution_run_budget_observations");
 
+    [Fact(DisplayName = "Retry Views Keep Ordered Participant Evidence Without Copying The Rest Of The Journal")]
+    public void BoundsRetryViewAllocation()
+    {
+        var participants = new System.Text.Json.Nodes.JsonArray();
+        for (var index = 0; index < 8; index++)
+        {
+            participants.Add(new System.Text.Json.Nodes.JsonObject
+            {
+                ["identity"] = new System.Text.Json.Nodes.JsonObject
+                {
+                    ["format"] = WriterIntentCodec.Format, ["stepId"] = "步骤-" + index
+                }
+            });
+            participants.Add(ExecutionInvocationCodec.Participant(new ExecutionInvocation(ExecutionInvocationCodec.Format,
+                1, "步骤-" + index, 2, 1, @"Local\NexusWorker-" + Guid.NewGuid().ToString("N"),
+                DateTimeOffset.UnixEpoch, []), "script"));
+        }
+        var node = new System.Text.Json.Nodes.JsonObject
+        {
+            ["participants"] = participants, ["unchanged"] = new string('文', 32 * 1024)
+        };
+        var options = new System.Text.Json.JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+        using var original = System.Text.Json.JsonDocument.Parse(node.ToJsonString(options));
+        var root = original.RootElement;
+        _ = ExecutionInvocationCodec.Views(root);
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        var views = ExecutionInvocationCodec.Views(root);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Console.WriteLine($"retry view allocation: {allocated} bytes");
+        Assert.True(allocated < 262144, $"Retry views allocated {allocated} bytes");
+        Assert.Equal(9, views.Count);
+        var evidence = root.GetProperty("participants").EnumerateArray().ToArray();
+        for (var index = 0; index < views.Count; index++)
+        {
+            var actual = views[index].Participants.ToArray();
+            Assert.Equal(evidence.Take(index == 8 ? 16 : index * 2 + 1).Select(item => item.GetProperty("identity").GetProperty("stepId").GetString()),
+                actual.Select(item => item.GetProperty("identity").GetProperty("stepId").GetString()));
+            Assert.Equal(root.GetProperty("unchanged").GetString(), views[index].Root.GetProperty("unchanged").GetString());
+        }
+    }
+
     private static string Plans(ProviderRuntimeFixture fixture) => string.Join("\n",
         Directory.GetFiles(Path.Combine(fixture.Source.Instance.RuntimeRoot, "blobs", "plans"))
             .OrderBy(path => path, StringComparer.Ordinal).Select(path => Path.GetFileName(path) + ":" +
@@ -198,7 +239,7 @@ public sealed class RetryRuntimeTests
     {
         var history = new JournalStore(instance, new()).ReadAllRevisions(state.Journal.JournalId);
         var root = history[^1].Root;
-        var expected = ExecutionInvocationCodec.Views(root).Select(view => view.GetRawText()).ToArray();
+        var expected = ExecutionInvocationCodec.Views(root).Select(view => string.Join(',', view.Participants.Select(item => item.GetRawText()))).ToArray();
         var jobs = WriterIntentCodec.ReadAllJobs(root, state.Total);
         var coverage = StepResultCodec.Coverage(root, state.Total);
         for (var pass = 0; pass < 3; pass++)
@@ -214,11 +255,11 @@ public sealed class RetryRuntimeTests
         Assert.Equal<StepWriterState>(jobs, state.AllJobs);
         using var memo = new AttemptReadMemo(state.Total);
         using var scope = new AttemptReadScope(history, state.Total, memo);
-        var previousViews = ExecutionInvocationCodec.Views(history[^2].Root).Select(view => view.GetRawText()).ToArray();
+        var previousViews = ExecutionInvocationCodec.Views(history[^2].Root).Select(view => string.Join(',', view.Participants.Select(item => item.GetRawText()))).ToArray();
         for (var pass = 0; pass < 3; pass++)
         {
-            Assert.Equal(previousViews, ExecutionInvocationCodec.Views(history[^2].Root).Select(view => view.GetRawText()));
-            Assert.Equal(expected, ExecutionInvocationCodec.Views(root).Select(view => view.GetRawText()));
+            Assert.Equal(previousViews, ExecutionInvocationCodec.Views(history[^2].Root).Select(view => string.Join(',', view.Participants.Select(item => item.GetRawText()))));
+            Assert.Equal(expected, ExecutionInvocationCodec.Views(root).Select(view => string.Join(',', view.Participants.Select(item => item.GetRawText()))));
             Assert.Equal(state.AllJobs.Length, WriterIntentCodec.ReadAllJobs(root, state.Total).Length);
             Assert.Single(ExecutionInvocationCodec.Read(root, state.Total));
         }
@@ -228,10 +269,10 @@ public sealed class RetryRuntimeTests
         participant["identity"]!["version"] = 999;
         using var foreign = System.Text.Json.JsonDocument.Parse(damaged.ToJsonString());
         Assert.Throws<IOException>(() => ExecutionInvocationCodec.Current(foreign.RootElement));
-        Assert.Equal(expected, ExecutionInvocationCodec.Views(root).Select(view => view.GetRawText()));
+        Assert.Equal(expected, ExecutionInvocationCodec.Views(root).Select(view => string.Join(',', view.Participants.Select(item => item.GetRawText()))));
         scope.Dispose();
         using var following = new AttemptReadScope(history, state.Total, memo);
-        Assert.Equal(expected, ExecutionInvocationCodec.Views(root).Select(view => view.GetRawText()));
+        Assert.Equal(expected, ExecutionInvocationCodec.Views(root).Select(view => string.Join(',', view.Participants.Select(item => item.GetRawText()))));
         Assert.Equal<StepWriterState>(jobs, WriterIntentCodec.ReadAllJobs(root, state.Total));
         Assert.Throws<IOException>(() => ExecutionInvocationCodec.Current(foreign.RootElement));
     }

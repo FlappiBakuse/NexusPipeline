@@ -19,14 +19,14 @@ internal static class BindingSuppressionCodec
         _ = Decode(participant); return true;
     }
 
-    internal static ImmutableArray<ExecutionBindingSuppression> Read(JsonElement journal, NexusPipeline.Platform.Serialization.Protocol.ExecutionPlan total)
+    internal static ImmutableArray<ExecutionBindingSuppression> Read(AttemptJournalView journal, NexusPipeline.Platform.Serialization.Protocol.ExecutionPlan total)
     {
         journal = ExecutionInvocationCodec.Current(journal);
         var jobs = WriterIntentCodec.ReadJobs(journal, total);
         var hooks = HookResultCodec.Read(journal, total);
         var close = DispatchIntentCodec.Read(journal, total);
         var result = ImmutableArray.CreateBuilder<ExecutionBindingSuppression>();
-        foreach (var participant in journal.GetProperty("participants").EnumerateArray().Where(IsParticipant))
+        foreach (var participant in journal.Participants.Where(IsParticipant))
         {
             var item = Decode(participant);
             var step = total.Steps.SingleOrDefault(step => step.StepId == item.StepId) ?? throw Invalid();

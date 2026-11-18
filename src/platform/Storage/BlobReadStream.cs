@@ -5,6 +5,7 @@ using Microsoft.Win32.SafeHandles;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Journals;
+using NexusPipeline.Platform.Storage.Notifications;
 
 namespace NexusPipeline.Platform.Storage;
 
@@ -88,12 +89,17 @@ internal sealed class BlobReadStream : FileStream
         => input is BlobReadStream { _content: { } content } && content.Reference.SizeBytes <= 4096
             ? content.ReadSnapshot(read) : read();
 
-    internal static T ReadEvidence<T>(FileStream input, Func<T> read) where T : class
+    internal static T ReadEvidence<T>(FileStream input, Func<T> read, Func<T, long>? retainedBytes = null) where T : class
     {
-        if (typeof(T) != typeof(FrozenJobClosure) && typeof(T) != typeof(StepEvidenceDocument) && typeof(T) != typeof(RawOutputManifest))
+        if (typeof(T) != typeof(FrozenJobClosure) && typeof(T) != typeof(StepEvidenceDocument) && typeof(T) != typeof(RawOutputManifest) &&
+            typeof(T) != typeof(NotificationTaskDocument) && typeof(T) != typeof(NotificationCatalogDocument) &&
+            typeof(T) != typeof(NotificationPublicationDocument) && typeof(T) != typeof(NotificationReceiptDocument) &&
+            typeof(T) != typeof(ReceiptRouteDocument) && typeof(T) != typeof(NotificationDeliveryDocument) &&
+            typeof(T) != typeof(NotificationWorkDocument) && typeof(T) != typeof(TaskTestDocument) &&
+            typeof(T) != typeof(ExecutionAdapterObservation) && typeof(T) != typeof(Configuration.FrozenRunState))
             throw new ArgumentException("blob_evidence_type_not_immutable");
         return input is BlobReadStream { _content: { } content } && content.Reference.SizeBytes <= 65536
-            ? content.ReadEvidence(read) : read();
+            ? content.ReadEvidence(read, retainedBytes) : read();
     }
 
     internal static IDisposable Retain(string path, out BlobReference reference)
@@ -157,13 +163,13 @@ internal sealed class BlobReadStream : FileStream
             lock (this) return _snapshot ??= read();
         }
 
-        internal T ReadEvidence<T>(Func<T> read) where T : class
+        internal T ReadEvidence<T>(Func<T> read, Func<T, long>? retainedBytes) where T : class
         {
             lock (this)
             {
                 if (_evidence is T saved) return saved;
                 var value = read();
-                var bytes = 256 + Reference.SizeBytes * 8;
+                var bytes = 256 + Reference.SizeBytes * 8 + (retainedBytes?.Invoke(value) ?? 0);
                 lock (Gate)
                     if (_evidence is null && bytes <= 8388608 - _parsedBytes)
                     { _evidence = value; ParsedBytes = bytes; _parsedBytes += bytes; }

@@ -14,7 +14,7 @@ namespace NexusPipeline.Platform.Storage.Execution;
 internal static class ExecutionStepAdmission
 {
     internal static void RequireRequiredRoles(NexusPipeline.Platform.Serialization.Protocol.ExecutionPlan total,
-        IReadOnlyList<StepWriterState> jobs, string stepId, string role, JsonElement journal)
+        IReadOnlyList<StepWriterState> jobs, string stepId, string role, AttemptJournalView journal)
     {
         var step = total.Steps.Single(item => item.StepId == stepId);
         var current = jobs.Where(item => item.StepId == stepId).ToArray();
@@ -36,7 +36,7 @@ internal static class ExecutionStepAdmission
     }
 
     internal static void RequireOpenRoles(NexusPipeline.Platform.Serialization.Protocol.ExecutionPlan total,
-        IReadOnlyList<StepWriterState> jobs, string stepId, string role, JsonElement journal)
+        IReadOnlyList<StepWriterState> jobs, string stepId, string role, AttemptJournalView journal)
     {
         RequireRequiredRoles(total, jobs, stepId, role, journal);
         if (jobs.Any(item => item.StepId == stepId && (item.Role == role ||
@@ -101,6 +101,7 @@ internal static class ExecutionStepAdmission
         AttemptWriterState state, int ordinal)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
+        using var reads = new HistoryReadScope(instance, database, contracts);
         RequirePredecessors(state.Latest, state.Total, ordinal);
         AttemptTerminalEvidence.RequireArtifacts(instance, database, contracts, state);
         var closures = new JobClosureStore(instance, database, contracts);
@@ -113,11 +114,11 @@ internal static class ExecutionStepAdmission
                 closure.Family.Any(member => WriterStopEvidence.ObserveProcess(member) != WriterState.Stopped))
                 throw new IOException("execution_predecessor_stop_unconfirmed");
         }
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
-        using (var transaction = DatabaseConnections.BeginRead(connection))
+        HistoryReadScope.ReadDatabase(database, (connection, transaction) =>
         {
-            RequirePredecessorsInside(connection, transaction, state, state.Latest, ordinal); transaction.Commit();
-        }
+            RequirePredecessorsInside(connection, transaction, state, state.Latest, ordinal);
+            return true;
+        }, DatabaseDomain.Runtime | DatabaseDomain.Configuration);
         return RunBindingEvidence.HoldRestored(instance, database, contracts, state,
             state.Total.Steps.Take(ordinal).Select(step => step.StepId));
     }
@@ -152,11 +153,13 @@ internal static class ExecutionStepAdmission
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = $"SELECT writer_id,job_name,session_id FROM main.journal_writer_jobs WHERE journal_id=$journal LIMIT {JournalCapacityLimits.MaximumWriterJobs + 1};";
         command.Parameters.AddWithValue("$journal", journalId.ToString("D"));
+        var expected = jobs.Select(job => (job.WriterId.ToString("D"), job.JobName, job.SessionId)).ToHashSet();
+        if (expected.Count != jobs.Count) throw new IOException("execution_writer_jobs_unbound");
         using var row = command.ExecuteReader(); var count = 0;
         while (row.Read())
         {
             count++;
-            if (count > JournalCapacityLimits.MaximumWriterJobs || !jobs.Any(job => job.WriterId.ToString("D") == row.GetString(0) && job.JobName == row.GetString(1) && job.SessionId == row.GetInt32(2)))
+            if (count > JournalCapacityLimits.MaximumWriterJobs || !expected.Remove((row.GetString(0), row.GetString(1), row.GetInt32(2))))
                 throw new IOException("execution_writer_jobs_unbound");
         }
         if (count != jobs.Count) throw new IOException("execution_writer_jobs_unbound");

@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Collections.Immutable;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -30,9 +29,23 @@ internal static class ExecutionInvocationCodec
 
     internal static bool IsParticipant(JsonElement participant)
     {
-        var identity = participant.GetProperty("identity");
-        if (!identity.TryGetProperty("format", out var format) || format.GetString() != Format) return false;
+        if (!MatchesFormat(participant)) return false;
         _ = Decode(participant); return true;
+    }
+
+    private static bool MatchesFormat(JsonElement participant) =>
+        participant.GetProperty("identity").TryGetProperty("format", out var format) && format.GetString() == Format;
+
+    internal static Dictionary<string, int> ReadOrdinals(AttemptJournalView view)
+    {
+        var ordinals = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var participant in view.Participants)
+        {
+            if (!MatchesFormat(participant)) continue;
+            var invocation = Decode(participant);
+            ordinals[invocation.StepId] = Math.Max(ordinals.GetValueOrDefault(invocation.StepId, 1), invocation.Ordinal);
+        }
+        return ordinals;
     }
 
     internal static ExecutionInvocation Decode(JsonElement participant)
@@ -60,17 +73,17 @@ internal static class ExecutionInvocationCodec
         return AttemptReadScope.RememberInvocation(participant, value);
     }
 
-    internal static ImmutableArray<ExecutionInvocation> Read(JsonElement journal, ExecutionPlan total)
+    internal static ImmutableArray<ExecutionInvocation> Read(AttemptJournalView journal, ExecutionPlan total)
     {
         if (AttemptReadScope.TryRead<ExecutionInvocation>(journal, total, out var saved)) return saved;
         var result = ImmutableArray.CreateBuilder<ExecutionInvocation>();
-        foreach (var participant in journal.GetProperty("participants").EnumerateArray().Where(IsParticipant))
+        foreach (var participant in journal.Participants.Where(IsParticipant))
         {
             var value = Decode(participant);
             var step = total.Steps.SingleOrDefault(step => step.StepId == value.StepId) ?? throw Invalid();
             var ordinal = result.Where(prior => prior.StepId == value.StepId).Select(prior => prior.Ordinal).DefaultIfEmpty(1).Max() + 1;
             if (value.Ordinal != ordinal || ordinal > (step.MaximumAttempts ?? 1) ||
-                value.BeforeRevision >= journal.GetProperty("revision").GetInt64() ||
+                value.BeforeRevision >= journal.Root.GetProperty("revision").GetInt64() ||
                 value.ConfigurationPlans.Length != total.ConfigurationSlots.Count(slot => slot.StepId == value.StepId) ||
                 participant.GetProperty("resourceKey").GetString() != "automation:" + step.ScriptId) throw Invalid();
             result.Add(value);
@@ -86,14 +99,15 @@ internal static class ExecutionInvocationCodec
             starts.Select(item => item.Ordinal).DefaultIfEmpty(1).Max();
     }
 
-    internal static int Ordinal(JsonElement journal, string stepId) => journal.GetProperty("participants").EnumerateArray()
+    internal static int Ordinal(AttemptJournalView journal, string stepId) => journal.Participants
         .Where(IsParticipant).Select(Decode).Where(item => item.StepId == stepId).Select(item => item.Ordinal).DefaultIfEmpty(1).Max();
 
     // Only invocation-owned events are projected. Configuration completion and unknown formats remain visible to their owners.
-    internal static JsonElement Current(JsonElement journal)
+    internal static AttemptJournalView Current(AttemptJournalView journal)
     {
+        if (journal.IsProjected) return journal;
         if (AttemptReadScope.TryProjection(journal, out var saved)) return saved;
-        var participants = journal.GetProperty("participants").EnumerateArray().ToArray();
+        var participants = journal.Participants.ToArray();
         var starts = new Dictionary<string, int>(StringComparer.Ordinal);
         for (var index = 0; index < participants.Length; index++)
             if (IsParticipant(participants[index])) starts[Decode(participants[index]).StepId] = index;
@@ -103,23 +117,26 @@ internal static class ExecutionInvocationCodec
             var step = ScopedStep(participant);
             return step is null || !starts.TryGetValue(step, out var start) || index > start;
         });
-        var projected = selected.ToArray();
+        var projected = selected.ToImmutableArray();
         return AttemptReadScope.RememberProjection(journal,
-            projected.Length == participants.Length ? journal : WithParticipants(journal, projected));
+            projected.Length == participants.Length ? journal : new(journal.Root, Selection: projected));
     }
 
-    internal static IReadOnlyList<JsonElement> Views(JsonElement journal)
+    internal static IReadOnlyList<AttemptJournalView> Views(AttemptJournalView journal)
     {
         if (AttemptReadScope.TryViews(journal, out var saved)) return saved;
-        var participants = journal.GetProperty("participants").EnumerateArray().ToArray();
-        var result = new List<JsonElement>();
-        for (var index = 0; index < participants.Length; index++)
-            if (IsParticipant(participants[index])) result.Add(WithParticipants(journal, participants.Take(index)));
+        var result = new List<AttemptJournalView>();
+        var index = 0;
+        foreach (var participant in journal.Participants)
+        {
+            if (IsParticipant(participant)) result.Add(journal with { Limit = index });
+            index++;
+        }
         result.Add(journal); return AttemptReadScope.RememberViews(journal, result.AsReadOnly());
     }
 
-    internal static JsonElement ForJob(JsonElement journal, ExecutionPlan total, string jobName) => Views(journal)
-        .LastOrDefault(view => WriterIntentCodec.ReadJobs(view, total).Any(job => job.JobName == jobName)) is var view && view.ValueKind != JsonValueKind.Undefined
+    internal static AttemptJournalView ForJob(AttemptJournalView journal, ExecutionPlan total, string jobName) => Views(journal)
+        .LastOrDefault(view => WriterIntentCodec.ReadJobs(view, total).Any(job => job.JobName == jobName)) is var view && view.Root.ValueKind != JsonValueKind.Undefined
             ? Current(view) : throw Invalid();
 
     internal static ImmutableArray<RunAttemptPlanConfigurationPlansItem> Plans(JsonElement journal, ExecutionPlan total, RunAttemptPlan attempt) =>
@@ -157,25 +174,6 @@ internal static class ExecutionInvocationCodec
         var owner = identity.TryGetProperty("binding", out var binding) ? binding : identity.GetProperty("source");
         if (owner.TryGetProperty("primary", out var primary)) owner = primary;
         return owner.GetProperty("stepId").GetString();
-    }
-
-    private static JsonElement WithParticipants(JsonElement journal, IEnumerable<JsonElement> participants)
-    {
-        var bytes = new ArrayBufferWriter<byte>();
-        using (var writer = new Utf8JsonWriter(bytes))
-        {
-            writer.WriteStartObject();
-            foreach (var property in journal.EnumerateObject())
-            {
-                if (property.Name != "participants") { property.WriteTo(writer); continue; }
-                writer.WritePropertyName(property.Name); writer.WriteStartArray();
-                foreach (var participant in participants) participant.WriteTo(writer);
-                writer.WriteEndArray();
-            }
-            writer.WriteEndObject();
-        }
-        using var document = JsonDocument.Parse(bytes.WrittenMemory);
-        return document.RootElement.Clone();
     }
 
     internal static IOException Invalid() => new("execution_invocation_unbound");

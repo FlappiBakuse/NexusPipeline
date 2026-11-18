@@ -1,4 +1,3 @@
-using System.Text.Json;
 using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Sqlite;
@@ -8,8 +7,8 @@ namespace NexusPipeline.Platform.Storage.Execution;
 internal sealed class HistoricalTargetEvidence(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
     ExecutionPlan total, string totalSha256)
 {
-    private readonly Dictionary<TargetJobState, JsonElement> _targets = [];
-    private readonly Dictionary<PcStageIntent, JsonElement> _stages = [];
+    private readonly Dictionary<TargetJobState, AttemptJournalView> _targets = [];
+    private readonly Dictionary<PcStageIntent, AttemptJournalView> _stages = [];
 
     internal HistoricalTargetEvidence Fork()
     {
@@ -19,7 +18,7 @@ internal sealed class HistoricalTargetEvidence(RuntimeInstance instance, StateDa
         return copy;
     }
 
-    internal void Observe(JsonElement journal)
+    internal void Observe(AttemptJournalView journal)
     {
         foreach (var view in ExecutionInvocationCodec.Views(journal).Select(ExecutionInvocationCodec.Current))
         {
