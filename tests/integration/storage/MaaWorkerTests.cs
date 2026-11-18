@@ -60,16 +60,21 @@ public sealed class MaaWorkerTests
         if (agent) MaaAgentSource.Prepare(project, input.NativeArchive!, marker + ".agent");
         var original = File.ReadAllBytes(project.ConfigurationFile!);
         var manifest = input.Manifest.DeepClone().AsObject(); manifest["extensionId"] = "maas"; manifest["artifactName"] = "ControlledMaaConsumer";
-        manifest["kind"] = "data-specialized"; manifest.Remove("managed"); manifest.Remove("execution"); manifest.Remove("frontend");
+        manifest["kind"] = "data-specialized";
+        foreach (var field in new[] { "managed", "execution", "frontend", "icon", "localization", "metadata" }) manifest.Remove(field);
         manifest["capabilities"] = new JsonArray("task.adapt", "configuration.edit");
         manifest["permissions"] = new JsonObject { ["fileAccess"] = new JsonArray("selected-script-root") };
-        manifest["specialized"] = new JsonObject { ["adapterEntry"] = "adapter.js",
+        manifest["specialized"] = new JsonObject { ["adapterEntry"] = "adapter/main.js",
             ["compiler"] = new JsonObject { ["extensionId"] = "maa-framework", ["compilerId"] = "project" },
             ["executionProvider"] = new JsonObject { ["extensionId"] = "maa-framework", ["entryId"] = "main" } };
         using var consumer = new InstallRuntimeFixture(catalog: catalog, originalManifest: manifest,
-            managedPayloadEdit: path => File.WriteAllText(Path.Combine(path, "adapter.js"), initialize
-                ? "globalThis.nexusTaskAdapter = () => { throw new Error('initialization_must_not_invoke_business_adapter'); };"
-                : preparation ? MaaPreparationSource.Adapter : MaaWorkerSource.Adapter),
+            managedPayloadEdit: path =>
+            {
+                Directory.CreateDirectory(Path.Combine(path, "adapter"));
+                File.WriteAllText(Path.Combine(path, "adapter", "main.js"), initialize
+                    ? "globalThis.nexusTaskAdapter = () => { throw new Error('initialization_must_not_invoke_business_adapter'); };"
+                    : preparation ? MaaPreparationSource.Adapter : MaaWorkerSource.Adapter);
+            },
             payloadRoots: provider.Roots, existingActivator: provider.Activator, catalogSequence: 2);
         try
         {

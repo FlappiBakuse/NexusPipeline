@@ -119,6 +119,7 @@ const specializedTitle = computed(() => typeMetadata.value ?
             :bundle="bundle"
             :store="store"
             @update:model-value="draft = $event as AutomationDraft"
+            @discard-new-item="presentation.discardNewItem($event)"
           />
           <AccountFields
             v-else-if="bundle && activeKind === 'users' && !userGlobal"

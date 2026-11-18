@@ -18,6 +18,7 @@
     "NexusPipeline.CoreTests.BrowserLoginTests",
     "NexusPipeline.CoreTests.BrowserPolicyTests",
     "NexusPipeline.CoreTests.BrowserValueTests",
+    "NexusPipeline.CoreTests.BrowserValueContractTests",
     "NexusPipeline.CoreTests.BusinessJudgementTests",
     "NexusPipeline.CoreTests.BusinessPreservationTests",
     "NexusPipeline.CoreTests.ClaimModeTests",

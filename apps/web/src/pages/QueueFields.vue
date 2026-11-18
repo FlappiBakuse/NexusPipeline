@@ -18,6 +18,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:modelValue': [value: Queue];
   'update:schedules': [value: readonly Schedule[]];
+  discardNewItem: [id: string];
 }>();
 const expanded = ref(new Set(props.schedules.filter(item => !props.bundle.schedules.some(saved => saved.id === item.id)).map(item => item.id)));
 const mode = computed(() =>
@@ -72,6 +73,10 @@ function addSchedule(): void {
       order: props.schedules.length
     }
   ]);
+}
+function removeSchedule(id: string): void {
+  emit('update:schedules', props.schedules.filter(item => item.id !== id));
+  if (!props.bundle.schedules.some(item => item.id === id)) emit('discardNewItem', id);
 }
 function toggle(id: string): void {
   const next = new Set(expanded.value);
@@ -224,12 +229,7 @@ function setTime(id: string, value: string): void {
               />
               <button
                 type="button"
-                @click="
-                  emit(
-                    'update:schedules',
-                    schedules.filter((value) => value.id !== item.id)
-                  )
-                "
+                @click="removeSchedule(item.id)"
               >
                 {{ t('删除定时') }}
               </button>

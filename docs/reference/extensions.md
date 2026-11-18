@@ -33,6 +33,8 @@ artifact 以有界缓冲流式核对长度和摘要，编码响应、范围响�
 
 ## 独占下载与包验证
 
+插件包与Host更新共用Platform的 `OwnedDownloadStaging`：独占目录、文件与资源租约、落盘摘要、重开身份复核及逐对象清理由该底层owner维护。两域各自校验大小上限、命名与错误码，继续独立核验签名和候选来源；插件的 `Adopt` 通过显式物理转移接口发布已封存内容，更新路径不提供该业务操作。
+
 下载独占创建 `runtime/staging/extension-<operationId>` 与其中的 `payload.zip`。
 已有同名目录不被接管；原生相对目录句柄、物理身份和实际资源租约约束本次拥有权。
 成功下载保持原文件只读句柄，供 `VerifiedExtensionPackage` 重新验证实际包。

@@ -21,6 +21,14 @@ def check_source(root, records=None):
     errors.extend(check_names(root, records, generated))
     exemptions = set()
     for entry in registry["files"]:
+        if entry["path"] == "apps/desktop/browser-login-limits.generated.cjs" and \
+                entry["generator"] == "tooling/browser_login_contract.py" and \
+                entry["verifyCommand"] == ["python", "-B", "tooling/browser_login_contract.py", "--check"]:
+            from browser_login_contract import generate
+            if (root / entry["path"]).read_bytes() != generate(root):
+                raise ValueError("Desktop login limits differ from the Core owner")
+            exemptions.add(entry["path"])
+            continue
         if entry["path"] == "apps/web/package-lock.json" and entry["generator"] == "npm" and entry["verifyCommand"] == ["python", "-B", "tooling/web_build.py", "--check-lock"]:
             from web_build import verify_lock
             verify_lock(root)

@@ -174,7 +174,7 @@ onBeforeUnmount(() => owner?.abort());
   max-height: 260px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--log-background, #0a1321);
+  background: var(--log-bg);
   color: var(--log-text, #c7e1fc);
 }
 .history-log-preview pre {

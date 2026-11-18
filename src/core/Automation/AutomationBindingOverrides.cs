@@ -16,9 +16,10 @@ public sealed record AutomationQueueDependency(Guid ScriptId, ImmutableArray<Gui
 
 public static class AutomationBindingPolicy
 {
-    public static AutomationBinding Resolve(AutomationUser user, AutomationBinding raw)
+    public static AutomationBinding Resolve(AutomationUser user, AutomationBinding raw) => Resolve(user.BindingOverrides, raw);
+
+    public static AutomationBinding Resolve(AutomationBindingOverrides overrides, AutomationBinding raw)
     {
-        var overrides = user.BindingOverrides;
         var result = raw with { };
         if (overrides.General.SyncEnabled)
             result = result with { IsEnabled = overrides.General.IsEnabled, RunDays = overrides.General.RunDays,

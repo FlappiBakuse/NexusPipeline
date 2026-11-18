@@ -1,6 +1,12 @@
 {
   "files": [
     {
+      "path": "apps/desktop/browser-login-limits.generated.cjs",
+      "generator": "tooling/browser_login_contract.py",
+      "verifyCommand": ["python", "-B", "tooling/browser_login_contract.py", "--check"],
+      "reason": "Desktop login prechecks use the authoritative Core value length, aggregate and JSON depth limits."
+    },
+    {
       "path": "contracts/sdk-public/schemas/task-adapter.schema.json",
       "generator": "tooling/contract_codegen.py",
       "verifyCommand": [

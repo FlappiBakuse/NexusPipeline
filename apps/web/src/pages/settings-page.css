@@ -119,7 +119,7 @@ dt {
   background: var(--content-card-soft);
 }
 .warning {
-  border-left: 2px solid var(--nx-color-warning);
+  border-left: 2px solid var(--warning);
   color: var(--muted);
   font-size: 12px;
   line-height: 1.7;

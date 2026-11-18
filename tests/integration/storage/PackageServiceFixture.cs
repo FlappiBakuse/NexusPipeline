@@ -22,7 +22,8 @@ internal sealed class PackageServiceFixture : IAsyncDisposable
     internal readonly OperationQueryService Queries;
     internal int Requests;
 
-    internal PackageServiceFixture(bool? enabled = false, bool trusted = true, Action<string>? payloadEdit = null)
+    internal PackageServiceFixture(bool? enabled = false, bool trusted = true, Action<string>? payloadEdit = null,
+        Func<HttpContent>? artifactContent = null)
     {
         Package = new("data-specialized", payloadEdit: payloadEdit);
         var owner = Package.Catalog;
@@ -46,7 +47,9 @@ internal sealed class PackageServiceFixture : IAsyncDisposable
             var body = path.EndsWith("index.json", StringComparison.Ordinal) ? signed.Pointer :
                 path.EndsWith("catalog.json", StringComparison.Ordinal) ? signed.Catalog :
                 path.EndsWith("catalog.sig.json", StringComparison.Ordinal) ? signed.Signature : archive;
-            return new(HttpStatusCode.OK) { RequestMessage = request, Content = new ByteArrayContent(body) };
+            return new(HttpStatusCode.OK) { RequestMessage = request,
+                Content = path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) && artifactContent is not null
+                    ? artifactContent() : new ByteArrayContent(body) };
         })) : null;
         Service = new(owner.Instance, owner.Database, owner.Lease, owner.Contracts, Roots, owner.Resources, owner.Index, Runtime, createClient);
         Queries = new(owner.Instance, owner.Lease, owner.Database);

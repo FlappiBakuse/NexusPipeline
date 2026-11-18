@@ -7,11 +7,11 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  border-bottom: 1px solid var(--nexus-border, #454b59);
+  border-bottom: 1px solid var(--nx-color-border);
   padding-bottom: 0.75rem;
 }
 .config-tabs button[aria-current='page'] {
-  color: var(--nexus-accent, #62a8ff);
+  color: var(--nx-color-accent);
   border-color: currentColor;
 }
 .config-fields {
@@ -34,7 +34,7 @@
   min-width: 0;
   display: grid;
   gap: 0.35rem;
-  border: 1px solid var(--nexus-border, #454b59);
+  border: 1px solid var(--nx-color-border);
   border-radius: 0.65rem;
 }
 .config-fields .choice-row {

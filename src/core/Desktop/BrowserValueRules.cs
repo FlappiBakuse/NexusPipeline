@@ -7,12 +7,17 @@ namespace NexusPipeline.Core.Desktop;
 
 public static class BrowserValueRules
 {
+    internal const int MaximumValueLength = 32768;
+    internal const int MaximumTotalLength = 65536;
+    internal const int MaximumValues = 28;
+    internal const int MaximumJsonDepth = 16;
+
     public static bool IsReady(BrowserLoginPolicy policy, IReadOnlyDictionary<string, SecretValue> values)
     {
         ArgumentNullException.ThrowIfNull(policy); ArgumentNullException.ThrowIfNull(values);
         var ids = policy.Cookies.Select(rule => rule.Id).Concat(policy.Storage.Select(rule => rule.Id))
             .Concat(policy.JsonRequests.Select(rule => rule.Id)).ToHashSet(StringComparer.Ordinal);
-        if (values.Count > 28 || values.Keys.Any(id => !ids.Contains(id))) return false;
+        if (values.Count > MaximumValues || values.Keys.Any(id => !ids.Contains(id))) return false;
         var normalized = new Dictionary<string, char[]>(StringComparer.Ordinal);
         var total = 0;
         try
@@ -20,12 +25,12 @@ public static class BrowserValueRules
             foreach (var (id, secret) in values)
             {
                 if (secret is null) return false;
-                var check = policy.Checks.SingleOrDefault(check => check.Id == id) ?? new(id, "nonEmpty", [], 32768);
+                var check = policy.Checks.SingleOrDefault(check => check.Id == id) ?? new(id, "nonEmpty", [], MaximumValueLength);
                 char[]? content = null;
                 secret.Use(value => content = Extract(value, check));
                 if (content is null) return false;
                 normalized.Add(id, content);
-                total = checked(total + content.Length); if (total > 65536) return false;
+                total = checked(total + content.Length); if (total > MaximumTotalLength) return false;
                 if (!Valid(content, check)) return false;
             }
             foreach (var set in policy.EqualSets)
@@ -45,12 +50,12 @@ public static class BrowserValueRules
 
     private static char[]? Extract(ReadOnlySpan<char> value, LoginValueCheck check)
     {
-        if (value.Length is < 1 or > 32768) return null;
+        if (value.Length is < 1 or > MaximumValueLength) return null;
         if (check.Path.IsEmpty) return value.ToArray();
         var bytes = new byte[Encoding.UTF8.GetByteCount(value)]; Encoding.UTF8.GetBytes(value, bytes);
         try
         {
-            using var document = JsonDocument.Parse(bytes, new() { MaxDepth = 16 });
+            using var document = JsonDocument.Parse(bytes, new() { MaxDepth = MaximumJsonDepth });
             if (HasDuplicates(document.RootElement)) return null;
             var item = document.RootElement;
             foreach (var part in check.Path)

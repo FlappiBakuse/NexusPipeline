@@ -1,4 +1,6 @@
 using System.Runtime.Versioning;
+using System.Net;
+using System.Security.Cryptography;
 using System.Text.Json;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Extensions;
@@ -10,6 +12,7 @@ using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Extensions;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
+using NexusPipeline.Platform.Storage.Maintenance;
 using Xunit;
 
 namespace NexusPipeline.StorageTests;
@@ -18,6 +21,83 @@ namespace NexusPipeline.StorageTests;
 [Collection("SerialNative")]
 public sealed class OwnedDownloadTests
 {
+    [Theory(DisplayName = "Real Update And Package Services Keep Shared Download Ownership Across Success Cancellation Invalid Bytes Replacement And Cleanup Failure")]
+    [InlineData(false, "success")] [InlineData(true, "success")]
+    [InlineData(false, "cancel")] [InlineData(true, "cancel")]
+    [InlineData(false, "size")] [InlineData(true, "size")]
+    [InlineData(false, "digest")] [InlineData(true, "digest")]
+    [InlineData(false, "replace")] [InlineData(true, "replace")]
+    [InlineData(false, "cleanup")] [InlineData(true, "cleanup")]
+    public async Task ProtectsServiceDownloads(bool update, string fault)
+    {
+        if (update) await UpdateDownload(fault);
+        else await PackageDownload(fault);
+    }
+
+    private static async Task PackageDownload(string fault)
+    {
+        using var stop = new CancellationTokenSource(); DownloadBodyFixture? body = null;
+        await using var fixture = new PackageServiceFixture(artifactContent: () => body!.Content());
+        var owner = fixture.Package.Catalog;
+        body = new(File.ReadAllBytes(fixture.Package.Archive), owner.Instance.RuntimeRoot, fault, stop);
+        var catalog = await fixture.Service.RefreshAsync("local", ExtensionStoreChannel.Stable, default);
+        var error = await Record.ExceptionAsync(async () =>
+        {
+            var details = await fixture.Service.CatalogDetailsAsync(catalog.Identity, "fixture-plugin", stop.Token);
+            Assert.NotNull(details); Assert.Equal("fixture-plugin", details.Manifest.GetProperty("extensionId").GetString());
+        });
+        RequireTransferResult(body, fault, error, update: false);
+        body.RequireReleased(owner.Resources); Assert.Empty(fixture.Runtime.ReadStates());
+    }
+
+    private static async Task UpdateDownload(string fault)
+    {
+        using var fixture = PayloadTestFixture.Create(JournalKind.UpdateApply, PayloadAction.Upgrade);
+        using var lease = InstanceLease.Acquire(fixture.Instance, new());
+        var index = new RecoveryIndex(); index.PublishVerified(0, 1, []);
+        var resources = new ResourceLeaseManager(new HostLifecycle(index, TimeProvider.System));
+        var source = new UpdateSourceCodec(fixture.Instance, new()).ReadMetadata(fixture.Plan.MaintenanceSource!);
+        var bytes = File.ReadAllBytes(Path.Combine(fixture.Instance.RuntimeRoot, source.Archive.RelativePath));
+        using var stop = new CancellationTokenSource();
+        var body = new DownloadBodyFixture(bytes, fixture.Instance.RuntimeRoot, fault, stop);
+        using var signer = ECDsa.Create(); signer.ImportPkcs8PrivateKey(UpdateSourceSeed.TestSigningKey(), out _);
+        var trust = new UpdateReleaseTrust(new Dictionary<string, byte[]> { ["fixture-only"] = signer.ExportSubjectPublicKeyInfo() },
+            new("https://updates.example.test/metadata/update/1/"), new("https://store.example.test/metadata/store/1/"),
+            [new("https://assets.example.test/releases/download/")], 1, 1);
+        await using var service = new HostUpdateService(fixture.Instance, fixture.Database, lease, resources, new(), fixture.Roots,
+            trust, () => new HttpClient(new DownloadHandler(body)));
+        var request = new HostUpdateRequest(Guid.NewGuid(), "download-fixture", source.Feed.Identity,
+            source.HostVersion, source.Timing, source.Window);
+        var error = await Record.ExceptionAsync(() => service.PrepareAsync(request, stop.Token));
+        RequireTransferResult(body, fault, error, update: true);
+        body.RequireReleased(resources);
+        Assert.Empty(new RecoveryJournalRegistry(fixture.Database).ReadSnapshot().Journals);
+    }
+
+    private static void RequireTransferResult(DownloadBodyFixture body, string fault, Exception? error, bool update)
+    {
+        if (fault == "cleanup") Assert.StartsWith(update ? "maintenance_download_cleanup_pending" : "extension_download_cleanup_pending",
+            Assert.IsType<AggregateException>(error).Message);
+        else if (fault == "cancel") Assert.IsAssignableFrom<OperationCanceledException>(error);
+        else if (fault is "size" or "digest") Assert.Equal("extension_store_download_invalid", Assert.IsType<IOException>(error).Message);
+        else
+        {
+            Assert.True(body.ReadComplete);
+            if (update) Assert.Equal("update_payload_profile_invalid", Assert.IsType<IOException>(error).Message);
+            else Assert.Null(error);
+            if (fault == "replace") Assert.True(body.ReplacementBlocked);
+        }
+    }
+
+    private sealed class DownloadHandler(DownloadBodyFixture body) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { RequestMessage = request, Content = body.Content() });
+        }
+    }
+
     [Fact(DisplayName = "A Killed Download Owner Leaves One Verified Published Zip That The Real Apply Workflow Reuses Without Transfer")]
     public async Task ReusesInterruptedAdoption()
     {

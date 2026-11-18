@@ -4,6 +4,7 @@ import FormSelect from '../../apps/web/src/components/FormSelect';
 import type { ControlHostSettingsValues } from '../../apps/web/src/control/wire.generated';
 import { SettingsWrites } from '../../apps/web/src/app/settings-writes';
 import { ControlFailure } from '../../apps/web/src/control/client';
+import { appAppearanceContract } from './app-appearance-contract';
 
 type Check = (value: unknown, name: string) => void;
 type Values = { enabled: boolean; port: number; style: { dim: number; blur: number } };
@@ -37,6 +38,7 @@ export async function immediateSettingsContract(check: Check): Promise<void> {
   lifetime.abort();
   await failedAndUnknown(check);
   await proxyCompletion(check);
+  await appAppearanceContract(check);
 }
 
 async function failedAndUnknown(check: Check): Promise<void> {

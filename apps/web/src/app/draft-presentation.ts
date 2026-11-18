@@ -3,7 +3,7 @@ import type { EditorDraftScope } from '@nexuspipeline/extension-sdk';
 import './draft-presentation.css';
 
 type Field = HTMLElement & { value: unknown; checked?: boolean; type?: string };
-type Baseline = { value: unknown; changed: boolean; sensitive: boolean };
+type Baseline = { value: unknown; changed: boolean; sensitive: boolean; itemId: string };
 const fields = 'input:not([type=hidden]):not([type=button]):not([type=submit]),textarea,select,nexus-text-input,nexus-text-area,nexus-number-input,nexus-switch,nexus-switch-setting,nexus-select,nexus-path-picker,nexus-file-picker,nexus-color-picker,nexus-range,nexus-date-range-picker,nexus-time-picker';
 const same = (a: unknown, b: unknown): boolean => {
   if (a === b) return true;
@@ -81,8 +81,9 @@ export class DraftPresentation {
         (label ? [...label.childNodes].filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent).join(' ').trim() ||
           label.querySelector('span,strong')?.textContent : '') || element.id;
       if (!caption) continue;
-      const item = (element.closest('[data-draft-item],[data-item-id]')?.getAttribute('data-draft-item') ||
-        element.closest('[data-item-id]')?.getAttribute('data-item-id') || '') + '/' +
+      const itemId = element.closest('[data-draft-item],[data-item-id]')?.getAttribute('data-draft-item') ||
+        element.closest('[data-item-id]')?.getAttribute('data-item-id') || '';
+      const item = itemId + '/' +
         (element.closest('[data-secret-field]')?.getAttribute('data-secret-field') || '');
       const base = JSON.stringify([item, caption.replace(/\s+/g, ' ').trim(), element.localName, element.type]);
       const ordinal = counts.get(base) || 0;
@@ -91,7 +92,7 @@ export class DraftPresentation {
       this.nodes.set(element, key);
       element.setAttribute('data-observe-value', '');
       const sensitive = element.type === 'password' || element.hasAttribute('data-sensitive') || !!element.closest('[data-secret-field]');
-      if (!this.baseline.has(key)) this.baseline.set(key, { sensitive, changed: false,
+      if (!this.baseline.has(key)) this.baseline.set(key, { sensitive, itemId, changed: false,
         value: sensitive ? undefined : this.value(element) && typeof this.value(element) === 'object' ?
           JSON.parse(JSON.stringify(this.value(element))) : this.value(element) });
       const saved = this.baseline.get(key)!;
@@ -104,6 +105,14 @@ export class DraftPresentation {
   private mark(element: Field, saved: Baseline): void {
     if (this.existing && this.state.restored && saved.changed) element.setAttribute('data-unsaved', 'true');
     else element.removeAttribute('data-unsaved');
+  }
+
+  discardNewItem(id: string): void {
+    for (const [key, saved] of this.baseline) if (saved.itemId === id) this.baseline.delete(key);
+    for (const [element, key] of this.nodes) if (!this.baseline.has(key)) {
+      element.removeAttribute('data-unsaved'); this.nodes.delete(element);
+    }
+    this.state.changed = [...this.baseline.values()].some(item => item.changed);
   }
 
   saved(): void {

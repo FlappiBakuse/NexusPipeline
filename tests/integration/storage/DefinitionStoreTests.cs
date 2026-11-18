@@ -7,10 +7,13 @@ using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Operations;
 using NexusPipeline.Core.Records;
+using NexusPipeline.Core.Notifications;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Automation;
+using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Journals;
+using NexusPipeline.Platform.Storage.Notifications;
 using NexusPipeline.Platform.Storage.Sqlite;
 using NexusPipeline.Host.Control.Automation;
 using NexusPipeline.Host.Control.Http;
@@ -21,6 +24,97 @@ namespace NexusPipeline.StorageTests;
 
 public sealed class DefinitionStoreTests
 {
+    [Theory(DisplayName = "Effective Binding Display Frozen Plan Validation And Notification Routes Share Every Override Combination")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    public async Task ConsumesEffectiveOverrides(int groups)
+    {
+        using var fixture = new ExecutionAdmissionFixture(); var source = fixture.Source;
+        var definitions = new AutomationDefinitionService(source.Instance, new(), source.Database, source.Lease, fixture.Resources, fixture.Index);
+        var useCases = new AutomationUseCases(definitions, new(new()));
+        var authority = new AuthenticatedControlRequest(ControlOrigin.Local, "override-fixture", null, () => new(false, false));
+        var rawTasks = ImmutableArray.Create(Guid.NewGuid(), Guid.NewGuid());
+        var overrideTasks = ImmutableArray.Create(Guid.NewGuid(), rawTasks[0]);
+        var notifications = new NotificationCatalogService(source.Instance, source.Database, source.Lease, fixture.Resources, fixture.Index, new());
+        foreach (var (id, index) in rawTasks.Append(overrideTasks[0]).Select((id, index) => (id, index)))
+            _ = await notifications.SaveAsync(Guid.NewGuid(), "override-fixture", index, id, 0,
+                new("Override task " + index, "", NotificationTaskKind.Webhook, false, NotificationChannelConfiguration.Default), []);
+        var general = (groups & 1) != 0; var notification = (groups & 2) != 0; var advanced = (groups & 4) != 0;
+        foreach (var variant in Enumerable.Range(0, 4))
+        {
+            var catalog = source.Definitions.Read();
+            var raw = catalog.Bindings.Single(item => item.Id == source.OtherBinding);
+            var script = catalog.Scripts.Single(item => item.Id == raw.ScriptId);
+            var hook = new AutomationHook(new(script.RootId, Path.GetFileName(source.OtherImage)), ["raw", "two words"]);
+            raw = raw with { IsEnabled = true, RunDays = 7, MaximumSuccessfulRunsPerDay = 3,
+                NotifyEnabled = true, NotificationTaskIds = rawTasks, PreHook = hook, PostHook = hook,
+                PreOnceAfterSuccess = false, PostFinalOnly = true };
+            var days = new[] { -1, 0, 36500, -1 }[variant]; var limit = new[] { -1, 1, 9999, -1 }[variant];
+            var selectedTasks = variant < 2 ? ImmutableArray<Guid>.Empty : overrideTasks;
+            var selectedHook = variant % 2 == 0 ? null : hook with { Arguments = ["override"] };
+            var user = catalog.Users.Single(item => item.Id == raw.UserId) with { BindingOverrides = new()
+            {
+                General = new(general, variant != 0, days, limit), Notification = new(notification, variant % 2 != 0, selectedTasks),
+                Advanced = new(advanced, selectedHook, selectedHook, selectedHook is not null, false)
+            } };
+            var scripts = catalog.Scripts.Select(item => item with { Limits = item.Limits with { MaximumAttempts = 1 } }).ToImmutableArray();
+            var changes = new AutomationChanges(catalog.Revision, [], scripts, [user], [raw], [], [], []);
+            source.Definitions.Commit(AutomationDefinitionStore.Identity(Guid.NewGuid(), "override-fixture", changes), changes, PlanBuilderFixture.CreatedAt);
+            var displayed = System.Text.Json.JsonSerializer.SerializeToElement(useCases.BindingEffective(authority, raw.Id),
+                System.Text.Json.JsonSerializerOptions.Web);
+            var effective = displayed.GetProperty("effective");
+            Assert.Equal(!general || variant != 0, effective.GetProperty("isEnabled").GetBoolean());
+            Assert.Equal(general ? days : 7, effective.GetProperty("runDays").GetInt32());
+            Assert.Equal(general ? limit : 3, effective.GetProperty("maximumSuccessfulRunsPerDay").GetInt32());
+            Assert.Equal(!notification || variant % 2 != 0, effective.GetProperty("notifyEnabled").GetBoolean());
+            Assert.Equal((notification ? selectedTasks : rawTasks).ToArray(),
+                effective.GetProperty("notificationTaskIds").EnumerateArray().Select(item => item.GetGuid()).ToArray());
+            Assert.Equal(advanced && selectedHook is null, effective.GetProperty("preHook").ValueKind == System.Text.Json.JsonValueKind.Null);
+            Assert.Equal(advanced && selectedHook is not null, effective.GetProperty("preOnceAfterSuccess").GetBoolean());
+            Assert.Equal(!advanced, effective.GetProperty("postFinalOnly").GetBoolean());
+            using var draft = source.Prepare(new QueueTarget(source.QueueId));
+            Assert.True(draft.Explanation.HasRunnable, string.Join(",", draft.Explanation.Items.Select(item => item.ReasonCode)));
+            using var prepared = source.Builder.Freeze(draft);
+            var plan = prepared.Plan.ReadWire();
+            var bundle = NexusPipeline.Platform.Storage.Notifications.ExecutionNotificationSource.ReadBundle(source.Instance, new(),
+                new(plan.DefinitionBundle.RelativePath, plan.DefinitionBundle.SizeBytes, plan.DefinitionBundle.Sha256));
+            ExecutionPlanSources.Validate(plan, bundle);
+            var step = plan.Steps.SingleOrDefault(item => item.BindingId == raw.Id.ToString("D"));
+            if (general && variant < 2) Assert.Null(step);
+            else
+            {
+                Assert.NotNull(step); Assert.Equal(general ? limit : 3, step.MaximumSuccessfulRunsPerDay);
+                Assert.Equal(advanced && selectedHook is null ? 0 : 2, (step.Hooks ?? []).Count);
+                if (step.Hooks is { Count: > 0 } hooks)
+                {
+                    Assert.Equal(advanced ? new[] { "override" } : new[] { "raw", "two words" }, hooks[0].SourceArguments);
+                    Assert.Equal(advanced, hooks[0].OnceAfterSuccess); Assert.Equal(!advanced, hooks[1].FinalOnly);
+                }
+                var damaged = plan with { Steps = plan.Steps.Select(item => item == step ? item with
+                    { MaximumSuccessfulRunsPerDay = 2 } : item).ToArray() };
+                Assert.Equal("execution_daily_limit_unbound", Assert.Throws<IOException>(() => ExecutionPlanSources.Validate(damaged, bundle)).Message);
+            }
+            var routes = NexusPipeline.Platform.Storage.Notifications.ExecutionNotificationSource.ReadRoutes(plan, bundle);
+            var route = routes.SingleOrDefault(item => item.SourceId == raw.Id);
+            if (general && variant == 0 || notification && variant % 2 == 0) Assert.Null(route);
+            else
+            {
+                Assert.NotNull(route); Assert.Equal(NexusPipeline.Core.Notifications.NotificationRoutingKind.Binding, route.Kind);
+                Assert.Equal((notification ? selectedTasks : rawTasks).ToArray(), route.Selection.TaskIds.ToArray());
+            }
+            var savedRaw = source.Definitions.Read().Bindings.Single(item => item.Id == raw.Id);
+            Assert.Equal(7, savedRaw.RunDays); Assert.Equal(3, savedRaw.MaximumSuccessfulRunsPerDay);
+            Assert.Equal(rawTasks.ToArray(), savedRaw.NotificationTaskIds.ToArray()); Assert.NotNull(savedRaw.PreHook);
+        }
+    }
+
     [Fact(DisplayName = "Effective Binding Projection Uses One Saved Catalog And Names Every Override Source")]
     public void ProjectsEffectiveBinding()
     {

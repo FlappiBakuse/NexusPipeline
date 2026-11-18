@@ -1,6 +1,6 @@
 'use strict';
-function strictJson(text) {
-  if (typeof text !== 'string' || Buffer.byteLength(text, 'utf8') > 32768) throw new Error('desktop_json_limit');
+function strictJson(text, { maximumBytes = 32768, maximumDepth = 64 } = {}) {
+  if (typeof text !== 'string' || Buffer.byteLength(text, 'utf8') > maximumBytes) throw new Error('desktop_json_limit');
   const parsed = JSON.parse(text);
   let cursor = 0;
   const whitespace = () => { while (/\s/.test(text[cursor] ?? '') && cursor < text.length) cursor++; };
@@ -14,10 +14,10 @@ function strictJson(text) {
     throw new Error('desktop_json_string');
   }
   function value(depth) {
-    if (depth > 64) throw new Error('desktop_json_depth');
     whitespace();
     const opening = text[cursor];
     if (opening === '{' || opening === '[') {
+      if (depth >= maximumDepth) throw new Error('desktop_json_depth');
       cursor++;
       whitespace();
       const closing = opening === '{' ? '}' : ']';

@@ -4,6 +4,8 @@
 
 先在仓外构建槽运行 `python tooling/web_build.py --prepare-only --output <构建槽>`。
 该模式固定当前源码和原生 npm lock、准备依赖，保留 source/prepare 回执；不运行 Vite、vue-tsc 或 .NET。
+
+Web 构建中的 `frontend_theme.mjs` 检查现役日志、配置与设置样式的变量消费；跨仓检查可显式传 `--plugins-root <Plugins根>`，包含插件公共草稿样式。变量定义来自生产 CSS、JS `setProperty` 与具名公开 hook。
 相同锁复用依赖；源码改变须重新准备。正常 Web build 继续执行类型、AST 边界及生产构建。
 
 源码、依赖和输出参数均须使用显式绝对路径；目录及父目录不得经过 symlink 或 junction。

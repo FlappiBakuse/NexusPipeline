@@ -7,6 +7,44 @@ namespace NexusPipeline.CoreTests;
 
 public sealed class BusinessPreservationTests
 {
+    [Theory(DisplayName = "Every Binding Override Group Independently Selects Its Saved Values Including Empty Hooks Lists And Limit Boundaries")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    public void ResolvesOverrideGroups(int groups)
+    {
+        var fixture = new ExecutionSelectionFixture();
+        var hook = new AutomationHook(new(fixture.Catalog.Roots[0].Id, "before.exe"), ["raw"]);
+        var tasks = ImmutableArray.Create(Guid.NewGuid(), Guid.NewGuid());
+        var raw = fixture.Catalog.Bindings[0] with { IsEnabled = true, RunDays = 7, MaximumSuccessfulRunsPerDay = 3,
+            NotifyEnabled = true, NotificationTaskIds = tasks, PreHook = hook, PostHook = hook,
+            PreOnceAfterSuccess = true, PostFinalOnly = true };
+        var general = (groups & 1) != 0; var notification = (groups & 2) != 0; var advanced = (groups & 4) != 0;
+        foreach (var (days, limit) in new[] { (-1, -1), (0, 1), (36500, 9999) })
+        {
+            var user = fixture.Catalog.Users.Single(item => item.Id == raw.UserId) with { BindingOverrides = new()
+            {
+                General = new(general, false, days, limit), Notification = new(notification, false, []),
+                Advanced = new(advanced, null, null, false, false)
+            } };
+            var actual = AutomationBindingPolicy.Resolve(user, raw);
+            Assert.Equal(!general, actual.IsEnabled);
+            Assert.Equal(general ? days : 7, actual.RunDays);
+            Assert.Equal(general ? limit : 3, actual.MaximumSuccessfulRunsPerDay);
+            Assert.Equal(!notification, actual.NotifyEnabled);
+            Assert.Equal(notification ? [] : tasks.ToArray(), actual.NotificationTaskIds.ToArray());
+            Assert.Equal(advanced ? null : hook, actual.PreHook); Assert.Equal(advanced ? null : hook, actual.PostHook);
+            Assert.Equal(!advanced, actual.PreOnceAfterSuccess); Assert.Equal(!advanced, actual.PostFinalOnly);
+            Assert.Equal(raw.Id, actual.Id); Assert.Equal(raw.Revision, actual.Revision);
+            Assert.Equal(raw.UserId, actual.UserId); Assert.Equal(raw.ScriptId, actual.ScriptId); Assert.Equal(raw.Priority, actual.Priority);
+        }
+    }
+
     [Fact(DisplayName = "User Binding Overrides Apply Enabled Groups And Disabled Overrides Preserve Saved Values")]
     public void FreezesBindingOverrides()
     {

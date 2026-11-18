@@ -10,6 +10,7 @@ export async function runNodeContract({ root, modules, directory, suite, entry, 
     }
   }
   const file = path.join(root, entry); captureInput(file);
+  if (suite === 'login-value-contract') captureInput(path.join(root, 'tests/fixtures/browser-login-values.json'));
   for (const relative of ['apps/web/package-lock.json', 'tooling/node_contracts.mjs', 'tooling/web_contracts.mjs']) {
     captureInput(path.join(root, relative));
   }

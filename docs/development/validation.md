@@ -102,6 +102,8 @@ python -B tooling/nexus.py test --group core --method NexusPipeline.CoreTests.Re
 
 发布来源与 PR 选择的工具用例在 [test_release_sources.py](../../tests/tooling/test_release_sources.py) 和 [test_ci_plans.py](../../tests/tooling/test_ci_plans.py)。工作流结构检查使用 [测试依赖清单](../../tests/tooling/requirements.txt) 中的 PyYAML，从显式仓外 Python 依赖目录通过进程级 `PYTHONPATH` 提供给 runner。
 
+Host 的 `ci_plan.py` 只提供 `host_scope`；插件选择与 Publisher 保护向量归 Plugins 实际生产模块。共享发行与路径工具以本仓为唯一 owner，由 `python -B tooling/sync_shared_tooling.py --plugins-root <Plugins根>` 生成消费镜像，追加 `--check` 检查未同步变化。Plugins 的 `tooling/shared-tooling.json` 固定来源提交和摘要，可在独立控制 checkout 校验，不读取浮动远端源码。
+
 Web 当前 suite 可显式选择，例如 `automation`、`account-summary`、`history-formatting`；完整语法在[前端参数参考](frontend-testing.md)。选择真实相关 suite 或必要单场景，不默认运行全部 controls、所有浏览器和所有 Host 场景。没有 `nexus test --group web`，不要虚构该入口。
 
 契约/fixture、真实集成、原生产品与真实上游分别记录。loopback 合成登录页通过不证明官方网页登录可用；adapter 纯函数通过不证明 Host 修复入口已接通。

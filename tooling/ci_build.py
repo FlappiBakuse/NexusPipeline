@@ -26,7 +26,7 @@ def external(root, partner, output):
 
 
 def run_check(root, kind, plan, partner, output):
-    if plan["kind"] != kind or plan["repository"] != REPOSITORIES[kind]:
+    if kind != "host" or plan["kind"] != kind or plan["repository"] != REPOSITORIES[kind]:
         raise ValueError("PR plan belongs to a different repository")
     verify_plan(root, plan)
     output = external(root, partner, output)
@@ -73,23 +73,23 @@ def run_check(root, kind, plan, partner, output):
             report.update(status="PASS", scope="No production input changes; no product compiler or tests invoked")
             return report
         scope = plan["scope"]
-        host = root if kind == "host" else partner
+        host = root
         consumer = None
         partner_before = None
         if plan["partnerRequired"]:
-            other = "plugins" if kind == "host" else "host"
+            other = "plugins"
             expected = plan["partner"]
             if partner is None or expected["repository"] != REPOSITORIES[other] or expected["ref"] != "refs/heads/develop":
                 raise ValueError("Fixed partner checkout is required")
             partner_before = source_identity(partner, full_sha(expected["commit"]))
             report["partnerSource"] = partner_before
-            plugin_root = partner if kind == "host" else root
-            plugin_commit = expected["commit"] if kind == "host" else plan["checkout"]
+            plugin_root = partner
+            plugin_commit = expected["commit"]
             consumer = clone(plugin_root, plugin_commit, output / "plugin-consumer")
-            if source_identity(consumer, plugin_commit) != (partner_before if kind == "host" else plan["source"]):
+            if source_identity(consumer, plugin_commit) != partner_before:
                 raise ValueError("Isolated consumer differs from its fixed source")
         build = output / "host-build"
-        projects = scope["projects"] if kind == "host" else []
+        projects = scope["projects"]
         if scope["extensions"] and not projects:
             projects = ["NexusPipeline.Extensibility", "NexusPipeline.Boundaries"]
         if projects:

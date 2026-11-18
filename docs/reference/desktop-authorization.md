@@ -40,6 +40,8 @@ Electron 主 frame 先验证 Host 签名，再发布该绑定；文档换代、�
 `Desktop.CaptureAsync` 另要求 `desktopAccess: ["interactive-login"]` 与明确的 `loginOrigins`，不借用后台网络来源权限。
 `CanCapture` 还依赖实际原生主进程近期的采集协议确认；只有在线或已绑定都不足以判定可采集。
 Host 冻结有限来源、cookie/storage/被动 JSON 选择器及完成谓词；秘密结果只返回可销毁内存草稿，不能经普通 JSON 序列化。
+
+登录预检与 Core 权威校验共用单值 32768 个 UTF-16 代码单元、合计 65536、最多 28 项及 JSON 容器深度 16 的边界；抽取后再执行该字段的长度与类型规则，重复键拒绝。Desktop 限额由 `tooling/browser_login_contract.py` 从 Core owner 生成；JSON 登录材料的 UTF-8 解析预算覆盖该字符边界，签名响应与窗口状态继续使用自己的字节预算。
 每次采集使用独立内存分区；主窗口与受控弹窗关闭、网络连接结束、存储和缓存清理后才确认结果。
 原请求、client 或 activation 退役后拒绝迟到候选，并继续保留 SDK 借用，直至原生清理确认或确切进程退出。
 原生绑定被撤销不等于进程已经退出；无清理证明时不报告释放成功。

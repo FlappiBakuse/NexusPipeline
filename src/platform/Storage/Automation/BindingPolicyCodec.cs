@@ -30,18 +30,16 @@ internal static class BindingPolicyCodec
 
     internal static AutomationRelationsBinding Resolve(AutomationRelationsUser user, AutomationRelationsBinding raw)
     {
-        var result = raw with { };
-        if (user.BindingOverrides is not { } overrides) return result;
-        if (overrides.General.SyncEnabled)
-            result = result with { Enabled = overrides.General.Enabled, RunDays = overrides.General.RunDays,
-                MaximumSuccessfulRunsPerDay = overrides.General.MaximumSuccessfulRunsPerDay };
-        if (overrides.Notification.SyncEnabled)
-            result = result with { NotifyEnabled = overrides.Notification.NotifyEnabled,
-                NotificationTaskIds = overrides.Notification.NotificationTaskIds };
-        if (overrides.Advanced.SyncEnabled)
-            result = result with { PreHook = overrides.Advanced.PreHook, PostHook = overrides.Advanced.PostHook,
-                PreOnceAfterSuccess = overrides.Advanced.PreOnceAfterSuccess, PostFinalOnly = overrides.Advanced.PostFinalOnly };
-        return result;
+        var effective = AutomationBindingPolicy.Resolve(Read(user.BindingOverrides), AutomationBundleCodec.Binding(raw));
+        return raw with
+        {
+            Enabled = effective.IsEnabled, RunDays = effective.RunDays,
+            MaximumSuccessfulRunsPerDay = effective.MaximumSuccessfulRunsPerDay,
+            NotifyEnabled = effective.NotifyEnabled,
+            NotificationTaskIds = effective.NotificationTaskIds.Select(id => id.ToString("D")).ToArray(),
+            PreHook = Hook(effective.PreHook), PostHook = Hook(effective.PostHook),
+            PreOnceAfterSuccess = effective.PreOnceAfterSuccess, PostFinalOnly = effective.PostFinalOnly
+        };
     }
 
     internal static string Encode(AutomationBindingOverrides value) => JsonSerializer.Serialize(Write(value));

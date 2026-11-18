@@ -1,17 +1,19 @@
 'use strict';
 const { strictJson } = require('./strict-json.cjs');
+const limits = require('./browser-login-limits.generated.cjs');
 
 function selected(value, path) {
   for (const part of path) {
     if (!value || typeof value !== 'object' || Array.isArray(value) || !Object.hasOwn(value, part)) return undefined;
     value = value[part];
   }
-  return typeof value === 'string' && value.length > 0 && value.length <= 32768 ? value : undefined;
+  return typeof value === 'string' && value.length > 0 && value.length <= limits.MaximumValueLength ? value : undefined;
 }
 function normalized(value, check) {
-  if (typeof value !== 'string' || value.length < 1 || value.length > 32768) return undefined;
+  if (typeof value !== 'string' || value.length < 1 || value.length > limits.MaximumValueLength) return undefined;
   if (check.path.length) {
-    try { value = selected(strictJson(value), check.path); } catch { return undefined; }
+    try { value = selected(strictJson(value, { maximumBytes: limits.MaximumValueLength * 3,
+      maximumDepth: limits.MaximumJsonDepth }), check.path); } catch { return undefined; }
   }
   if (typeof value !== 'string' || value.length < 1 || value.length > check.maximumLength) return undefined;
   const patterns = { header: /^[\x21-\x7e]+$/, cookie: /^[\x21\x23-\x2b\x2d-\x3a\x3c-\x5b\x5d-\x7e]+$/,
@@ -19,13 +21,14 @@ function normalized(value, check) {
   return check.kind === 'nonEmpty' || patterns[check.kind]?.test(value) ? value : undefined;
 }
 function isReady(policy, values) {
+  if (Object.keys(values).length > limits.MaximumValues) return false;
   const valid = Object.create(null); let total = 0;
   const ids = new Set([...policy.cookies, ...policy.storage, ...policy.jsonRequests].map(rule => rule.id));
   for (const [id, value] of Object.entries(values)) {
     if (!ids.has(id)) return false;
-    const check = policy.checks.find(check => check.id === id) ?? { kind: 'nonEmpty', path: [], maximumLength: 32768 };
+    const check = policy.checks.find(check => check.id === id) ?? { kind: 'nonEmpty', path: [], maximumLength: limits.MaximumValueLength };
     const checked = normalized(value, check);
-    if (checked === undefined || (total += checked.length) > 65536) return false;
+    if (checked === undefined || (total += checked.length) > limits.MaximumTotalLength) return false;
     valid[id] = checked;
   }
   for (const set of policy.equalSets) {

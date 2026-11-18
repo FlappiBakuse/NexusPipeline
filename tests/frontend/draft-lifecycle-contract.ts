@@ -8,6 +8,7 @@ import AutomationEditorDialog from '../../apps/web/src/pages/AutomationEditorDia
 import { draftFixture, exitDecision, settle } from './configuration-draft-fixture';
 import { draftPresentation } from '../../apps/web/src/app/draft-presentation';
 import { privateDraftContract } from './private-draft-contract';
+import { queueDraftItemsContract } from './queue-draft-items-contract';
 
 type Check = (value: unknown, name: string) => void;
 export async function draftLifecycleContract(parent: HTMLElement, check: Check): Promise<void> {
@@ -16,6 +17,7 @@ export async function draftLifecycleContract(parent: HTMLElement, check: Check):
   await pathField(parent, check);
   await extensionMemory(parent, check);
   await privateDraftContract(parent, check);
+  await queueDraftItemsContract(parent, check);
 }
 async function newAccount(parent: HTMLElement, check: Check) {
   const fixture = draftFixture(), store = fixture.store;

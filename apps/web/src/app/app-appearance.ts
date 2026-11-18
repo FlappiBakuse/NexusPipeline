@@ -38,11 +38,14 @@ export function useAppAppearance(store: AppStore) {
     const current = store.state.interface;
     if (!current || themeBusy.value || store.interfaceChange.pending || !store.can('settings.write')) return;
     themeBusy.value = true;
+    clearTimeout(timer);
+    themeNotice.value = '';
     try {
       const mode = ({ system: 'light', light: 'dark', dark: 'system' } as const)[current.values.theme];
-      await interfaceSettings(store).patch({ theme: mode });
-      themeNotice.value = t('主题：') + t({ system: '跟随系统', light: '浅色', dark: '深色' }[mode]);
-      clearTimeout(timer);
+      const writer = interfaceSettings(store);
+      const saved = await writer.patch({ theme: mode });
+      if (writer.state.error) throw new Error(writer.state.error);
+      themeNotice.value = t('主题：') + t({ system: '跟随系统', light: '浅色', dark: '深色' }[saved.values.theme]);
       timer = setTimeout(() => {
         themeNotice.value = '';
       }, 3000);

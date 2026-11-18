@@ -28,6 +28,7 @@ import { executionLayoutContract } from './execution-layout-contract.js';
 import { logPanelContract } from './log-panel-contract.js';
 import { configurationDraftContract } from './configuration-draft-contract.js';
 import { draftLifecycleContract } from './draft-lifecycle-contract.js';
+import { themeConsumersContract } from './theme-consumers-contract';
 
 const checks: string[] = [];
 const create = <N extends UiElementName>(name: N): UiElement<N> => document.createElement(name) as UiElement<N>;
@@ -87,6 +88,7 @@ async function structural(): Promise<string[]> {
   await feedbackLayoutContract(fixture, assert);
   await interfaceCommandContract(assert);
   await immediateSettingsContract(assert);
+  await themeConsumersContract(fixture, assert);
   assert(!customElements.get('nxp-button'), 'new realm registers no retired element alias');
   const button = create('nexus-button');
   button.label = 'Action';
