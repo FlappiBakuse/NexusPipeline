@@ -80,6 +80,12 @@ watch(
 );
 const preparation = interfacePreparation(store, frontend, registry);
 const { preparing, surfacesReady, failed: preparationFailed, coreFailed, stage: preparationStage, count: preparationCount } = preparation;
+const installingExtensions = computed(() => !!store.state.capabilities && surfacesReady.value &&
+  !coreFailed.value && store.state.events?.initialExtensions === 'installing');
+const operationMessage = computed(() => store.state.uncertainOperation
+  ? '写入结果待确认，请返回原操作查询状态。'
+  : store.state.error === 'initial_extensions_pending' && installingExtensions.value ? ''
+    : store.state.error === 'connection_lost' ? '与宿主的连接已中断，请重新连接。' : store.state.error);
 const prepareInterface = preparation.prepare;
 const credential = ref('');
 const desktopReady = ref(false);
@@ -188,7 +194,7 @@ onBeforeUnmount(() => {
     <div v-if="store.state.busy" class="navigation-progress" role="progressbar" :aria-label="t('准备页面')">
       <span />
     </div>
-    <nexus-scroll-area class="workspace-scroll" :label="t('主内容')">
+    <nexus-scroll-area class="workspace-scroll" :data-card-scroll="store.state.page === 'history' || store.state.page === 'plugins'" :label="t('主内容')">
       <main class="workspace">
         <header v-show="!!title" class="workspace-header">
           <div class="page-heading">
@@ -203,10 +209,11 @@ onBeforeUnmount(() => {
             <nexus-button v-if="store.state.error === 'connection_lost'" @click="authenticate">{{ t('重新连接') }}</nexus-button>
           </div>
         </header>
-        <nexus-toast v-if="store.state.error || store.state.uncertainOperation" class="operation-toast" tone="danger"
-          :message.prop="t(store.state.uncertainOperation ? '写入结果待确认，请返回原操作查询状态。' : store.state.error === 'connection_lost' ? '与宿主的连接已中断，请重新连接。' : store.state.error)">
+        <nexus-toast v-if="installingExtensions" :key="store.state.capabilities?.instanceId" class="startup-installation-toast" :persistent.prop="true"
+          :message.prop="t('initial_extensions_pending')" />
+        <nexus-toast v-if="operationMessage" class="operation-toast" tone="danger" :message.prop="t(operationMessage)">
         </nexus-toast>
-        <nexus-toast v-if="store.state.feedError" class="connection-toast" tone="warning" :message.prop="t('事件连接中断，正在重连')" />
+        <nexus-toast v-if="store.state.feedError && store.state.error !== 'connection_lost'" class="connection-toast" tone="warning" :message.prop="t('事件连接中断，正在重连')" />
         <nexus-toast v-if="exitMessage" :tone="exitFailed ? 'warning' : 'info'" :message.prop="t(exitMessage)" />
         <form v-if="!preparing && (!store.state.capabilities || coreFailed)" novalidate class="authentication" @submit.prevent="authenticate">
           <label>
@@ -216,7 +223,6 @@ onBeforeUnmount(() => {
           <button :disabled="authenticating">{{ t('连接') }}</button>
         </form>
         <nexus-toast v-if="store.state.notice" :message.prop="t(store.state.notice)" @nexus-close="store.state.notice = ''" />
-        <nexus-toast v-if="preparationFailed && !coreFailed" tone="warning" :message.prop="t('部分界面准备失败，可重新准备。')" />
         <template v-if="store.state.capabilities && surfacesReady">
           <section
             v-for="page in visited"
@@ -241,7 +247,6 @@ onBeforeUnmount(() => {
                   target="settings.panels"
                   :context="context('settings.panels')"
                   :visible="store.state.visible && page === store.state.page"
-                  @error="store.report"
                 />
               </template>
               <template #settings-extra>
@@ -250,7 +255,6 @@ onBeforeUnmount(() => {
                   target="settings.extra"
                   :context="context('settings.extra')"
                   :visible="store.state.visible && page === store.state.page"
-                  @error="store.report"
                 />
               </template>
             </component>

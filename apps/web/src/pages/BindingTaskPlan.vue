@@ -44,14 +44,13 @@ onBeforeUnmount(() => { owner?.abort(); stopDraft?.(); });
 <template>
   <section class="binding-task-plan">
     <header><h3>{{ t('任务计划') }}</h3><button type="button" @click="read">{{ t('重新检查') }}</button></header>
-    <p v-if="error" role="alert">{{ t(error) }}</p>
+    <nexus-toast v-if="visible && error" tone="danger" :message.prop="t(error)" />
     <AdapterEditorPanel v-if="overview?.resources.some(item => item.isSaved)" :key="epoch" :store="store" :overview="overview" :visible="visible" @changed="read" />
-    <p v-else-if="overview">{{ t('配置不可用，请先保存用户配置快照。') }}</p>
+    <nexus-toast v-else-if="visible && overview" tone="warning" :message.prop="t('配置不可用，请先保存用户配置快照。')" />
   </section>
 </template>
 <style scoped>
 .binding-task-plan { display: grid; gap: 12px; min-width: 0; }
 header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-h3, p { margin: 0; }
-p { color: var(--muted); }
+h3 { margin: 0; }
 </style>

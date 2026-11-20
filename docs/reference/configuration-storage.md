@@ -46,7 +46,7 @@ Host 组合的 `ConfigurationRevisionService` 复用实例租约和共享定义�
 全部资源共享定义、物理文件及配置准入，拒绝链接、运行目录、重复或重叠路径，并限制总文件数和字节数。
 读取期间持有原文件及目录，提交前重新核验文件树、物理身份和资源声明；全部配置修订在同一事务发布。
 相同 operationId、主体和请求返回原批次结果，即使来源已经变化或消失也不会重新导入。
-Web 的“读取现有配置”和 CLI `configuration-import --input <JSON>` 共用此用例；要求 `configuration.edit`，MCP 不开放。
+CLI `configuration-import --input <JSON>` 使用此用例，要求 `configuration.edit`。MCP 不开放。
 
 ## 字节补丁
 
@@ -241,7 +241,7 @@ Host 组合配置修订、补丁、编辑与运行配置服务，Web、CLI 和 M
 ValueService 在入口拥有并解析 patch 一次，内部传 ConfigurationPatchRequest；资源租约前后仍分别查询原操作和核对修订。
 原生编辑的 editPrepare/editCommit 由编辑事务选择，仅接受已冻结专项声明的单字段补丁。准备作用候选副本，提交在 writer 停止和最终捕获后执行；取消不运行提交补丁，按原事务恢复原字节。
 
-原生编辑拒绝专项声明的自动执行参数。独占上游声明投影到冻结计划和编辑命令，配置交换前及实际启动前核对同程序已停止；发现活动或无法确认的同名进程时拒绝，不终止外部进程。进程 stdout/stderr 继续使用既有严格 UTF-8 解码。
+原生编辑拒绝专项声明的自动执行参数。独占上游声明投影到冻结计划和编辑命令。使用同一 Windows 用户与会话共享实例的上游可额外声明 `exclusiveProgramInUserSession`，以程序名租约协调编辑与执行。配置交换前及实际启动前核对程序停止，存在活动进程或停止证据不完整时拒绝。本机程序由用户关闭。进程 stdout/stderr 使用严格 UTF-8 解码。
 
 编辑 hook 的 resource revision 为工作候选的下一修订（saved revision + 1），hash 对应本阶段候选原字节；尚无保存快照时可从 revision 0 准备候选 1。发布仍使用编辑会话冻结的原 ExpectedRevision 做 CAS，候选 patch 不直接写数据库。独占编辑在现有资源 lease 中持有程序物理对象的 mutation claim。
 

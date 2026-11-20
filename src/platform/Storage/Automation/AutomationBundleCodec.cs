@@ -97,18 +97,25 @@ public sealed class AutomationBundleCodec(ContractReader contracts)
         new(checked((int)wire.Limits.MaximumAttempts), checked((int)wire.Limits.StallTimeoutSeconds), checked((int)wire.Limits.TotalTimeoutSeconds)),
         new(Enum.Parse<AutomationJudgementLanguage>(wire.Judgement.Language, true), wire.Judgement.SuccessKeywords.ToImmutableArray(),
             wire.Judgement.FailureKeywords.ToImmutableArray(), wire.Judgement.Script)) { Order = checked((int)(wire.Order ?? 0)), UpdateConfigurationAtFinish = wire.UpdateConfigurationAtFinish, Target = AutomationTargetCodec.FromWire(wire.Target),
-            AdapterResources = wire.AdapterResources.Select(resource => new AutomationAdapterResource(resource.ResourceId, checked((int)resource.DeclarationIndex),
-                resource.RelativePath, resource.DefinitionRevision, Enum.Parse<ConfigurationSyntax>(resource.Syntax, true),
-                ConfigurationSelectorProtocol.Read(resource.Access))).ToImmutableArray() };
+            AdapterResources = wire.AdapterResources.Select(Resource).ToImmutableArray() };
+
+    internal static AutomationAdapterResource Resource(AutomationScriptAdapterResource resource) =>
+        new(resource.ResourceId, checked((int)resource.DeclarationIndex), resource.RelativePath, resource.DefinitionRevision,
+            Enum.Parse<ConfigurationSyntax>(resource.Syntax, true), ConfigurationSelectorProtocol.Read(resource.Access));
+
+    internal static AutomationScriptAdapterResource Resource(AutomationAdapterResource resource) => new()
+    {
+        ResourceId = resource.ResourceId, DeclarationIndex = resource.DeclarationIndex, RelativePath = resource.RelativePath,
+        DefinitionRevision = resource.DefinitionRevision, Syntax = resource.Syntax == ConfigurationSyntax.JsonWithComments ?
+            "jsonWithComments" : resource.Syntax.ToString().ToLowerInvariant(),
+        Access = ConfigurationSelectorProtocol.Write(resource.Access)
+    };
 
     internal static AutomationScriptScript Script(AutomationScript value) => new()
     {
         Id = value.Id.ToString("D"), Order = value.Order, Name = value.Name, Kind = Lower(value.Kind), RootId = value.RootId.ToString("D"), ExtensionId = value.ExtensionId,
         Target = AutomationTargetCodec.ToWire(value.Target),
-        AdapterResources = value.AdapterResources.Select(resource => new AutomationScriptAdapterResource
-        { ResourceId = resource.ResourceId, DeclarationIndex = resource.DeclarationIndex, RelativePath = resource.RelativePath, DefinitionRevision = resource.DefinitionRevision, Syntax = resource.Syntax switch
-            { ConfigurationSyntax.JsonWithComments => "jsonWithComments", _ => resource.Syntax.ToString().ToLowerInvariant() },
-            Access = ConfigurationSelectorProtocol.Write(resource.Access) }).ToArray(),
+        AdapterResources = value.AdapterResources.Select(Resource).ToArray(),
         UpdateConfigurationAtFinish = value.UpdateConfigurationAtFinish, Executable = Path(value.Executable), Arguments = value.Arguments, ConfigurationPaths = value.ConfigurationPaths.Select(Path).ToArray(),
         LogPaths = value.LogPaths.Select(Path).ToArray(), Limits = new() { MaximumAttempts = value.Limits.MaximumAttempts,
             StallTimeoutSeconds = value.Limits.StallTimeoutSeconds, TotalTimeoutSeconds = value.Limits.TotalTimeoutSeconds },

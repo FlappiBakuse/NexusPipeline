@@ -50,10 +50,10 @@ internal static class BindingConfigurationSource
     }
 
     internal static ConfigurationRevisionChange Change(RuntimeInstance instance, ContractReader contracts, AutomationBinding binding,
-        AutomationScript script, Core.Automation.BindingScriptSource source, string digest)
+        AutomationScript script, Core.Automation.BindingScriptSource source, string? digest, long expectedRevision = 0)
     {
         var content = new ImmutableBlobStore(instance, contracts).PersistContent(BoundedJson.Serialize(BindingSourceCodec.Write(source)), default);
-        return new(new(binding.Id, ResourceId), 0, binding.Revision, Contract(script),
+        return new(new(binding.Id, ResourceId), expectedRevision, binding.Revision, Contract(script),
             new(FileObjectKind.File, [new("", FileObjectKind.File, content.SizeBytes, content.Sha256)]), ConfigurationUpdateKind.Manual)
             { SourceRequestDigest = digest };
     }

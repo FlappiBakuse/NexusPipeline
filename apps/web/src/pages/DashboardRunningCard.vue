@@ -40,16 +40,15 @@ registerMessages({
       <strong>{{ t('运行中') }}</strong>
       <span>{{ active.length }} {{ t('个活动任务') }}</span>
     </div>
-    <p v-if="loading && !items.length" role="status">{{ t('正在读取运行状态…') }}</p>
-    <p v-else-if="error" role="alert">{{ t(error) }}</p>
-    <div v-else-if="!active.length" class="running-empty">
+    <nexus-spinner v-if="loading && !items.length" :label="t('正在读取运行状态…')" />
+    <div v-else-if="!active.length && !error" class="running-empty">
       <strong>{{ t('当前空闲') }}</strong>
       <p>
         {{ t('没有正在运行的脚本或调度队列。') }}
         <button @click="emit('details')">{{ t('前往调度中心') }}</button>
       </p>
     </div>
-    <template v-else>
+    <template v-else-if="active.length">
       <nexus-scroll-area class="running-table" direction="horizontal" :label="t('当前运行')">
         <table>
           <thead>
@@ -94,6 +93,7 @@ registerMessages({
         </article>
       </div>
     </template>
+    <nexus-toast v-if="error" tone="danger" :message.prop="t(error)" />
   </div>
 </template>
 

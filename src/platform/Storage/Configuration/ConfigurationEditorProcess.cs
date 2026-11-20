@@ -20,6 +20,7 @@ public sealed class ConfigurationEditorProcess : IDisposable
     public OwnedWorkerIdentity Start() => _writer.Start();
     public OwnedWorkerIdentity Start(string executable, string expectedSha256, IReadOnlyList<string> arguments, string workingDirectory) =>
         _writer.Start(executable, expectedSha256, arguments, workingDirectory);
+    internal bool HasExited() => _writer.HasExited();
     public Task<StoppedConfigurationEditor> StopAsync(TimeSpan timeout) => _writer.StopAsync(timeout);
     public void Dispose() => _writer.Dispose();
 }

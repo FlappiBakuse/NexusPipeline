@@ -1,19 +1,23 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { AutomationEntity, UserDraft } from '../app/automation-draft';
+import type { AutomationEntity, ScriptDraft, UserDraft } from '../app/automation-draft';
 import { scriptIcon } from './script-icons';
 import type { AutomationStore } from '../app/store-ports';
 import type { AutomationBundle } from '../control/wire.generated';
 import ExtensionOutlet from '../extensions/ExtensionOutlet.vue';
 import AccountAvatar from './AccountAvatar.vue';
-import { t } from '../app/locale';
+import { locale, t } from '../app/locale';
 import { completionLabels } from './execution-plan';
 import type { AccountSummary } from '../control/account-summary';
+import type { ExtensionState } from '../control/extensions';
+import { metadataText } from '../control/extension-metadata';
 type Row = AutomationEntity;
+type Badge = { label: string; tone: string };
 const props = defineProps<{
   kind: 'scripts' | 'users' | 'queues';
   rows: Row[];
   bundle: AutomationBundle;
+  scriptCatalog?: readonly ExtensionState[];
   store: AutomationStore;
   visible: boolean;
   locked: boolean;
@@ -36,7 +40,28 @@ const bindingCounts = computed(() => {
 const revisions = computed(() => new Map((props.store.state.automation?.revisions || []).filter(item => item.kind === 'user').map(item => [item.id, item.revision])));
 const isUser = (row: Row): row is UserDraft => !('judgement' in row) && !('scriptIds' in row);
 const extensionId = (row: Row): string | undefined => 'extensionId' in row ? row.extensionId : undefined;
-function badges(row: Row): { label: string; tone: string }[] {
+const scriptExtensions = computed(() => new Map(props.scriptCatalog?.map(item => [item.extensionId, item])));
+function scriptTypeBadge(script: ScriptDraft): Badge {
+  if (script.kind === 'generic') return { label: t('通用脚本'), tone: 'neutral' };
+  if (!props.scriptCatalog) return { label: t('专项脚本'), tone: 'neutral' };
+  const extension = script.extensionId && scriptExtensions.value.get(script.extensionId);
+  if (!extension || !extension.isInstalled || !extension.desiredEnabled || !extension.activationId || extension.unavailableReason)
+    return { label: t('未知专项'), tone: 'danger' };
+  const name = extension.metadata ? metadataText(extension.metadata, locale.value).displayName : extension.artifactName || extension.extensionId;
+  return { label: extension.kind === 'managed-code' ? name : `${name} ${t('专项')}`, tone: 'neutral' };
+}
+function scriptBadges(script: ScriptDraft): Badge[] {
+  const result = [scriptTypeBadge(script)];
+  if (script.target?.launchByHost)
+    result.push({ label: t(script.target.kind === 'android' ? '安卓模拟器' : 'PC 客户端'), tone: 'neutral' });
+  const { judgement } = script;
+  if (judgement.language !== 'keywords' && judgement.script?.trim()) result.push({ label: t('判定脚本'), tone: 'neutral' });
+  else if (judgement.language === 'keywords' && (judgement.successKeywords.length || judgement.failureKeywords.length))
+    result.push({ label: t('关键字判断'), tone: 'neutral' });
+  if (script.limits.stallTimeoutSeconds === 0) result.push({ label: t('长时策略'), tone: 'warning' });
+  return result;
+}
+function badges(row: Row): Badge[] {
   if (props.kind === 'users')
     return [
       {
@@ -50,14 +75,7 @@ function badges(row: Row): { label: string; tone: string }[] {
       },
       { label: nextLabel(props.summaries.get(row.id)), tone: 'info' }
     ];
-  if ('judgement' in row) {
-    const judgement = row.judgement;
-    const result = [{ label: t(row.kind === 'specialized' ? '专项脚本' : '通用脚本'), tone: 'neutral' }];
-    if (judgement?.language !== 'keywords') result.push({ label: t('判定脚本'), tone: 'neutral' });
-    else if (judgement.successKeywords.length || judgement.failureKeywords.length)
-      result.push({ label: t('关键字判断'), tone: 'neutral' });
-    return result;
-  }
+  if ('judgement' in row) return scriptBadges(row);
   if (!('scriptIds' in row)) return [];
   return [
     { label: row.scriptIds.length + ' ' + t('个任务'), tone: 'neutral' },
@@ -121,7 +139,7 @@ async function openSummary(row: Row): Promise<void> {
       />
       <span v-else class="script-avatar"><img v-if="kind === 'scripts'" :src="scriptIcon(extensionId(row))" alt="" /><nexus-icon v-else aria-hidden="true" name="queues" /></span>
       <div class="row-main">
-        <button class="entity-link" :disabled="locked" @click="emit('edit', row)">{{ row.name }}</button>
+        <h2 class="entity-card-name">{{ row.name }}</h2>
         <div class="row-meta">
           <button v-if="kind === 'users'" class="summary-link" :disabled="locked" @click="openSummary(row)">
             <nexus-badge :label="t('专项任务') + ' · ' + t(summaries.has(row.id) ? summaryLabels[summaries.get(row.id)!.summaryReason] : '不可读取')"
@@ -149,20 +167,16 @@ async function openSummary(row: Row): Promise<void> {
           />
         </div>
       </div>
-      <div class="row-actions">
-        <button :disabled="locked" @click="emit('edit', row)">
-          {{ t(kind === 'users' ? '用户管理' : kind === 'scripts' ? '编辑脚本' : '编辑队列') }}
-        </button>
-        <button v-if="kind === 'users'" :disabled="locked" @click="emit('global', row)">
-          {{ t('全局管理') }}
-        </button>
-        <button
-          class="danger"
-          :disabled="locked || !store.can('automation.delete')"
+      <div class="entity-card-actions">
+        <nexus-icon-button :icon="kind === 'users' ? 'user' : 'edit'" :disabled.prop="locked"
+          :label="t(kind === 'users' ? '用户管理' : kind === 'scripts' ? '编辑脚本' : '编辑队列')" @click="emit('edit', row)" />
+        <nexus-icon-button v-if="kind === 'users'" icon="settings" :label="t('全局管理')"
+          :disabled.prop="locked" @click="emit('global', row)" />
+        <nexus-icon-button icon="trash" class="danger-action"
+          :label="t(kind === 'users' ? '删除用户' : kind === 'scripts' ? '删除脚本' : '删除队列')"
+          :disabled.prop="locked || !store.can('automation.delete')"
           @click="emit('remove', row)"
-        >
-          {{ t(kind === 'users' ? '删除用户' : kind === 'scripts' ? '删除脚本' : '删除队列') }}
-        </button>
+        />
       </div>
     </article>
   </nexus-sortable-list>
@@ -191,55 +205,19 @@ nexus-drag-handle {
   min-width: 0;
   flex: 1;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
 }
 .scripts .row-main,
 .queues .row-main {
   gap: 6px;
 }
-.entity-link {
-  display: block;
-  justify-self: start;
-  padding: 0;
-  min-height: 18px;
-  max-width: 100%;
-  border: 0;
-  background: transparent;
-  text-align: left;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.entity-link:hover {
-  color: var(--accent);
-}
-.summary-link { border: 0; background: transparent; padding: 0; min-height: 0; }
-.scripts .entity-link,
-.queues .entity-link {
-  font-size: 14px;
-  font-weight: 400;
-  line-height: 1.55;
-}
+.summary-link { border: 0; background: transparent; padding: 0; min-height: 0; min-width: 0; max-width: 100%; }
 .row-meta {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-}
-.row-actions {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-.row-actions > button {
-  min-width: 96px;
-  color: var(--muted);
-}
-.row-actions > .danger {
-  color: var(--bad);
-  background: var(--bad-soft, #ef707020);
-  border-color: var(--bad-border, #ef707080);
 }
 .script-avatar {
   display: grid;
@@ -257,18 +235,7 @@ nexus-drag-handle {
 .script-avatar nexus-icon {
   color: var(--bg);
 }
-@media (max-width: 900px) {
-  .automation-row {
-    flex-wrap: wrap;
-  }
-  .row-main {
-    flex-basis: calc(100% - 88px);
-  }
-  .row-actions {
-    width: 100%;
-    flex-wrap: nowrap;
-  }
-  .row-actions > button:first-child { flex: 1; }
-  .row-actions > button { min-width: 0; }
+@media (max-width: 600px) {
+  .automation-row { gap: 6px; padding-inline: 8px; }
 }
 </style>

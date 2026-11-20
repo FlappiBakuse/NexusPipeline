@@ -25,6 +25,10 @@ public sealed record AutomationBindingSource
     /// <summary>Schema field <c>configurationPaths</c>; constraints are owned by automation-binding-source.schema.json.</summary>
     [JsonPropertyName("configurationPaths")]
     public required IReadOnlyList<AutomationPathsPortablePath> ConfigurationPaths { get; init; }
+    /// <summary>Schema field <c>adapterResources</c>; constraints are owned by automation-binding-source.schema.json.</summary>
+    [JsonPropertyName("adapterResources")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<AutomationScriptAdapterResource>? AdapterResources { get; init; }
     /// <summary>Schema field <c>logPaths</c>; constraints are owned by automation-binding-source.schema.json.</summary>
     [JsonPropertyName("logPaths")]
     public required IReadOnlyList<AutomationPathsPortablePath> LogPaths { get; init; }

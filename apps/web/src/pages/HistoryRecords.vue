@@ -36,11 +36,9 @@ const recordRows = computed(() =>
         <strong>{{ t(selectedName) }}</strong>
         <nexus-badge :label="(page?.items.length || 0) + ' ' + t('条记录')" />
       </header>
-      <p v-if="error" role="alert">
-        {{ t(error) }}
-        <button @click="emit('retry')">{{ t('重试') }}</button>
-      </p>
-      <p v-if="loading && !page?.items.length" role="status">{{ t('加载中') }}</p>
+      <nexus-toast v-if="error" tone="danger" :message.prop="t(error)" />
+    <button v-if="error" type="button" @click="emit('retry')">{{ t('重试') }}</button>
+      <nexus-spinner v-if="loading && !page?.items.length" :label="t('加载中')" />
       <nexus-empty-state v-else-if="!page?.items.length" :title="t('暂无历史记录')" />
       <article v-for="{ record: row, view } in recordRows" :key="row.runId" class="record-card">
         <button class="record-open" @click="emit('select', row)">
@@ -80,7 +78,7 @@ const recordRows = computed(() =>
         @nexus-change="emit('page', $event.detail.value)"
       />
     </template>
-    <p v-if="linkError" role="alert">{{ t(linkError) }}</p>
+    <nexus-toast v-if="linkError" tone="danger" :message.prop="t(linkError)" />
   </nexus-scroll-area>
 </template>
 <style scoped src="./history-records.css"></style>

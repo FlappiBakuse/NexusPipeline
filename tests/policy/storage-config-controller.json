@@ -1,6 +1,7 @@
 {
   "group": "storage-config-controller",
   "classes": [
+    "NexusPipeline.StorageTests.BindingEditorTests",
     "NexusPipeline.StorageTests.ControllerCrashTests",
     "NexusPipeline.StorageTests.EditControllerTests"
   ]

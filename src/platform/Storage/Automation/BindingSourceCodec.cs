@@ -8,11 +8,14 @@ internal static class BindingSourceCodec
 {
     internal static Core.Automation.BindingScriptSource? Read(NexusPipeline.Platform.Serialization.Protocol.AutomationBindingSource? value) => value is null ? null :
         new(value.CandidateId, Guid.Parse(value.RootId), Path(value.Executable), value.Arguments.ToImmutableArray(),
-            value.ConfigurationPaths.Select(Path).ToImmutableArray(), value.LogPaths.Select(Path).ToImmutableArray());
+            value.ConfigurationPaths.Select(Path).ToImmutableArray(), value.LogPaths.Select(Path).ToImmutableArray())
+        { AdapterResources = value.AdapterResources?.Select(AutomationBundleCodec.Resource).ToImmutableArray() ?? [] };
 
     internal static NexusPipeline.Platform.Serialization.Protocol.AutomationBindingSource? Write(Core.Automation.BindingScriptSource? value) => value is null ? null :
         new() { CandidateId = value.CandidateId, RootId = value.RootId.ToString("D"), Executable = Path(value.Executable),
-            Arguments = value.Arguments, ConfigurationPaths = value.ConfigurationPaths.Select(Path).ToArray(), LogPaths = value.LogPaths.Select(Path).ToArray() };
+            Arguments = value.Arguments, ConfigurationPaths = value.ConfigurationPaths.Select(Path).ToArray(),
+            LogPaths = value.LogPaths.Select(Path).ToArray(), AdapterResources = value.AdapterResources.IsEmpty ?
+                null : value.AdapterResources.Select(AutomationBundleCodec.Resource).ToArray() };
 
     internal static AutomationScriptScript Resolve(AutomationBundle bundle, ExecutionPlanStep step)
         => Resolve(bundle.Scripts.Single(item => item.Id == step.ScriptId), bundle.Bindings.SingleOrDefault(item => item.Id == step.BindingId)?.Source);

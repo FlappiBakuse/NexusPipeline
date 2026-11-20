@@ -5,6 +5,7 @@ import { initialValue, schemaAt } from '../../apps/web/src/control/schema';
 import ScriptSourceFields from '../../apps/web/src/pages/ScriptSourceFields.vue';
 import { scriptPaths } from '../../apps/web/src/pages/script-paths';
 import type { AutomationBundle } from '../../apps/web/src/control/wire.generated';
+import type { UiElement } from '@nexuspipeline/extension-sdk';
 
 type Script = AutomationBundle['scripts'][number];
 const candidate = { candidateId: 'first', title: 'First', executable: 'app.exe', arguments: ['daily'],
@@ -12,21 +13,25 @@ const candidate = { candidateId: 'first', title: 'First', executable: 'app.exe',
 
 export async function scriptSourceContract(): Promise<string[]> {
   const checks: string[] = [];
-  for (const mode of ['ready', 'readonly', 'empty', 'details-failure', 'cancelled'] as const) {
+  for (const mode of ['ready', 'readonly', 'empty', 'diagnostics-only', 'details-failure', 'cancelled'] as const) {
     const calls: string[] = [], emitted: Script[] = [];
     let queried = false, release: (() => void) | undefined;
     const client = new ControlClient(location.origin, async (input, init) => {
       const path = new URL(String(input)).pathname; calls.push(path);
       if (path === '/control/v1/extensions') return json({ hasReleaseTrust: true, items: [{ extensionId: 'maaend',
         installedRevision: 3, isInstalled: true, desiredEnabled: true, activationId: 'active', unavailableReason: null, capabilities: [] }] });
-      if (path.endsWith('/details')) return json({ code: 'fixture_details_rejected' }, 409);
+      if (path.endsWith('/details')) return mode === 'diagnostics-only' ? json({ extensionId: 'maaend',
+        packageVersion: '1.0.0', documents: {}, diagnosticLocales: { 'zh-CN': { fixture_diagnostic: '未找到可用配置文件。' } },
+        manifest: { extensionId: 'maaend', format: 'nexus.extension.manifest',
+          version: 1, displayName: 'MaaEnd', artifactName: 'MaaEnd', minHostVersion: '0.18.0', packageVersion: '1.0.0',
+          kind: 'data-specialized' } }) : json({ code: 'fixture_details_rejected' }, 409);
       if (!path.endsWith('/discover')) throw Error('Unexpected source request: ' + path);
       const request = JSON.parse(String(init!.body)); queried = true;
       if (mode === 'cancelled') await new Promise<void>(resolve => { release = resolve; });
       return json({ rootPath: request.rootPath, installedRevision: 3, discovery: {
         format: 'nexus.script.source', version: 1, direction: 'response', operationId: request.operationId, extensionId: 'maaend',
-        candidates: mode === 'empty' ? [] : [candidate, { ...candidate, candidateId: 'second', executable: 'second.exe' }],
-        diagnostics: mode === 'details-failure' ? ['fixture_diagnostic'] : [] } });
+        candidates: mode === 'empty' || mode === 'diagnostics-only' ? [] : [candidate, { ...candidate, candidateId: 'second', executable: 'second.exe' }],
+        diagnostics: mode === 'details-failure' || mode === 'diagnostics-only' ? ['fixture_diagnostic'] : [] } });
     });
     const store = createStore(client);
     store.state.capabilities = { instanceId: 'source-fixture', hostVersion: '0.18.0',
@@ -56,6 +61,9 @@ export async function scriptSourceContract(): Promise<string[]> {
       } else if (mode === 'empty') {
         check(!emitted.length && !!mount.querySelector('nexus-toast') && !paths.executable,
           'empty discovery retains its warning without publishing an invalid selection', checks);
+      } else if (mode === 'diagnostics-only') {
+        check(!emitted.length && mount.querySelector<UiElement<'nexus-toast'>>('nexus-toast')?.message === '未找到可用配置文件。',
+          'empty discovery reports the verified diagnostic once without guessing a candidate', checks);
       } else {
         await new Promise(resolve => setTimeout(resolve, 30));
         check(!emitted.length && !paths.executable,

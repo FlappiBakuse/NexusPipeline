@@ -9,6 +9,7 @@ registerMessages({
   '未检测到公网网卡地址；NAT 环境需配置公网域名与端口映射':
     'No public interface address detected; NAT requires a public domain and port forwarding',
   '秘密变更结果未知，请查询原操作。': 'Secret change outcome is unknown. Check the original operation.',
+  '秘密变更结果待确认。': 'Check the original secret operation to confirm its outcome.',
   查询密码原操作: 'Check original password operation',
   秘密保存失败: 'Could not save the secret',
 
@@ -38,7 +39,9 @@ registerMessages({
   读取状态确认: 'Read status to confirm',
   保存视图设置: 'Save view settings',
   放弃视图草稿: 'Discard view draft',
-  '更改等待重启：': 'Changes awaiting restart: ',
+  '有改动需要重启服务后生效。': 'Some changes require a service restart.',
+  '自定义令牌支持 4–256 个英文字母、数字、短横线或下划线，移开焦点即保存。留空保持当前令牌。':
+    'Use 4–256 letters (A–Z, a–z), digits, hyphens, or underscores. Move focus away to save. Leave blank to keep the current token.',
   重启服务: 'Restart service',
   '远程访问和 MCP': 'Remote access and MCP',
   高级设置: 'Advanced settings',
@@ -84,6 +87,7 @@ registerMessages({
   令牌读取失败: 'Could not read token',
   '请输入控制令牌。': 'Enter a control token.',
   '控制令牌已更新。': 'Control token updated.',
+  '控制令牌已清空。': 'Control token cleared.',
   令牌变更未确认: 'Token change is unconfirmed',
   '操作状态暂不可用；请刷新秘密状态。': 'Operation status is unavailable; refresh secret status.',
   重启未确认: 'Restart is unconfirmed',

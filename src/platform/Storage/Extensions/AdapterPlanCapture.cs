@@ -78,7 +78,8 @@ internal sealed class AdapterPlanCapture(ExtensionActivator activator, SecretAcc
             new() { ExtensionId = identity.ExtensionId, PackageVersion = source.Installed.Package.PackageVersion, SdkVersion = manifest.SdkVersion,
                 ContractFingerprint = manifest.ContractFingerprint, ManifestSha256 = manifestHash, PackageSha256 = source.Installed.Package.ArchiveSha256 },
             new Dictionary<string, byte[]> { [manifestHash] = original.Manifest, [scriptHash] = original.Script })
-            { ExecutionProvider = manifest.Specialized?.ExecutionProvider, ExclusiveProgram = manifest.Specialized?.ExclusiveProgram == true };
+            { ExecutionProvider = manifest.Specialized?.ExecutionProvider, ExclusiveProgram = manifest.Specialized?.ExclusiveProgram == true,
+                ExclusiveProgramInUserSession = manifest.Specialized?.ExclusiveProgramInUserSession == true };
         if (snapshot is not null)
         {
             var provider = snapshot.Value.Provider;

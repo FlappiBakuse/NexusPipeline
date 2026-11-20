@@ -21,11 +21,21 @@ public sealed class ResourceLeaseManager(HostLifecycle lifecycle)
         => Acquire(operationId, claims, null);
 
     public async ValueTask<ResourceLeaseAdmission> AcquireAsync(Guid operationId, IReadOnlyList<ResourceClaim> claims,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, Func<Func<ResourceLeaseAdmission>, ResourceLeaseAdmission>? orderAdmission = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var frozen = FreezeClaims(claims);
-        var admission = TryAcquire(operationId, frozen);
+        ResourceLeaseAdmission Admit()
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var result = TryAcquire(operationId, frozen);
+            if (result.Denial != ResourceLeaseDenial.HostUnavailable) return result;
+            // A live lease can also have a published isolation. Recheck admission after that lease releases.
+            lock (_gate) return frozen.Any(Conflicts) ? new(null, ResourceLeaseDenial.Conflict) : result;
+        }
+        ResourceLeaseAdmission Attempt() => orderAdmission is null ? Admit() : orderAdmission(Admit);
+
+        var admission = Attempt();
         if (admission.Denial != ResourceLeaseDenial.Conflict) return admission;
         if (Interlocked.Increment(ref _waiters) > 128)
         {
@@ -38,8 +48,7 @@ public sealed class ResourceLeaseManager(HostLifecycle lifecycle)
             {
                 Task changed;
                 lock (_gate) changed = (_changed ??= new(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
-                cancellationToken.ThrowIfCancellationRequested();
-                admission = TryAcquire(operationId, frozen);
+                admission = Attempt();
                 if (admission.Denial != ResourceLeaseDenial.Conflict) return admission;
                 await changed.WaitAsync(cancellationToken).ConfigureAwait(false);
             }

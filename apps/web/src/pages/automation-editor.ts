@@ -26,6 +26,8 @@ export class AutomationEditor {
   readonly activeKind: Ref<EntityKind>;
   readonly selected = ref('');
   readonly editing = ref(false);
+  // Catalog refresh can publish a new row while its creation dialog is still saving.
+  readonly existing = ref(false);
   readonly userGlobal = ref(false);
   readonly catalog = computed(() => this.store.state.automation);
   readonly bundle = computed(() => this.catalog.value?.bundle);
@@ -136,6 +138,7 @@ export class AutomationEditor {
     }
     if (this.activeKind.value === 'queues' && !this.queueState.value) this.initializeSchedules(!!row);
     if (fresh) this.formBaseline().value = this.formSnapshot();
+    this.existing.value = !!row;
     this.editing.value = true;
     this.session.error = '';
     this.session.notice = '';
@@ -171,6 +174,7 @@ export class AutomationEditor {
     if (!this.current() || this.session.saving || this.session.pending || !this.selected.value ||
         this.rows.value.some(row => row.id === this.selected.value) || !this.store.drafts.has(this.draftKey.value))
       return false;
+    this.existing.value = false;
     this.editing.value = true;
     this.session.error = '';
     return true;

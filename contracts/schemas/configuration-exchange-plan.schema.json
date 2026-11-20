@@ -20,6 +20,7 @@
       "type": "object", "additionalProperties": false, "required": ["executablePath", "executableSha256", "arguments", "workingDirectory"],
       "properties": {
         "exclusiveProgram": {"type": "boolean"},
+        "exclusiveProgramInUserSession": {"type": "boolean"},
         "executablePath": {"type": "string", "minLength": 4, "maxLength": 32767},
         "executableSha256": {"$ref": "common.schema.json#/$defs/sha256"},
         "arguments": {"type": "array", "maxItems": 256, "items": {"type": "string", "maxLength": 32767}},

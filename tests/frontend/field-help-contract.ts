@@ -28,13 +28,30 @@ export async function fieldHelpContract(fixture: HTMLElement, check: Check) {
       'aria-label': 'Help account', placeholder: t('脚本根目录'),
       'onNexus-change': () => { changed.value++; } }), [[fieldHelp, t(helpText)]]),
     withDirectives(h('label', ['Limit', h(FormNumber, { modelValue: null, placeholder: t('-1 表示不限次数') })]), [[fieldHelp, t(helpText)]]),
-    withDirectives(h('nexus-switch-setting', { id: 'field-help-switch', title: 'Help switch', value: false }), [[fieldHelp, t(helpText)]]),
+    withDirectives(h('label', { id: 'field-help-edge', style: 'position:fixed;top:8px;right:8px;display:grid;width:160px' }, [
+      h('span', { class: 'field-help-caption' }, 'Placement select'),
+      h(FormSelect, { modelValue: 'first' }, () => [h('option', { value: 'first' }, 'First')])
+    ]), [[fieldHelp, t(helpText)]]),
+    withDirectives(h('div', { id: 'field-help-token' }, [
+      h('span', { class: 'field-help-caption' }, h('label', { for: 'field-help-token-input' }, 'Access token')),
+      h('div', [h('input', { id: 'field-help-token-input', type: 'password' }),
+        h('button', { type: 'button' }, 'Generate'), h('button', { type: 'button' }, 'Clear')])
+    ]), [[fieldHelp, t(helpText)]]),
+    h('nexus-switch-setting', { id: 'field-help-switch', title: 'Help switch', description: t(helpText), value: false }),
     h(NotificationSecretInput, { field: 'webhook-secret', label: 'Webhook 签名密钥', value: '', configured: true, disabled: false }),
     h(ScriptFields, { modelValue: script.value, store, 'onUpdate:modelValue': () => { changed.value++; } })
   ]) });
   app.component('FormSelect', FormSelect);
   app.mount(fixture);
   await nextTick();
+  const pluginLabel = document.createElement('label');
+  pluginLabel.id = 'field-help-plugin';
+  pluginLabel.innerHTML = '<span><span>配置路径</span></span><nexus-text-input></nexus-text-input>';
+  const pluginHelp = document.createElement('nexus-tooltip') as HTMLElement & { anchor: Element; content: string };
+  pluginHelp.anchor = pluginLabel.lastElementChild!;
+  pluginHelp.content = helpText;
+  pluginLabel.firstElementChild!.append(pluginHelp);
+  fixture.append(pluginLabel);
   const input = fixture.querySelector<HTMLElement>('#field-help-input')!;
   const inner = input.shadowRoot!.querySelector<HTMLInputElement>('input')!;
   const number = fixture.querySelector('nexus-number-input')!;
@@ -50,13 +67,23 @@ export async function fieldHelpContract(fixture: HTMLElement, check: Check) {
     'configured secrets retain their existing keep placeholder');
   const described = () => inner.ariaDescribedByElements?.map(item => item.textContent).join(' ');
   check(described() === helpText, 'the actual shadow input receives its help description before keyboard focus');
-  const switchInput = fixture.querySelector('#field-help-switch')!.shadowRoot!
-    .querySelector('nexus-switch')!.shadowRoot!.querySelector('button')!;
+  const tokenHelp = fixture.querySelector('#field-help-token nexus-tooltip')!;
+  const tokenInput = fixture.querySelector<HTMLInputElement>('#field-help-token-input')!;
+  check(!tokenHelp.shadowRoot!.querySelector<HTMLButtonElement>('.question')!.hidden &&
+    tokenInput.ariaDescribedByElements?.some(item => item.textContent === helpText) &&
+    !fixture.querySelector('#field-help-token button')!.hasAttribute('aria-describedby'),
+    'a grouped field links its caption question only to the explicitly labelled input');
+  const switchCard = fixture.querySelector('#field-help-switch')!.shadowRoot!;
+  const switchInput = switchCard.querySelector('nexus-switch')!.shadowRoot!.querySelector('button')!;
+  const switchDescription = switchCard.querySelector('.description');
+  check(switchDescription?.textContent === helpText && !!switchDescription.getClientRects().length &&
+    !switchCard.querySelector('nexus-tooltip'), 'switch cards show their full descriptions directly without a question mark');
   check(switchInput.ariaDescribedByElements?.some(item => item.textContent === helpText),
-    'nested switch controls receive descriptions across the owner shadow roots');
+    'screen readers get the switch card description from the real switch');
   locale.value = 'en-US'; await nextTick();
   check(inner.placeholder === 'Script root directory' && described()?.startsWith('-1 means unlimited.'),
     'changing language updates existing placeholders and help descriptions');
+  check(switchDescription?.textContent?.startsWith('-1 means unlimited.'), 'the inline switch description updates in place with the language');
   check(fixture.querySelector('#field-help-input') === input && inner.value === 'saved value',
     'language updates preserve the input node and saved value');
   locale.value = originalLocale; await nextTick();
@@ -64,6 +91,6 @@ export async function fieldHelpContract(fixture: HTMLElement, check: Check) {
     'mounting and translating help neither submit the form nor mark a draft changed');
   return {
     unchanged: () => changed.value === 0 && JSON.stringify(script.value) === baseline && store.dirty.size === 0,
-    dispose: () => { app.unmount(); store.dispose(); locale.value = originalLocale; }
+    dispose: () => { pluginLabel.remove(); app.unmount(); store.dispose(); locale.value = originalLocale; }
   };
 }

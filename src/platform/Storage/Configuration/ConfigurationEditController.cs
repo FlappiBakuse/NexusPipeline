@@ -3,6 +3,7 @@ using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Maintenance;
+using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Automation;
 using NexusPipeline.Platform.Storage.Journals;
@@ -14,7 +15,7 @@ public enum ConfigurationEditBoundary { Accepted, Installed, Editing, WriterStar
 public interface IConfigurationEditObserver { void Reached(ConfigurationEditBoundary boundary, Guid sessionId); }
 
 [SupportedOSPlatform("windows")]
-public sealed class ConfigurationEditController : IDisposable
+public sealed partial class ConfigurationEditController : IDisposable
 {
     private readonly RuntimeInstance _instance;
     private readonly StateDatabase _database;
@@ -48,6 +49,10 @@ public sealed class ConfigurationEditController : IDisposable
     internal (ConfigurationEditAdapter? Rule, bool Exclusive) BindAdapter(string extensionId, string resourceId, string relativePath, ConfigurationDocumentAccess access, IReadOnlyList<string> arguments)
         => (_adapter ?? throw new ConfigurationException("configuration_edit_adapter_unavailable")).Bind(extensionId, resourceId, relativePath, access, arguments);
 
+    internal FileTreeSnapshot ApplyAdapter(Guid sessionId, ConfigurationAddress address, long revision,
+        FileTreeSnapshot tree, ConfigurationEditAdapter rule, string purpose) =>
+        (_adapter ?? throw new ConfigurationException("configuration_edit_adapter_unavailable")).Apply(sessionId, address, revision, tree, rule, purpose);
+
     public ConfigurationEditStatus? Read(Guid sessionId, string subject)
     {
         _instanceLease.VerifyHeld(_instance);
@@ -61,6 +66,13 @@ public sealed class ConfigurationEditController : IDisposable
     }
 
     public async Task<ConfigurationEditStatus> BeginAsync(Guid sessionId, string subject, ConfigurationEditRequest request, DateTimeOffset acceptedAt)
+        => await BeginAsync(sessionId, subject, request, acceptedAt, null, null);
+
+    internal Task<ConfigurationEditStatus> BeginBindingAsync(Guid sessionId, string subject, ConfigurationEditRequest request,
+        BindingEditorSession owner) => BeginAsync(sessionId, subject, request, DateTimeOffset.UtcNow, owner, owner.Prepare);
+
+    private async Task<ConfigurationEditStatus> BeginAsync(Guid sessionId, string subject, ConfigurationEditRequest request,
+        DateTimeOffset acceptedAt, BindingEditorSession? owner, Func<ConfigurationTarget, FileTreeSnapshot, FileTreeSnapshot>? initialize)
     {
         request = ConfigurationEditPolicy.Freeze(request);
         if (request.Editor is null || request.Targets.Any(target => target.WritePolicy is null))
@@ -84,6 +96,7 @@ public sealed class ConfigurationEditController : IDisposable
                 ?? throw new ConfigurationException("configuration_binding_missing");
             var claims = PhysicalResourceAdmission.Merge(state.Files.Claims
                 .Concat(request.Editor.ExclusiveProgram ? PhysicalResourceAdmission.Read(request.Editor.ExecutablePath) : [])
+                .Concat(request.Editor.ExclusiveProgramInUserSession ? [ExclusiveProgramAdmission.UserSessionClaim(request.Editor.ExecutablePath)] : [])
                 .Concat(request.Targets.Select(target =>
                     new ResourceClaim(ConfigurationRevisionService.ResourceKey(target.Address), ResourceClaimMode.Mutation)))
                 .Concat([new("automation:definitions", ResourceClaimMode.Reference), new("blobs:content", ResourceClaimMode.Reference),
@@ -91,11 +104,14 @@ public sealed class ConfigurationEditController : IDisposable
             var admission = _resources.TryAcquire(sessionId, claims);
             state.Lease = admission.Lease ?? throw new ConfigurationException(admission.Denial == ResourceLeaseDenial.Conflict
                 ? "configuration_resource_conflict" : "configuration_host_unavailable");
-            using var prepared = _store.Prepare(sessionId, request, _adapter);
+            if (request.Editor.ExclusiveProgram)
+                ExclusiveProgramAdmission.RequireStopped(request.Editor.ExecutablePath, request.Editor.ExclusiveProgramInUserSession);
+            using var prepared = _store.Prepare(sessionId, request, _adapter, initialize);
             if (!prepared.AllPhysicalClaims.SequenceEqual(state.Files.Claims)) throw new IOException("configuration_file_admission_changed");
             var accepted = _store.Begin(operation, prepared, acceptedAt); acceptedHere = accepted.IsNew;
             if (!accepted.IsNew) { state.Release(); return accepted; }
             state.Subject = subject;
+            state.Binding = owner; state.Request = request;
             PublishHolds(); Reached(ConfigurationEditBoundary.Accepted, sessionId);
             state.Editor = new(_instance, _database, _contracts, _instanceLease, sessionId, subject);
             foreach (var resource in accepted.Resources) _exchange.Install(resource.JournalId);
@@ -133,6 +149,7 @@ public sealed class ConfigurationEditController : IDisposable
         {
             VerifyActive();
             var session = Required(sessionId, subject);
+            if (IsBindingProfile(session)) throw new ConfigurationException("configuration_editor_binding_save_required");
             if (session.Phase is ConfigurationEditPhase.Prepared or ConfigurationEditPhase.Editing)
             {
                 ConfigurationEditStore.RequireOpen(session, expectedSessionRevision, ConfigurationEditPhase.Editing);
@@ -162,7 +179,14 @@ public sealed class ConfigurationEditController : IDisposable
             var operation = ConfigurationEditStore.CancelIdentity(operationId, subject, cancel);
             var replay = _store.LookupCancel(operation, cancel);
             if (replay is not null) { PublishHolds(); state.Release(); return replay; }
-            var session = Required(sessionId, subject); ConfigurationEditStore.RequireOpen(session, expectedSessionRevision);
+            var session = Required(sessionId, subject);
+            if (session.Phase == ConfigurationEditPhase.Cancelled && session.Revision - 1 == expectedSessionRevision &&
+                CanRetryResume(state, subject))
+            {
+                state.Binding = null; state.Request = null;
+                return session;
+            }
+            ConfigurationEditStore.RequireOpen(session, expectedSessionRevision);
             if (state.Lease is not null) await RestoreAsync(state, session).ConfigureAwait(false);
             var cancelled = state.Lease is null ? _completion.Cancel(operation, cancel, acceptedAt) : _store.Cancel(operation, cancel, acceptedAt);
             PublishHolds(); state.Release(); Reached(ConfigurationEditBoundary.Completed, sessionId);
@@ -178,23 +202,10 @@ public sealed class ConfigurationEditController : IDisposable
         VerifyActive();
         if (state.Lease is not { IsActive: true } || state.Lease.OperationId != session.SessionId)
             throw new IOException("configuration_edit_admission_required");
-        StoppedConfigurationEditor? stopped = null;
-        if (state.Editor is not null)
-        {
-            stopped = await state.Editor.StopAsync(TimeSpan.FromSeconds(20)).ConfigureAwait(false);
-            state.Editor.Dispose(); Reached(ConfigurationEditBoundary.WriterStopped, session.SessionId);
-        }
+        var stopped = await StopWriterAsync(state, session.SessionId).ConfigureAwait(false);
         Exception? failure = null;
-        if (stopped is not null && session.Phase == ConfigurationEditPhase.Editing)
-        {
-            var recorder = new EditOutputRecorder(_instance, _database, _contracts, _instanceLease);
-            foreach (var resource in session.Resources)
-            {
-                try { recorder.Seal(resource.JournalId, stopped); }
-                catch (Exception error) when (error is IOException or ConfigurationException) { failure ??= error; }
-            }
-            if (failure is null) Reached(ConfigurationEditBoundary.OutputSealed, session.SessionId);
-        }
+        try { Seal(state, session, stopped); }
+        catch (Exception error) when (error is IOException or ConfigurationException) { failure = error; }
         foreach (var resource in session.Resources)
         {
             try
@@ -207,6 +218,30 @@ public sealed class ConfigurationEditController : IDisposable
         PublishHolds();
         if (failure is not null) { PublishFailure(); throw failure; }
         state.Restored = true; Reached(ConfigurationEditBoundary.Restored, session.SessionId);
+    }
+
+    private void Seal(Session state, ConfigurationEditStatus session, StoppedConfigurationEditor? stopped)
+    {
+        if (state.Sealed || stopped is null || session.Phase != ConfigurationEditPhase.Editing) return;
+        var recorder = new EditOutputRecorder(_instance, _database, _contracts, _instanceLease);
+        Exception? failure = null;
+        foreach (var resource in session.Resources)
+        {
+            try { recorder.Seal(resource.JournalId, stopped); }
+            catch (Exception error) when (error is IOException or ConfigurationException) { failure ??= error; }
+        }
+        if (failure is not null) throw failure;
+        state.Sealed = true;
+        Reached(ConfigurationEditBoundary.OutputSealed, session.SessionId);
+    }
+
+    private async Task<StoppedConfigurationEditor?> StopWriterAsync(Session state, Guid sessionId)
+    {
+        if (state.Editor is null) return state.Stopped;
+        state.Stopped = await state.Editor.StopAsync(TimeSpan.FromSeconds(20)).ConfigureAwait(false);
+        state.Editor.Dispose(); state.Editor = null;
+        Reached(ConfigurationEditBoundary.WriterStopped, sessionId);
+        return state.Stopped;
     }
 
     private Session GetSession(Guid sessionId)
@@ -306,7 +341,14 @@ public sealed class ConfigurationEditController : IDisposable
         internal ResourceOperationLease? Lease;
         internal PhysicalResourceAdmission? Files;
         internal ConfigurationEditorProcess? Editor;
+        internal StoppedConfigurationEditor? Stopped;
+        internal BindingEditorSession? Binding;
+        internal ConfigurationEditRequest? Request;
+        internal Guid? ResumeId;
+        internal bool ResumeFailed;
+        internal ProjectedPublication? Publication;
         internal bool Restored;
+        internal bool Sealed;
         internal string? Subject;
         internal void Release()
         {

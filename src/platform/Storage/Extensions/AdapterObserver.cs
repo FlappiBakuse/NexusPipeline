@@ -236,7 +236,7 @@ internal sealed class AdapterObserver
         using var bundleInput = blobs.OpenVerified(new(definition.RelativePath, definition.SizeBytes, definition.Sha256));
         if (bundleInput.Length > StrictJson.MaximumBytes) throw new IOException("adapter_definition_input_limit");
         var bundleBytes = new byte[checked((int)bundleInput.Length)]; bundleInput.ReadExactly(bundleBytes);
-        var script = _contracts.Read<AutomationBundle>(bundleBytes, "automation-bundle.schema.json").Scripts.Single(item => item.Id == step.ScriptId);
+        var script = BindingSourceCodec.Resolve(_contracts.Read<AutomationBundle>(bundleBytes, "automation-bundle.schema.json"), step);
         var sources = attempt.ConfigurationPlans.Where(item => item.StepId == step.StepId).Select(item =>
         {
             var plan = plans.ReadStructure(AttemptPlanCodec.Reference(item.Plan));

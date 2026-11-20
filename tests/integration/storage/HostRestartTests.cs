@@ -15,8 +15,6 @@ public sealed class HostRestartTests
     [Fact]
     public async Task RestartsSavedPort()
     {
-        using var origin = MaintenanceStartupOrigin.CaptureUnjobbedProcess();
-        origin.RequireCurrent();
         var executable = Environment.GetEnvironmentVariable("NEXUS_TEST_HOST_EXE") ?? throw new InvalidOperationException();
         var runtime = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "restart-" + Guid.NewGuid().ToString("N"));
         var start = new ProcessStartInfo(executable)

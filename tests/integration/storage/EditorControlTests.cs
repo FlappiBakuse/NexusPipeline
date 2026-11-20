@@ -55,6 +55,13 @@ public sealed class EditorControlTests
         var selection = new GenericEditorSelection(Guid.NewGuid(), source.BindingA, 1, script.Revision, root.Id, 1, Path.GetFileName(executable),
             ["configuration-editor-writer", input, report], [new(resourceId, resourceRevision)]);
         var original = File.ReadAllBytes(source.Configuration);
+        if (specialized)
+        {
+            var denied = await Assert.ThrowsAsync<ConfigurationException>(() => service.BeginAsync("editor-control", selection, DateTimeOffset.UtcNow));
+            Assert.Equal("configuration_editor_binding_open_required", denied.Message);
+            Assert.Equal(original, File.ReadAllBytes(source.Configuration));
+            return;
+        }
         var opened = await service.BeginAsync("editor-control", selection, DateTimeOffset.UtcNow);
         var pid = (await OwnedCrashProcess.ReadReportAsync(report)).GetProperty("processId").GetInt32();
         using var process = Process.GetProcessById(pid); Assert.False(process.HasExited);

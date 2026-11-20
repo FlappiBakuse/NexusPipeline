@@ -1,3 +1,19 @@
+<script lang="ts">
+import { computed as computedAvailability, inject as injectRegistry, onBeforeUnmount, ref } from 'vue';
+import type { SurfaceId as AvailableSurface } from '@nexuspipeline/extension-sdk';
+import { registryKey as availabilityRegistryKey } from './registry-context';
+
+export function useSurfaceAvailability(target: AvailableSurface, extensionId: () => string | undefined) {
+  const registry = injectRegistry(availabilityRegistryKey);
+  const revision = ref(0);
+  const unsubscribe = registry?.subscribe(() => { revision.value++; });
+  onBeforeUnmount(() => unsubscribe?.());
+  return computedAvailability(() => {
+    void revision.value;
+    return registry?.listSurfaces(target).some(entry => entry.extensionId === extensionId()) ?? false;
+  });
+}
+</script>
 <script setup lang="ts">
 import { computed, inject } from 'vue';
 import type { SurfaceId, SurfaceContext } from '@nexuspipeline/extension-sdk';
@@ -32,6 +48,5 @@ const context = computed<SurfaceContext>(() => ({
     :visible="visible"
     :extension-ids="extensionIds"
     v-bind="entry ? { entry } : {}"
-    @error="store.report"
   />
 </template>

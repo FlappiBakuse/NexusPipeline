@@ -15,11 +15,8 @@ import HistoryIndex from './HistoryIndex.vue';
 import { outcomeName } from './history-row';
 import HistoryRecords from './HistoryRecords.vue';
 import { HistoryLink } from './history-link';
-import { usePanelHeight } from '../app/panel-height';
 import { localDate, timeRange } from './history-range';
 const props = defineProps<{ store: RecordsStore; visible: boolean }>();
-const workspace = ref<HTMLElement>();
-const { height: workspaceHeight } = usePanelHeight(workspace, () => props.visible);
 const page = ref<RecordPage>();
 const pageNumber = ref(1);
 const records = new RecordWindow();
@@ -151,7 +148,6 @@ async function load(target = 1, reset = true): Promise<void> {
   } catch (error) {
     if (!controller.signal.aborted) {
       recordError.value = error instanceof Error ? error.message : String(error);
-      props.store.report(error);
     }
   } finally {
     if (owner === controller) loading.value = false;
@@ -228,12 +224,7 @@ onBeforeUnmount(() => {
 </script>
 <template>
   <HistoryDescription :from="from" :until="until" :visible="visible" />
-  <div
-    ref="workspace"
-    class="history-layout"
-    :data-selected="!!chosenUser"
-    :style="{ height: workspaceHeight }"
-  >
+  <div class="history-layout" :data-selected="!!chosenUser">
     <div class="history-left">
       <div class="history-filters">
         <nexus-date-range-picker

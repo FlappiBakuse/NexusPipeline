@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, ref, watch, toRefs } from 'vue';
+import { computed, ref, shallowRef, watch, toRefs } from 'vue';
 import type { AutomationStore } from '../app/store-ports';
 import ModalTransition from '../components/ModalTransition.vue';
-import ConfigurationPanel from './ConfigurationPanel.vue';
+import BindingEditorDialog from './BindingEditorDialog.vue';
 import AutomationRows from './AutomationRows.vue';
 import AutomationEditorDialog from './AutomationEditorDialog.vue';
+import AutomationDeleteDialog from './AutomationDeleteDialog.vue';
 import ScriptTypes, { type ScriptChoice } from './ScriptTypes.vue';
+import type { ExtensionState } from '../control/extensions';
 import { scriptPathKey } from './script-paths';
 import type { AutomationDraft } from '../app/automation-draft';
 import type { AutomationBundle } from '../control/wire.generated';
@@ -33,12 +35,22 @@ const commands = new AutomationCommands(props.store, session, (action) => {
     editing.value = false;
 });
 const saveOwner = new AutomationSave(props.store, editorModel, session, commands);
-const configBinding = ref('');
-const deleting = ref<{ id: string; name: string } | null>(null);
+const nativeBinding = ref('');
+const bindingEditor = computed(() => {
+  const binding = bundle.value?.bindings.find(row => row.id === nativeBinding.value);
+  const script = bundle.value?.scripts.find(row => row.id === binding?.scriptId);
+  const revision = (kind: string, id: string) => catalog.value?.revisions.find(row => row.kind === kind && row.id === id)?.revision ?? 0;
+  return binding && script ? {
+    bindingId: binding.id, bindingRevision: revision('binding', binding.id),
+    scriptRevision: revision('script', script.id), extensionId: script.extensionId
+  } : null;
+});
+const deleting = ref<{ id: string; name: string; revision: number } | null>(null);
 const exchangeOpen = ref(false);
 const exchangeMounted = ref(false);
 const importFile = ref<File>();
 const typesOpen = ref(false);
+const scriptCatalog = shallowRef<readonly ExtensionState[]>();
 const listedRows = computed(() => {
   const values = bundle.value?.[props.kind] || [];
   return [...values].sort((a, b) => Number('order' in a ? a.order : 0) - Number('order' in b ? b.order : 0));
@@ -86,13 +98,15 @@ async function importScript(file: File): Promise<void> {
   }
 }
 const edit = (row?: unknown) => editorModel.edit(row);
-function askRemove(row: { id: string }): void {
+function askRemove(row: { id: string; name: string }): void {
   if (!pending.value && !saving.value)
-    deleting.value = { id: row.id, name: label(row as AutomationDraft) };
+    deleting.value = { id: row.id, name: row.name, revision: editorModel.revision(row.id) };
 }
-async function remove(): Promise<void> {
-  if (!deleting.value || saving.value || pending.value || !props.store.can('automation.delete')) return;
+async function remove(name?: string): Promise<void> {
   const target = deleting.value;
+  if (!target || !props.visible || saving.value || pending.value || !props.store.can('automation.delete') ||
+      (props.kind === 'users' && name !== target.name)) return;
+  activeKind.value = props.kind;
   selected.value = target.id;
   deleting.value = null;
   saving.value = true;
@@ -101,7 +115,7 @@ async function remove(): Promise<void> {
   (body.removed as unknown[]).push({
     kind: activeKind.value.slice(0, -1),
     id: target.id,
-    expectedRevision: editorModel.revision(target.id)
+    expectedRevision: target.revision
   });
   await commit(body, {
     id: body.operationId,
@@ -127,9 +141,6 @@ async function checkPending(): Promise<void> {
   const completed = await commands.check();
   if (completed?.key === draftKey.value && (completed.action === 'save' || completed.action === 'import'))
     editing.value = false;
-}
-function label(row: AutomationDraft): string {
-  return String(row.name || row.id);
 }
 async function reorder(ids: string[]): Promise<void> {
   if (pending.value || saving.value) return;
@@ -169,6 +180,7 @@ watch(
 watch(editing, (value) => {
   if (!value) activeKind.value = props.kind;
 });
+watch(() => props.visible, visible => { if (!visible) deleting.value = null; });
 function openRow(row: unknown, global = false): void {
   activeKind.value = props.kind;
   userGlobal.value = global;
@@ -184,23 +196,17 @@ function openRow(row: unknown, global = false): void {
     >
       {{ t(createLabel) }}
     </button>
-      <button v-if="pending && !editing" :disabled="saving" @click="checkPending">{{ t('查询操作状态并刷新') }}</button>
+    <button v-if="pending && !editing" :disabled="saving" @click="checkPending">{{ t('查询操作状态并刷新') }}</button>
   </PageActions>
-  <ModalTransition>
-    <ScriptTypes
-      v-if="kind === 'scripts'"
-      :store="store"
-      :active="visible"
-      :visible="visible && typesOpen"
-      @choose="chooseScript"
-      @close="typesOpen = false"
-    />
-  </ModalTransition>
+  <ScriptTypes v-if="kind === 'scripts'" v-model:installed="scriptCatalog" :store="store" :active="visible"
+    :visible="visible && typesOpen" @choose="chooseScript" @close="typesOpen = false" />
   <div class="entity-list-page">
-    <nexus-toast v-if="kind === 'users' && summaries.error" tone="danger" :message.prop="t(summaries.error)" />
-    <nexus-toast v-if="error && !editing" tone="danger" :message.prop="t(error)" />
-    <nexus-toast v-if="pending && !editing" tone="warning" :message.prop="t('操作结果待确认；请查询状态，勿重复提交。')" />
-    <nexus-toast v-if="notice" :message.prop="t(notice)" @nexus-close="notice = ''" />
+    <template v-if="visible && !editing">
+      <nexus-toast v-if="error" :tone="pending ? 'warning' : 'danger'" :message.prop="t(error)" />
+      <nexus-toast v-else-if="notice" :message.prop="t(notice)" @nexus-close="notice = ''" />
+      <nexus-toast v-else-if="pending && !saving" tone="warning" :message.prop="t('操作结果待确认；请查询状态，勿重复提交。')" />
+      <nexus-toast v-else-if="!pending && kind === 'users' && summaries.error" tone="danger" :message.prop="t(summaries.error)" />
+    </template>
     <section class="entity-list">
       <nexus-empty-state
         v-if="!listedRows.length"
@@ -213,6 +219,7 @@ function openRow(row: unknown, global = false): void {
         :kind="kind"
         :rows="listedRows"
         :bundle="bundle"
+        :script-catalog="scriptCatalog"
         :store="store"
         :visible="visible"
         :locked="saving || !!pending"
@@ -231,12 +238,13 @@ function openRow(row: unknown, global = false): void {
         v-if="editing"
         :store="store"
         :kind="kind"
-        :visible="visible && !configBinding"
+        :visible="visible && !nativeBinding"
         :model="editorModel"
         :session="session"
+        :script-type="scriptCatalog?.find(item => item.extensionId === draft.extensionId)"
         @close="editing = false"
         @import="importScript"
-        @configure="configBinding = $event"
+        @configure="nativeBinding = $event"
         @inspect="checkPending"
         @save="saveOwner.save($event)"
       />
@@ -260,26 +268,10 @@ function openRow(row: unknown, global = false): void {
     </nexus-modal>
   </div>
   <ModalTransition>
-    <ConfigurationPanel
-      v-if="configBinding"
-      :store="store"
-      :binding-id="configBinding"
-      :visible="visible"
-      @close="configBinding = ''"
-    />
+    <BindingEditorDialog v-if="bindingEditor" :key="bindingEditor.bindingId" v-bind="bindingEditor" :store="store" :visible="visible"
+      @close="nativeBinding = ''" @changed="notice = t('已保存')" />
   </ModalTransition>
-  <ModalTransition>
-    <nexus-confirm-dialog
-      v-if="deleting"
-      :open.prop="visible"
-      :title="t('删除自动化项目')"
-      :message="`${t('确定删除')} ${deleting.name}? ${t('关联定义将由 Host 检查。')}`"
-      tone="danger"
-      @nexus-confirm="remove"
-      @nexus-cancel="deleting = null"
-      @nexus-close="deleting = null"
-    />
-  </ModalTransition>
+  <AutomationDeleteDialog :target="deleting" :kind="kind" :visible="visible"
+    @confirm="remove" @cancel="deleting = null" />
 </template>
-
 <style scoped src="./automation-page.css"></style>

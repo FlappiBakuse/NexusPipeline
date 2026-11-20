@@ -44,7 +44,7 @@ export function interfacePreparation(store: AppStore, frontend: FrontendLoader, 
       stage.value = '加载插件界面'; progress(0, 0);
       await Promise.all([
         abortable(frontend.synchronize(), owner.signal).then(() => performance.mark('nexus.plugins.prepared')),
-        preparePages(store, owner.signal, () => {}, report, true, completedPages).then(() => performance.mark('nexus.current-page.prepared'))
+        preparePages(store, owner.signal, () => {}, true, completedPages).then(() => performance.mark('nexus.current-page.prepared'))
       ]);
       owner.signal.throwIfAborted();
       surfacesReady.value = true;
@@ -67,7 +67,7 @@ export function interfacePreparation(store: AppStore, frontend: FrontendLoader, 
       }
       // Background reads and slow contributions retain their owner after presentation.
       await pending;
-      await preparePages(store, owner.signal, () => {}, () => {}, false, completedPages);
+      await preparePages(store, owner.signal, () => {}, false, completedPages);
       performance.mark('nexus.pages.prepared');
     } finally { clearTimeout(timer); }
   }

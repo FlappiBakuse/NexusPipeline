@@ -3,10 +3,6 @@
   gap: 16px;
   min-width: 0;
 }
-h2,
-p {
-  margin: 0;
-}
 .task-list {
   display: grid;
   gap: 14px;
@@ -34,45 +30,17 @@ p {
 }
 .copy {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
   flex: 1;
   min-width: 0;
   padding-left: 4px;
-}
-.copy h2 {
-  font-size: 16px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .badges {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
 }
-.actions {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.actions button {
-  min-width: 96px;
-}
-.error {
-  color: var(--nx-color-danger);
-}
-@media (max-width: 700px) {
-  .task {
-    flex-wrap: wrap;
-  }
-  .task .actions {
-    width: 100%;
-    padding-left: 44px;
-  }
-  .task .actions button:first-child {
-    flex: 1;
-  }
-  .task .actions button:last-child {
-    min-width: 64px;
-  }
+@media (max-width: 600px) {
+  .task { gap: 6px; padding-inline: 8px; }
 }

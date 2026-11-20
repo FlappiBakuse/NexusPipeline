@@ -33,6 +33,7 @@ export type AdapterDraft = Omit<AdapterResult, 'hasChanges'> & {
   request: Record<string, unknown> | null;
   busy: boolean;
   note: string;
+  error: string;
 };
 
 export function resetAdapterProposal(
@@ -169,6 +170,7 @@ export function createAdapterDraft(): AdapterDraft {
     diagnostics: [],
     request: null,
     busy: false,
-    note: ''
+    note: '',
+    error: ''
   };
 }

@@ -258,6 +258,14 @@ export default {
           "$ref": "automation-paths.schema.json#/$defs/portablePath"
         }
       },
+      "adapterResources": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 31,
+        "items": {
+          "$ref": "automation-script.schema.json#/$defs/adapterResource"
+        }
+      },
       "logPaths": {
         "type": "array",
         "maxItems": 32,
@@ -2879,6 +2887,9 @@ export default {
         "type": "string",
         "minLength": 1,
         "maxLength": 32767
+      },
+      "purpose": {
+        "const": "edit"
       }
     }
   },
@@ -3505,6 +3516,9 @@ export default {
           "exclusiveProgram": {
             "type": "boolean"
           },
+          "exclusiveProgramInUserSession": {
+            "type": "boolean"
+          },
           "editorForbiddenArguments": {
             "type": "array",
             "maxItems": 64,
@@ -3752,6 +3766,12 @@ export default {
           "response"
         ]
       },
+      "purpose": {
+        "const": "edit"
+      },
+      "editor": {
+        "$ref": "#/$defs/editor"
+      },
       "operationId": {
         "$ref": "common.schema.json#/$defs/uuid"
       },
@@ -3787,7 +3807,8 @@ export default {
         "then": {
           "properties": {
             "candidates": false,
-            "diagnostics": false
+            "diagnostics": false,
+            "editor": false
           }
         }
       },
@@ -3860,6 +3881,17 @@ export default {
           "exclusiveProgram": {
             "type": "boolean"
           },
+          "instance": {
+            "$ref": "#/$defs/instance"
+          },
+          "isolationPath": {
+            "$ref": "#/$defs/path"
+          },
+          "runIdentity": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
           "projectSelection": {
             "type": "object",
             "additionalProperties": true
@@ -3870,6 +3902,43 @@ export default {
         "type": "string",
         "minLength": 1,
         "maxLength": 1024
+      },
+      "instance": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "collection",
+          "identity",
+          "value",
+          "selection"
+        ],
+        "properties": {
+          "collection": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "identity": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "value": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "selection": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        }
       },
       "resource": {
         "type": "object",
@@ -3893,6 +3962,45 @@ export default {
               "json",
               "yaml"
             ]
+          }
+        }
+      },
+      "editor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "executable",
+          "arguments",
+          "scopes",
+          "canCreate",
+          "exclusiveProgram"
+        ],
+        "properties": {
+          "executable": {
+            "$ref": "#/$defs/path"
+          },
+          "arguments": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          },
+          "scopes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/$defs/path"
+            }
+          },
+          "canCreate": {
+            "type": "boolean"
+          },
+          "exclusiveProgram": {
+            "type": "boolean"
           }
         }
       }

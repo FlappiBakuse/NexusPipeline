@@ -2,15 +2,14 @@ import { createApp, h, nextTick } from 'vue';
 import AttemptLogs from '../../apps/web/src/pages/AttemptLogs.vue';
 import themeCss from '../../apps/web/src/styles/theme.css?inline';
 import uiCss from '../../apps/web/src/ui/theme.css?inline';
-import configurationCss from '../../apps/web/src/pages/configuration.css?inline';
 import settingsCss from '../../apps/web/src/pages/settings-page.css?inline';
 import { createStore } from '../../apps/web/src/app/store';
 import { useAppAppearance } from '../../apps/web/src/app/app-appearance';
 import { ControlClient } from '../../apps/web/src/control/client';
 
 export async function themeConsumersContract(parent: HTMLElement, check: (value: unknown, name: string) => void) {
-  const previous = document.body.dataset.theme, oldAccent = document.body.style.getPropertyValue('--accent');
-  const style = document.createElement('style'); style.textContent = [themeCss, uiCss, configurationCss, settingsCss].join('\n');
+  const previous = document.body.dataset.theme;
+  const style = document.createElement('style'); style.textContent = [themeCss, uiCss, settingsCss].join('\n');
   document.head.append(style);
   const store = createStore(new ControlClient());
   const values = { theme: 'dark' as 'dark' | 'light' | 'system', locale: 'zh-CN' as const,
@@ -20,7 +19,6 @@ export async function themeConsumersContract(parent: HTMLElement, check: (value:
   const app = createApp({ setup() {
     useAppAppearance(store);
     return () => h('div', [h(AttemptLogs, { store, runId: 'run', attemptId: 'attempt', visible: true, logs: [] }),
-      h('nav', { class: 'config-tabs' }, [h('button', { 'aria-current': 'page' }, 'Configuration')]),
       h('p', { class: 'warning' }, 'Warning')]);
   } });
   app.mount(holder);
@@ -37,13 +35,9 @@ export async function themeConsumersContract(parent: HTMLElement, check: (value:
         mode + ' history preview retains readable foreground');
       check(getComputedStyle(holder.querySelector('.warning')!).borderLeftColor === (light ? 'rgb(166, 106, 11)' : 'rgb(246, 191, 97)'),
         mode + ' settings warning uses the active warning palette');
-      document.body.style.setProperty('--accent', '#257045'); await nextTick();
-      check(getComputedStyle(holder.querySelector('.config-tabs button')!).color === 'rgb(37, 112, 69)',
-        mode + ' configuration selection follows the live wallpaper accent');
     }
   } finally {
     app.unmount(); holder.remove(); store.dispose(); style.remove();
     if (previous === undefined) delete document.body.dataset.theme; else document.body.dataset.theme = previous;
-    if (oldAccent) document.body.style.setProperty('--accent', oldAccent); else document.body.style.removeProperty('--accent');
   }
 }

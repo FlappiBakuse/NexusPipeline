@@ -28,4 +28,8 @@ public sealed record ControlScriptSource
     /// <summary>Schema field <c>rootPath</c>; constraints are owned by control-script-source.schema.json.</summary>
     [JsonPropertyName("rootPath")]
     public required string RootPath { get; init; }
+    /// <summary>Schema field <c>purpose</c>; constraints are owned by control-script-source.schema.json.</summary>
+    [JsonPropertyName("purpose")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Purpose { get; init; }
 }

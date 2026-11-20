@@ -31,7 +31,7 @@ internal sealed class SourceUseCases(ScriptSourceService sources, ContractReader
         try
         {
             var result = await sources.DiscoverAsync(Guid.Parse(command.OperationId), command.ExtensionId,
-                command.ExpectedInstalledRevision, command.RootPath, Current, cancellation);
+                command.ExpectedInstalledRevision, command.RootPath, Current, cancellation, command.Purpose == "edit");
             Current();
             return new { rootPath = command.RootPath, installedRevision = command.ExpectedInstalledRevision, discovery = result };
         }

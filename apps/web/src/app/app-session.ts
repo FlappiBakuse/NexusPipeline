@@ -61,8 +61,8 @@ export class AppSession {
       this.state.error = '';
       if (!this.stopFeed && this.state.automation) this.subscribe();
     } catch (error) {
-      if (!owner.signal.aborted) this.report(error);
       if (initialAccess) throw error;
+      if (!owner.signal.aborted) this.report(error);
     } finally {
       signal?.removeEventListener('abort', cancel);
       if (this.navigationOwner === owner) this.state.busy = false;

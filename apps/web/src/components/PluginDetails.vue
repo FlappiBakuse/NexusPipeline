@@ -67,8 +67,8 @@ const facts = computed(() => [
         <dd>{{ fact[1] || t('未提供') }}</dd>
       </div>
     </dl>
-    <p v-if="loading && !details" role="status">{{ t('正在验证发行文档…') }}</p>
-    <p v-if="error" class="detail-error" role="alert">{{ t(error) }}</p>
+    <nexus-spinner v-if="loading && !details" :label="t('正在验证发行文档…')" />
+    <nexus-toast v-if="error" tone="danger" :message.prop="t(error)" />
     <section class="plugin-document">
       <h4>README</h4>
       <MarkdownDocument v-if="readme" :text="readme" />
@@ -86,7 +86,6 @@ const facts = computed(() => [
 <style scoped>
 .plugin-details {
   min-height: 0;
-  height: 100%;
   overflow: hidden;
   padding: clamp(18px, 2.5vw, 28px);
   border: 1px solid var(--border);

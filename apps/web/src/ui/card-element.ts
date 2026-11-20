@@ -9,9 +9,7 @@ export class NexusCardElement extends NexusElement {
       `
       :host{display:block;min-width:0;border:1px solid var(--nx-color-border,#394152);
       border-radius:var(--nx-radius-lg,14px);padding:var(--nx-space-5,24px);
-      color:var(--nx-color-text,#e9edf5);background:var(--content-card,#1e2330)}
-      :host([data-surface=secondary]){background:var(--content-card-secondary,#242a38)}
-      :host([data-surface=nested]){background:var(--content-control,#ffffff08)}
+      color:var(--nx-color-text,#e9edf5);background:var(--_nexus-card-fill,var(--content-card,#1e2330))}
     `,
       '<slot></slot>'
     );

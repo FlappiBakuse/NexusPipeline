@@ -32,4 +32,18 @@ export function settingContract(fixture: HTMLElement, check: Check): void {
   toggle.shadowRoot!.querySelector<HTMLButtonElement>('button')!.click();
   check(setting.value && changes === 1, 'disabled switch settings cannot change their shared switch');
   setting.remove();
+  const list = create('nexus-switch-list');
+  list.style.setProperty('--nx-color-border', '#394152');
+  const first = create('nexus-switch-setting'), second = create('nexus-switch-setting'), last = create('nexus-switch-setting');
+  list.append(first, second, last);
+  fixture.append(list);
+  const border = (row: HTMLElement) => getComputedStyle(row).borderTopWidth;
+  check(getComputedStyle(list).borderTopWidth === '1px' && border(first) === '0px' &&
+    border(second) === '1px' && border(last) === '1px', 'integrated switch lists paint one shared frame and a separator before each subsequent row');
+  first.hidden = true;
+  check(!first.getClientRects().length && border(second) === '0px' && border(last) === '1px',
+    'hiding a switch keeps separators between visible rows only');
+  second.remove();
+  check(border(last) === '0px', 'the last visible switch does not keep a separator when it becomes the only row');
+  list.remove();
 }

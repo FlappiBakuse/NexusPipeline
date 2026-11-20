@@ -42,7 +42,8 @@ public sealed class ControlTokenService : IAsyncDisposable
         _native = native; _dialog = dialog; _nativeExit = native is null ? Task.CompletedTask : WatchNativeAsync();
     }
 
-    public Task<SecretFieldStatus> ChangeAsync(Guid operation, long expectedRevision, SecretDisposition disposition, SecretValue? value)
+    public Task<SecretFieldStatus> ChangeAsync(Guid operation, long expectedRevision, SecretDisposition disposition,
+        SecretValue? value, bool confirm = true)
     {
         if (expectedRevision is < 0 or > SecretFieldReference.MaximumRevision)
             throw new ArgumentException("control_token_revision_invalid");
@@ -68,9 +69,9 @@ public sealed class ControlTokenService : IAsyncDisposable
             {
                 RequireLive();
                 if (_pending.TryGetValue(operation, out var prior))
-                    return prior.Request == request ? prior.Work : throw new OperationConflictException();
+                    return prior.Request == request && prior.Confirm == confirm ? prior.Work : throw new OperationConflictException();
                 if (_pending.Count >= 32) throw new IOException("control_token_confirmation_busy");
-                var pending = new Pending(request, CancellationTokenSource.CreateLinkedTokenSource(_ending.Token));
+                var pending = new Pending(request, confirm, CancellationTokenSource.CreateLinkedTokenSource(_ending.Token));
                 _pending.Add(operation, pending);
                 pending.Work = ChangeCoreAsync(operation, expectedRevision, disposition, owned, pending);
                 owned = null;
@@ -97,7 +98,7 @@ public sealed class ControlTokenService : IAsyncDisposable
     {
         lock (_gate)
         {
-            if (_disposed || !_pending.TryGetValue(operation, out var pending) || pending.EffectStarted) return false;
+            if (_disposed || !_pending.TryGetValue(operation, out var pending) || !pending.Confirm || pending.EffectStarted) return false;
             pending.Cancellation.Cancel(); return true;
         }
     }
@@ -112,25 +113,13 @@ public sealed class ControlTokenService : IAsyncDisposable
             _lease.VerifyHeld(_instance);
             var replay = _store.Lookup(operation, key, revision, disposition, owned, pending.Cancellation.Token);
             if (replay is not null) return replay;
-            var details = "Change this instance's remote-control bearer credential?\n\nInstance " +
-                _instance.InstanceId.ToString("D") + "\nOperation " + operation.ToString("D") +
-                "\nExpected credential revision " + revision.ToString(System.Globalization.CultureInfo.InvariantCulture) +
-                "\n\nThis grants remote access only through the saved listener and server capability rules. " +
-                "No credential value is displayed. Choose Cancel unless you requested this local change.";
-            if (!await _dialogSlot.WaitAsync(0, pending.Cancellation.Token).ConfigureAwait(false))
-                throw new IOException("control_token_confirmation_busy");
-            bool approved;
-            try
-            {
-                approved = await _dialog.ShowAsync(new(Guid.NewGuid(), "NexusPipeline control credential", details, "Allow change"),
-                    TimeSpan.FromSeconds(60), pending.Cancellation.Token).ConfigureAwait(false);
-            }
-            finally { _dialogSlot.Release(); }
+            if (pending.Confirm && !await ConfirmAsync(operation, revision, pending.Cancellation.Token).ConfigureAwait(false))
+                throw new UnauthorizedAccessException("control_token_local_confirmation_required");
             lock (_gate)
             {
                 RequireLive();
-                if (!approved || pending.Cancellation.IsCancellationRequested)
-                    throw new UnauthorizedAccessException("control_token_local_confirmation_required");
+                if (pending.Cancellation.IsCancellationRequested)
+                    throw new UnauthorizedAccessException("control_token_local_context_closed");
                 pending.EffectStarted = true;
             }
             return await _secrets.ApplyAsync(operation, key, revision, disposition, owned, CancellationToken.None).ConfigureAwait(false);
@@ -140,6 +129,23 @@ public sealed class ControlTokenService : IAsyncDisposable
             owned?.Dispose();
             lock (_gate) { _pending.Remove(operation); pending.Cancellation.Dispose(); }
         }
+    }
+
+    private async Task<bool> ConfirmAsync(Guid operation, long revision, CancellationToken cancellation)
+    {
+        var details = "Change this instance's remote-control bearer credential?\n\nInstance " +
+            _instance.InstanceId.ToString("D") + "\nOperation " + operation.ToString("D") +
+            "\nExpected credential revision " + revision.ToString(System.Globalization.CultureInfo.InvariantCulture) +
+            "\n\nThis grants remote access only through the saved listener and server capability rules. " +
+            "No credential value is displayed. Choose Cancel unless you requested this local change.";
+        if (!await _dialogSlot.WaitAsync(0, cancellation).ConfigureAwait(false))
+            throw new IOException("control_token_confirmation_busy");
+        try
+        {
+            return await _dialog.ShowAsync(new(Guid.NewGuid(), "NexusPipeline control credential", details, "Allow change"),
+                TimeSpan.FromSeconds(60), cancellation).ConfigureAwait(false);
+        }
+        finally { _dialogSlot.Release(); }
     }
 
     private void RequireLive()
@@ -175,9 +181,10 @@ public sealed class ControlTokenService : IAsyncDisposable
         _dialogSlot.Dispose(); _ending.Dispose();
     }
 
-    private sealed class Pending(string request, CancellationTokenSource cancellation)
+    private sealed class Pending(string request, bool confirm, CancellationTokenSource cancellation)
     {
         internal string Request { get; } = request;
+        internal bool Confirm { get; } = confirm;
         internal CancellationTokenSource Cancellation { get; } = cancellation;
         internal bool EffectStarted { get; set; }
         internal Task<SecretFieldStatus> Work { get; set; } = null!;

@@ -2,7 +2,8 @@ using System.Text.Json;
 
 namespace NexusPipeline.Host.Control.Events;
 
-internal sealed record ControlEventRevision(long Mutation, long Recovery, long Execution = 0, long Interface = 0, string Extensions = "");
+internal sealed record ControlEventRevision(long Mutation, long Recovery, long Execution = 0, long Interface = 0, string Extensions = "",
+    bool InitialExtensionsPending = false);
 internal sealed record ControlEventMessage(long Sequence, string Kind, string Frame);
 
 internal sealed class ControlEventFeed(Guid instanceId, Func<ControlEventRevision> readRevision, Func<object> readSnapshot)

@@ -1,6 +1,6 @@
 {
   "algorithm": "nexus-sdk-source-manifest-sha256-v1",
-  "sourceFingerprint": "0610ba037d4e1a0524e5f200f4b77bef7f16b7a90a59aef613a1187ced2da8cd",
+  "sourceFingerprint": "fecf189efcad7a3b84c26e4069edaad5be959558d08080fbe3226ccf20da1ec6",
   "inputs": [
     {
       "path": "Directory.Build.props",
@@ -229,8 +229,8 @@
     },
     {
       "path": "contracts/schemas/automation-binding-source.schema.json",
-      "sizeBytes": 1123,
-      "sha256": "f893fb14dcfc3c979b3c88c16949f5a8bab4d3a88695551e41ca22d642dcbd51"
+      "sizeBytes": 1302,
+      "sha256": "6d81966f22eb20f2e18c886bb075469157e9d70ba928d3d4879adb4e45173e08"
     },
     {
       "path": "contracts/schemas/automation-bundle.schema.json",
@@ -289,8 +289,8 @@
     },
     {
       "path": "contracts/schemas/configuration-exchange-plan.schema.json",
-      "sizeBytes": 4199,
-      "sha256": "d39dfcb2f664e6ec795d6572d77f02c5b6c92c037dc4a51c398ed8e581064900"
+      "sizeBytes": 4261,
+      "sha256": "ae6dc88d630156287820b7ae0ec9089c8efd1027e2c820d0c48d3e4c8a9eaaba"
     },
     {
       "path": "contracts/schemas/configuration-run-state.schema.json",
@@ -424,8 +424,8 @@
     },
     {
       "path": "contracts/schemas/control-script-source.schema.json",
-      "sizeBytes": 714,
-      "sha256": "65cf08eab26630e8c104afbadd25c9877c35231d579166fa7126be7208a65fc1"
+      "sizeBytes": 748,
+      "sha256": "433e8fc15594156e7ba023e597592d583abf25e9982c69055267cf662b897e7a"
     },
     {
       "path": "contracts/schemas/control-service-settings.schema.json",
@@ -509,8 +509,8 @@
     },
     {
       "path": "contracts/schemas/execution-plan.schema.json",
-      "sizeBytes": 15699,
-      "sha256": "b20b4ad6b3559b09d3f1247bb6c3f36e333a0806e72f91d2dee152ccb784fe86"
+      "sizeBytes": 15761,
+      "sha256": "6f3d6e677012ec8243ca824db7b25681a101e20b453cf5ab4be88d4f154beab5"
     },
     {
       "path": "contracts/schemas/execution-project-request.schema.json",
@@ -584,8 +584,8 @@
     },
     {
       "path": "contracts/schemas/extension-manifest.schema.json",
-      "sizeBytes": 7570,
-      "sha256": "27c9d9c689270d5cb68e703200bf25c0d4b0b670cfdf45c5b92fdcffff994ec9"
+      "sizeBytes": 7652,
+      "sha256": "c5305ee1a29ee6e856be5b7364a0e500dec3b088df4d463b4235392909f77621"
     },
     {
       "path": "contracts/schemas/extension-metadata.schema.json",
@@ -669,8 +669,8 @@
     },
     {
       "path": "contracts/schemas/script-source.schema.json",
-      "sizeBytes": 3370,
-      "sha256": "4939e679b08345799454de060ff4555e8077241eec75a6f3840e468b43632213"
+      "sizeBytes": 4758,
+      "sha256": "8dd6277097d6b94bab4d9b90a311be99bf5fbbe076300990f81b3890e8cdb5f5"
     },
     {
       "path": "contracts/schemas/secret-preparation-defs.schema.json",
@@ -754,13 +754,13 @@
     },
     {
       "path": "contracts/sdk-frontend-api.json",
-      "sizeBytes": 57517,
-      "sha256": "3011ad1fca33cefea220ab4a53da20546bd1b8ce078b1e400e8a9d3b370d2561"
+      "sizeBytes": 58201,
+      "sha256": "ac11d56c9e9f47260b1d4720f58fe68135292b7cc7f0a9a73c1e4e109c9aa134"
     },
     {
       "path": "contracts/sdk-public-api.json",
-      "sizeBytes": 1863316,
-      "sha256": "170b66dbf16ab5786085d1db523726df9dbac11828732081dbecb5792aac65e6"
+      "sizeBytes": 1900230,
+      "sha256": "8dc96ec85464e923158215fcc13c59a5eea09db1f4ecd97bd36d4fdbe07b3c06"
     },
     {
       "path": "contracts/ui-elements.json",

@@ -50,6 +50,7 @@ export interface AutomationBindingSource {
   readonly executable: AutomationPathsPortablePath;
   readonly arguments: ReadonlyArray<string>;
   readonly configurationPaths: ReadonlyArray<AutomationPathsPortablePath>;
+  readonly adapterResources?: ReadonlyArray<AutomationScriptAdapterResource>;
   readonly logPaths: ReadonlyArray<AutomationPathsPortablePath>;
 }
 
@@ -462,6 +463,7 @@ export interface ControlScriptSource {
   readonly extensionId: string;
   readonly expectedInstalledRevision: number;
   readonly rootPath: string;
+  readonly purpose?: "edit";
 }
 
 export interface EmulatorTargetSelection {
@@ -567,6 +569,7 @@ export interface ExtensionManifestPermissions {
 export interface ExtensionManifestSpecialized {
   readonly adapterEntry: string;
   readonly exclusiveProgram?: boolean;
+  readonly exclusiveProgramInUserSession?: boolean;
   readonly editorForbiddenArguments?: ReadonlyArray<string>;
   readonly editorLifecycle?: ExtensionManifestSpecializedEditorLifecycle;
   readonly readOnlySources?: AdapterSourcePolicy;
@@ -599,6 +602,8 @@ export interface ScriptSource {
   readonly format: "nexus.script.source";
   readonly version: 1;
   readonly direction: "request" | "response";
+  readonly purpose?: "edit";
+  readonly editor?: ScriptSourceEditor;
   readonly operationId: string;
   readonly extensionId: string;
   readonly candidates?: ReadonlyArray<ScriptSourceCandidate>;
@@ -613,7 +618,25 @@ export interface ScriptSourceCandidate {
   readonly resources: ReadonlyArray<ScriptSourceResource>;
   readonly logPaths: ReadonlyArray<string>;
   readonly exclusiveProgram?: boolean;
+  readonly instance?: ScriptSourceInstance;
+  readonly isolationPath?: string;
+  readonly runIdentity?: string;
   readonly projectSelection?: Readonly<Record<string, unknown>>;
+}
+
+export interface ScriptSourceEditor {
+  readonly executable: string;
+  readonly arguments: ReadonlyArray<string>;
+  readonly scopes: ReadonlyArray<string>;
+  readonly canCreate: boolean;
+  readonly exclusiveProgram: boolean;
+}
+
+export interface ScriptSourceInstance {
+  readonly collection: string;
+  readonly identity: string;
+  readonly value: string;
+  readonly selection: ReadonlyArray<string>;
 }
 
 export interface ScriptSourceResource {

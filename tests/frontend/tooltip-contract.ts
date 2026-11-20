@@ -60,16 +60,19 @@ export async function tooltipContract(fixture: HTMLElement, check: (value: unkno
     select.options = [{ id: 'one', label: 'One' }, { id: 'two', label: 'Two' }];
     const label = document.createElement('label'); label.append(select); fixture.append(label);
     tooltip.anchor = label;
+    const question = tooltip.shadowRoot!.querySelector<HTMLButtonElement>('button')!;
     select.focus(); await pause();
-    check(tooltip.open, 'a collapsed select exposes its field help on keyboard focus');
+    check(!tooltip.open && !question.hidden, 'a collapsed select has a separate help trigger');
+    question.click();
+    check(tooltip.open, 'the question mark opens help for the select');
     const input = select.shadowRoot!.querySelector('input')!;
     input.click();
     check(!tooltip.open && select.shadowRoot!.querySelector('.panel')!.matches(':popover-open'),
       'opening a select immediately hides its tooltip while preserving the option list');
-    label.dispatchEvent(new PointerEvent('pointerenter')); await pause();
-    check(!tooltip.open, 'pointer hover cannot reopen field help over an expanded select');
+    question.click();
+    check(!tooltip.open, 'the trigger cannot reopen field help over an expanded select');
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    label.dispatchEvent(new PointerEvent('pointerenter')); await pause();
+    question.click();
     check(tooltip.open, 'field help is available again after the select closes');
     label.remove();
   } finally { tooltip.remove(); anchor.remove(); replacement.remove(); }

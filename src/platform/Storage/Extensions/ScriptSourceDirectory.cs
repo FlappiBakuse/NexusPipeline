@@ -14,6 +14,7 @@ internal sealed class ScriptSourceDirectory : IDisposable
     private readonly ResourceLeaseManager resources;
     private readonly Action current;
     private readonly CancellationToken cancellation;
+    private readonly ResourceOperationLease? owner;
     private readonly Dictionary<string, Entry[]> directories = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> files = new(StringComparer.Ordinal);
     private readonly List<IDisposable> held = [];
@@ -21,9 +22,10 @@ internal sealed class ScriptSourceDirectory : IDisposable
     private long bytes;
     private bool disposed;
 
-    internal ScriptSourceDirectory(string path, ResourceLeaseManager resources, Action current, CancellationToken cancellation)
+    internal ScriptSourceDirectory(string path, ResourceLeaseManager resources, Action current, CancellationToken cancellation,
+        ResourceOperationLease? owner = null)
     {
-        this.resources = resources; this.current = current; this.cancellation = cancellation;
+        this.resources = resources; this.current = current; this.cancellation = cancellation; this.owner = owner;
         current(); cancellation.ThrowIfCancellationRequested();
         root = PhysicalPathPolicy.NormalizeWithoutLinks(path);
         if (!Directory.Exists(root)) throw new IOException("script_source_root_missing");
@@ -48,7 +50,7 @@ internal sealed class ScriptSourceDirectory : IDisposable
         var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
         try
         {
-            if (input.Length is < 1 or > 8 * 1024 * 1024 || bytes + input.Length > 32 * 1024 * 1024) throw Limit();
+            if (input.Length > 8 * 1024 * 1024 || bytes + input.Length > 32 * 1024 * 1024) throw Limit();
             var entry = Find(relative)!;
             if (PhysicalObjectIdentity.Read(input.SafeFileHandle) != entry.Identity) throw Changed();
             var buffer = new byte[checked((int)input.Length)]; input.ReadExactly(buffer);
@@ -106,7 +108,7 @@ internal sealed class ScriptSourceDirectory : IDisposable
         PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar)));
 
     private void Hold(string path) => held.Add(ProjectReadLease.Acquire(resources,
-        PhysicalResourceAdmission.Read(path, ResourceClaimMode.Reference, includeDescendants: false)));
+        PhysicalResourceAdmission.Read(path, ResourceClaimMode.Reference, includeDescendants: false), owner));
 
     private void Check()
     {

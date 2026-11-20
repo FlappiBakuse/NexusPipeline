@@ -8,6 +8,7 @@
     "operationId": {"$ref": "common.schema.json#/$defs/uuid"},
     "extensionId": {"$ref": "common.schema.json#/$defs/extensionId"},
     "expectedInstalledRevision": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
-    "rootPath": {"type": "string", "minLength": 1, "maxLength": 32767}
+    "rootPath": {"type": "string", "minLength": 1, "maxLength": 32767},
+    "purpose": {"const": "edit"}
   }
 }

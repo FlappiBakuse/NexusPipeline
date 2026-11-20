@@ -20,7 +20,8 @@ registerMessages({
   '点击右上角“添加通知任务”，配置 SMTP 或 Webhook 发送目标。':
     'Click “Add notification” at the top right to configure an SMTP or webhook destination.',
   删除通知任务: 'Delete notification',
-  确定删除: 'Delete',
+  '删除「{name}」会清除其发送凭据。引用它的配置将无法再通过该任务发送通知。':
+    'Deleting “{name}” clears its delivery credentials. Configurations that reference it will stop sending through it.',
   编辑通知任务: 'Edit notification',
   添加通知任务: 'Add notification',
   '渠道：': 'Channel: ',

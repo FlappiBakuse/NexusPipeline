@@ -6,7 +6,6 @@ import './dashboard-messages';
 const props = defineProps<{
   summary: RecordSummary | null;
   loading: boolean;
-  error: string;
   dates: string[];
   kind?: 'duration' | 'runs';
 }>();
@@ -139,9 +138,8 @@ function key(event: KeyboardEvent, chart: 'duration' | 'runs', index: number): v
         <h3>{{ chart.title }}</h3>
         <small>{{ dateText(dates[0]) }} {{ t('至') }} {{ dateText(dates[6]) }}</small>
       </header>
-      <p v-if="loading && !summary" role="status">{{ t('正在读取历史统计…') }}</p>
-      <p v-else-if="error || !summary" role="alert">{{ t(error || '历史统计不可用。') }}</p>
-      <template v-else>
+      <nexus-spinner v-if="loading && !summary" :label="t('正在读取历史统计…')" />
+      <template v-else-if="summary">
         <div class="legend">
           <span v-for="series in chart.series" :key="series.id" :class="'series-' + series.id">
             {{ series.title }}

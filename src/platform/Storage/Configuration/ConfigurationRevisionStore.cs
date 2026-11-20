@@ -151,6 +151,18 @@ public sealed class ConfigurationRevisionStore : IConfigurationRevisionStore
         return command.ExecuteScalar() as long?;
     }
 
+    internal IReadOnlyDictionary<string, long> ReadCurrentRevisions(Guid bindingId)
+    {
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Configuration);
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT resource_id,revision FROM configuration.configuration_current WHERE binding_id=$binding;";
+        command.Parameters.AddWithValue("$binding", bindingId.ToString("D"));
+        using var rows = command.ExecuteReader();
+        var result = new Dictionary<string, long>(StringComparer.Ordinal);
+        while (rows.Read()) result.Add(rows.GetString(0), rows.GetInt64(1));
+        return result;
+    }
+
     internal void RequireReadSet(SqliteConnection connection, SqliteTransaction transaction, IReadOnlyList<ConfigurationReadStamp> readSet)
     {
         foreach (var item in readSet)

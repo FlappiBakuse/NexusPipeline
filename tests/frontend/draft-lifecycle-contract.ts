@@ -39,7 +39,7 @@ async function newAccount(parent: HTMLElement, check: Check) {
     check(!blankExit.prompted && blankExit.accepted && fixture.writes.length === 0,
       'closing an untouched new account exits without a draft confirmation or save');
     model.edit(); await settle();
-    check(!holder.querySelector('.draft-restored'), 'reopening an untouched new form has no draft reminder');
+    check(!holder.querySelector('nexus-toast.draft-restored-toast'), 'reopening an untouched new form has no draft reminder');
     check(!holder.querySelector('[data-unsaved=true]'), 'new drafts do not highlight fields');
     check(!store.dirty.has(model.draftKey.value), 'an untouched new form has no edited state');
     holder.querySelector('nexus-text-input')!.dispatchEvent(new CustomEvent('nexus-change', { detail: { value: 'Retained account' } }));
@@ -72,7 +72,7 @@ async function changedFields(parent: HTMLElement, check: Check) {
   };
   try {
     model.edit(saved); await settle();
-    check(!holder.querySelector('.draft-restored'), 'the first existing-account opening has no restored reminder');
+    check(!holder.querySelector('nexus-toast.draft-restored-toast'), 'the first existing-account opening has no restored reminder');
     await edit('Changed account');
     check(!holder.querySelector('nexus-text-input')!.hasAttribute('data-unsaved'),
       'first-session edits do not show restored-draft highlighting');
@@ -84,13 +84,13 @@ async function changedFields(parent: HTMLElement, check: Check) {
       'programmatic changes wait for draft restoration before highlighting');
     model.draft.value = { ...model.draft.value, notes: 'Saved note' }; await settle();
     model.editing.value = false; await settle(); model.edit(saved); await settle();
-    check(!!holder.querySelector('.draft-restored') && holder.querySelector('nexus-text-input')!.hasAttribute('data-unsaved'),
+    check(!!holder.querySelector('nexus-toast.draft-restored-toast') && holder.querySelector('nexus-text-input')!.hasAttribute('data-unsaved'),
       'restored existing edits retain their reminder and original field baseline');
     await edit('Saved account');
     check(!holder.querySelector('nexus-text-input')!.hasAttribute('data-unsaved'),
       'returning to the saved field value clears its highlight');
     model.discard(); await settle(); model.edit(saved); await settle();
-    check(!holder.querySelector('.draft-restored') && !holder.querySelector('[data-unsaved=true]'),
+    check(!holder.querySelector('nexus-toast.draft-restored-toast') && !holder.querySelector('[data-unsaved=true]'),
       'explicit cancellation clears presentation state for the target');
   } finally { app.unmount(); holder.remove(); store.dispose(); }
 }

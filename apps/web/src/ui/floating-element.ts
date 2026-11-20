@@ -23,7 +23,7 @@ export abstract class FloatingElement extends NexusElement {
           !this.values.open ||
           this.contains(event.target as Node) ||
           event.composedPath().includes(this) ||
-          (this.values.anchor instanceof HTMLElement && this.values.anchor.contains(event.target as Node))
+          (this.keepOpenOnAnchor() && this.values.anchor instanceof HTMLElement && this.values.anchor.contains(event.target as Node))
         )
           return;
         this.close('backdrop');
@@ -43,6 +43,8 @@ export abstract class FloatingElement extends NexusElement {
     window.addEventListener('resize', () => this.place(), { signal });
     window.addEventListener('scroll', () => this.place(), { capture: true, signal });
   }
+
+  protected keepOpenOnAnchor(): boolean { return true; }
 
   protected float(): void {
     this.panel.hidden = !this.values.open;

@@ -56,7 +56,6 @@ small {
   min-width: 0;
   border: 1px solid var(--content-card-border, var(--border));
   border-radius: 10px;
-  background: var(--content-card, var(--panel));
   overflow: hidden;
 }
 .binding.expanded {
@@ -91,6 +90,7 @@ small {
   font-size: 13px;
   overflow-wrap: anywhere;
 }
+.binding-toggle:hover { background: transparent; }
 .binding-toggle nexus-icon,
 .choice-grid nexus-icon {
   display: grid;
@@ -114,7 +114,6 @@ small {
   display: grid;
   gap: 16px;
   padding: 16px;
-  background: var(--content-card-soft);
   border-top: 1px solid var(--border);
   min-width: 0;
   grid-template-columns: minmax(0, 1fr);

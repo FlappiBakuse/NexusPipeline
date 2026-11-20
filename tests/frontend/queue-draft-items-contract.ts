@@ -29,7 +29,7 @@ export async function queueDraftItemsContract(parent: HTMLElement, check: (value
     await settle();
     check(!store.drafts.has(key), 'removing an edited new schedule releases a pristine queue draft on close');
     model.edit(saved); await settle();
-    check(!holder.querySelector('.draft-restored'), 'reopening the unchanged queue shows no restored draft after discarding a new schedule');
+    check(!holder.querySelector('nexus-toast.draft-restored-toast'), 'reopening the unchanged queue shows no restored draft after discarding a new schedule');
     model.editing.value = false; await settle();
     const original = { id: 'original-schedule', queueId: saved.id, enabled: true, weekdays: [1],
       localMinute: 540, timeZoneId: 'Asia/Tokyo', missedPolicy: 'skip' as const, order: 0 };
@@ -41,7 +41,7 @@ export async function queueDraftItemsContract(parent: HTMLElement, check: (value
     holder.querySelector<HTMLButtonElement>('.schedule-heading button')!.click(); await settle();
     check(!holder.querySelector('nexus-time-picker'), 'collapsing an existing queue schedule removes its visible time field');
     model.editing.value = false; await settle(); model.edit(saved); await settle();
-    check(!!holder.querySelector('.draft-restored'), 'a collapsed existing queue schedule keeps its edited draft on reopen');
+    check(!!holder.querySelector('nexus-toast.draft-restored-toast'), 'a collapsed existing queue schedule keeps its edited draft on reopen');
     holder.querySelector<HTMLButtonElement>('.schedule-heading button')!.click(); await settle();
     check(holder.querySelector('nexus-time-picker')!.hasAttribute('data-unsaved'), 'recreated queue time fields retain the saved baseline');
     click('删除定时'); await settle();

@@ -190,6 +190,9 @@
         "exclusiveProgram": {
           "type": "boolean"
         },
+        "exclusiveProgramInUserSession": {
+          "type": "boolean"
+        },
         "editorForbiddenArguments": {
           "type": "array",
           "maxItems": 64,

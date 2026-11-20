@@ -56,7 +56,7 @@ internal sealed class MaintenanceStartupOrigin : IDisposable
     internal static async Task<MaintenanceStartupOrigin> ReceiveSuccessorAsync(NamedPipeClientStream pipe,
         NativeClientBinding actualParent, ProcessIdentity expectedParent, long sourceHandle, CancellationToken cancellation)
     {
-        RequirePeer();
+        RequirePipeParent(pipe, actualParent, expectedParent);
         using var received = MaintenanceJobQuery.Receive(actualParent, expectedParent, sourceHandle);
         received.RequireMember(ProcessIdentityReader.Read(Environment.ProcessId));
         if (received.Flags != 0x2800) throw Invalid();
@@ -65,41 +65,27 @@ internal sealed class MaintenanceStartupOrigin : IDisposable
         await pipe.FlushAsync(cancellation).ConfigureAwait(false);
         var acknowledgement = new byte[1];
         await pipe.ReadExactlyAsync(acknowledgement, cancellation).ConfigureAwait(false);
-        RequirePeer();
+        RequirePipeParent(pipe, actualParent, expectedParent);
         if (acknowledgement[0] != 1) throw Invalid();
-        return CaptureAcknowledgedSuccessor(received, actualParent, expectedParent);
-
-        void RequirePeer()
-        {
-            if (!actualParent.IsRegistered(expectedParent) ||
-                !GetNamedPipeServerProcessId(pipe.SafePipeHandle, out var producer) || producer != expectedParent.ProcessId)
-                throw Invalid();
-        }
+        return CaptureAcknowledgedSuccessor(received, actualParent, expectedParent, 0x2800);
     }
 
     internal static async Task AcknowledgeSuccessorAsync(NamedPipeServerStream pipe, MaintenanceStartupJob actualJob,
         MaintenanceJobQuery offeredJob, NativeClientBinding actualChild, ProcessIdentity expectedChild, CancellationToken cancellation)
     {
-        RequirePeer();
+        RequirePipeChild(pipe, actualChild, expectedChild);
         var echo = new byte[8]; await pipe.ReadExactlyAsync(echo, cancellation).ConfigureAwait(false);
         using var received = MaintenanceJobQuery.Receive(actualChild, expectedChild, BinaryPrimitives.ReadInt64LittleEndian(echo));
         offeredJob.RequireSameObject(received);
         using var current = actualJob.RetainSuccessorJob(expectedChild);
         offeredJob.RequireSameObject(current);
-        RequirePeer();
+        RequirePipeChild(pipe, actualChild, expectedChild);
         await pipe.WriteAsync(new byte[] { 1 }, cancellation).ConfigureAwait(false);
         await pipe.FlushAsync(cancellation).ConfigureAwait(false);
-
-        void RequirePeer()
-        {
-            if (!actualChild.IsRegistered(expectedChild) ||
-                !GetNamedPipeClientProcessId(pipe.SafePipeHandle, out var child) || child != expectedChild.ProcessId)
-                throw Invalid();
-        }
     }
 
     private static MaintenanceStartupOrigin CaptureAcknowledgedSuccessor(MaintenanceJobQuery currentJob,
-        NativeClientBinding actualParent, ProcessIdentity expectedParent)
+        NativeClientBinding actualParent, ProcessIdentity expectedParent, uint expectedFlags)
     {
         if (!actualParent.IsRegistered(expectedParent)) throw Invalid();
         var process = JobNative.OpenProcess(0x101000, false, Environment.ProcessId);
@@ -110,7 +96,7 @@ internal sealed class MaintenanceStartupOrigin : IDisposable
             held = currentJob.Clone();
             var result = new MaintenanceStartupOrigin(process, ProcessIdentityReader.Read(process, Environment.ProcessId), held);
             result.RequireCurrent();
-            if (held.Flags != 0x2800 || !actualParent.IsRegistered(expectedParent)) throw Invalid();
+            if (held.Flags != expectedFlags || !actualParent.IsRegistered(expectedParent)) throw Invalid();
             return result;
         }
         catch { held?.Dispose(); process.Dispose(); throw; }
@@ -126,6 +112,32 @@ internal sealed class MaintenanceStartupOrigin : IDisposable
     {
         RequireCurrent();
         if (_currentJob is null || _currentJob.Flags != 0x800) throw Invalid();
+    }
+
+    internal MaintenanceJobQuery RetainRestartJob()
+    {
+        RequireReleasedSuccessor();
+        return _currentJob!.Clone();
+    }
+
+    internal static MaintenanceStartupOrigin ReceiveRestartJob(NativeClientBinding parent, ProcessIdentity identity, long handle)
+    {
+        using var received = MaintenanceJobQuery.Receive(parent, identity, handle);
+        if (received.Flags != 0x800) throw Invalid();
+        received.RequireMember(identity);
+        return CaptureAcknowledgedSuccessor(received, parent, identity, 0x800);
+    }
+
+    internal static void RequirePipeParent(NamedPipeClientStream pipe, NativeClientBinding parent, ProcessIdentity identity)
+    {
+        if (!parent.IsRegistered(identity) ||
+            !GetNamedPipeServerProcessId(pipe.SafePipeHandle, out var actual) || actual != identity.ProcessId) throw Invalid();
+    }
+
+    internal static void RequirePipeChild(NamedPipeServerStream pipe, NativeClientBinding child, ProcessIdentity identity)
+    {
+        if (!child.IsRegistered(identity) ||
+            !GetNamedPipeClientProcessId(pipe.SafePipeHandle, out var actual) || actual != identity.ProcessId) throw Invalid();
     }
 
     public void Dispose()

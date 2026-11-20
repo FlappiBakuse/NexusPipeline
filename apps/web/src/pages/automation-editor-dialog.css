@@ -13,9 +13,6 @@
 .account-actions .primary {
   order: -1;
 }
-.error-text {
-  color: var(--bad);
-}
 .editor-fields {
   border: 0;
   margin: 0;

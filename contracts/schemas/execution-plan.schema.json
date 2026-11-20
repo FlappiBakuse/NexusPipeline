@@ -234,6 +234,7 @@
         "engineKind": {"enum": ["process", "extensionWorker"]},
         "purpose": {"enum": ["initialization"]},
         "exclusiveProgram": {"type": "boolean"},
+        "exclusiveProgramInUserSession": {"type": "boolean"},
         "judgementWorker": {"$ref": "#/$defs/judgementWorker"},
         "provider": {"$ref": "execution-provider.schema.json"},
         "adapter": {

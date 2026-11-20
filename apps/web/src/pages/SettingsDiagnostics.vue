@@ -67,11 +67,8 @@ async function read(): Promise<void> {
     };
     current.signal.throwIfAborted();
     report.value = next;
-  } catch (reason) {
-    if (!current.signal.aborted) {
-      props.store.report(reason);
-      error.value = '诊断读取失败，请重试。';
-    }
+  } catch {
+    if (!current.signal.aborted) error.value = '诊断读取失败，请重试。';
   } finally {
     if (owner === current) {
       owner = undefined;
@@ -100,8 +97,7 @@ async function support(): Promise<void> {
     anchor.download = 'nexus-support.zip';
     anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 30000);
-  } catch (reason) {
-    props.store.report(reason);
+  } catch {
     error.value = '诊断导出失败，请重试。';
   } finally {
     exporting.value = false;
@@ -111,8 +107,8 @@ async function support(): Promise<void> {
 
 <template>
   <div class="diagnostics" :aria-busy="busy">
-    <p v-if="error" role="alert">{{ t(error) }}</p>
-    <p v-if="!report && busy" role="status">{{ t('诊断加载中…') }}</p>
+    <nexus-toast v-if="visible && error" tone="danger" :message.prop="t(error)" />
+    <nexus-spinner v-if="!report && busy" :label="t('诊断加载中…')" />
     <template v-if="report">
       <div class="overview">
         <div>

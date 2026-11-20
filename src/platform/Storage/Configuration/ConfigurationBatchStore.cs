@@ -183,6 +183,9 @@ public sealed class ConfigurationBatchStore
         return result;
     }
 
+    internal ConfigurationBatchResult ReadResult(SqliteConnection connection, SqliteTransaction transaction, Guid operationId) =>
+        ReadResult(connection, transaction, operationId, BatchResultRows.Read(connection, transaction, operationId));
+
     private ConfigurationBatchResult ReadResult(SqliteConnection connection, SqliteTransaction transaction, Guid operationId,
         BatchResultMetadata stored) => new(operationId, stored.Items.Select(row => _revisions.ReadSavedResult(connection, transaction,
             operationId, row.Address, row.Revision, row.Changed)).ToImmutableArray(), false);

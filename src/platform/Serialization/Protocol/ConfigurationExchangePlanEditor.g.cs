@@ -14,6 +14,10 @@ public sealed record ConfigurationExchangePlanEditor
     [JsonPropertyName("exclusiveProgram")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? ExclusiveProgram { get; init; }
+    /// <summary>Schema field <c>exclusiveProgramInUserSession</c>; constraints are owned by configuration-exchange-plan.schema.json.</summary>
+    [JsonPropertyName("exclusiveProgramInUserSession")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ExclusiveProgramInUserSession { get; init; }
     /// <summary>Schema field <c>executablePath</c>; constraints are owned by configuration-exchange-plan.schema.json.</summary>
     [JsonPropertyName("executablePath")]
     public required string ExecutablePath { get; init; }

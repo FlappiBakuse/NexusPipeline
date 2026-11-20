@@ -1,7 +1,9 @@
 import { elementAttributes } from './element-base.js';
 import { FloatingElement } from './floating-element.js';
+import { ModalSurface } from './modal-surface.js';
 
 let descriptionSequence = 0;
+const fieldControl = 'input:not([type=button],[type=submit],[type=hidden]),textarea,select,nexus-text-input,nexus-text-area,nexus-number-input,nexus-select,nexus-path-picker,nexus-file-picker,nexus-switch,nexus-range,nexus-color-picker,nexus-date-range-picker,nexus-time-picker';
 
 export class NexusTooltipElement extends FloatingElement {
   static readonly observedAttributes = [...elementAttributes('nexus-tooltip'), 'hidden'];
@@ -15,23 +17,53 @@ export class NexusTooltipElement extends FloatingElement {
   private described: HTMLElement | undefined;
   private hovering = false;
   private reading = false;
+  private readonly trigger: HTMLButtonElement;
+  private readonly text: HTMLElement;
+  private field?: HTMLElement;
 
   constructor() {
     super(
       'nexus-tooltip',
-      `:host{display:inline-flex}:host([hidden]){display:none}
-      .panel{position:fixed;inset:auto;margin:0;max-width:min(240px,calc(100vw - 16px));
-      padding:8px 12px;border:1px solid var(--nx-color-border,#394152);border-radius:8px;
-      background:var(--nx-color-surface,#1e2330);color:var(--nx-color-text,#e9edf5);
-      font:inherit;font-size:12px;line-height:1.55;box-shadow:0 12px 28px #0005;overflow-wrap:anywhere}
-      .panel[hidden]{display:none}.panel::backdrop{display:none;pointer-events:none}`,
-      '<slot></slot><span class="panel" role="tooltip" popover="manual" hidden></span>',
+      `:host{display:inline-flex;vertical-align:middle}:host([hidden]){display:none}
+      :host(:empty:not([data-field-help])){position:absolute;width:0;height:0}
+      button{position:relative;display:grid;place-content:center;width:20px;height:20px;padding:0;margin-inline:6px 2px;
+      border:0;border-radius:50%;background:transparent;color:var(--nx-color-muted);cursor:pointer}
+      button::after{content:"";position:absolute;inset:-2px}
+      .glyph{display:grid;place-content:center;box-sizing:border-box;width:15px;height:15px;border-radius:50%;
+      border:1px solid var(--border-strong,var(--nx-color-border));pointer-events:none}
+      .glyph svg{display:block;width:10px;height:10px}
+      button:hover,button[aria-expanded=true]{color:var(--accent)}
+      button:hover .glyph,button[aria-expanded=true] .glyph{border-color:currentColor}
+      button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+      .panel{position:fixed;inset:auto;margin:0;box-sizing:border-box;overflow:visible;
+      max-width:min(320px,calc(100vw - 16px));border:1px solid var(--border-strong,var(--nx-color-border));border-radius:10px;
+      background:var(--content-card-secondary,var(--nx-color-surface));color:var(--nx-color-text);
+      font:400 13px/1.55 system-ui;box-shadow:0 12px 28px #0005}
+      .panel::before{content:"";position:absolute;left:calc(var(--pointer) - 5px);top:-6px;width:10px;height:10px;
+      background:inherit;border:inherit;border-right:0;border-bottom:0;transform:rotate(45deg)}
+      .panel[data-side=above]::before{top:auto;bottom:-6px;transform:rotate(225deg)}
+      .text{display:block;position:relative;box-sizing:border-box;padding:8px 12px;max-height:var(--help-height);
+      overflow:auto;overflow-wrap:anywhere;white-space:pre-wrap}
+      [hidden]{display:none}.panel::backdrop{display:none;pointer-events:none}`,
+      '<slot></slot><button class="question" type="button" aria-controls="help-panel" aria-expanded="false" hidden>' +
+      '<span class="glyph" aria-hidden="true"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round">' +
+      '<path d="M2.8 3a2.2 1.6 0 0 1 4.4 0C7.2 4.5 5 4.7 5 6m0 2.6v.1"/></svg></span></button>' +
+      '<span id="help-panel" class="panel" role="tooltip" popover="manual" hidden><span class="text"></span></span>',
       '.panel'
     );
+    this.trigger = this.root.querySelector('button')!;
+    this.text = this.root.querySelector('.text')!;
   }
 
   protected connect(signal: AbortSignal): void {
     this.attachFloat(signal);
+    this.trigger.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (this.values.open) this.close('button');
+      else if (this.visibleAnchor()) this.setProperty('open', true);
+    }, { signal });
+    const stopLayer = ModalSurface.watchLayer(() => { if (NexusTooltipElement.active === this) this.close('owner'); });
     this.panel.addEventListener('pointerenter', () => { this.reading = true; this.cancelLeave(); }, { signal });
     this.panel.addEventListener('pointerleave', () => { this.reading = false; this.leave(); }, { signal });
     window.addEventListener('blur', () => this.close('owner'), { signal });
@@ -39,6 +71,7 @@ export class NexusTooltipElement extends FloatingElement {
       if (document.hidden) this.close('owner');
     }, { signal });
     signal.addEventListener('abort', () => {
+      stopLayer();
       this.anchorOwner?.abort();
       this.anchorOwner = undefined;
       this.anchorNode = undefined;
@@ -60,7 +93,11 @@ export class NexusTooltipElement extends FloatingElement {
       return;
     }
     if (this.hidden || !this.values.content) this.clearTimer();
-    this.panel.textContent = String(this.values.content);
+    this.trigger.hidden = !this.field || !this.values.content;
+    this.toggleAttribute('data-field-help', !this.trigger.hidden);
+    this.trigger.setAttribute('aria-label', this.ownerDocument.documentElement.lang === 'en-US' ? 'Field help' : '字段帮助');
+    this.trigger.setAttribute('aria-expanded', String(this.values.open));
+    this.text.textContent = String(this.values.content);
     this.panel.hidden = !this.values.open;
     if (this.values.open) {
       if (NexusTooltipElement.active !== this) {
@@ -75,6 +112,27 @@ export class NexusTooltipElement extends FloatingElement {
       if (NexusTooltipElement.active === this) NexusTooltipElement.active = undefined;
       if (this.panel.matches(':popover-open')) this.panel.hidePopover();
     }
+  }
+
+  protected override keepOpenOnAnchor(): boolean { return !this.field; }
+
+  protected override place(): void {
+    if (!this.values.open || this.panel.hidden || !this.anchorNode) return;
+    const rect = (this.field ? this.trigger : this.anchorNode).getBoundingClientRect();
+    const field = this.field?.getBoundingClientRect();
+    const top = Math.min(rect.top, field?.top ?? rect.top);
+    const bottom = Math.max(rect.bottom, field?.bottom ?? rect.bottom);
+    const spaceAbove = top - 16, spaceBelow = innerHeight - bottom - 16;
+    const height = this.text.scrollHeight + 2;
+    const above = (field && height <= spaceAbove) || (height > spaceBelow && spaceAbove > spaceBelow);
+    const center = rect.left + rect.width / 2;
+    const left = Math.max(8, Math.min(center - this.panel.offsetWidth / 2, innerWidth - this.panel.offsetWidth - 8));
+    const pointer = Math.max(9, Math.min(center - left, this.panel.offsetWidth - 9));
+    this.panel.dataset.side = above ? 'above' : 'below';
+    this.panel.style.setProperty('--help-height', Math.max(0, above ? spaceAbove : spaceBelow) + 'px');
+    this.panel.style.setProperty('--pointer', pointer + 'px');
+    this.panel.style.left = left + 'px';
+    this.panel.style.top = (above ? top - this.panel.offsetHeight - 8 : bottom + 8) + 'px';
   }
 
   override disconnectedCallback(): void {
@@ -99,6 +157,10 @@ export class NexusTooltipElement extends FloatingElement {
     this.cancelLeave();
     this.hovering = this.reading = false;
     this.anchorNode = anchor;
+    const labeled = anchor.querySelector<HTMLLabelElement>(':scope > .field-help-caption > label')?.control;
+    this.field = anchor.matches(fieldControl) ? anchor :
+      labeled && anchor.contains(labeled) && labeled.matches(fieldControl) ? labeled :
+      anchor.matches('label,.form-number,.form-select') ? anchor.querySelector<HTMLElement>(fieldControl) ?? undefined : undefined;
     this.anchorOwner = new AbortController();
     const signal = this.anchorOwner.signal;
     for (const select of anchor.matches('nexus-select') ? [anchor] : anchor.querySelectorAll('nexus-select')) {
@@ -106,6 +168,7 @@ export class NexusTooltipElement extends FloatingElement {
         if ((event as ToggleEvent).newState === 'open') this.close('owner');
       }, { signal, capture: true });
     }
+    if (this.field) return;
     anchor.addEventListener('pointerenter', () => {
       this.hovering = true;
       this.cancelLeave();
@@ -125,9 +188,7 @@ export class NexusTooltipElement extends FloatingElement {
       this.releaseDescription();
       return;
     }
-    const control = anchor.matches('label,.form-number,.form-select')
-      ? anchor.querySelector<HTMLElement>('nexus-number-input,nexus-select,nexus-text-input,nexus-path-picker,input,textarea') ?? anchor
-      : anchor;
+    const control = this.field ?? anchor;
     if (this.described !== control) this.releaseDescription();
     if (!this.description) {
       this.description = document.createElement('span');
@@ -166,6 +227,7 @@ export class NexusTooltipElement extends FloatingElement {
   }
 
   private leave(): void {
+    if (this.field) return;
     this.cancelLeave();
     if (this.hovering || this.reading || this.anchorNode?.matches(':focus-within')) return;
     this.clearTimer();
@@ -173,7 +235,7 @@ export class NexusTooltipElement extends FloatingElement {
   }
 
   private visibleAnchor(): boolean {
-    const anchor = this.anchorNode;
+    const anchor = this.field ? this.trigger : this.anchorNode;
     if (!anchor?.isConnected || !anchor.getClientRects().length || anchor.closest('[inert]') || this.hasExpandedSelect()) return false;
     const rect = anchor.getBoundingClientRect();
     let left = Math.max(0, rect.left), right = Math.min(innerWidth, rect.right);

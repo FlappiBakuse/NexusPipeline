@@ -165,6 +165,13 @@ internal static class ApplicationHost
             lifecycle, resources, app.Lifetime, nativeBinding, maintenanceOrigin, ownedDesktop, services.Scheduling, windowIntent, app.Logger);
         await using var automaticUpdates = new HostAutomaticUpdates(instance, runtime.Database, settingsService,
             updates, maintenance, packages, extensions, app.Lifetime.ApplicationStopping);
+        var initialSource = Path.Combine(payloadRoots.HostPayloadRoot, "package-info", "initial-extensions");
+        var initializer = new InitialExtensionInstaller(instance, runtime.Database, instanceLease, contracts, payloadRoots,
+            resources, runtime.Recovery, extensions);
+        var showBeforeInitialExtensions = showStartupProgress && startup?.Intent is { Mode: UpdateWindowMode.Desktop, Visible: true } &&
+            !controlStartup.AllowRemoteAccess && !controlStartup.McpEnabled && !savedStartup.Updates.AutoApplyEnabled &&
+            !automaticUpdates.HasStartupPending && initializer.IsPending(initialSource);
+        var initialStartup = new InitialExtensionStartup(showBeforeInitialExtensions);
         using var editShutdown = app.Lifetime.ApplicationStopping.Register(configurationEdits.PreventNewBegins);
         await using var desktop = nativeBinding is null ? null : new DesktopControl(nativeBinding, instance.InstanceId, contracts,
             lifecycle, new DesktopExitWatch(nativeBinding, lifecycle, app.Lifetime,
@@ -179,6 +186,7 @@ internal static class ApplicationHost
         app.Use(ControlExceptionBoundary.InvokeAsync);
         app.Use(new ControlRequestLimits().InvokeAsync);
         app.Use(controlAuthority.InvokeAsync);
+        if (showBeforeInitialExtensions) app.Use(initialStartup.InvokeAsync);
         var availableCapabilities = new HashSet<NexusPipeline.Core.Control.ControlCapability>
             {
                 NexusPipeline.Core.Control.ControlCapability.CompletionLocal,
@@ -233,13 +241,15 @@ internal static class ApplicationHost
         var exchange = new NexusPipeline.Host.Control.Automation.ExchangeUseCases(definitions, automationImports, new AutomationBundleCodec(contracts));
         new AutomationExchangeControl(controlAuthority, exchange, contracts).Map(app);
         new ExtensionControl(controlAuthority, new NexusPipeline.Host.Control.Extensions.ExtensionUseCases(packages, extensions,
-            extensionOperations, app.Lifetime.ApplicationStopping), contracts).Map(app);
+            extensionOperations, app.Lifetime.ApplicationStopping, () => initialStartup.Pending), contracts).Map(app);
         new ExtensionDetailsControl(controlAuthority, new ExtensionDetailsReader(instance, runtime.Database, instanceLease, contracts, payloadRoots)).Map(app);
         var extensionFrontend = new ExtensionFrontendControl(controlAuthority, extensions.Activator); extensionFrontend.Map(app);
         if (desktop is not null) new NativeFrontendControl(controlAuthority, extensionFrontend.Clients, desktop, nativeClients).Map(app);
         if (desktop is not null) new DesktopLoginControl(controlAuthority, desktop, browserLogins, contracts).Map(app);
-        new NativeConfigurationControl(controlAuthority, new NativeEditorService(instance, runtime.Database, contracts,
-            instanceLease, resources, configurationEdits), configurationEdits, contracts).Map(app);
+        var nativeEditor = new NativeEditorService(instance, runtime.Database, contracts, instanceLease, resources, configurationEdits);
+        var bindingEditor = new BindingEditorService(instance, runtime.Database, contracts, resources, configurationEdits, nativeEditor,
+            new ScriptSourceService(instance, runtime.Database, instanceLease, resources, contracts, payloadRoots, extensions.Activator));
+        new NativeConfigurationControl(controlAuthority, nativeEditor, bindingEditor, configurationEdits, contracts).Map(app);
         new ConfigurationImportControl(controlAuthority, configurationImports).Map(app);
         await using var mediaControl = new NexusPipeline.Host.Control.Media.MediaUseCases(instance.InstanceId, services.LiveMedia);
         new MediaControl(controlAuthority, mediaControl, contracts).Map(app);
@@ -256,7 +266,7 @@ internal static class ApplicationHost
                 contracts, instanceLease, resources, runtime.Recovery, payloadRoots), services.History);
         var eventFeed = new NexusPipeline.Host.Control.Events.ControlEventFeed(instance.InstanceId,
             () => new(runtime.Database.CommitSequence, runtime.Recovery.Current.Revision, execution.ProgressRevision,
-                interfacePreferences.ChangeVersion, ExtensionFrontendControl.Identity(extensions.Activator)), () =>
+                interfacePreferences.ChangeVersion, ExtensionFrontendControl.Identity(extensions.Activator), initialStartup.Pending), () =>
         {
             var statistics = doctor.ReadControlSnapshot();
             var recovery = runtime.Recovery.Current;
@@ -264,6 +274,7 @@ internal static class ApplicationHost
                 catalogRevision = statistics.CatalogRevision, settingsRevision = statistics.SettingsRevision,
                 interfaceRevision = interfacePreferences.PublishedRevision,
                 extensionGeneration = ExtensionFrontendControl.Identity(extensions.Activator),
+                initialExtensions = initialStartup.Pending ? "installing" : null,
                 admission = recovery.IsReady && recovery.Isolations.Count == 0 && recovery.ResourceHolds.Count == 0 ? "Ready" : "Blocked",
                 recoveryRevision = recovery.Revision, pendingOperations = statistics.Counts.PendingOperations,
                 attempts = statistics.Counts.Attempts, completedRuns = statistics.Counts.CompletedRuns };
@@ -307,23 +318,32 @@ internal static class ApplicationHost
         new CompletionLocalControl(services.Completion, controlAuthority).Map(app);
         try
         {
-            startup?.Advance(StartupStage.InstallingExtensions);
-            if (installationBundle is not null) await packages.InstallLocalAsync(installationBundle);
-            else await new InitialExtensionInstaller(instance, runtime.Database, instanceLease, contracts, payloadRoots,
-                resources, runtime.Recovery, extensions).InitializeAsync(
-                    Path.Combine(payloadRoots.HostPayloadRoot, "package-info", "initial-extensions"), CancellationToken.None);
-            if (installationBundle is not null) return 0;
-            startup?.Advance(StartupStage.StartingExtensions);
-            await extensions.StartAsync(CancellationToken.None);
-            startup?.Advance(StartupStage.StartingServer);
-            await app.StartAsync();
-            startup?.Advance(StartupStage.StartingDesktop);
-            if (startup is not null) await startup.ConfigureAsync(port, savedStartup.Desktop);
+            if (showBeforeInitialExtensions)
+            {
+                await StartControlAsync();
+                await startup!.PresentInterfaceAsync();
+            }
+            if (!showBeforeInitialExtensions) startup?.Advance(StartupStage.InstallingExtensions);
+            if (installationBundle is not null)
+            {
+                await packages.InstallLocalAsync(installationBundle);
+                return 0;
+            }
+            using (StartupProfile.Begin("extensions.initial"))
+                await initializer.InitializeAsync(initialSource, app.Lifetime.ApplicationStopping);
+            if (!showBeforeInitialExtensions) startup?.Advance(StartupStage.StartingExtensions);
+            using (StartupProfile.Begin("extensions.start"))
+                await extensions.StartAsync(CancellationToken.None);
+            if (!showBeforeInitialExtensions) await StartControlAsync();
 
             startup?.Advance(StartupStage.StartupUpdates);
             var startupUpdating = await automaticUpdates.ApplyStartupAsync();
-            if (!startupUpdating) { services.Start(app.Lifetime); automaticUpdates.Start(); packages.StartCleanup(); }
-            if (!startupUpdating && startup is not null) await startup.CompleteAsync();
+            if (!startupUpdating)
+            {
+                services.Start(app.Lifetime); automaticUpdates.Start(); packages.StartCleanup();
+                initialStartup.Complete();
+                if (startup is not null) await startup.CompleteAsync();
+            }
             var webAddress = app.Urls.Single(value => new Uri(value).Port != mcpPort);
             var advertised = new UriBuilder(webAddress) { Host = IPAddress.Loopback.ToString() }.Uri.GetLeftPart(UriPartial.Authority);
             Console.WriteLine(JsonSerializer.Serialize(new
@@ -340,6 +360,7 @@ internal static class ApplicationHost
             try { await app.WaitForShutdownAsync(); }
             finally { windowStop.Cancel(); await updateWindow; }
         }
+        catch (OperationCanceledException) when (app.Lifetime.ApplicationStopping.IsCancellationRequested) { }
         finally
         {
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -363,5 +384,13 @@ internal static class ApplicationHost
             }
         }
         return 0;
+
+        async Task StartControlAsync()
+        {
+            startup?.Advance(StartupStage.StartingServer);
+            await app.StartAsync();
+            startup?.Advance(StartupStage.StartingDesktop);
+            if (startup is not null) await startup.ConfigureAsync(port, savedStartup.Desktop);
+        }
     }
 }

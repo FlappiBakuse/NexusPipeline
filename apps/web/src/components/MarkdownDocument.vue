@@ -11,6 +11,7 @@ const html = computed(() => {
     FORBID_ATTR: ['style', 'id', 'name']
   });
   const document = new DOMParser().parseFromString(sanitized, 'text/html');
+  if (document.body.firstElementChild?.matches('h1')) document.body.firstElementChild.remove();
   for (const content of document.querySelectorAll('pre,table')) {
     const area = document.createElement('nexus-scroll-area');
     area.className = 'markdown-scroll';

@@ -12,7 +12,7 @@ export class NotificationCredentials {
   private alive = true;
 
   constructor(
-    private readonly port: Pick<NotificationEditorPort, 'current' | 'readCredentials' | 'report' | 'drafts'>,
+    private readonly port: Pick<NotificationEditorPort, 'current' | 'readCredentials' | 'drafts'>,
     private readonly taskId: string | undefined,
     private readonly draft: () => ControlNotificationCommandInput,
     private readonly revision: () => number,
@@ -62,7 +62,6 @@ export class NotificationCredentials {
       }
     } catch (error) {
       if (!owner.signal.aborted && this.alive && this.port.current()) {
-        this.port.report(error);
         this.failed(error instanceof Error ? error.message : '凭据状态读取失败');
       }
     }

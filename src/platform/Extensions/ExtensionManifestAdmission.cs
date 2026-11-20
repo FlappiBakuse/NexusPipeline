@@ -19,6 +19,8 @@ public sealed class ExtensionManifestAdmission(ContractReader reader)
             throw new JsonException("extension_compiler_dependency_invalid");
         if (manifest.Kind == "data-specialized" && manifest.Specialized?.ExecutionProvider?.ExtensionId == manifest.ExtensionId)
             throw new JsonException("extension_execution_dependency_invalid");
+        if (manifest.Specialized is { ExclusiveProgramInUserSession: true, ExclusiveProgram: not true })
+            throw new JsonException("extension_exclusive_program_scope_invalid");
         if (manifest.Kind == "managed-code" && manifest.Specialized is { } driver &&
             (driver.Compiler?.ExtensionId != manifest.ExtensionId || driver.ExecutionProvider?.ExtensionId != manifest.ExtensionId ||
                 manifest.Managed?.Compilers?.Contains(driver.Compiler.CompilerId, StringComparer.Ordinal) != true ||

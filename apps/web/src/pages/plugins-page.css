@@ -1,9 +1,11 @@
 .plugin-workspace {
   display: grid;
+  flex: 1;
   grid-template-columns: minmax(280px, 0.5625fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 18px;
   align-items: stretch;
-  min-height: 240px;
+  min-height: 0;
 }
 .plugin-list-column,
 .plugin-detail-column {
@@ -95,7 +97,8 @@
 }
 .plugin-placeholder {
   flex: 1;
-  min-height: 300px;
+  min-height: 0;
+  overflow: auto;
   padding: 28px;
   border: 1px solid var(--border);
   border-radius: 16px;

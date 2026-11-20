@@ -13,7 +13,6 @@ const props = defineProps<{
   entry?: { extensionId: string; id: string };
   extensionIds?: readonly string[];
 }>();
-const emit = defineEmits<{ error: [error: unknown] }>();
 const container = ref<HTMLElement | null>(null);
 const errorText = ref('');
 const identity = computed(() =>
@@ -46,13 +45,9 @@ const refreshError = () => {
   const error = [...entries.values()].find(entry => entry.error)?.error;
   errorText.value = error instanceof Error ? error.message : error ? String(error) : '';
 };
-function report(error: unknown) {
-  emit('error', error);
-  props.registry.reportMountFailure(error);
-}
 async function release(entry: MountedEntry) {
   entry.owner.abort(); entry.slot.remove();
-  try { await entry.session?.scope.dispose(); } catch (error) { report(error); }
+  await entry.session?.scope.dispose();
 }
 async function mount(entry: MountedEntry): Promise<void> {
   if (entry.pending) return entry.pending;
@@ -64,14 +59,17 @@ async function mount(entry: MountedEntry): Promise<void> {
       entry.session = session;
       await nextTick(); session.setVisible(props.visible);
     } catch (error) {
-      if (!entry.owner.signal.aborted && !detached) { entry.error = error; report(error); }
+      if (!entry.owner.signal.aborted && !detached) {
+        entry.error = error;
+        props.registry.reportMountFailure(error);
+      }
     } finally { entry.pending = undefined; refreshError(); }
   })();
   return entry.pending;
 }
 async function reconcile(changed?: string) {
   if (detached || !container.value) return;
-  if (props.context.surfaceId !== props.target) { report(new Error('Surface target and context disagree')); return; }
+  if (props.context.surfaceId !== props.target) throw new Error('Surface target and context disagree');
   const wanted = (props.entry ? [props.entry] : props.registry.listSurfaces(props.target))
     .filter(entry => !props.extensionIds || props.extensionIds.includes(entry.extensionId));
   const keys = new Set(wanted.map(entry => entry.extensionId + '/' + entry.id));
@@ -95,7 +93,7 @@ async function retryFailed() {
 }
 function reset() {
   const previous = [...entries.values()]; entries.clear();
-  for (const entry of previous) void release(entry);
+  for (const entry of previous) props.registry.trackMount(release(entry));
   props.registry.trackMount(reconcile());
 }
 watch([() => props.registry, identity], reset, { flush: 'post' });
@@ -113,21 +111,20 @@ watch(() => props.visible, visible => {
 });
 onBeforeUnmount(() => {
   detached = true; unsubscribe?.(); stopRetry?.();
-  for (const entry of entries.values()) void release(entry);
+  for (const entry of entries.values()) props.registry.trackMount(release(entry));
   entries.clear();
 });
 </script>
 
 <template>
   <div class="surface-outlet">
-    <p v-if="errorText" role="alert">{{ t('扩展界面加载失败：') }}{{ t(errorText) }}
-      <button @click="registry.trackMount(retryFailed())">{{ t('重试') }}</button>
-    </p>
+    <nexus-toast v-if="visible && errorText" tone="danger" :message.prop="t('扩展界面加载失败：') + t(errorText)" />
+    <button v-if="errorText" type="button" @click="registry.trackMount(retryFailed())">{{ t('重试') }}</button>
     <div ref="container" class="surface-outlet-content" />
   </div>
 </template>
 <style scoped>
-.surface-outlet:has(> .surface-outlet-content:empty):not(:has(> [role='alert'])) {
+.surface-outlet:has(> .surface-outlet-content:empty):not(:has(> button)) {
   display: none;
 }
 </style>

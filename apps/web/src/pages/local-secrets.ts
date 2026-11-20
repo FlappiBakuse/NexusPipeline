@@ -56,7 +56,7 @@ export async function changeValue(
     headers.set('Nexus-Secret-Disposition', mode);
     if (mode === 'set') headers.set('Content-Type', 'text/plain; charset=utf-8');
     const target =
-      field === 'control-bearer' ? '/control/v1/local/control-token/change' : path(field) + '/change';
+      field === 'control-bearer' ? '/control/v1/local/control-token/change-from-settings' : path(field) + '/change';
     let response: Response;
     try {
       response = await fetch(target, {

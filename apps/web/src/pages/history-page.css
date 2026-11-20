@@ -1,6 +1,8 @@
 .history-layout {
   display: grid;
+  flex: 1;
   grid-template-columns: minmax(220px, 0.36fr) minmax(0, 0.64fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 18px;
   min-height: 0;
 }

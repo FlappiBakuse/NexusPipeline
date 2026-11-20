@@ -134,7 +134,8 @@ export async function registryContracts(checks: string[]): Promise<void> {
   const field = document.createElement('nexus-text-input');
   const modal = document.createElement('nexus-modal'); modal.setAttribute('surface', 'secondary');
   const modalCard = document.createElement('nexus-card'); modalCard.setAttribute('surface', 'nested');
-  const modalField = document.createElement('nexus-text-input'); modal.append(modalCard, modalField);
+  const modalField = document.createElement('nexus-text-input'); modalCard.append(modalField); modal.append(modalCard);
+  const modalColors = () => [modalCard, modalField.shadowRoot!.querySelector('input')!].map(backgroundPixel);
   appearanceHost.append(style, primary, secondary, nested, field, modal);
   document.body.dataset.theme = 'dark';
   const appearanceSession = await registry.mount(appearance.extensionId, 'theme', appearanceHost,
@@ -152,17 +153,17 @@ export async function registryContracts(checks: string[]): Promise<void> {
     'appearance rejects invalid or unknown fields without mutating current colors');
   appearanceSession.setAppearance({ accent: '#334455', cardDark: '#112233', cardLight: '#eeeeee',
     cardOpacity: .6, secondaryTransparent: false });
-  assert([modalCard, modalField.shadowRoot!.querySelector('input')!]
-    .every(element => backgroundPixel(element) === '17,34,51,255') && backgroundPixel(primary).endsWith(',153'),
-    'secondary overlay cards and inputs are opaque and retain the wallpaper palette');
+  const darkOverlay = modalColors();
+  assert(darkOverlay.every(color => color.endsWith(',255')) && darkOverlay[0] !== darkOverlay[1] && backgroundPixel(primary).endsWith(',153'),
+    'secondary overlay cards and inputs are opaque and retain distinct wallpaper shades');
   assert([secondary, nested, field.shadowRoot!.querySelector('input')!].every(element => backgroundPixel(element).endsWith(',153')),
     'all main-page nested surfaces retain transparency when secondary transparency is disabled');
   document.body.dataset.theme = 'light';
   await new Promise(resolve => setTimeout(resolve, 0));
   assert(document.body.style.getPropertyValue('--panel').includes('#eeeeee'),
     'appearance chooses the light card color when Host theme changes');
-  assert([modalCard, modalField.shadowRoot!.querySelector('input')!]
-    .every(element => backgroundPixel(element) === '238,238,238,255'),
+  const lightOverlay = modalColors();
+  assert(lightOverlay.every((color, index) => color.endsWith(',255') && color !== darkOverlay[index]) && lightOverlay[0] !== lightOverlay[1],
     'opaque overlay surfaces follow a live light-theme change');
   appearanceSession.setAppearance({ accent: '#334455', cardDark: '#112233', cardLight: '#eeeeee',
     cardOpacity: .6, secondaryTransparent: true });
@@ -267,9 +268,10 @@ async function retryOutlet(checks: string[]): Promise<void> {
     controller.abort(); await flush();
     registry.preparationSignal = undefined;
     await registry.settled(new AbortController().signal);
-    if (!failures || !host.querySelector('[role=alert] button')) throw new Error('Mount cancellation lacks retry');
+    if (!failures || !host.querySelector('nexus-toast[role=alert]:popover-open') ||
+        !host.querySelector('.surface-outlet > button')) throw new Error('Mount cancellation lacks feedback or retry');
     registry.retryMounts(); await registry.settled(new AbortController().signal); await flush();
-    if (host.querySelector('[role=alert]') || host.querySelector('span')?.textContent !== 'prepared' || host.querySelector('input')?.value !== 'unsaved')
+    if (host.querySelector('nexus-toast[role=alert]') || host.querySelector('span')?.textContent !== 'prepared' || host.querySelector('input')?.value !== 'unsaved')
       throw new Error('Retry failed or replaced the healthy ordinary draft');
     release(); await flush();
     if (host.querySelectorAll('span').length !== 1 || disposed !== 1) throw new Error('Late cancelled mount leaked content or cleanup');

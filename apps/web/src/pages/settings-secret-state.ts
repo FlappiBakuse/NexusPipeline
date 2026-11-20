@@ -204,23 +204,36 @@ export function useSettingsSecrets(owner: Owner, notice: Ref<string>) {
         token.value = '';
         tokenVisible.value = false;
         tokenMode.value = 'keep';
+        if (result) notice.value = mode === 'clear' ? '控制令牌已清空。' : '控制令牌已更新。';
       } else {
         secret.value = '';
         secretVisible.value = false;
         secretMode.value = 'keep';
+        if (result) notice.value = '代理密码状态已保存。';
       }
-      if (result) notice.value = isToken ? '控制令牌已更新。' : '代理密码状态已保存。';
     }
   }
   const saveSecret = () => save('proxy-password'),
     saveToken = () => save('control-bearer');
+  function blurToken(): Promise<void> {
+    edits['control-bearer']++;
+    if (tokenMode.value === 'keep') {
+      token.value = '';
+      tokenVisible.value = false;
+    }
+    return saveToken();
+  }
+  function clearToken(): Promise<void> {
+    edits['control-bearer']++;
+    tokenMode.value = 'clear';
+    return saveToken();
+  }
   function generateToken(): void {
     if (
       !owner.visible ||
       !instanceId() ||
       !state('control-bearer').status ||
-      state('control-bearer').pending ||
-      tokenReading.value
+      state('control-bearer').pending
     )
       return;
     const bytes = crypto.getRandomValues(new Uint8Array(32));
@@ -279,7 +292,9 @@ export function useSettingsSecrets(owner: Owner, notice: Ref<string>) {
     loadToken,
     revealToken,
     generateToken,
+    clearToken,
     saveToken,
+    blurToken,
     inspectTokenOperation,
     inspectSecretOperation,
     editSecret,

@@ -38,7 +38,6 @@ export class NotificationCommands {
     return JSON.stringify(this.session.draft) !== this.session.baseline || this.credentials.dirty;
   }
   private clearPending(): void {
-    this.port.clearOperation(this.session.pending);
     this.session.pending = '';
     this.session.pendingAction = '';
     this.port.markDirty(this.dirty());
@@ -74,7 +73,6 @@ export class NotificationCommands {
       await this.port.save(this.target(id), input, secrets);
       this.finishSaved();
     } catch (reason) {
-      this.port.report(reason);
       this.session.error = reason instanceof Error ? reason.message : '保存失败；草稿已保留';
       if (reason instanceof ControlFailure && reason.status === 409) this.session.conflict = true;
       if (!(reason instanceof ControlFailure && reason.uncertain)) this.clearPending();
@@ -104,7 +102,6 @@ export class NotificationCommands {
       this.session.notice = '已将已保存任务送入测试队列。';
       this.clearPending();
     } catch (reason) {
-      this.port.report(reason);
       this.session.error = reason instanceof Error ? reason.message : '测试请求失败';
       if (!(reason instanceof ControlFailure && reason.uncertain)) this.clearPending();
     } finally {
@@ -125,8 +122,7 @@ export class NotificationCommands {
           this.session.error = '';
         }
       } else this.session.notice = '通知操作仍在处理，请稍后查询。';
-    } catch (reason) {
-      this.port.report(reason);
+    } catch {
       this.session.error = '无法确认原通知操作；草稿与操作 ID 已保留。';
     } finally {
       this.session.busy = false;

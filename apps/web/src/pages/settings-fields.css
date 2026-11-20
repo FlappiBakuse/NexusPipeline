@@ -30,23 +30,6 @@ input {
   font: inherit;
   font-weight: 400;
 }
-.switches {
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  overflow: hidden;
-}
-nexus-switch-setting {
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-}
-nexus-switch-setting + nexus-switch-setting {
-  border-top: 1px solid var(--border);
-}
-.divider {
-  height: 1px;
-  background: var(--border);
-}
 @media (max-width: 700px) {
   .columns,
   .three {

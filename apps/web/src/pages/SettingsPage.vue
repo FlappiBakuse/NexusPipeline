@@ -4,7 +4,7 @@ import { createIdentity } from '../control/identity';
 import { computed, reactive, ref, watch } from 'vue';
 import type { AppStore } from '../app/store';
 import type { InterfaceCategory } from '../control/interface';
-import { integerValue, objectValue } from '../control/client';
+import { ControlFailure, integerValue, objectValue } from '../control/client';
 import { validateForm } from '../components/form-validation';
 import { useSettingsSecrets } from './settings-secret-state';
 import { useSettingsSession } from './settings-session';
@@ -20,6 +20,8 @@ const props = defineProps<{ store: AppStore; visible: boolean }>();
 const form = ref<HTMLElement>();
 const notice = ref('');
 const restartPort = ref<number | null>(null);
+const restarting = ref(false);
+const restartError = ref('');
 const categories: { id: InterfaceCategory; label: string; description: string }[] = [
   { id: 'service', label: '服务行为', description: '服务启动、历史记录与日志选项' },
   { id: 'remote', label: '远程访问和 MCP', description: '远程管理入口与本机 Agent 服务' },
@@ -41,23 +43,21 @@ const panels = computed(() =>
   )
 );
 const canEdit = computed(() => props.store.can('settings.write') && !host.locked);
-const unknownSecret = computed(() => !!secrets.tokenUnknownId || !!secrets.secretUnknownId);
+const tokenDisabled = computed(() => !secrets.tokenReady || secrets.tokenBusy ||
+  !!secrets.tokenUnknownId || !props.store.can('secrets.write'));
 
-async function setToken(value: string): Promise<void> {
-  if (!value || !secrets.tokenReady || secrets.tokenUnknownId) return;
-  secrets.token = value;
-  secrets.tokenMode = 'set';
-  await secrets.saveToken();
+function preserveTokenFocus(event: PointerEvent): void {
+  // An explicit pointer action takes precedence over submitting the field on blur.
+  if (document.activeElement?.id === 'settings-access-token') event.preventDefault();
 }
 async function generateToken(): Promise<void> {
-  if (!secrets.tokenReady || secrets.tokenUnknownId) return;
+  if (tokenDisabled.value) return;
   secrets.generateToken();
   await secrets.saveToken();
 }
 async function clearToken(): Promise<void> {
-  if (!secrets.tokenReady || secrets.tokenUnknownId) return;
-  secrets.tokenMode = 'clear';
-  await secrets.saveToken();
+  if (tokenDisabled.value) return;
+  await secrets.clearToken();
 }
 async function setPassword(value: string): Promise<void> {
   if (!value || !secrets.secretReady || secrets.secretUnknownId) return;
@@ -66,27 +66,35 @@ async function setPassword(value: string): Promise<void> {
   await secrets.saveSecret();
 }
 async function restart(): Promise<void> {
-  if (!props.store.can('maintenance.write')) return;
+  if (restarting.value || !props.store.can('maintenance.write')) return;
+  restarting.value = true;
+  restartError.value = '';
   try {
     const result = await props.store.client.restartHost(createIdentity(), objectValue);
     restartPort.value = integerValue(result.port);
     notice.value = '重启交接已受理。';
   } catch (reason) {
-    props.store.report(reason);
-    notice.value = '重启未确认，请检查当前服务状态。';
+    restartError.value = reason instanceof ControlFailure && !reason.uncertain
+      ? reason.code : '重启未确认，请检查当前服务状态。';
+  } finally {
+    restarting.value = false;
   }
 }
 </script>
 
 <template>
   <main ref="form" class="settings-page" @nexus-toggle="categoryOwner.toggle">
-    <nexus-toast v-if="host.session.error" tone="danger" :message.prop="t(host.session.error)" />
-    <nexus-toast v-if="view.state.error" tone="danger" :message.prop="t(view.state.error)" />
-    <nexus-toast v-if="notice" :message.prop="t(notice) + (restartPort ? ' ' + restartPort : '')" @nexus-close="notice = ''" />
-    <p v-if="store.state.settings?.restartReasons.length" class="notice">
-      {{ t('更改等待重启：') }} {{ store.state.settings.restartReasons.join('、') }}
-      <button :disabled="!store.can('maintenance.write')" @click="restart">{{ t('重启服务') }}</button>
-    </p>
+    <template v-if="visible">
+      <nexus-toast v-if="host.session.error" tone="danger" :message.prop="t(host.session.error)" />
+      <nexus-toast v-if="view.state.error" tone="danger" :message.prop="t(view.state.error)" />
+      <nexus-toast v-if="restartError" tone="danger" :message.prop="t(restartError)" @nexus-close="restartError = ''" />
+      <nexus-toast v-else-if="notice" :message.prop="t(notice) + (restartPort ? ' ' + restartPort : '')" @nexus-close="notice = ''" />
+    </template>
+    <section v-if="store.state.settings?.restartReasons.length" class="warning restart-notice">
+      <p role="status">{{ t('有改动需要重启服务后生效。') }}</p>
+      <button type="button" class="primary" :disabled="restarting || !store.can('maintenance.write')"
+        @click="restart">{{ t('重启服务') }}</button>
+    </section>
     <nav class="categories" :aria-label="t('设置类别')">
       <template v-for="item in categories" :key="item.id">
       <button
@@ -102,7 +110,7 @@ async function restart(): Promise<void> {
     </nav>
     <div id="settings-extension-panels"><slot name="settings-panels" /></div>
     <template v-for="item in panels" :key="item.id">
-    <section :id="'settings-' + item.id" class="panel" :style="{ order: categoryOwner.order(item.id) }">
+    <section :id="'settings-' + item.id" class="panel" data-surface="collapsible" :style="{ order: categoryOwner.order(item.id) }">
       <button class="panel-heading" :aria-expanded="categoryOwner.isExpanded(item.id)" @click="categoryOwner.toggleCard(item.id)">
         <span>
           <strong>{{ t(item.label) }}</strong>
@@ -129,49 +137,31 @@ async function restart(): Promise<void> {
         >
           <template #token>
             <div v-if="store.can('secrets.status')" class="token">
-              <label v-help="t('留空保持当前令牌；远程客户端使用令牌访问宿主，本机回环请求使用当前本地授权规则。')">
-                {{ t('访问令牌') }}
+              <div class="token-field" v-help="t('自定义令牌支持 4–256 个英文字母、数字、短横线或下划线，移开焦点即保存。留空保持当前令牌。') + '\n' + t('安全提示：启用远程访问后，持有令牌的人都能管理本机脚本与配置。请勿在公共网络环境开启。令牌与配置数据绑定当前电脑（DPAPI）加密，不可迁移。')">
+                <span class="field-help-caption"><label for="settings-access-token">{{ t('访问令牌') }}</label></span>
                 <div class="token-input">
                   <input
+                    id="settings-access-token"
                     :value="secrets.token"
                     :type="secrets.tokenVisible ? 'text' : 'password'"
                     :placeholder="t('留空不修改')"
-                    :disabled="
-                      !secrets.tokenReady ||
-                      secrets.tokenBusy ||
-                      !!secrets.tokenUnknownId ||
-                      !store.can('secrets.write')
-                    "
+                    :disabled="tokenDisabled"
                     autocomplete="new-password"
+                    autocorrect="off"
+                    autocapitalize="none"
+                    spellcheck="false"
                     @focus="secrets.revealToken"
                     @input="secrets.editToken(($event.target as HTMLInputElement).value)"
-                    @change="setToken(($event.target as HTMLInputElement).value)"
+                    @blur="secrets.blurToken"
                   />
-                  <button
-                    :disabled="
-                      !secrets.tokenReady ||
-                      secrets.tokenBusy ||
-                      !!secrets.tokenUnknownId ||
-                      !store.can('secrets.write')
-                    "
-                    @click="generateToken"
-                  >
+                  <button type="button" :disabled="tokenDisabled" @pointerdown="preserveTokenFocus" @click="generateToken">
                     {{ t('生成令牌') }}
                   </button>
-                  <button
-                    class="danger"
-                    :disabled="
-                      !secrets.tokenReady ||
-                      secrets.tokenBusy ||
-                      !!secrets.tokenUnknownId ||
-                      !store.can('secrets.write')
-                    "
-                    @click="clearToken"
-                  >
+                  <button type="button" class="danger" :disabled="tokenDisabled" @pointerdown="preserveTokenFocus" @click="clearToken">
                     {{ t('清空令牌') }}
                   </button>
                 </div>
-              </label>
+              </div>
               <dl class="addresses">
                 <div>
                   <dt>{{ t('内网访问地址') }}</dt>
@@ -189,17 +179,9 @@ async function restart(): Promise<void> {
                   </dd>
                 </div>
               </dl>
-              <p class="warning">
-                {{
-                  t(
-                    '安全提示：启用远程访问后，持有令牌的人都能管理本机脚本与配置。请勿在公共网络环境开启。令牌与配置数据绑定当前电脑（DPAPI）加密，不可迁移。'
-                  )
-                }}
-              </p>
-              <p v-if="secrets.tokenError" role="alert" class="error">
-                {{ t(secrets.tokenError) }}
-                <button v-if="!secrets.tokenReady" @click="secrets.loadToken">{{ t('重试') }}</button>
-              </p>
+
+              <nexus-toast v-if="visible && secrets.tokenError" tone="danger" :message.prop="t(secrets.tokenError)" />
+              <button v-if="secrets.tokenError && !secrets.tokenReady" type="button" @click="secrets.loadToken">{{ t('重试') }}</button>
               <button
                 v-if="secrets.tokenUnknownId"
                 :disabled="secrets.tokenBusy"
@@ -207,12 +189,12 @@ async function restart(): Promise<void> {
               >
                 {{ t('查询令牌操作') }}
               </button>
-              <p v-if="secrets.tokenOperationStatus" role="status">{{ t(secrets.tokenOperationStatus) }}</p>
+              <nexus-toast v-if="visible && !secrets.tokenError && secrets.tokenOperationStatus" tone="info" :message.prop="t(secrets.tokenOperationStatus)" />
             </div>
           </template>
           <template #proxy-password>
             <label v-if="store.can('secrets.status')" v-help="t('留空保持已保存的代理密码；输入新值后提交替换。')">
-              {{ t('密码') }}
+              <span class="field-help-caption"><span>{{ t('密码') }}</span></span>
               <input
                 type="password"
                 :value="secrets.secret"
@@ -228,10 +210,8 @@ async function restart(): Promise<void> {
                 @input="secrets.editSecret(($event.target as HTMLInputElement).value)"
                 @change="setPassword(($event.target as HTMLInputElement).value)"
               />
-              <span v-if="secrets.secretError" role="alert" class="error">
-                {{ t(secrets.secretError) }}
-                <button v-if="!secrets.secretReady" @click="secrets.loadSecret">{{ t('重试') }}</button>
-              </span>
+              <nexus-toast v-if="visible && secrets.secretError" tone="danger" :message.prop="t(secrets.secretError)" />
+              <button v-if="secrets.secretError && !secrets.secretReady" type="button" @click="secrets.loadSecret">{{ t('重试') }}</button>
               <button
                 v-if="secrets.secretUnknownId"
                 :disabled="secrets.secretBusy"
@@ -253,7 +233,6 @@ async function restart(): Promise<void> {
     </section>
     </template>
     <slot name="settings-extra" />
-    <p v-if="unknownSecret" class="notice">{{ t('秘密变更结果待确认，原操作已锁定。') }}</p>
   </main>
 </template>
 

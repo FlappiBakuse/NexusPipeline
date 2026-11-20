@@ -74,6 +74,8 @@ internal sealed class StartupProgress : IDisposable
         await _channel.SendAsync(new { kind = "complete" });
     }
 
+    internal Task PresentInterfaceAsync() => _channel.SendAsync(new { kind = "present" });
+
     internal async Task FailAsync(Exception error)
     {
         var reason = Reason(error);

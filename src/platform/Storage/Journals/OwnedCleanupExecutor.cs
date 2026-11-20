@@ -49,9 +49,9 @@ public sealed class OwnedCleanupExecutor(RuntimeInstance instance, ContractReade
             return new(instance.InstanceId, journalId, observation.IsComplete, observation.State);
         }
         var initialObservation = Observe();
-        var scopedAdmission = OperatingSystem.IsWindows() && roots is not null && work is null && held is null &&
-            index.Current.IsReady && initialObservation is { IsComplete: true, State: WriterState.Stopped } &&
-            plan.Items.All(item => item.Blob.RelativePath == $"blobs/content/{item.Blob.Sha256}.bin");
+        var scopedAdmission = OperatingSystem.IsWindows() && roots is not null && held is null &&
+            initialObservation is { IsComplete: true, State: WriterState.Stopped } &&
+            (work is not null || plan.Items.All(item => item.Blob.RelativePath == $"blobs/content/{item.Blob.Sha256}.bin"));
         if (!scopedAdmission) index.BlockUnknown("cleanup_execution_active");
         try
         {
@@ -62,7 +62,8 @@ public sealed class OwnedCleanupExecutor(RuntimeInstance instance, ContractReade
             {
                 try
                 {
-                    var published = cleanup.HasProtectedCandidates(plan.Items) && instanceLease.PublishExecution(() =>
+                    // Extension work already holds its frozen workspace and installation claims.
+                    var published = (work is not null || cleanup.HasProtectedCandidates(plan.Items)) && instanceLease.PublishExecution(() =>
                     {
                         if (!index.Current.IsReady || Observe() is not { IsComplete: true, State: WriterState.Stopped }) return false;
                         var admissionEvidence = new NexusPipeline.Platform.Storage.Execution.AdmissionPublicationEvidence(
@@ -71,7 +72,7 @@ public sealed class OwnedCleanupExecutor(RuntimeInstance instance, ContractReade
                         NexusPipeline.Platform.Storage.Configuration.ConfigurationRecoveryHolds.Publish(database, index, roots!);
                         return true;
                     });
-                    if (!published) index.BlockUnknown("cleanup_execution_active");
+                    if (!published && work is null) index.BlockUnknown("cleanup_execution_active");
                 }
                 catch
                 {

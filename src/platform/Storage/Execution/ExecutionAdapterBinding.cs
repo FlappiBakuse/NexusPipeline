@@ -20,7 +20,7 @@ internal static class ExecutionAdapterBinding
             var script = NexusPipeline.Platform.Storage.Automation.BindingSourceCodec.Resolve(bundle, step);
             if (step.Adapter is not { } adapter)
             {
-                if (script.AdapterResources.Count != 0) throw Invalid();
+                if (script.AdapterResources.Count != 0 || step.ExclusiveProgramInUserSession == true) throw Invalid();
                 continue;
             }
             if (script.Kind != "specialized" || script.ExtensionId != step.ExtensionId || script.AdapterResources.Count == 0 ||
@@ -34,7 +34,8 @@ internal static class ExecutionAdapterBinding
                 locked.ManifestSha256 != adapter.Manifest.Sha256 || locked.PackageVersion != manifest.PackageVersion ||
                 locked.SdkVersion != manifest.SdkVersion || locked.ContractFingerprint != manifest.ContractFingerprint ||
                 manifest.Kind == "data-specialized" && manifest.Execution is not null) throw Invalid();
-            if ((step.ExclusiveProgram == true) != (manifest.Specialized?.ExclusiveProgram == true)) throw Invalid();
+            if ((step.ExclusiveProgram == true) != (manifest.Specialized?.ExclusiveProgram == true) ||
+                (step.ExclusiveProgramInUserSession == true) != (manifest.Specialized?.ExclusiveProgramInUserSession == true)) throw Invalid();
             ExecutionProviderRelationship.Require(manifest, step);
             var sourceRoot = plan.RootBindings.Single(root => root.RootId == script.RootId).Path;
             var sourceFiles = adapter.SourceFiles ?? [];

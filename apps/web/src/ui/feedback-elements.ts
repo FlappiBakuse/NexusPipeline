@@ -107,7 +107,7 @@ export class EmptyState extends NexusElement {
     super(
       'nexus-empty-state',
       tones +
-        `:host{box-sizing:border-box;display:grid;justify-items:center;align-content:center;gap:5px;min-height:147px;padding:24px 20px;text-align:center;line-height:1.55;border:1px solid var(--content-card-border,var(--nx-color-border));border-radius:var(--nx-radius-lg);background:var(--content-card,var(--nx-color-surface))}
+        `:host{box-sizing:border-box;display:grid;justify-items:center;align-content:center;gap:5px;min-height:147px;padding:24px 20px;text-align:center;line-height:1.55;border:1px solid var(--content-card-border,var(--nx-color-border));border-radius:var(--nx-radius-lg);background:var(--_nexus-card-fill,var(--content-card,var(--nx-color-surface)))}
     h3{margin:0;font-size:15px;font-weight:700;color:var(--tone,var(--nx-color-text,#e9edf5))}p{margin:0;font-size:13px;font-weight:400;color:var(--nx-color-muted,#9eacc1);overflow-wrap:anywhere}`,
       '<slot name="icon"></slot><h3></h3><p></p><slot name="actions"></slot>'
     );

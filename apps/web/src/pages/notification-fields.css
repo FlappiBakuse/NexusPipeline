@@ -42,19 +42,6 @@ textarea {
 .three {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
-.switches {
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  overflow: hidden;
-}
-nexus-switch-setting {
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-}
-nexus-switch-setting + nexus-switch-setting {
-  border-top: 1px solid var(--border);
-}
 @media (max-width: 650px) {
   .columns,
   .three {

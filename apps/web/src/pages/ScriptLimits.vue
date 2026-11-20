@@ -16,8 +16,7 @@ function limit(key: keyof Limits, value: number): void {
       <h3>{{ t('运行设置') }}</h3>
       <div class="columns three">
         <label v-help="t('每个步骤最多尝试的次数，包含首次运行；实际重试还需满足插件声明与安全条件。')">
-          {{ t('最大尝试次数（含首次）') }}
-          <em>*</em>
+          <span class="field-help-caption"><span>{{ t('最大尝试次数（含首次）') }} </span><em>*</em></span>
           <nexus-number-input
         data-draft-field="ScriptFields/modelValue.maximumAttempts"
             :aria-label="t('最大尝试次数（含首次）')"
@@ -29,8 +28,7 @@ function limit(key: keyof Limits, value: number): void {
           />
         </label>
         <label v-help="t('达到该时长且日志无更新时判定停滞；0 表示不启用日志停滞限制。')">
-          {{ t('日志无更新上限（分钟）') }}
-          <em>*</em>
+          <span class="field-help-caption"><span>{{ t('日志无更新上限（分钟）') }} </span><em>*</em></span>
           <nexus-number-input
         data-draft-field="ScriptFields/modelValue.stallTimeoutSeconds / 60"
             :aria-label="t('日志无更新上限（分钟）')"
@@ -42,8 +40,7 @@ function limit(key: keyof Limits, value: number): void {
           />
         </label>
         <label v-help="t('限制当前步骤的总运行时间，包含重试；0 表示不启用总时间限制。')">
-          {{ t('运行总时间上限（分钟）') }}
-          <em>*</em>
+          <span class="field-help-caption"><span>{{ t('运行总时间上限（分钟）') }} </span><em>*</em></span>
           <nexus-number-input
         data-draft-field="ScriptFields/modelValue.totalTimeoutSeconds / 60"
             :aria-label="t('运行总时间上限（分钟）')"

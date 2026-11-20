@@ -7,7 +7,8 @@ namespace NexusPipeline.Platform.Storage.Configuration;
 
 internal sealed class ConfigurationEditPreparation(RuntimeInstance instance, StateDatabase database, ContractReader contracts, AdapterEditHook? adapter = null)
 {
-    internal PreparedConfigurationEdit Prepare(Guid sessionId, ConfigurationEditRequest request)
+    internal PreparedConfigurationEdit Prepare(Guid sessionId, ConfigurationEditRequest request,
+        Func<ConfigurationTarget, FileTreeSnapshot, FileTreeSnapshot>? initialize = null)
     {
         if (sessionId == Guid.Empty) throw new ConfigurationException("configuration_edit_session_invalid");
         request = ConfigurationEditPolicy.Freeze(request);
@@ -25,7 +26,7 @@ internal sealed class ConfigurationEditPreparation(RuntimeInstance instance, Sta
                 if ((saved?.Revision ?? 0) != target.ExpectedRevision) throw new ConfigurationException("configuration_revision_conflict");
                 if (saved is not null) ConfigurationRevisionPolicy.RequireCurrentContract(saved, target.Contract);
                 var before = archive.Capture(targetPath, default);
-                var tree = saved?.Tree ?? before.Snapshot;
+                var tree = initialize is null ? saved?.Tree ?? before.Snapshot : initialize(target, before.Snapshot);
                 if (target.WritePolicy?.Adapter is { } rule)
                     tree = (adapter ?? throw new ConfigurationException("configuration_edit_adapter_unavailable"))
                         .Apply(sessionId, target.Address, target.ExpectedRevision, tree, rule, "editPrepare");

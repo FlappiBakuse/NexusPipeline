@@ -38,13 +38,7 @@ internal sealed class InstalledExtensionConsumption(InstanceLease lease, Extensi
             var operation = Guid.NewGuid();
             ResourceClaim[] claims = [new("extension:" + scope.Activation.ExtensionId, ResourceClaimMode.Reference)];
             // Recovery publication temporarily closes admission while verifying otherwise live installations.
-            var admission = lease.PublishExecution(() =>
-            {
-                deadline.Token.ThrowIfCancellationRequested();
-                return resources.TryAcquire(operation, claims);
-            });
-            if (admission.Denial == ResourceLeaseDenial.Conflict)
-                admission = await resources.AcquireAsync(operation, claims, deadline.Token).ConfigureAwait(false);
+            var admission = await resources.AcquireAsync(operation, claims, deadline.Token, lease.PublishExecution).ConfigureAwait(false);
             root = admission.Lease
                 ?? throw new IOException("extension_consumption_resources_unavailable");
             return OpenUse(root, usage);

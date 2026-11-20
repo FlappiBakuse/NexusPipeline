@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fieldHelp as vHelp } from '../components/field-help';
 import type { DashboardCard } from '../control/interface';
 import { t } from '../app/locale';
 const props = defineProps<{
@@ -12,12 +13,10 @@ const emit = defineEmits<{ change: [cards: DashboardCard[]]; reorderAvailable: [
 
 <template>
   <div class="layout-fields">
-    <p>
-      {{ t('拖动把手或使用把手上的键盘方向键排序。修改立即生效，取消可恢复本次打开前的布局。') }}
-    </p>
-    <h3>{{ t('当前显示') }}</h3>
+    <h3 tabindex="0" v-help="t('拖动把手或使用把手上的键盘方向键排序。修改立即生效，取消可恢复本次打开前的布局。')">{{ t('当前显示') }}</h3>
     <nexus-sortable-list
       class="layout-list"
+      data-surface="raised"
       :ids.prop="cards"
       :disabled.prop="locked"
       @nexus-reorder="emit('change', $event.detail.ids)"
@@ -42,9 +41,9 @@ const emit = defineEmits<{ change: [cards: DashboardCard[]]; reorderAvailable: [
       </article>
     </nexus-sortable-list>
     <h3>{{ t('可添加') }}</h3>
-    <nexus-sortable-list class="layout-list" :ids.prop="available" :disabled.prop="locked"
+    <nexus-sortable-list class="layout-list" data-surface="raised" :ids.prop="available" :disabled.prop="locked"
       @nexus-reorder="emit('reorderAvailable', $event.detail.ids)">
-      <p v-if="!available.some(id => catalog.some(item => item.id === id))" class="all-added">{{ t('所有可用卡片均已加入') }}</p>
+      <nexus-empty-state v-if="!available.some(id => catalog.some(item => item.id === id))" :title="t('所有可用卡片均已加入')" />
       <article v-for="id in available.filter(id => catalog.some(item => item.id === id))" :key="id" :data-item-id="id">
         <nexus-drag-handle :item-id="id" :label="t('调整卡片顺序')" :disabled.prop="locked" />
         <span>
@@ -80,7 +79,6 @@ h3 {
   border: 1px solid var(--border);
   border-radius: 16px;
   overflow: hidden;
-  background: var(--nx-color-surface);
 }
 article {
   display: flex;

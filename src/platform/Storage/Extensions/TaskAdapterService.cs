@@ -124,6 +124,29 @@ internal sealed class TaskAdapterService : ITaskAdapterPort
         AcceptedExecutionAdmission accepted, StepEvidenceBinding binding, BlobReference rawOutput, Action requireActualStep)
         => _observer.ObserveOwnedAsync(accepted, binding, rawOutput, requireActualStep);
 
+    internal async ValueTask<bool> IsLaunchUniqueAsync(AcceptedExecutionAdmission accepted, ExecutionPlanStep step,
+        CancellationToken cancellation)
+    {
+        accepted.Prepared.RequireLive();
+        var plan = accepted.Prepared.Total.Plan.ReadWire();
+        var bundle = new ExecutionJudgementInputs(_instance, _contracts).ReadBundle(plan);
+        var source = bundle.Bindings.SingleOrDefault(binding => binding.Id == step.BindingId)?.Source;
+        try
+        {
+            if (step.ExclusiveProgramInUserSession == true)
+                NexusPipeline.Platform.Processes.ExclusiveProgramAdmission.RequireStopped(step.ExecutablePath, inUserSession: true);
+            if (source is null) return true;
+            var discovery = new ScriptSourceService(_instance, _database, _lease, _resources, _contracts, _roots, _activator);
+            return await discovery.UseAsync(Guid.NewGuid(), step.ExtensionId!, step.Adapter!.InstalledRevision,
+                step.WorkingDirectory, accepted.Prepared.RequireLive, cancellation,
+                (result, _) => !result.Candidates!.Any(candidate => candidate.RunIdentity is not null &&
+                    candidate.CandidateId != source.CandidateId &&
+                    candidate.Executable.Equals(source.Executable.Relative, StringComparison.OrdinalIgnoreCase) &&
+                    candidate.Arguments.SequenceEqual(step.Arguments)), edit: true, owner: accepted.Root).ConfigureAwait(false);
+        }
+        catch (IOException) { return false; }
+    }
+
     public async ValueTask<AdapterRepairPreview> PreviewRepairAsync(string serverSubject, AdapterSelection selection,
         int candidateIndex, string expectedProposalDigest, CancellationToken cancellationToken, Action? requireCaller = null)
     {

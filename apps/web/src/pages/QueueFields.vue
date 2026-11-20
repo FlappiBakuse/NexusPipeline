@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fieldHelp as vHelp } from '../components/field-help';
 import { createIdentity } from '../control/identity';
 import { computed, ref, onBeforeUnmount, onMounted } from 'vue';
 import type { AutomationBundle } from '../control/wire.generated';
@@ -147,6 +148,7 @@ function setTime(id: string, value: string): void {
     <nexus-switch-setting
         data-draft-field="QueueFields/modelValue.notifyEnabled"
       class="notification-setting"
+      data-surface="raised"
       :title="t('队列通知')"
       :description="t('开启后仅发送队列汇总，不再发送队列内用户通知；未选择通知任务时不发送。')"
       :value.prop="modelValue.notifyEnabled"
@@ -166,8 +168,7 @@ function setTime(id: string, value: string): void {
     </label>
     <section class="queue-section">
       <header>
-        <h3>{{ t('定时列表') }}</h3>
-        <small>{{ t('默认收起；展开后编辑周期与执行时间，拖拽左侧把手排序') }}</small>
+        <h3 tabindex="0" v-help="t('默认收起；展开后编辑周期与执行时间，拖拽左侧把手排序')">{{ t('定时列表') }}</h3>
       </header>
       <nexus-sortable-list
         :ids.prop="schedules.map((item) => item.id)"
@@ -185,7 +186,7 @@ function setTime(id: string, value: string): void {
           v-for="(item, index) in schedules"
           :key="item.id"
           :data-item-id="item.id" :data-draft-item="item.id"
-          class="schedule-item"
+          class="schedule-item" data-surface="collapsible"
         >
           <div class="schedule-heading">
             <nexus-drag-handle :item-id="item.id" :label="t('调整定时顺序')" />

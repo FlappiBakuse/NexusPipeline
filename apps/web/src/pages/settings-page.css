@@ -17,7 +17,6 @@
 .panel {
   border: 1px solid var(--border);
   border-radius: 16px;
-  background: var(--nx-color-surface);
   overflow: hidden;
 }
 .panel-heading {
@@ -47,6 +46,7 @@
 .panel-heading nexus-icon {
   color: var(--accent);
 }
+.panel-heading:hover { background: transparent; }
 .panel-body {
   border-top: 1px solid var(--border);
   padding: 24px;
@@ -72,7 +72,8 @@
   display: grid;
   gap: 16px;
 }
-label {
+label,
+.token-field {
   display: grid;
   gap: 6px;
   color: var(--muted);
@@ -111,8 +112,7 @@ dt {
   width: 94px;
   color: var(--muted);
 }
-.warning,
-.notice {
+.warning {
   padding: 12px 16px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -124,9 +124,14 @@ dt {
   font-size: 12px;
   line-height: 1.7;
 }
-.notice button {
-  margin-left: 12px;
+.restart-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
 }
+.restart-notice p { flex: 1 1 240px; }
 .error {
   color: var(--nx-color-danger);
 }

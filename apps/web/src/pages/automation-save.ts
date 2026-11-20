@@ -111,7 +111,6 @@ export class AutomationSave {
         kind
       });
     } catch (error) {
-      this.store.report(error);
       session.error = error instanceof Error ? error.message : '保存失败；草稿已保留。';
     } finally {
       session.saving = false;

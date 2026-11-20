@@ -85,7 +85,8 @@ internal sealed class RunBindingEvidence
             return (command, hook.LaunchKind == "command" ? CommandLineSyntax.CommandInterpreter : CommandLineSyntax.ArgumentVector);
         }
         return (EditorCommandPolicy.Freeze(new(_step.ExecutablePath, _step.ImageSha256, _step.Arguments.ToImmutableArray(),
-            _step.WorkingDirectory) { ExclusiveProgram = _step.ExclusiveProgram == true }), CommandLineSyntax.ArgumentVector);
+            _step.WorkingDirectory) { ExclusiveProgram = _step.ExclusiveProgram == true,
+                ExclusiveProgramInUserSession = _step.ExclusiveProgramInUserSession == true }), CommandLineSyntax.ArgumentVector);
     }
 
     internal static RegisteredJournal ReadAdmission(RuntimeInstance instance, StateDatabase database, ContractReader contracts,

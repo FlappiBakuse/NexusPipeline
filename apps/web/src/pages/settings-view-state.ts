@@ -13,7 +13,10 @@ export function useSettingsView(store: AppStore, categories: readonly InterfaceC
   const pinned = computed(() => state.values.pinnedSettings.filter(id => id === expanded.value));
   watch(() => store.state.interface, value => { if (value) writer.observe(value); });
   const patch = (values: Partial<typeof state.values>) => {
-    if (store.can('settings.write')) void writer.patch(values).catch(store.report);
+    if (store.can('settings.write')) void writer.patch(values).catch(reason => {
+      if (!store.editors.signal.aborted && !state.error)
+        state.error = reason instanceof Error ? reason.message : '视图设置保存失败。';
+    });
     else state.values = { ...state.values, ...values };
   };
   const isExpanded = (id: InterfaceCategory) => expanded.value === id;

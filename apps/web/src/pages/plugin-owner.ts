@@ -55,11 +55,6 @@ export class PluginOwner {
     else this.store.dirty.delete(this.key);
   }
   private finish(notice: string): void {
-    const id = this.state.pending?.apply?.operationId || this.state.pending?.setting?.operationId;
-    if (this.current()) {
-      if (this.store.state.uncertainOperation === id) this.store.state.uncertainOperation = '';
-      if (this.store.state.error === this.state.error) this.store.state.error = '';
-    }
     this.state.pending = null;
     this.state.error = '';
     this.state.notice = notice;
@@ -68,7 +63,6 @@ export class PluginOwner {
   }
   private failed(reason: unknown): void {
     this.state.error = reason instanceof Error ? reason.message : '插件操作失败。';
-    if (this.current()) this.store.report(reason);
   }
   async apply(
     item: CatalogEntry | ExtensionState,

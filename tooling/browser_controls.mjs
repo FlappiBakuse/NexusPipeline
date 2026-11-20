@@ -32,6 +32,8 @@ export async function runControls({ root, modules, browser, runtime, output, chr
       });
     }
   }], resolve: { alias: { vue: path.join(modules, 'vue/dist/vue.runtime.esm-bundler.js'),
+    dompurify: path.join(modules, 'dompurify/dist/purify.es.mjs'),
+    marked: path.join(modules, 'marked/lib/marked.esm.js'),
     'pinyin-pro': path.join(modules, 'pinyin-pro/dist/esm/index.mjs'),
     '@nexuspipeline/extension-sdk': path.join(root, 'sdk/frontend/src/index.ts') } },
     server: { host: '127.0.0.1', port: 0, fs: { allow: [root, modules] } }, optimizeDeps: { noDiscovery: true, include: [] } });
@@ -63,6 +65,24 @@ export async function runControls({ root, modules, browser, runtime, output, chr
       addChecks('painted-controls', result);
     } else {
       addChecks('element-owners-and-painted-controls', await call('structural'));
+      for (const width of [1280, 480]) {
+        await page.setViewportSize({ width, height: 900 });
+        const checks = await page.evaluate(async () => {
+          const { cardWorkspaceContract } = await import('/tests/frontend/card-workspace-contract.ts');
+          const results = [];
+          await cardWorkspaceContract((value, name) => { if (!value) throw Error(name); results.push(name); });
+          return results;
+        });
+        addChecks('card-workspace-' + width, checks);
+      }
+      await page.setViewportSize({ width: 1280, height: 900 });
+      const surfaces = await page.evaluate(async () => {
+        const { surfaceDepthContract } = await import('/tests/frontend/surface-depth-contract.ts');
+        const results = [];
+        await surfaceDepthContract((value, name) => { if (!value) throw Error(name); results.push(name); });
+        return results;
+      });
+      addChecks('surface-depth', surfaces);
       const controls = await page.evaluate(async () => (await import('/tests/frontend/control-contract.ts')).runControlContract());
       addChecks('control-transport-owners', controls);
       await call('prepareAccessibility');

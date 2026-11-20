@@ -44,10 +44,6 @@ function accept(
   state.pending = null;
   state.error = '';
   state.operationStatus = '';
-  if (store.state.uncertainOperation === id) {
-    store.state.uncertainOperation = '';
-    store.state.error = '';
-  }
 }
 
 export async function writeHostSecret(
@@ -80,12 +76,12 @@ export async function writeHostSecret(
         await inspectHostSecret(store, instance, field, store.editors.signal);
       }
       if (!state.pending) return true;
+      if (!state.error) state.error = '秘密变更结果待确认。';
     } else {
       state.pending = null;
-          state.error = reason instanceof Error ? reason.message : '秘密保存失败';
+      state.error = reason instanceof Error ? reason.message : '秘密保存失败';
       if (reason instanceof ControlFailure && reason.status === 409) state.status = null;
     }
-    if (store.state.capabilities?.instanceId === instance) store.report(reason);
     return false;
   }
 }

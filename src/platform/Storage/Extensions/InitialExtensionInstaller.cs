@@ -22,6 +22,8 @@ public sealed class InitialExtensionInstaller(RuntimeInstance instance, StateDat
     private readonly InitialExtensionStateStore _state = new(instance, lease);
     private readonly ImmutableBlobStore _blobs = new(instance, contracts);
 
+    internal bool IsPending(string source) => _state.Read() is { } saved ? !saved.Complete : Directory.Exists(source);
+
     public async Task InitializeAsync(string source, CancellationToken cancellation)
     {
         lease.VerifyHeld(instance);

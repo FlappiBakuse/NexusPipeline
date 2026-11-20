@@ -140,7 +140,8 @@ public sealed class ConfigurationPlanCodec(RuntimeInstance instance, ContractRea
             FileTreeProtocol.FromWire(wire.Before, identities), FileTreeProtocol.FromWire(wire.Candidate, []))
             { RunState = wire.RunState is null ? null : new(wire.RunState.RelativePath, wire.RunState.SizeBytes, wire.RunState.Sha256),
                 Editor = wire.Editor is null ? null : EditorCommandPolicy.Freeze(new(wire.Editor.ExecutablePath, wire.Editor.ExecutableSha256,
-                    wire.Editor.Arguments.ToImmutableArray(), wire.Editor.WorkingDirectory) { ExclusiveProgram = wire.Editor.ExclusiveProgram == true }),
+                    wire.Editor.Arguments.ToImmutableArray(), wire.Editor.WorkingDirectory) { ExclusiveProgram = wire.Editor.ExclusiveProgram == true,
+                    ExclusiveProgramInUserSession = wire.Editor.ExclusiveProgramInUserSession == true }),
                 PhysicalClaims = wire.PhysicalClaims?.Select(item => new ResourceClaim(item.ResourceKey, Enum.Parse<ResourceClaimMode>(item.Mode, true))).ToImmutableArray() ?? [],
                 EditPolicy = wire.EditPolicy is null ? null : EditWriteRules.Freeze(new(
                 wire.EditPolicy.WritableRoots.ToImmutableArray(), wire.EditPolicy.ResultShapes.Select(value => Enum.Parse<FileObjectKind>(value, true)).ToImmutableArray())
@@ -238,7 +239,8 @@ public sealed class ConfigurationPlanCodec(RuntimeInstance instance, ContractRea
         OperationKind = plan.Kind == JournalKind.ConfigExchange ? "configExchange" : "configEdit", TargetPath = plan.TargetPath,
         RunState = plan.RunState is null ? null : new() { RelativePath = plan.RunState.RelativePath, SizeBytes = plan.RunState.SizeBytes, Sha256 = plan.RunState.Sha256 },
         ParentIdentity = FileTreeProtocol.ToWire(plan.ParentIdentity), Before = FileTreeProtocol.ToWire(plan.Before.Snapshot), Candidate = FileTreeProtocol.ToWire(plan.Candidate.Snapshot),
-        Editor = plan.Editor is null ? null : new() { ExclusiveProgram = plan.Editor.ExclusiveProgram ? true : null, ExecutablePath = plan.Editor.ExecutablePath, ExecutableSha256 = plan.Editor.ExecutableSha256,
+        Editor = plan.Editor is null ? null : new() { ExclusiveProgram = plan.Editor.ExclusiveProgram ? true : null,
+            ExclusiveProgramInUserSession = plan.Editor.ExclusiveProgramInUserSession ? true : null, ExecutablePath = plan.Editor.ExecutablePath, ExecutableSha256 = plan.Editor.ExecutableSha256,
             Arguments = plan.Editor.Arguments, WorkingDirectory = plan.Editor.WorkingDirectory },
         PhysicalClaims = plan.PhysicalClaims.IsDefaultOrEmpty ? null : plan.PhysicalClaims.Select(item => new ConfigurationExchangePlanPhysicalClaimsItem
             { ResourceKey = item.ResourceKey, Mode = item.Mode.ToString().ToLowerInvariant() }).ToArray(),

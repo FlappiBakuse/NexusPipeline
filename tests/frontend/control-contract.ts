@@ -2,7 +2,6 @@ import { ControlClient, ControlFailure, objectValue } from '../../apps/web/src/c
 import { EventFeed, type EventSnapshot } from '../../apps/web/src/control/event-feed.js';
 import { MediaPool, type ImageLease } from '../../apps/web/src/control/media-pool.js';
 import { settings } from '../../apps/web/src/control/models.js';
-import { valueSelector } from '../../apps/web/src/pages/value-selector.js';
 import { executionCommandContract } from './execution-command-contract.js';
 import { liveLogContract } from './live-log-contract.js';
 import { completionCommands } from './completion-command-contract.js';
@@ -215,12 +214,6 @@ async function mediaPoolContract(checks: string[]): Promise<void> {
 export async function runControlContract(): Promise<string[]> {
   const checks: string[] = await scriptSourceContract();
   checks.push(...await formReviewContract());
-  const sourceDocument = { '0': 'a', list: [{ '0': 'b' }], 'a/b': { '~': 'c' }, '': 'empty' };
-  assert(JSON.stringify(valueSelector(sourceDocument, '/0')) === '["0"]'
-    && JSON.stringify(valueSelector(sourceDocument, '/list/0/0')) === '["list",0,"0"]'
-    && JSON.stringify(valueSelector(sourceDocument, '/a~1b/~0')) === '["a/b","~"]'
-    && JSON.stringify(valueSelector(sourceDocument, '/')) === '[""]',
-    'typed selectors distinguish numeric object keys, array positions and escaped property names', checks);
   const savedValues = { autoStart: true, desktop: { mode: 'browser', minimizeToTray: true, openOnStartup: false },
     service: { webPort: 0, allowRemoteAccess: false, mcpEnabled: false, mcpWriteEnabled: false, mcpPort: 18291 },
     proxy: { mode: 'none', url: null, userName: '' }, allowConfigRepair: false, historyRetentionDays: 30,

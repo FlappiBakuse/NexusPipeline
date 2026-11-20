@@ -41,6 +41,7 @@ export async function executionCommandContract(): Promise<string[]> {
   const selection = { format: 'nexus.control.execution-selection', version: 1,
     expectedCatalogRevision: 7, expectedSettingsRevision: 3, target: { kind: 'script', scriptId: 'script-a' } };
   requireValue(!await first.start(selection), 'a lost start response remains unresolved', checks);
+  requireValue(!first.state.error, 'a lost response uses the pending warning without a second failure message', checks);
   const original = first.state.pending!;
   selection.target.scriptId = 'script-b';
   requireValue((original.body.target as Record<string, unknown>).scriptId === 'script-a',
@@ -50,7 +51,7 @@ export async function executionCommandContract(): Promise<string[]> {
   requireValue(remounted.state.pending?.id === original.id && requests.filter(item => item.body).length === 1,
     'remounting retains the same pending operation and cannot send another start', checks);
   answer = { operationId: crypto.randomUUID(), kind: 'execution.start', status: 'completed' };
-  requireValue(!await remounted.inspect() && !!remounted.state.pending,
+  requireValue(!await remounted.inspect() && !!remounted.state.pending && !!remounted.state.error,
     'a successful receipt for a different operation cannot unlock execution', checks);
   answer = { operationId: original.id, kind: 'automation.change', status: 'completed' };
   requireValue(!await remounted.inspect() && !!remounted.state.pending,
@@ -59,7 +60,7 @@ export async function executionCommandContract(): Promise<string[]> {
   requireValue(!await remounted.inspect() && !!remounted.state.pending,
     'an unfinished original operation remains locked', checks);
   answer = { ...answer, status: 'accepted' };
-  requireValue(await remounted.inspect() && !remounted.state.pending && !store.dirty.size,
+  requireValue(await remounted.inspect() && !remounted.state.pending && !remounted.state.error && !store.dirty.size,
     'the exact accepted original operation resolves without replaying its write', checks);
   const run = { operationId: crypto.randomUUID(), runId: crypto.randomUUID(), attemptId: crypto.randomUUID() } as ActiveRun;
   const originalRun = { ...run };

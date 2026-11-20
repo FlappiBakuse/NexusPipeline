@@ -31,6 +31,18 @@ public sealed record ScriptSourceCandidate
     [JsonPropertyName("exclusiveProgram")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? ExclusiveProgram { get; init; }
+    /// <summary>Schema field <c>instance</c>; constraints are owned by script-source.schema.json.</summary>
+    [JsonPropertyName("instance")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ScriptSourceInstance? Instance { get; init; }
+    /// <summary>Schema field <c>isolationPath</c>; constraints are owned by script-source.schema.json.</summary>
+    [JsonPropertyName("isolationPath")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? IsolationPath { get; init; }
+    /// <summary>Schema field <c>runIdentity</c>; constraints are owned by script-source.schema.json.</summary>
+    [JsonPropertyName("runIdentity")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RunIdentity { get; init; }
     /// <summary>Schema field <c>projectSelection</c>; constraints are owned by script-source.schema.json.</summary>
     [JsonPropertyName("projectSelection")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

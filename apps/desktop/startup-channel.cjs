@@ -8,9 +8,11 @@ function connectStartup(config) {
   const listeners = new Set(), requests = new Map();
   let snapshot = { kind: 'stage', stage: 0, total: 12, elapsedMilliseconds: 0 };
   let sequence = 0, ended = false, failure, activated = false;
-  let resolveReady, rejectReady, resolveComplete, rejectComplete;
+  let resolveReady, rejectReady, resolveComplete, rejectComplete, resolvePresentable, rejectPresentable;
   const complete = new Promise((resolve, reject) => { resolveComplete = resolve; rejectComplete = reject; });
   complete.catch(() => {});
+  const presentable = new Promise((resolve, reject) => { resolvePresentable = resolve; rejectPresentable = reject; });
+  presentable.catch(() => {});
   const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
   ready.catch(() => {});
   const socket = net.createConnection('\\\\.\\pipe\\' + config.startupPipe);
@@ -21,7 +23,7 @@ function connectStartup(config) {
   }
   function fail(error) {
     if (ended) return;
-    ended = true; rejectReady(error); rejectComplete(error);
+    ended = true; rejectReady(error); rejectComplete(error); rejectPresentable(error);
     for (const request of requests.values()) request.reject(error);
     requests.clear();
     if (!failure) {
@@ -44,15 +46,18 @@ function connectStartup(config) {
           if (!Number.isInteger(value.action) || value.action < 0 || value.action > 3) throw new Error('desktop_menu_invalid');
           requests.get(value.id)?.resolve(value.action); requests.delete(value.id);
         } else if (value.kind === 'ready') resolveReady(value.config);
-        else if (value.kind === 'complete') resolveComplete();
+        else if (value.kind === 'present') resolvePresentable();
+        else if (value.kind === 'complete') { resolvePresentable(); resolveComplete(); }
         else if (value.kind === 'stage' || value.kind === 'failed' || value.kind === 'activate') {
           if (value.kind === 'stage' && (!Number.isInteger(value.stage) || value.stage < 0 || value.stage >= 12 || value.total !== 12))
             throw new Error('desktop_startup_stage_invalid');
           if (value.kind === 'stage' && (snapshot.kind === 'failed' || value.stage < snapshot.stage)) continue;
           if (value.kind === 'activate') activated = true;
-          if (value.kind === 'stage' && (snapshot.kind === 'failed' || value.stage < snapshot.stage)) continue;
-          if (value.kind === 'activate') activated = true;
-          if (value.kind === 'failed') { failure = value; rejectReady(new Error('desktop_startup_failed')); rejectComplete(new Error('desktop_startup_failed')); }
+          if (value.kind === 'failed') {
+            failure = value;
+            const error = new Error('desktop_startup_failed');
+            rejectReady(error); rejectComplete(error); rejectPresentable(error);
+          }
           if (value.kind !== 'activate') snapshot = value;
           for (const listener of listeners) listener(value);
         } else throw new Error('desktop_startup_message_invalid');
@@ -61,7 +66,7 @@ function connectStartup(config) {
     } catch { fail(new Error('desktop_startup_message_rejected')); socket.destroy(); }
   });
   return {
-    ready, complete, get activated() { return activated; }, get failed() { return snapshot.kind === 'failed'; },
+    ready, presentable, complete, get activated() { return activated; }, get failed() { return snapshot.kind === 'failed'; },
     get snapshot() { return snapshot; },
     subscribe(listener) { listeners.add(listener); listener(snapshot); return () => listeners.delete(listener); },
     menu(browser, busy, locale) {

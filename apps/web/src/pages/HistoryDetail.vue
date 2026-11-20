@@ -75,7 +75,8 @@ async function load(): Promise<void> {
       report.value = details[1].value;
       steps.value = details[1].value.steps.filter(step => !props.row.userId || step.userId === props.row.userId);
     }
-    for (const result of details) if (result.status === 'rejected') props.store.report(result.reason);
+    const failed = details.find(result => result.status === 'rejected');
+    if (failed) throw failed.reason;
     if (props.attemptId) {
       await nextTick();
       document.getElementById('history-attempt-' + props.attemptId)?.scrollIntoView({ block: 'nearest' });
@@ -120,10 +121,8 @@ onBeforeUnmount(() => owner?.abort());
           {{ historyTime(item.recordedAt) }} · {{ item.stepId }} · {{ item.phase }} · {{ historyReason(item.reasonCode) }} ({{ item.exceptionType }})
         </li>
       </ul>
-      <p v-if="error" role="alert">
-        {{ t(error) }}
-        <button @click="load">{{ t('重试') }}</button>
-      </p>
+      <nexus-toast v-if="visible && active && error" tone="danger" :message.prop="t(error)" />
+      <button v-if="error" type="button" @click="load">{{ t('重试') }}</button>
       <dl class="history-detail-metadata">
         <div>
           <dt>{{ t('结果') }}</dt>

@@ -73,11 +73,12 @@ onBeforeUnmount(() => observer?.disconnect());
         <dd>{{ historyReason((state.report.facts || facts).reasonCode) }}</dd>
       </div>
     </dl>
-    <p v-if="indexing" role="status">{{ t('历史索引正在补齐') }}</p>
-    <p v-for="kind in (['report', 'logs', 'images'] as const)" v-show="state[kind].error" :key="kind" role="alert">
-      {{ t(kind === 'report' ? '运行详情' : kind === 'logs' ? '脚本日志' : '运行截图') }}: {{ t(state[kind].error) }}
-      <button @click="load(kind)">{{ t('重试') }}</button>
-    </p>
+    <nexus-spinner v-if="indexing" :label="t('历史索引正在补齐')" />
+    <template v-for="kind in (['report', 'logs', 'images'] as const)" :key="kind">
+      <nexus-toast v-if="active && state[kind].error" tone="danger"
+        :message.prop="t(kind === 'report' ? '运行详情' : kind === 'logs' ? '脚本日志' : '运行截图') + ' · ' + t(state[kind].error)" />
+      <button v-if="state[kind].error" type="button" @click="load(kind)">{{ t('重试') }}</button>
+    </template>
     <HistoryInvocations v-if="hasInvocations" :store="store" :run-id="runId"
       :attempt-id="attemptId" :visible="active" :steps="state.report.steps" :step-names="stepNames"
       :logs="state.logs.items" :images="state.images.items" :logs-ready="state.logs.loaded" :images-ready="state.images.loaded" />

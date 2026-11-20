@@ -119,6 +119,10 @@ app.whenReady().then(async () => {
   await tray.start();
   startup.subscribe(value => {
     if (value.kind === 'activate') void tray.show().catch(() => {});
+    if (value.kind === 'failed' && starting && !overlay && window && !window.isDestroyed()) {
+      overlay = createStartupView(window, startup, config);
+      void overlay.loaded.catch(() => {});
+    }
   });
   if (startup.activated) await tray.show();
   ipcMain.handle('desktop.preparation', (event, value) => {
@@ -156,7 +160,8 @@ app.whenReady().then(async () => {
     await bridge.start();
     measure('session');
     if (window) {
-      await Promise.all([firstPage, startup.complete]);
+      await Promise.all([firstPage, startup.presentable]);
+      if (startup.failed) return;
       measure('interface');
       overlay?.dispose(); overlay = undefined;
       startup.presented('console');

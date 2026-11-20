@@ -3,6 +3,7 @@ import AttemptDetail from '../../apps/web/src/pages/AttemptDetail.vue';
 import { ControlClient } from '../../apps/web/src/control/client';
 import { createStore } from '../../apps/web/src/app/store';
 import type { AttemptFacts } from '../../apps/web/src/control/records';
+import type { UiElement } from '@nexuspipeline/extension-sdk';
 
 export async function historyIndexContract(fixture: HTMLElement, check: (value: unknown, name: string) => void): Promise<void> {
   const id = '10000000-0000-4000-8000-000000000001';
@@ -28,8 +29,9 @@ export async function historyIndexContract(fixture: HTMLElement, check: (value: 
     check(condition(), 'history index state reaches its visible result');
   };
   try {
-    await wait(() => !!mount.querySelector('[role="status"]'));
-    check(mount.textContent?.includes('历史索引正在补齐') && !mount.querySelector('.history-log-toggle'),
+    const indicator = () => mount.querySelector<UiElement<'nexus-spinner'>>('nexus-spinner');
+    await wait(() => !!indicator());
+    check(indicator()?.label === '历史索引正在补齐' && !mount.querySelector('.history-log-toggle'),
       'pending historical catalogs show indexing progress without claiming zero log lines');
     await wait(() => logs >= 2);
     check(reports === 1 && images === 1, 'index polling retries only the resource that is still pending');
@@ -38,6 +40,6 @@ export async function historyIndexContract(fixture: HTMLElement, check: (value: 
     check(reads === stoppedReads, 'hidden history stops index polling');
     pending = false; visible.value = true; await nextTick();
     await wait(() => !!mount.querySelector('.history-log-toggle'));
-    check(!mount.querySelector('[role="status"]'), 'available catalogs replace indexing progress with actual history');
+    check(!indicator(), 'available catalogs replace indexing progress with actual history');
   } finally { app.unmount(); mount.remove(); owner.dispose(); }
 }

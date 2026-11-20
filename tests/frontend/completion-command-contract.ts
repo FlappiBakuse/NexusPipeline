@@ -16,7 +16,7 @@ export async function completionCommands(): Promise<string[]> {
     return new Response(JSON.stringify(response), { headers: { 'content-type': 'application/json' } });
   });
   const store = { client, drafts: new Map(), state: { capabilities: { instanceId: 'a' } },
-    can: () => true, report: () => {} } satisfies CompletionContext;
+    can: () => true } satisfies CompletionContext;
   const first = new CompletionCommands(store);
   requireValue(!await first.cancel('completion-a') && first.state.pending === 'completion-a',
     'a malformed successful response retains the original completion identity');

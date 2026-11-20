@@ -69,7 +69,7 @@ internal sealed class MaintenanceStartupJob : IDisposable
             }
             catch (Exception failure)
             {
-                if (_root.StopSuspended() is { } stopFailure)
+                if (_root.Stop() is { } stopFailure)
                     throw new AggregateException("maintenance_startup_stop_pending", failure, stopFailure);
                 throw;
             }

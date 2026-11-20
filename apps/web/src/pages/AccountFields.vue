@@ -7,7 +7,6 @@ import type { AutomationStore } from '../app/store-ports';
 import type { AutomationBundle } from '../control/wire.generated';
 import BindingPolicyFields from './BindingPolicyFields.vue';
 import BindingTaskPlan from './BindingTaskPlan.vue';
-import ExtensionOutlet from '../extensions/ExtensionOutlet.vue';
 import { t } from '../app/locale';
 
 type User = AutomationBundle['users'][number];
@@ -102,7 +101,6 @@ function update(value: Binding): void {
         <header>
           <div>
             <h3>{{ t('已绑定脚本实例') }}</h3>
-            <small>{{ t('每个绑定独立保存运行、通知和高级选项设置。') }}</small>
           </div>
           <button
             v-if="!expanded"
@@ -130,7 +128,6 @@ function update(value: Binding): void {
         <section v-if="choosing" class="script-picker">
           <header>
             <strong>{{ t('选择要绑定的脚本实例') }}</strong>
-            <small>{{ t('可多选') }}</small>
           </header>
           <div class="choice-grid">
             <button
@@ -144,7 +141,7 @@ function update(value: Binding): void {
               {{ script.name }}
             </button>
           </div>
-          <p v-if="!available.length">{{ t('暂无可绑定的脚本实例') }}</p>
+          <nexus-empty-state v-if="!available.length" :title="t('暂无可绑定的脚本实例')" />
           <div class="picker-actions">
             <button type="button" @click="choosing = false">{{ t('取消') }}</button>
             <button type="button" class="primary" :disabled="!choices.length" @click="add">
@@ -162,7 +159,7 @@ function update(value: Binding): void {
             v-for="binding in bindings"
             :key="binding.id"
             :data-item-id="binding.id" :data-draft-item="binding.id"
-            :class="['binding', { expanded: expanded === binding.id }]"
+            :class="['binding', { expanded: expanded === binding.id }]" data-surface="collapsible"
           >
             <div class="binding-heading">
               <nexus-drag-handle
@@ -224,13 +221,6 @@ function update(value: Binding): void {
                 :store="store"
                 :model-value="binding"
                 @update:model-value="update($event as Binding)"
-              />
-              <ExtensionOutlet
-                target="automation.binding.editor"
-                :store="store"
-                :visible="visible && expanded === binding.id"
-                :entity-id="binding.id"
-                :extension-ids="scripts.get(binding.scriptId)?.extensionId ? [scripts.get(binding.scriptId)!.extensionId!] : []"
               />
             </div></div></div>
           </article>

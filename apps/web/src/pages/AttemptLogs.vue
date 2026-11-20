@@ -100,10 +100,8 @@ onBeforeUnmount(() => owner?.abort());
 
 <template>
   <section class="history-log-disclosure" :aria-busy="busy">
-    <p v-if="error" role="alert">
-      {{ t(error) }}
-      <button @click="load">{{ t('重试') }}</button>
-    </p>
+    <nexus-toast v-if="visible && expanded && error" tone="danger" :message.prop="t(error)" />
+    <button v-if="error" type="button" @click="load">{{ t('重试') }}</button>
     <button v-if="!expanded" class="history-log-toggle" :aria-expanded="false" @click="expanded = true">
       <strong>{{ title }}</strong>
       <span>{{ t('点击展开') }}</span>

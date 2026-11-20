@@ -1,5 +1,19 @@
 using System.Text;
 using System.Text.Json;
+
+if (args.Length == 0 && File.Exists("nexus-editor-fixture"))
+{
+    File.WriteAllText("nexus-editor-started", Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    while (!File.Exists("nexus-editor-exit")) await Task.Delay(20);
+    return 0;
+}
+if (args is ["startOneDragon", var profile] && File.Exists("nexus-editor-fixture"))
+{
+    File.WriteAllText("nexus-runtime-started", profile);
+    var header = $"[01:00:00.000] [INF] [fixture:S1:P{Environment.ProcessId}:T1] BetterGenshinImpact.ViewModel.Pages.OneDragonFlowViewModel";
+    File.AppendAllText(Path.Combine("log", "run.log"), $"{header}\n一条龙任务执行: 1/1\n{header}\n一条龙和配置组任务结束\n");
+    return 0;
+}
 if (args is ["initial-extensions-recovery", .. var initialExtensionArgs]) return await InitialExtensionCrash.RunAsync(initialExtensionArgs);
 if (args is ["database-transaction", .. var databaseArgs]) return DatabaseCrashFixture.Run(databaseArgs);
 if (await FixtureExtensions.RunAsync(args) is { } pluginExit) return pluginExit;

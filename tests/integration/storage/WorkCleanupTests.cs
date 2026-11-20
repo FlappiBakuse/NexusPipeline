@@ -16,6 +16,45 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class WorkCleanupTests(ITestOutputHelper output)
 {
+    [Fact(DisplayName = "Owned Extension Work Cleanup Keeps Unrelated Extensions Available While Its Journal Is Isolated")]
+    public async Task KeepsUnrelatedExtensionsAvailable()
+    {
+        await using var fixture = await WorkCleanupFixture.CreateAsync();
+        var owner = fixture.Original.Package.Catalog;
+        Task<ResourceLeaseAdmission>? relatedRead = null;
+        var observer = new ObserveRemoval(journal =>
+        {
+            var recovery = owner.Index.Current;
+            Assert.True(recovery.IsReady);
+            Assert.Contains(recovery.Isolations, item => item.JournalId == journal &&
+                item.ResourceKey == "extension:fixture-plugin" && item.Mode == ResourceClaimMode.Mutation);
+            using var unrelated = owner.Resources.TryAcquire(Guid.NewGuid(),
+                [new("extension:unrelated", ResourceClaimMode.Reference)]).Lease;
+            Assert.NotNull(unrelated);
+            relatedRead = owner.Resources.AcquireAsync(Guid.NewGuid(),
+                [new("extension:fixture-plugin", ResourceClaimMode.Reference)], default, owner.Lease.PublishExecution).AsTask();
+            Assert.False(relatedRead.IsCompleted);
+        });
+        Assert.True(await fixture.Service().RunNextPageAsync(fixture.Producer.Plan.JournalId, default, observer));
+        Assert.True(observer.ReachedRemoval);
+        Assert.True(owner.Index.Current.IsReady);
+        Assert.Empty(owner.Index.Current.Isolations);
+        using var related = (await relatedRead!.WaitAsync(TimeSpan.FromSeconds(5))).Lease;
+        Assert.NotNull(related);
+    }
+
+    private sealed class ObserveRemoval(Action<Guid> inspect) : ICleanupPersistenceObserver
+    {
+        public bool ReachedRemoval { get; private set; }
+
+        public void Reached(CleanupPersistencePoint point, Guid journal, long revision, JournalPhase phase)
+        {
+            if (point != CleanupPersistencePoint.FileRemoved || ReachedRemoval) return;
+            ReachedRemoval = true;
+            inspect(journal);
+        }
+    }
+
     [Fact(DisplayName = "A Busy Final Cleanup Projection Resumes Under The Same Owner Without Repeating Physical Deletion")]
     public async Task RetriesBusyProjection()
     {

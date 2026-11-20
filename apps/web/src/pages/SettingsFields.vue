@@ -46,7 +46,7 @@ function updates(value: Partial<Values['updates']>): void {
 <template>
   <div class="settings-fields">
     <template v-if="category === 'service'">
-      <div class="switches">
+      <nexus-switch-list>
         <nexus-switch-setting
           :title="t('开机自启')"
           :description="t('注册到当前用户启动项')"
@@ -65,7 +65,7 @@ function updates(value: Partial<Values['updates']>): void {
           :disabled.prop="disabled"
           @nexus-change="desktop({ openOnStartup: $event.detail.value })"
         />
-      </div>
+      </nexus-switch-list>
       <div class="columns three">
         <label>
           {{ t('历史保留天数') }}
@@ -78,7 +78,7 @@ function updates(value: Partial<Values['updates']>): void {
           />
         </label>
         <label v-help="t('填写 0 或 1024–65535；0 由系统分配端口。端口修改在重启后生效，日志级别即时生效。')">
-          {{ t('Web 端口') }}
+          <span class="field-help-caption"><span>{{ t('Web 端口') }}</span></span>
           <FormNumber
             :disabled="disabled"
             :model-value="value.service.webPort"
@@ -116,7 +116,7 @@ function updates(value: Partial<Values['updates']>): void {
           </FormSelect>
         </label>
         <label v-help="t('控制 CLI、托盘、通知和后台日志；界面语言单独设置。')">
-          {{ t('宿主语言') }}
+          <span class="field-help-caption"><span>{{ t('宿主语言') }}</span></span>
           <FormSelect
             :disabled="disabled"
             :model-value="value.locale"
@@ -129,19 +129,17 @@ function updates(value: Partial<Values['updates']>): void {
       </div>
     </template>
     <template v-else-if="category === 'remote'">
-      <div class="switches">
+      <nexus-switch-list>
         <nexus-switch-setting
           :title="t('远程访问')"
-          v-help="t('其他设备请使用本机局域网 IP 与实际 Web 端口，并提供访问令牌。localhost 与 0.0.0.0 用于本机地址或监听配置。')"
-          :description="t('绑定所有网卡，API 需要访问令牌；本地 127.0.0.1 请求豁免')"
+          :description="t('绑定所有网卡，API 需要访问令牌；本地 127.0.0.1 请求豁免') + '\n' + t('其他设备请使用本机局域网 IP 与实际 Web 端口，并提供访问令牌。localhost 与 0.0.0.0 用于本机地址或监听配置。')"
           :value.prop="value.service.allowRemoteAccess"
           :disabled.prop="disabled"
           @nexus-change="service({ allowRemoteAccess: $event.detail.value })"
         />
-      </div>
+      </nexus-switch-list>
       <slot name="token" />
-      <div class="divider" />
-      <div class="switches">
+      <nexus-switch-list>
         <nexus-switch-setting
           :title="t('启用 MCP 服务')"
           :description="t('重启后监听本机 MCP 端点')"
@@ -156,9 +154,9 @@ function updates(value: Partial<Values['updates']>): void {
           :disabled.prop="disabled"
           @nexus-change="service({ mcpWriteEnabled: $event.detail.value })"
         />
-      </div>
+      </nexus-switch-list>
       <label v-help="t('MCP 使用本机独立端口；监听与工具权限变更需重启服务，端口冲突会使 MCP 不可用。')">
-        {{ t('MCP 端口') }}
+        <span class="field-help-caption"><span>{{ t('MCP 端口') }}</span></span>
         <FormNumber
           :disabled="disabled"
           :model-value="value.service.mcpPort"
@@ -170,7 +168,7 @@ function updates(value: Partial<Values['updates']>): void {
     </template>
     <template v-else-if="category === 'proxy'">
       <label v-help="t('下载、更新和宿主 HTTP 请求使用代理，回环地址直连；SMTP 不使用此 HTTP 代理。')">
-        {{ t('代理模式') }}
+        <span class="field-help-caption"><span>{{ t('代理模式') }}</span></span>
         <FormSelect
           :disabled="disabled"
           :model-value="proxyValue.mode"
@@ -183,7 +181,7 @@ function updates(value: Partial<Values['updates']>): void {
       </label>
       <template v-if="proxyValue.mode === 'http'">
         <label v-help="t('代理地址需包含 http:// 或 https://。')">
-          {{ t('代理地址') }}
+          <span class="field-help-caption"><span>{{ t('代理地址') }}</span></span>
           <input
             :disabled="disabled"
             :value="proxyValue.url || ''"
@@ -208,7 +206,7 @@ function updates(value: Partial<Values['updates']>): void {
         </div>
       </template>
     </template>
-    <div v-else-if="category === 'advanced'" class="switches">
+    <nexus-switch-list v-else-if="category === 'advanced'">
       <nexus-switch-setting
         :title="t('逐次配置修复')"
         :description="t('允许在每次运行前检查并修复配置；关闭时保留原配置。')"
@@ -216,9 +214,9 @@ function updates(value: Partial<Values['updates']>): void {
         :disabled.prop="disabled"
         @nexus-change="emit('patch', { allowConfigRepair: $event.detail.value })"
       />
-    </div>
+    </nexus-switch-list>
     <template v-else-if="category === 'updates'">
-      <div class="switches">
+      <nexus-switch-list>
         <nexus-switch-setting
           :title="t('定期检查更新')"
           :description="t('服务启动约 5 秒后首次检查，此后每次自动检查完成后间隔 12 小时')"
@@ -240,7 +238,7 @@ function updates(value: Partial<Values['updates']>): void {
           :disabled.prop="disabled"
           @nexus-change="updates({ pluginAutoUpdateEnabled: $event.detail.value })"
         />
-      </div>
+      </nexus-switch-list>
       <div class="columns">
         <label>
           {{ t('更新渠道') }}
@@ -254,7 +252,7 @@ function updates(value: Partial<Values['updates']>): void {
           </FormSelect>
         </label>
         <label v-help="t('留空时使用默认 GitHub 更新源。')">
-          {{ t('镜像源地址') }}
+          <span class="field-help-caption"><span>{{ t('镜像源地址') }}</span></span>
           <input
             :disabled="disabled"
             :value="value.updates.sourceUrl || ''"

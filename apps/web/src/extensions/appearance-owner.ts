@@ -69,6 +69,11 @@ function blend(color: string, opacity: number): string {
   return result;
 }
 
+function surfaceColor(tint: string | undefined, token: string): string {
+  const base = `var(${token})`;
+  return tint ? `color-mix(in srgb, ${tint} 75%, ${base})` : base;
+}
+
 function render(): void {
   restore();
   if (!current) return;
@@ -80,15 +85,14 @@ function render(): void {
   if (current.accentStrong) style.setProperty('--accent-strong', current.accentStrong);
   const cardColor = document.body.dataset.theme === 'light' ? current.cardLight : current.cardDark;
   const opacity = current.cardOpacity ?? 1;
-  if (cardColor || opacity < 1)
-    style.setProperty('--panel', blend(cardColor || 'var(--panel-opaque)', opacity));
   if (cardColor || opacity < 1) {
-    style.setProperty('--panel-soft', blend(cardColor || 'var(--panel-soft-opaque)', opacity));
-    style.setProperty('--panel-hover', blend(cardColor || 'var(--panel-hover-opaque)', opacity));
     const secondaryOpacity = current.secondaryTransparent ? opacity : 1;
-    style.setProperty('--_nexus-secondary-panel', blend(cardColor || 'var(--panel-opaque)', secondaryOpacity));
-    style.setProperty('--_nexus-secondary-soft', blend(cardColor || 'var(--panel-soft-opaque)', secondaryOpacity));
-    style.setProperty('--_nexus-secondary-hover', blend(cardColor || 'var(--panel-hover-opaque)', secondaryOpacity));
+    for (const [token, secondary] of [['--panel', '--_nexus-secondary-panel'],
+      ['--panel-soft', '--_nexus-secondary-soft'], ['--panel-hover', '--_nexus-secondary-hover']]) {
+      const color = surfaceColor(cardColor, `${token}-opaque`);
+      style.setProperty(token, blend(color, opacity));
+      style.setProperty(secondary, blend(color, secondaryOpacity));
+    }
   }
 }
 

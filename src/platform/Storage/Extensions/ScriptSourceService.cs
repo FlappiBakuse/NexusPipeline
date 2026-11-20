@@ -28,11 +28,18 @@ internal sealed class ScriptSourceService(RuntimeInstance instance, StateDatabas
     }
 
     internal ValueTask<ScriptSource> DiscoverAsync(Guid operationId, string extensionId, long revision,
-        string rootPath, Action requireCaller, CancellationToken cancellation) =>
-        UseAsync(operationId, extensionId, revision, rootPath, requireCaller, cancellation, (result, _) => result);
+        string rootPath, Action requireCaller, CancellationToken cancellation, bool edit = false) =>
+        UseAsync(operationId, extensionId, revision, rootPath, requireCaller, cancellation, (result, _) => result, edit);
+
+    internal (long Revision, bool ExclusiveInUserSession) ReadEditorPolicy(string extensionId)
+    {
+        using var installed = new ProjectCompilerInstallation(instance, database, contracts, roots, activator, extensionId);
+        return (installed.Metadata.Revision, installed.Manifest.Specialized?.ExclusiveProgramInUserSession == true);
+    }
 
     internal async ValueTask<T> UseAsync<T>(Guid operationId, string extensionId, long revision,
-        string rootPath, Action requireCaller, CancellationToken cancellation, Func<ScriptSource, Action, T> consume)
+        string rootPath, Action requireCaller, CancellationToken cancellation, Func<ScriptSource, Action, T> consume,
+        bool edit = false, ResourceOperationLease? owner = null)
     {
         requireCaller(); lease.VerifyHeld(instance); cancellation.ThrowIfCancellationRequested();
         using var use = resources.TryAcquire(operationId, [new("extension:" + extensionId, ResourceClaimMode.Reference),
@@ -46,15 +53,16 @@ internal sealed class ScriptSourceService(RuntimeInstance instance, StateDatabas
             if (!use.IsActive) throw new IOException("script_source_owner_ended");
             installed.RequireActive();
         }
-        using var source = new ScriptSourceDirectory(rootPath, resources, Current, cancellation);
+        using var source = new ScriptSourceDirectory(rootPath, resources, Current, cancellation, owner);
         var result = await activator.RequirePublishedRuntime(extensionId).InvokeAdapterAsync(use, Current,
             (adapter, current) =>
             {
                 void Check() { Current(); current(); }
                 var response = adapter.DiscoverSource(operationId, extensionId,
-                    path => { Check(); return source.List(path); }, path => { Check(); return source.Read(path); }, cancellation);
+                    path => { Check(); return source.List(path); }, path => { Check(); return source.Read(path); }, cancellation, edit);
                 Validate(response, source, installed.Manifest.Specialized?.Compiler is not null);
-                if (response.Candidates!.Any(candidate => candidate.ExclusiveProgram == true && installed.Manifest.Specialized?.ExclusiveProgram != true))
+                if ((response.Editor?.ExclusiveProgram == true || response.Candidates!.Any(candidate => candidate.ExclusiveProgram == true)) &&
+                    installed.Manifest.Specialized?.ExclusiveProgram != true)
                     throw Invalid();
                 source.RequireCurrent(); installed.RequireCurrent(); Check();
                 return ValueTask.FromResult(consume(response, () => { source.RequireCurrent(); installed.RequireCurrent(); Check(); }));
@@ -64,6 +72,14 @@ internal sealed class ScriptSourceService(RuntimeInstance instance, StateDatabas
 
     private static void Validate(ScriptSource response, ScriptSourceDirectory source, bool compiled)
     {
+        if (response.Editor is { } editor)
+        {
+            source.RequireFile(editor.Executable);
+            foreach (var scope in editor.Scopes) PhysicalPathPolicy.ValidateRelativePath(scope);
+            if (response.Purpose != "edit" || compiled || editor.Arguments.Any(argument => argument.Contains('\0')) ||
+                editor.Scopes.Any(scope => Within(scope, editor.Executable) ||
+                    editor.Scopes.Any(other => scope != other && Within(scope, other)))) throw Invalid();
+        }
         var rows = response.Candidates!;
         if (rows.Select(row => row.CandidateId).Distinct(StringComparer.Ordinal).Count() != rows.Count) throw Invalid();
         foreach (var row in rows)
@@ -74,9 +90,22 @@ internal sealed class ScriptSourceService(RuntimeInstance instance, StateDatabas
                 row.Resources.Select(item => item.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count() !=
                     row.Resources.Count || row.ProjectSelection is not null && !compiled) throw Invalid();
             source.RequireFile(row.Executable);
-            foreach (var resource in row.Resources) source.RequireFile(resource.Path);
+            foreach (var resource in row.Resources)
+            {
+                source.RequireFile(resource.Path);
+                if (response.Editor is { } bound && !bound.Scopes.Any(scope => Within(scope, resource.Path))) throw Invalid();
+            }
+            if (row.Instance is not null && (response.Purpose != "edit" || row.Resources.Count != 1)) throw Invalid();
+            if (row.IsolationPath is { } isolation)
+            {
+                PhysicalPathPolicy.ValidateRelativePath(isolation);
+                if (response.Editor is not { } bound || !bound.Scopes.Any(scope => Within(scope, isolation)) ||
+                    !row.Resources.Any(resource => Within(isolation, resource.Path))) throw Invalid();
+            }
             foreach (var path in row.LogPaths) PhysicalPathPolicy.ValidateRelativePath(path.Replace('*', 'x').Replace('?', 'x'));
         }
     }
+    private static bool Within(string parent, string path) => parent.Equals(path, StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWith(parent + "/", StringComparison.OrdinalIgnoreCase);
     private static IOException Invalid() => new("script_source_candidate_invalid");
 }

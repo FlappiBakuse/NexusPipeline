@@ -1,13 +1,15 @@
 import { createApp, h, nextTick, ref } from 'vue';
 import ScriptTypes from '../../apps/web/src/pages/ScriptTypes.vue';
 import { ControlClient } from '../../apps/web/src/control/client';
+import type { ExtensionState } from '../../apps/web/src/control/extensions';
 import { createStore } from '../../apps/web/src/app/store';
 import { AutomationEditor } from '../../apps/web/src/pages/automation-editor';
 import { automationSession } from '../../apps/web/src/pages/automation-session';
 
 export async function scriptCreationContract(fixture: HTMLElement, check: (value: unknown, name: string) => void): Promise<void> {
   let respond: (value: Response) => void = () => {};
-  const send: typeof fetch = () => new Promise(resolve => { respond = resolve; });
+  let reads = 0;
+  const send: typeof fetch = () => new Promise(resolve => { reads++; respond = resolve; });
   const store = createStore(new ControlClient(location.origin, send));
   store.state.capabilities = { instanceId: 'script-fixture', hostVersion: '0.18.0', capabilities: ['extensions.read', 'automation.declare'] };
   store.state.automation = { catalogRevision: 1, roots: [], revisions: [], bundle: {
@@ -15,7 +17,9 @@ export async function scriptCreationContract(fixture: HTMLElement, check: (value
     roots: [], scripts: [], users: [], bindings: [], queues: [], schedules: [], attachments: []
   } } as never;
   const visible = ref(false), mount = document.createElement('section'); fixture.append(mount);
-  const app = createApp({ render: () => h(ScriptTypes, { store, visible: visible.value, active: true }) });
+  const installed = ref<readonly ExtensionState[]>();
+  const app = createApp({ render: () => h(ScriptTypes, { store, visible: visible.value, active: true,
+    installed: installed.value, 'onUpdate:installed': value => { installed.value = value; } }) });
   app.mount(mount);
   const hasTypes = (...labels: string[]) => JSON.stringify([...mount.querySelectorAll('.type-choice strong')]
     .map(item => item.textContent?.trim()).sort()) === JSON.stringify(labels.sort());
@@ -29,9 +33,14 @@ export async function scriptCreationContract(fixture: HTMLElement, check: (value
       await new Promise(resolve => setTimeout(resolve, 10));
     check(hasTypes('通用脚本', 'alpha 专项', 'beta 专项'), 'all types preload while the picker is closed');
     visible.value = true; await nextTick();
-    check(hasTypes('通用脚本', 'alpha 专项', 'beta 专项'), 'opening shows every cached card before a delayed refresh finishes');
+    check(hasTypes('通用脚本', 'alpha 专项', 'beta 专项') && installed.value?.length === 2,
+      'opening shows cached cards and shares the installed metadata with the editor owner');
     visible.value = false; await nextTick(); visible.value = true; await nextTick();
-    check(hasTypes('通用脚本', 'alpha 专项', 'beta 专项'), 'reopening retains the complete type list');
+    check(hasTypes('通用脚本', 'alpha 专项', 'beta 专项') && reads === 1,
+      'closing and reopening without a generation change do not query extensions again');
+    store.state.events = { extensionGeneration: 2 };
+    await nextTick();
+    check(reads === 2, 'an updated extension generation refreshes the type list');
     respond(Response.json({ ...catalog, items: [catalog.items[1]] }));
     for (let i = 0; i < 50 && mount.querySelectorAll('.type-choice').length !== 2; i++)
       await new Promise(resolve => setTimeout(resolve, 10));

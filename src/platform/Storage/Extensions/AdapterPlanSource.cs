@@ -16,5 +16,6 @@ internal sealed record AdapterPlanSource(IReadOnlyList<ConfigurationRevision> Co
 {
     internal ImmutableArray<ExecutionPlanExtensionLocksItem> CompilerLocks { get; init; } = [];
     internal bool ExclusiveProgram { get; init; }
+    internal bool ExclusiveProgramInUserSession { get; init; }
     internal ExecutionProviderUse? ExecutionProvider { get; init; }
 }

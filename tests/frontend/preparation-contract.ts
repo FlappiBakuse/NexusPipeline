@@ -170,7 +170,7 @@ async function summaryPreparation(check: (value: unknown, name: string) => void)
   store.can = capability => capability === 'records.read';
   const completed = new Set<string>();
   try {
-    await preparePages(store, new AbortController().signal, () => {}, () => {}, true, completed);
+    await preparePages(store, new AbortController().signal, () => {}, true, completed);
     check(paths.filter(path => path.includes('/summary/days?')).length === 1 &&
       paths.every(path => path.includes('/summary/days?') || path.includes('/summary/users?')),
       'history foreground preparation requests its own date range without the dashboard summary');
@@ -180,7 +180,7 @@ async function summaryPreparation(check: (value: unknown, name: string) => void)
       await client.read(users, objectValue);
       check(paths.length === before, 'the expanded date consumes its prepared user page');
     }
-    await preparePages(store, new AbortController().signal, () => {}, () => {}, false, completed);
+    await preparePages(store, new AbortController().signal, () => {}, false, completed);
     check(paths.filter(path => path.includes('/summary/days?')).length === 2,
       'background preparation still warms the visible dashboard summary');
   } finally { store.dispose(); }
@@ -199,7 +199,7 @@ async function routePreparation(check: (value: unknown, name: string) => void): 
       pinnedSettings: [], collapsedSettings: [] }, operationId: '' };
     store.can = capability => capability === 'records.read';
     try {
-      await preparePages(store, new AbortController().signal, () => {}, () => {}, true);
+      await preparePages(store, new AbortController().signal, () => {}, true);
       check(paths.includes('/control/v1/records/summary/days') === expected,
         'dashboard summary preparation follows the actual card layout');
     } finally { store.dispose(); }
@@ -214,11 +214,11 @@ async function routePreparation(check: (value: unknown, name: string) => void): 
     store.state.page = page;
     store.can = capability => capability === 'extensions.read';
     try {
-      await preparePages(store, new AbortController().signal, () => {}, () => {}, true, completed);
+      await preparePages(store, new AbortController().signal, () => {}, true, completed);
       check(paths.includes('/control/v1/extensions/catalog/stable') === (page === 'plugins'),
         'only the plugin page prepares its catalog in the foreground');
       await client.read('/control/v1/extensions', objectValue);
-      await preparePages(store, new AbortController().signal, () => {}, () => {}, false, completed);
+      await preparePages(store, new AbortController().signal, () => {}, false, completed);
       check(paths.filter(path => path === '/control/v1/extensions/catalog/stable').length === 1,
         'background preparation retains one plugin catalog after the installed list is consumed');
     } finally { store.dispose(); clearExtensionIcons(); }
@@ -233,20 +233,19 @@ async function preparationCancellation(check: (value: unknown, name: string) => 
       init!.signal!.addEventListener('abort', () => { transportAborted = true; reject(init!.signal!.reason); }, { once: true });
     });
   });
-  const store = createStore(client), controller = new AbortController(), errors: unknown[] = [];
+  const store = createStore(client), controller = new AbortController();
   store.state.page = 'dashboard';
   store.state.interface = { revision: 0, values: { theme: 'dark', locale: 'zh-CN', dashboardCards: [],
     pinnedSettings: [], collapsedSettings: [] }, operationId: '' };
   try {
     store.can = () => false;
-    await preparePages(store, controller.signal, () => {}, error => errors.push(error), true);
+    await preparePages(store, controller.signal, () => {}, true);
     check(requests === 0, 'page preparation does not read data without its capability');
     store.can = capability => capability === 'records.read';
-    const pending = preparePages(store, controller.signal, () => {}, error => errors.push(error), true)
+    const pending = preparePages(store, controller.signal, () => {}, true)
       .then(() => false, error => error === controller.signal.reason);
     controller.abort();
-    check(await pending && transportAborted && !errors.length,
-      'cancelling foreground preparation aborts its transport without reporting a failure');
+    check(await pending && transportAborted, 'cancelling foreground preparation aborts its transport');
   } finally { controller.abort(); store.dispose(); }
 }
 

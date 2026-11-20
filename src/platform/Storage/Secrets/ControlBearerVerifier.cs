@@ -333,7 +333,7 @@ public sealed class ControlBearerVerifier : IDisposable
 
     internal static bool ValidToken(ReadOnlySpan<char> value)
     {
-        if (value.Length is < 32 or > 256) return false;
+        if (value.Length is < 4 or > 256) return false;
         foreach (var character in value)
             if (!(character is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= '0' and <= '9' or '-' or '_')) return false;
         return true;

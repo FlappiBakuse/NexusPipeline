@@ -8,7 +8,7 @@ namespace NexusPipeline.WindowsTests;
 
 public sealed class ControlBearerTests
 {
-    private const string First = "control_Bearer_First_Actual_Dpapi_032";
+    private const string First = "T-9_";
     private const string Second = "control_Bearer_Second_Actual_Dpapi_032";
 
     [Fact(DisplayName = "Actual Host Bearer Ciphertext Verifies Only Its Exact Current Revision And Cannot Be Read Through The Generic Port")]

@@ -177,11 +177,9 @@ onBeforeUnmount(() => {
 
 <template>
   <nexus-scroll-area class="history-index-pane" :label="t('历史日期')">
-    <p v-if="loading && !days.length" role="status">{{ t('加载中') }}</p>
-    <div v-else-if="error" role="alert">
-      <p>{{ t(error) }}</p>
-      <button @click="emit('retry')">{{ t('重试') }}</button>
-    </div>
+    <nexus-toast v-if="error" tone="danger" :message.prop="t(error)" />
+    <nexus-spinner v-if="loading && !days.length" :label="t('加载中')" />
+    <button v-else-if="error" type="button" @click="emit('retry')">{{ t('重试') }}</button>
     <nexus-empty-state
       v-else-if="!days.length"
       :title="t('该时间段暂无记录')"
@@ -206,13 +204,10 @@ onBeforeUnmount(() => {
         />
       </button>
       <div v-if="expanded.has(String(item.date))" class="date-users">
-        <p v-if="windows.get(String(item.date))?.error" role="alert">
-          {{ windows.get(String(item.date))?.error }}
-          <button @click="load(String(item.date))">{{ t('重试') }}</button>
-        </p>
-        <p v-else-if="!windows.has(String(item.date)) || windows.get(String(item.date))?.busy" role="status">
-          {{ t('加载运行用户…') }}
-        </p>
+        <nexus-toast v-if="windows.get(String(item.date))?.error" tone="danger"
+          :message.prop="t(windows.get(String(item.date))?.error || '')" />
+        <button v-if="windows.get(String(item.date))?.error" type="button" @click="load(String(item.date))">{{ t('重试') }}</button>
+        <nexus-spinner v-else-if="!windows.has(String(item.date)) || windows.get(String(item.date))?.busy" :label="t('加载运行用户…')" />
         <button
           v-for="user in windows.get(String(item.date))?.items || []"
           :key="String(user.userId)"

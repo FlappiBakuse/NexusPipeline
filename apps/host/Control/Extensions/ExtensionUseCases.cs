@@ -9,7 +9,7 @@ namespace NexusPipeline.Host.Control.Extensions;
 
 [SupportedOSPlatform("windows")]
 internal sealed class ExtensionUseCases(IExtensionPackages packages, NexusPipeline.Platform.Storage.Extensions.ExtensionRuntimeLifecycle runtime, IExtensionOperationQueries operations,
-    CancellationToken hostStopping)
+    CancellationToken hostStopping, Func<bool> initialExtensionsPending)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     { PropertyNameCaseInsensitive = false, UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
@@ -17,7 +17,7 @@ internal sealed class ExtensionUseCases(IExtensionPackages packages, NexusPipeli
     internal async Task<object> ReadAsync(AuthenticatedControlRequest request)
     {
         request.Require(ControlCapability.ExtensionsRead);
-        await runtime.ReconcileFilesAsync(hostStopping);
+        if (!initialExtensionsPending()) await runtime.ReconcileFilesAsync(hostStopping);
         request.Require(ControlCapability.ExtensionsRead);
         return new { packages.HasReleaseTrust, items = runtime.ReadStates() };
     }

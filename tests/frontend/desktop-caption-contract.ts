@@ -35,6 +35,8 @@ export function desktopCaptionContract(fixture: HTMLElement, check: (value: unkn
     check(caption.element.getBoundingClientRect().height > 0
       && ['Minimize', 'Maximize', 'Close'].every(label => buttons.some(button => button.getAttribute('aria-label') === label)),
       'the visible desktop caption exposes named minimize, maximize and close actions');
+    check(buttons.every(button => !button.hasAttribute('title') && !button.querySelector('nexus-tooltip')),
+      'familiar window actions retain accessible names without delayed bubbles');
     buttons[0]!.click();
     check(actions.length === 0 && buttons.every(button => button.disabled),
       'caption actions stay unavailable until the bound native session is ready');

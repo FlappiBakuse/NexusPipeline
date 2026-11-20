@@ -15,6 +15,7 @@ const emit = defineEmits<{ 'update:modelValue': [value: Script] }>();
 const rootId = ref(props.modelValue.rootId), loading = ref(false), options = ref<Option[]>([]), roots = ref<Root[]>([]), diagnostics = ref<string[]>([]);
 const english = computed(() => locale.value === 'en-US');
 const text = (zh: string, en: string): string => english.value ? en : zh;
+const stored = computed(() => props.store.state.automation?.bundle.scripts.some(script => script.id === props.modelValue.id));
 let ticket = 0;
 watch(() => props.modelValue.id, () => { rootId.value = props.modelValue.rootId; clear(); });
 watch(rootId, clear);
@@ -28,6 +29,7 @@ async function discover(): Promise<void> {
     expectedCatalogRevision: revision, rootIds: [rootId.value] };
   if (!matchesSchema(body, schemaAt('control-emulator-discover.schema.json'))) throw new Error('emulator_request_invalid');
   loading.value = true;
+  diagnostics.value = [];
   try {
     const response = await props.store.client.query('/control/v1/automation/emulators/discover', body, objectValue);
     if (ticket !== current || props.modelValue.id !== script || props.store.state.capabilities?.instanceId !== identity ||
@@ -75,10 +77,10 @@ function select(value: string): void {
       <FormSelect
         data-draft-field="EmulatorFields/rootId" :value="rootId" @change="rootId = ($event.target as HTMLSelectElement).value"><option v-for="root in store.state.automation?.bundle.roots" :key="root.id" :value="root.id">{{ root.name }}</option></FormSelect>
     </label>
-    <button type="button" :disabled="loading || !store.state.automation?.bundle.scripts.some(script => script.id === modelValue.id)" @click="discover">
+    <button type="button" :disabled="loading || !stored" @click="discover">
       {{ text('发现模拟器实例', 'Discover emulator instances') }}
     </button>
-    <p v-if="!store.state.automation?.bundle.scripts.some(script => script.id === modelValue.id)">{{ text('请先保存脚本，再发现实例；也可填写手动 ADB 路径。', 'Save the script before discovery, or enter a manual ADB path.') }}</p>
+    <p v-if="!stored">{{ text('请先保存脚本，再发现实例；也可填写手动 ADB 路径。', 'Save the script before discovery, or enter a manual ADB path.') }}</p>
     <label>{{ text('实例与 ADB 地址', 'Instance and ADB endpoint') }}
       <FormSelect
         data-draft-field="EmulatorFields/''" :value="''" @change="select(($event.target as HTMLSelectElement).value)">
@@ -87,6 +89,7 @@ function select(value: string): void {
       </FormSelect>
     </label>
     <p v-if="modelValue.target?.android?.emulator">{{ modelValue.target.android.emulator.vendor }} · {{ modelValue.target.android.endpoint }}</p>
-    <p v-for="(message, index) in diagnostics" :key="index" role="status">{{ message === 'emulator_no_bindable_instances' ? text('未发现可绑定实例。', 'No bindable instances found.') : message }}</p>
+    <nexus-toast v-if="diagnostics.length" tone="warning" :message.prop="diagnostics.map(message =>
+      message === 'emulator_no_bindable_instances' ? text('未发现可绑定实例。', 'No bindable instances found.') : message).join(' · ')" />
   </div>
 </template>

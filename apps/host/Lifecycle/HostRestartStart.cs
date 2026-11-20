@@ -30,21 +30,21 @@ internal static class HostRestartStart
                 PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
             await pipe.ConnectAsync(deadline.Token);
+            MaintenanceStartupOrigin.RequirePipeParent(pipe, producer, parent);
             var bytes = await MaintenanceStartupFrames.ReadAsync(pipe, deadline.Token);
             using var parsed = StrictJson.Parse(bytes);
             var frame = parsed.RootElement.Deserialize<HostRestartFrame>(HostRestartHandoff.Json) ?? throw Invalid();
             var instance = new InstanceRoot(new ContractReader()).OpenExisting(args[1]);
             if (frame.Format != "nexus.host.restart" || frame.Version != 1 || frame.OperationId != operation ||
                 frame.InstanceId != instance.InstanceId || frame.Parent != parent) throw Invalid();
-            using var origin = await MaintenanceStartupOrigin.ReceiveSuccessorAsync(pipe, producer, parent,
-                frame.JobHandle, deadline.Token);
+            using var origin = frame.JobHandle is { } handle ? MaintenanceStartupOrigin.ReceiveRestartJob(producer, parent, handle) : null;
             await pipe.WriteAsync(new byte[] { 2 }, deadline.Token);
             await pipe.FlushAsync(deadline.Token);
             var commit = new byte[1];
             await pipe.ReadExactlyAsync(commit, deadline.Token);
             if (commit[0] != 3) throw Invalid();
             await producer.WaitForExitAsync(deadline.Token);
-            origin.RequireReleasedSuccessor();
+            origin?.RequireReleasedSuccessor();
             pipe.Dispose(); producer.Dispose();
             return await NexusPipeline.Host.Desktop.DesktopStartup.RunAsync(instance.RuntimeRoot, null, maintenanceOrigin: origin, resumeWindow: frame.Window);
         }

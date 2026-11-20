@@ -1,5 +1,6 @@
-import { reactive, type Directive } from 'vue';
-import type { EditorDraftScope } from '@nexuspipeline/extension-sdk';
+import { reactive, watch, type Directive } from 'vue';
+import type { EditorDraftScope, UiElement } from '@nexuspipeline/extension-sdk';
+import { t } from './locale';
 import './draft-presentation.css';
 
 type Field = HTMLElement & { value: unknown; checked?: boolean; type?: string };
@@ -20,6 +21,7 @@ export class DraftPresentation {
   private observer?: MutationObserver;
   private controller?: AbortController;
   private retained = false;
+  private dismissNotice?: () => void;
   edited?: () => boolean;
   get modified(): boolean { return this.edited?.() ?? this.state.changed; }
 
@@ -33,6 +35,15 @@ export class DraftPresentation {
     root.classList.add('draft-surface');
     this.controller = new AbortController();
     const signal = this.controller.signal;
+    if (this.state.restored) {
+      const toast = document.createElement('nexus-toast') as UiElement<'nexus-toast'>;
+      toast.className = 'draft-restored-toast';
+      toast.tone = 'warning';
+      const stop = watch(() => t('已恢复未保存的草稿，请及时保存或取消。'), message => { toast.message = message; }, { immediate: true });
+      this.dismissNotice = () => { stop(); toast.remove(); this.dismissNotice = undefined; };
+      toast.addEventListener('nexus-close', this.dismissNotice, { once: true, signal });
+      root.append(toast);
+    }
     const edit = (event: Event) => {
       const input = event.composedPath().find((node): node is Field => node instanceof HTMLElement && this.nodes.has(node as Field));
       if (!input) return;
@@ -116,6 +127,7 @@ export class DraftPresentation {
   }
 
   saved(): void {
+    this.dismissNotice?.();
     this.existing = true;
     this.baseline.clear();
     this.state.restored = false;
@@ -125,6 +137,7 @@ export class DraftPresentation {
   }
   detach(): void {
     if (this.root) this.retained = this.modified;
+    this.dismissNotice?.();
     this.controller?.abort(); this.observer?.disconnect();
     for (const element of this.nodes.keys()) element.removeAttribute('data-observe-value');
     for (const [key, value] of this.baseline) if (!value.changed) this.baseline.delete(key);

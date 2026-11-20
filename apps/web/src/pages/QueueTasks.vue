@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fieldHelp as vHelp } from '../components/field-help';
 import { createIdentity } from '../control/identity';
 import { ref, watch } from 'vue';
 import type { AutomationBundle } from '../control/wire.generated';
@@ -68,8 +69,7 @@ function reorder(ids: string[]): void {
 <template>
   <section class="queue-section">
     <header>
-      <h3>{{ t('任务列表') }}</h3>
-      <small>{{ t('按顺序先后执行，拖拽左侧把手排序；长时运行与标准运行不能混合编排') }}</small>
+      <h3 tabindex="0" v-help="t('按顺序先后执行，拖拽左侧把手排序；长时运行与标准运行不能混合编排')">{{ t('任务列表') }}</h3>
     </header>
     <nexus-sortable-list :ids.prop="rows.map((row) => row.id)" @nexus-reorder="reorder($event.detail.ids)">
       <div v-for="(row, index) in rows" :key="row.id" :data-item-id="row.id" class="task-row">

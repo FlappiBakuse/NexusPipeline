@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Runtime.Versioning;
+using System.Text.Json;
 using NexusPipeline.Core.Control;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Host.Control.Notifications;
@@ -10,7 +11,7 @@ namespace NexusPipeline.Host.Control.Http;
 
 [SupportedOSPlatform("windows")]
 internal sealed class NativeConfigurationControl(ControlAuthentication authority, NativeEditorService service,
-    ConfigurationEditController edits, ContractReader contracts)
+    BindingEditorService bindings, ConfigurationEditController edits, ContractReader contracts)
 {
     internal void Map(WebApplication app)
     {
@@ -36,6 +37,39 @@ internal sealed class NativeConfigurationControl(ControlAuthentication authority
             request.Require(ControlCapability.NativeConfigurationOpen);
             return Results.Json(Public(await service.BeginAsync(request.SubjectId, selection, DateTimeOffset.UtcNow)), NotificationUseCases.Json);
         });
+        app.MapPost("/control/v1/configuration/editor/open-binding", async (HttpContext context) =>
+        {
+            var request = authority.Require(context, ControlCapability.NativeConfigurationOpen); Query(context);
+            using var body = await ControlRequestBody.ReadAsync(context, 4096);
+            var root = body.Root;
+            ControlRequestBody.RequireMembers(root, "sessionId", "bindingId", "expectedBindingRevision", "expectedScriptRevision", "candidateId");
+            var selection = new BindingEditorSelection(Identity(root, "sessionId"), Identity(root, "bindingId"),
+                Revision(root, "expectedBindingRevision"), Revision(root, "expectedScriptRevision"), Candidate(root));
+            var opened = await bindings.OpenAsync(request.SubjectId, selection,
+                () => request.Require(ControlCapability.NativeConfigurationOpen), context.RequestAborted);
+            return Results.Json(new { session = opened.Session is { } status ? Public(status) : null, opened.Options, opened.Issue, opened.CanResume },
+                NotificationUseCases.Json);
+        });
+        app.MapPost("/control/v1/configuration/editor/{sessionId}/save-binding", async (HttpContext context, string sessionId) =>
+        {
+            var request = authority.Require(context, ControlCapability.NativeConfigurationOpen); Query(context);
+            using var body = await ControlRequestBody.ReadAsync(context, 4096);
+            ControlRequestBody.RequireMembers(body.Root, "operationId", "expectedSessionRevision", "candidateId");
+            var id = ControlQueryValues.Id(sessionId);
+            var result = await edits.SaveBindingAsync(Identity(body.Root, "operationId"), request.SubjectId, id,
+                Revision(body.Root, "expectedSessionRevision"), Candidate(body.Root), DateTimeOffset.UtcNow);
+            return Results.Json(new { session = Public(edits.Read(id, request.SubjectId)!), result.Inspection, result.CanResume },
+                NotificationUseCases.Json);
+        });
+        app.MapPost("/control/v1/configuration/editor/{sessionId}/resume-binding", async (HttpContext context, string sessionId) =>
+        {
+            var request = authority.Require(context, ControlCapability.NativeConfigurationOpen); Query(context);
+            using var body = await ControlRequestBody.ReadAsync(context, 4096);
+            ControlRequestBody.RequireMembers(body.Root, "expectedSessionRevision", "nextSessionId");
+            var status = await edits.ResumeBindingAsync(request.SubjectId, ControlQueryValues.Id(sessionId),
+                Revision(body.Root, "expectedSessionRevision"), Identity(body.Root, "nextSessionId"));
+            return Results.Json(Public(status), NotificationUseCases.Json);
+        });
         app.MapPost("/control/v1/configuration/editor/{sessionId}/{action}", async (HttpContext context, string sessionId, string action) =>
         {
             if (action is not ("save" or "cancel")) throw new ControlRequestException(404, "control_not_found");
@@ -57,6 +91,18 @@ internal sealed class NativeConfigurationControl(ControlAuthentication authority
         value.SessionId, value.Revision, value.Phase, value.ExpectedBindingRevision, value.CompletionOperationId, value.IsNew,
         resources = value.Resources.Select(item => new { item.Address, item.ExpectedRevision }).ToArray()
     };
+    private static Guid Identity(JsonElement value, string name) =>
+        value.TryGetProperty(name, out var member) ? ControlRequestBody.Uuid(member) :
+            throw new ControlRequestException(400, "request_identity_invalid");
+    private static long Revision(JsonElement value, string name) => value.TryGetProperty(name, out var member) &&
+        member.ValueKind == JsonValueKind.Number && member.TryGetInt64(out var revision) && revision is >= 1 and <= 9007199254740991
+        ? revision : throw new ControlRequestException(400, "request_revision_invalid");
+    private static string? Candidate(JsonElement value)
+    {
+        if (!value.TryGetProperty("candidateId", out var member)) return null;
+        return member.ValueKind == JsonValueKind.String && member.GetString() is { Length: >= 1 and <= 1024 } id &&
+            !id.Any(char.IsControl) ? id : throw new ControlRequestException(400, "request_shape_invalid");
+    }
     private static void Query(HttpContext context)
     { if (context.Request.QueryString.HasValue) throw new ControlRequestException(400, "request_query_invalid"); }
 }

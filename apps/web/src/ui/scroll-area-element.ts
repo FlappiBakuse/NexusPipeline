@@ -6,6 +6,7 @@ const styles =
   `
 :host {
   --nx-scroll-padding: 0;
+  --_nexus-scroll-content-height: auto;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -27,7 +28,7 @@ const styles =
   outline: none;
 }
 .viewport::-webkit-scrollbar { display: none; }
-.inside { min-width: 100%; min-height: 100%; box-sizing: border-box; padding: var(--nx-scroll-padding,0); }
+.inside { min-width: 100%; min-height: 100%; block-size: var(--_nexus-scroll-content-height); box-sizing: border-box; padding: var(--nx-scroll-padding,0); }
 
 `;
 

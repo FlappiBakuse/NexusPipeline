@@ -8,7 +8,7 @@ import { retryRead } from '../control/read-retry';
 import { dashboardCards } from '../control/interface';
 
 export async function preparePages(store: AppStore, signal: AbortSignal,
-  progress: (done: number, total: number) => void, report: (error: unknown) => void, foreground = false,
+  progress: (done: number, total: number) => void, foreground = false,
   completed = new Set<string>()): Promise<void> {
   const include = (...pages: string[]) => !foreground || pages.includes(store.state.page);
   const paths: string[] = [];
@@ -54,7 +54,8 @@ export async function preparePages(store: AppStore, signal: AbortSignal,
   await Promise.all(Array.from({ length: Math.min(4, pending.length) }, async () => {
     while (next < pending.length && !signal.aborted) {
       const job = pending[next++]!;
-      try { await retryRead(job.run, signal); completed.add(job.key); } catch (error) { if (!signal.aborted) report(error); }
+      try { await retryRead(job.run, signal); completed.add(job.key); }
+      catch { /* The page reads again and owns user-visible feedback if the read still fails. */ }
       finally { progress(++done, pending.length); }
     }
   }));

@@ -57,7 +57,7 @@ const completion = computed(() => completionLabels[props.preview.completionActio
       <p v-if="completion">{{ t('运行完成操作') }}：{{ t(completion) }}</p>
     </header>
     <nexus-empty-state v-if="!groups.length" :title="t('此计划没有可执行的任务。')" />
-    <article v-for="(group, index) in groups" :key="group.id" class="plan-group">
+    <article v-for="(group, index) in groups" :key="group.id" class="plan-group" data-surface="raised">
       <header>
         <span class="plan-number">{{ index + 1 }}</span>
         <h4>{{ group.name }}</h4>

@@ -40,7 +40,7 @@ export function useSettingsSession(store: AppStore, valid: () => boolean) {
         const saved = { revision: value.revision + 1, values: value.values };
         store.state.settings = { ...store.state.settings!, saved };
         try { return await read(); }
-        catch (reason) { store.report(reason); return saved; }
+        catch { return saved; }
       },
       inspect: async value => {
         const result = await store.client.read('/control/v1/operations/' + value.id, objectValue);
@@ -54,7 +54,8 @@ export function useSettingsSession(store: AppStore, valid: () => boolean) {
   return { session: writer.state, locked: computed(() => writer.state.unknown),
     patch: (values: Partial<ControlHostSettingsValues>) => {
       if (valid() && store.can('settings.write')) void writer.patch(values).catch(reason => {
-        if (store.state.capabilities?.instanceId === instance) store.report(reason);
+        if (!store.editors.signal.aborted && store.state.capabilities?.instanceId === instance && !writer.state.error)
+          writer.state.error = reason instanceof Error ? reason.message : '设置保存失败。';
       });
     } };
 }

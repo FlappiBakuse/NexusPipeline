@@ -2,7 +2,6 @@
 import { fieldHelp as vHelp } from '../components/field-help';
 import { createIdentity } from '../control/identity';
 import { computed, onBeforeUnmount, reactive, ref, toRefs, watch } from 'vue';
-import DraftNotice from '../components/DraftNotice.vue';
 import { draftPresentation, draftDirective as vDraft } from '../app/draft-presentation';
 import NotificationFields from './NotificationFields.vue';
 import { NotificationCredentials } from './notification-credentials';
@@ -131,15 +130,13 @@ async function loadLatest(): Promise<void> {
       presentation.saved();
       session.taskRevision = task.revision;
     }
-    port.clearError(error.value);
     session.catalogRevision = latest.revision;
     session.conflict = false;
     error.value = '';
     credentials.clear();
     if (task) await loadCredentials(task.id);
-  } catch (reason) {
+  } catch {
     if (owner.signal.aborted || !port.current()) return;
-    port.report(reason);
     error.value = '无法读取最新通知任务，草稿已保留。';
   } finally {
     latestRead = undefined;
@@ -162,7 +159,6 @@ function cancel(): void {
     @nexus-close="emit('close')"
   >
     <div v-draft="presentation" ref="panel" class="editor">
-      <DraftNotice :restored="presentation.state.restored" />
       <NotificationFields
         v-model="draft"
         :disabled="busy || !!pending"
@@ -171,24 +167,20 @@ function cancel(): void {
         :configured="configured"
         @secret="editSecret"
       />
-      <p v-if="error" class="error" role="alert">
-        {{ t(error) }}
-        <button v-if="session.conflict" :disabled="busy || !!pending" @click="loadLatest">
-          {{ t('取消修改并载入最新') }}
-        </button>
-        <button v-if="task && !credentialsReady" :disabled="busy" @click="loadCredentials(task.id)">
-          {{ t('重试') }}
-        </button>
-      </p>
-      <p v-if="notice" role="status">{{ t(notice) }}</p>
-      <p v-if="pending" role="alert">
-        {{ t('写入结果待确认，请先核实原操作。') }} {{ pending }}
-        <button :disabled="busy || !port.can('operations.read')" @click="commands.checkPending()">
-          {{ t('查询操作状态') }}
-        </button>
-      </p>
+      <nexus-toast v-if="error" :tone="pending ? 'warning' : 'danger'" :message.prop="t(error)" />
+      <nexus-toast v-else-if="notice" :message.prop="t(notice)" @nexus-close="notice = ''" />
+      <nexus-toast v-else-if="pending && !busy" tone="warning" :message.prop="t('写入结果待确认，请先核实原操作。')" />
     </div>
     <div slot="footer" class="actions">
+      <button v-if="session.conflict" :disabled="busy || !!pending" @click="loadLatest">
+        {{ t('取消修改并载入最新') }}
+      </button>
+      <button v-if="error && task && !credentialsReady" :disabled="busy" @click="loadCredentials(task.id)">
+        {{ t('重试') }}
+      </button>
+      <button v-if="pending" :disabled="busy || !port.can('operations.read')" @click="commands.checkPending()">
+        {{ t('查询操作状态') }}
+      </button>
       <button
         v-if="task"
         :disabled="busy || !!pending || dirty || !port.can('notifications.test')"

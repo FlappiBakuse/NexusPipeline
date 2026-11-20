@@ -76,7 +76,6 @@ async function readActive(): Promise<void> {
     activeError.value = '';
   } catch (reason) {
     if (!owner.signal.aborted) {
-      props.store.report(reason);
       activeError.value = reason instanceof Error ? reason.message : '运行状态不可用。';
     }
   } finally {
@@ -117,7 +116,6 @@ async function readSummary(): Promise<void> {
     summaryError.value = '';
   } catch (reason) {
     if (!owner.signal.aborted) {
-      props.store.report(reason);
       summaryError.value = reason instanceof Error ? reason.message : '历史统计不可用。';
     }
   } finally {
@@ -203,10 +201,11 @@ onBeforeUnmount(() => {
       </button>
       <button v-if="layoutError && !layoutCards" @click="readLayout">{{ t('重新读取') }}</button>
     </PageActions>
-    <nexus-toast v-if="layoutError" tone="danger" :message.prop="t(layoutError)" />
+    <nexus-toast v-if="visible && layoutError" tone="danger" :message.prop="t(layoutError)" />
+    <nexus-toast v-if="visible && statisticsVisible && summaryError" tone="danger" :message.prop="t(summaryError)" />
     <nexus-toast v-if="layoutNotice" :message.prop="t(layoutNotice)" @nexus-close="layoutNotice = ''" />
     <CompletionNotice :store="store" :visible="visible" />
-    <p v-if="!layout && layoutBusy" role="status">{{ t('正在读取卡片布局…') }}</p>
+    <nexus-spinner v-if="!layout && layoutBusy" :label="t('正在读取卡片布局…')" />
     <div v-if="layout" class="dashboard-grid">
       <template v-for="card in cards.filter(item => catalog.some(card => card.id === item))" :key="card">
         <section
@@ -219,11 +218,7 @@ onBeforeUnmount(() => {
             <i aria-hidden="true"></i>
             {{ t(active.length ? '运行中' : '系统空闲') }}
           </span>
-          <strong>{{ t(active.length ? '任务正在执行' : '一切准备就绪') }}</strong>
-          <p v-if="active.length">
-            {{ t('当前有') }} {{ active.length }} {{ t('个活动任务，状态会自动更新。') }}
-          </p>
-          <p v-else>{{ t('当前没有活动任务，可以从调度中心手动执行脚本或队列。') }}</p>
+          <strong>{{ active.length ? t('任务正在执行') : t('当前没有正在运行的任务') }}</strong>
         </section>
         <section v-else-if="card === 'running'" class="running-surface full-card">
           <DashboardRunningCard
@@ -242,7 +237,6 @@ onBeforeUnmount(() => {
           class="full-card"
           :summary="summary"
           :loading="summaryLoading"
-          :error="summaryError"
           :dates="dates"
         />
       </template>
@@ -256,7 +250,6 @@ onBeforeUnmount(() => {
         surface="secondary"
         @nexus-close="cancelLayout"
       >
-        <p v-if="layoutError" role="alert">{{ t(layoutError) }}</p>
         <DashboardLayout
           v-if="layoutCards"
           :cards="layoutCards"

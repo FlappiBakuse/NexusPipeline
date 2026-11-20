@@ -86,12 +86,6 @@ export class DesktopCaption {
       },
       { signal: this.owner.signal }
     );
-    for (const button of this.root.querySelectorAll('button')) {
-      const tooltip = document.createElement('nexus-tooltip') as UiElement<'nexus-tooltip'>;
-      tooltip.style.cssText = 'position:absolute;width:0;height:0';
-      tooltip.anchor = button;
-      button.append(tooltip);
-    }
     this.move();
   }
 
@@ -107,7 +101,6 @@ export class DesktopCaption {
       const label = labels[button.dataset.action as CaptionAction];
       button.disabled = !state.ready;
       button.setAttribute('aria-label', label);
-      (button.querySelector('nexus-tooltip') as UiElement<'nexus-tooltip'>).content = label;
     }
     this.root.querySelector('[data-action=toggleMaximize] svg')!.innerHTML = state.maximized
       ? restoreIcon
@@ -129,4 +122,3 @@ export class DesktopCaption {
     this.element.remove();
   }
 }
-import type { UiElement } from '@nexuspipeline/extension-sdk';

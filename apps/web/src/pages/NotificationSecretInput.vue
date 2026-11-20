@@ -9,7 +9,7 @@ const emit = defineEmits<{ edit: [field: SecretField, value: string] }>();
 
 <template>
   <label v-help="configured ? t('已有凭据留空不修改；输入新值后在保存时替换，秘密内容不会写入提示。') : undefined" class="secret-input" :data-secret-field="field">
-    {{ t(label) }}
+    <span class="field-help-caption"><span>{{ t(label) }}</span></span>
     <input
         data-draft-field="NotificationSecretInput/value"
       :value="value"

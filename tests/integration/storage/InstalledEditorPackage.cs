@@ -12,6 +12,17 @@ internal sealed class InstalledEditorPackage(InstallRuntimeFixture installation)
 {
     internal ExtensionActivator Activator => installation.Activator;
 
+    internal static void PrepareImage(string directory, string name)
+    {
+        var executable = Environment.GetEnvironmentVariable("NEXUS_PROCESS_FIXTURE_EXE")!;
+        foreach (var dependency in Directory.EnumerateFiles(Path.GetDirectoryName(executable)!))
+            if (dependency.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ||
+                dependency.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                File.Copy(dependency, Path.Combine(directory, Path.GetFileName(dependency)));
+        File.Copy(executable, Path.Combine(directory, name));
+        File.WriteAllText(Path.Combine(directory, "nexus-editor-fixture"), "");
+    }
+
     internal static async Task<InstalledEditorPackage> CreateAsync(ExecutionAdmissionFixture fixture,
         BuiltExtensionInputs? package = null)
     {

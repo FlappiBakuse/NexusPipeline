@@ -21,7 +21,8 @@ const confirmation = ref<ActiveRun>();
 const initializationConfirmation = ref('');
 const active = ref<ActiveRun[]>([]);
 const targetHint = ref('');
-let hintTimer: ReturnType<typeof setTimeout> | undefined;
+const readError = ref('');
+const actionError = computed(() => commands.state.error || targetHint.value);
 registerMessages({
   项目初始化: 'Project initialization',
   执行初始化: 'Run initialization',
@@ -49,6 +50,7 @@ registerMessages({
     'Stop requested. Waiting for the Host to confirm stopping and restoring configuration.',
   '写入结果待确认，请先核实原操作。':
     'The write outcome is unknown. Check the original operation before continuing.',
+  '无法确认原运行操作，请稍后再次查询。': 'Could not verify the original run request. Try checking again later.',
   查询操作状态: 'Check operation',
   日志来源: 'Log source',
   主任务: 'Main task',
@@ -96,25 +98,24 @@ function selection(): Record<string, unknown> {
 }
 function hasTarget(): boolean {
   if (targetId.value) return true;
+  commands.state.error = '';
   targetHint.value = t(targetKind.value === 'queue' ? '请选择调度队列' : '请选择脚本实例');
-  clearTimeout(hintTimer);
-  hintTimer = setTimeout(() => {
-    targetHint.value = '';
-  }, 3000);
   return false;
 }
 async function explain(): Promise<void> {
   if (busy.value || !hasTarget()) return;
+  targetHint.value = commands.state.error = '';
   busy.value = true;
   const identity = JSON.stringify(selection());
   try {
-    const result = await props.store.client.write('/control/v1/execution/preview', selection(), executionPreview);
+    const result = await props.store.client.query('/control/v1/execution/preview', selection(), executionPreview);
     if (props.visible && identity === JSON.stringify(selection())) {
       preview.value = result;
       planOpen.value = true;
     }
   } catch (error) {
-    props.store.report(error);
+    if (props.visible && identity === JSON.stringify(selection()))
+      targetHint.value = error instanceof Error ? error.message : 'request_failed';
   } finally {
     busy.value = false;
   }
@@ -141,12 +142,14 @@ async function runSelected(confirmedInitialization = false): Promise<void> {
 async function cancel(): Promise<void> {
   const target = confirmation.value;
   if (!target || pending.value) return;
+  targetHint.value = '';
   if (await commands.cancel(target)) {
     confirmation.value = undefined;
     props.store.state.notice = t('已提交停止请求；请等待宿主确认停止与配置恢复。');
   }
 }
 async function checkOperation(): Promise<void> {
+  targetHint.value = '';
   if (await commands.inspect()) confirmation.value = undefined;
 }
 let activeOwner: AbortController | undefined;
@@ -155,8 +158,8 @@ watch(
   async () => {
     activeOwner?.abort();
     if (!props.visible) {
-      clearTimeout(hintTimer);
       targetHint.value = '';
+      readError.value = '';
       return;
     }
     const controller = new AbortController();
@@ -169,6 +172,7 @@ watch(
       );
       controller.signal.throwIfAborted();
       active.value = arrayValue(value.items, executionRun);
+      readError.value = '';
       const runId = commands.state.acceptedRunId;
       if (runId && !active.value.some(run => run.runId === runId) && props.store.can('records.read')) {
         try {
@@ -184,15 +188,12 @@ watch(
         }
       }
     } catch (error) {
-      if (!controller.signal.aborted) props.store.report(error);
+      if (!controller.signal.aborted) readError.value = error instanceof Error ? error.message : 'request_failed';
     }
   },
   { immediate: true }
 );
-onBeforeUnmount(() => {
-  activeOwner?.abort();
-  clearTimeout(hintTimer);
-});
+onBeforeUnmount(() => activeOwner?.abort());
 </script>
 <template>
   <section class="dispatch-targets">
@@ -225,15 +226,14 @@ onBeforeUnmount(() => {
       />
       <button v-if="pending && !commands.state.sending" @click="checkOperation">{{ t('查询操作状态') }}</button>
     </div>
-    <nexus-toast v-if="pending && !commands.state.sending" tone="warning" :message.prop="t('写入结果待确认，请先核实原操作。')" />
   </section>
-  <nexus-toast
-    v-if="visible && targetHint"
-    class="dispatch-hint"
-    :message.prop="targetHint"
-    tone="danger"
-    @nexus-close="targetHint = ''"
-  />
+  <template v-if="visible">
+    <nexus-toast v-if="!commands.state.sending && actionError" class="dispatch-hint"
+      :tone="pending ? 'warning' : 'danger'" :message.prop="t(actionError)"
+      @nexus-close="targetHint = commands.state.error = ''" />
+    <nexus-toast v-else-if="pending && !commands.state.sending" tone="warning" :message.prop="t('写入结果待确认，请先核实原操作。')" />
+    <nexus-toast v-else-if="!pending && readError" tone="danger" :message.prop="t(readError)" />
+  </template>
   <nexus-modal
     :open.prop="visible && planOpen"
     :title="t('运行计划检查')"
@@ -263,7 +263,6 @@ onBeforeUnmount(() => {
   <section class="dispatch-running">
     <div class="running-heading">
       <strong>{{ t('运行中') }} ({{ active.length }})</strong>
-      <small>{{ t('每 1 秒更新') }}</small>
     </div>
     <RunningExecution
       v-for="run in active"

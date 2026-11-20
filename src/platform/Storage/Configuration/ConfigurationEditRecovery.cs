@@ -18,7 +18,8 @@ public static class ConfigurationEditRecovery
             foreach (var (sessionId, subject) in OpenSessions(database))
             {
                 var session = store.Read(sessionId, subject)!;
-                if (session.Phase != ConfigurationEditPhase.Prepared || session.Resources.Any(resource =>
+                if (session.Phase != ConfigurationEditPhase.Prepared && !ConfigurationEditController.IsBindingProfile(session) ||
+                    session.Resources.Any(resource =>
                     journals.FindJournal(resource.JournalId) is not { Phase: JournalPhase.Committed })) continue;
                 var cancel = new ConfigurationEditCancel(sessionId, session.Revision);
                 store.Cancel(ConfigurationEditStore.CancelIdentity(Guid.NewGuid(), subject, cancel), cancel, DateTimeOffset.UtcNow);

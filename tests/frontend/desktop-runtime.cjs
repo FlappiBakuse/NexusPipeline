@@ -172,7 +172,7 @@ async function run() {
   }
   peer.write(JSON.stringify({ kind: 'stage', stage: 11, total: 12, elapsedMilliseconds: 9000 }) + '\n');
   peer.write(JSON.stringify({ kind: 'ready', config: { address, mode, route: '/', minimizeToTray: true } }) + '\n');
-  peer.write(JSON.stringify({ kind: 'complete' }) + '\n');
+  peer.write(JSON.stringify({ kind: mode === 'desktop' ? 'present' : 'complete' }) + '\n');
   if (mode === 'desktop') {
     const preparingWindow = await renderer();
     const connected = await preparingWindow.webContents.executeJavaScript('window.session');
@@ -197,7 +197,14 @@ async function run() {
   }
   await waitFor(() => presentations.includes(mode === 'desktop' ? 'console' : 'tray'));
   if (mode === 'desktop') {
+    assert.equal(progressWindow.contentView.children.length, 0);
+    await click(3);
+    assert.equal(lastMenu.busy, true);
+    assert.equal(closePermits, 0);
+    cases.push('console-presents-before-host-ready-with-tray-actions-blocked');
+    peer.write(JSON.stringify({ kind: 'complete' }) + '\n');
     releaseLocale(); cases.push('console-presentation-does-not-wait-for-tray-locale');
+    await waitFor(async () => { await click(0); return !lastMenu.busy; });
   }
   await click(0); assert.equal(lastMenu.busy, false);
   if (mode === 'desktop') {

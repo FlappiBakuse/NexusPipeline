@@ -48,9 +48,10 @@ export async function pageLoadingContract(fixture: HTMLElement, check: (value: u
     respond(Response.json({ code: 'extension_manifest_missing' }, { status: 503 }));
     const remove = () => [...mount.querySelectorAll<HTMLButtonElement>('button')]
       .find(button => button.textContent?.trim() === t('卸载插件'));
-    for (let i = 0; i < 50 && (!mount.querySelector('.detail-error') || remove()?.disabled); i++)
+    const detailError = () => mount.querySelector('.plugin-details nexus-toast[role=alert]:popover-open');
+    for (let i = 0; i < 50 && (!detailError() || remove()?.disabled); i++)
       await new Promise(resolve => setTimeout(resolve, 10));
-    check(mount.querySelector('.detail-error') && remove() && !remove()!.disabled,
+    check(detailError() && remove() && !remove()!.disabled,
       'a damaged local plugin remains removable when its installed documents are unavailable');
     remove()!.click();
     await nextTick();

@@ -69,7 +69,6 @@ internal sealed class HostMaintenanceController : IAsyncDisposable
             if (_stopping || operationId == Guid.Empty || _flight is { IsCompleted: false } || _handoff is not null || _restart is not null)
                 throw Invalid();
             if (_desktop is not null && _ownedDesktop is null) throw new IOException("maintenance_desktop_family_proof_required");
-            var origin = _inheritedOrigin ?? (_ownedOrigin ??= MaintenanceStartupOrigin.CaptureUnjobbedProcess());
             stage = "drain";
             _drain = _lease.PublishExecution(() => _lifecycle.BeginCompletionDrain(operationId, onlyWhenIdle: true, drainReferences: true)) ?? throw Invalid();
             try
@@ -93,7 +92,7 @@ internal sealed class HostMaintenanceController : IAsyncDisposable
                     Mode = saved.Desktop.Mode == NexusPipeline.Core.Settings.DesktopMode.Desktop
                         ? UpdateWindowMode.Desktop : UpdateWindowMode.Browser
                 };
-                _restart = new(origin);
+                _restart = new(_inheritedOrigin);
                 // The accepted handoff closes its requesting renderer before committing the successor.
                 stage = "successor";
                 await _restart.PrepareAsync(_instance, operationId, saved.Service.WebPort, window, deadline.Token);
@@ -111,7 +110,7 @@ internal sealed class HostMaintenanceController : IAsyncDisposable
             }
             catch
             {
-                if (_restart is not null && !await _restart.StopAsync())
+                if (_restart is not null && !_restart.Stop())
                     throw new IOException("host_restart_stop_unconfirmed");
                 _restart?.Dispose(); _restart = null;
                 _restartRoot?.Dispose(); _restartRoot = null;
@@ -314,7 +313,7 @@ internal sealed class HostMaintenanceController : IAsyncDisposable
         _stopping = true;
         if (_flight is { } flight) await flight.WaitAsync(TimeSpan.FromSeconds(40));
         if (!_handedOff && _handoff is not null) await AbortUnhandedAsync();
-        if (!_handedOff && _restart is not null && !await _restart.StopAsync())
+        if (!_handedOff && _restart is not null && !_restart.Stop())
             throw new IOException("host_restart_stop_unconfirmed");
         _restart?.Dispose(); _restartRoot?.Dispose();
         ReleaseInputs(); _drain?.Dispose(); _serial.Dispose();

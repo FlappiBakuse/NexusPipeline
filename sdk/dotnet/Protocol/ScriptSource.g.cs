@@ -18,6 +18,14 @@ public sealed record ScriptSource
     /// <summary>Schema field <c>direction</c>; constraints are owned by script-source.schema.json.</summary>
     [JsonPropertyName("direction")]
     public required string Direction { get; init; }
+    /// <summary>Schema field <c>purpose</c>; constraints are owned by script-source.schema.json.</summary>
+    [JsonPropertyName("purpose")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Purpose { get; init; }
+    /// <summary>Schema field <c>editor</c>; constraints are owned by script-source.schema.json.</summary>
+    [JsonPropertyName("editor")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ScriptSourceEditor? Editor { get; init; }
     /// <summary>Schema field <c>operationId</c>; constraints are owned by script-source.schema.json.</summary>
     [JsonPropertyName("operationId")]
     public required string OperationId { get; init; }

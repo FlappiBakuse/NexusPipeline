@@ -12,7 +12,8 @@ internal sealed class LocalTokenControl(ControlAuthentication authority, Control
 {
     internal void Map(WebApplication app)
     {
-        app.MapPost("/control/v1/local/control-token/change", (Delegate)ChangeAsync);
+        app.MapPost("/control/v1/local/control-token/change", (Delegate)ChangeWithConfirmationAsync);
+        app.MapPost("/control/v1/local/control-token/change-from-settings", (Delegate)ChangeFromSettingsAsync);
         app.MapGet("/control/v1/local/control-token/operations/{operationId}", (Delegate)ReadOperation);
         app.MapPost("/control/v1/local/control-token/{operationId}/cancel", (Delegate)CancelAsync);
     }
@@ -26,13 +27,20 @@ internal sealed class LocalTokenControl(ControlAuthentication authority, Control
         return value is null ? Results.NotFound() : Results.Json(value);
     }
 
-    private async Task<IResult> ChangeAsync(HttpContext context)
+    private Task<IResult> ChangeWithConfirmationAsync(HttpContext context) => ChangeAsync(context, fromSettings: false);
+
+    private Task<IResult> ChangeFromSettingsAsync(HttpContext context) => ChangeAsync(context, fromSettings: true);
+
+    private async Task<IResult> ChangeAsync(HttpContext context, bool fromSettings)
     {
         Guid? operation = null;
         try
         {
             var identity = authority.Require(context, ControlCapability.SecretWrite);
             if (identity.Origin != ControlOrigin.Local || context.Request.QueryString.HasValue)
+                throw new UnauthorizedAccessException("control_local_origin_required");
+            if (fromSettings && (context.Request.Headers.Origin.Count != 1 ||
+                context.Request.Headers["Sec-Fetch-Site"] is not { Count: 1 } site || site[0] != "same-origin"))
                 throw new UnauthorizedAccessException("control_local_origin_required");
             operation = Uuid(Header(context.Request, "Nexus-Operation-Id"));
             var revisionText = Header(context.Request, "Nexus-Expected-Revision");
@@ -51,7 +59,7 @@ internal sealed class LocalTokenControl(ControlAuthentication authority, Control
                 return ControlErrors.Result(415, "control_token_media_type_invalid", operation);
             using var body = await SecretRequestBody.ReadAsync(context, disposition == SecretDisposition.Set ? 256 : 0);
             using var value = disposition == SecretDisposition.Set ? body.Decode() : null;
-            var work = tokens.ChangeAsync(operation.Value, revision, disposition, value);
+            var work = tokens.ChangeAsync(operation.Value, revision, disposition, value, confirm: !fromSettings);
             var status = await work.WaitAsync(context.RequestAborted);
             identity.Require(ControlCapability.SecretWrite);
             return Results.Json(new
@@ -61,6 +69,8 @@ internal sealed class LocalTokenControl(ControlAuthentication authority, Control
             });
         }
         catch (SecretBodyException error) { return ControlErrors.Result(error.Status, "control_token_body_invalid", operation); }
+        catch (ArgumentException error) when (error.Message == "control_token_shape_invalid")
+        { return ControlErrors.Result(400, "control_token_shape_invalid", operation); }
         catch (UnauthorizedAccessException) { return ControlErrors.Result(403, "access_denied", operation); }
         catch (Exception error) when (!context.RequestAborted.IsCancellationRequested)
         { return ControlErrors.Secret(error, false, operation); }

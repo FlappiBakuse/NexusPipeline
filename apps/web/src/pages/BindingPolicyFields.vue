@@ -63,15 +63,10 @@ onBeforeUnmount(() => owner.abort());
 
 <template>
   <div class="binding-policy">
-    <section>
-      <h3>{{ t('通用') }}</h3>
-      <p v-if="locked('general')">{{ t('使用全局设置，当前绑定的独立设置已保留。') }}</p>
-      <p>
-        {{
-          t(global ? '统一控制所有脚本绑定的启用状态与运行天数。' : '控制当前脚本绑定的启用状态与运行天数。')
-        }}
-      </p>
-      <div class="switches">
+    <section data-surface="raised">
+      <h3 :tabindex="locked('general') ? 0 : undefined"
+        v-help="locked('general') ? t('使用全局设置，当前绑定的独立设置已保留。') : ''">{{ t('通用') }}</h3>
+      <nexus-switch-list>
         <nexus-switch-setting
         data-draft-field="BindingPolicyFields/(groups.general as Overrides['general']).syncEnabled"
           v-if="global"
@@ -88,9 +83,9 @@ onBeforeUnmount(() => owner.abort());
           :value.prop="groups.general.enabled"
           @nexus-change="set('general', 'enabled', $event.detail.value)"
         />
-      </div>
+      </nexus-switch-list>
       <label v-help="t('-1 表示永久运行，0 表示停止，正数为剩余运行天数，每日递减。')">
-        {{ t('运行天数') }}
+        <span class="field-help-caption"><span>{{ t('运行天数') }}</span></span>
         <nexus-number-input
         data-draft-field="BindingPolicyFields/groups.general.runDays ?? -1"
           :placeholder="t('-1 永久；0 停止')"
@@ -104,8 +99,9 @@ onBeforeUnmount(() => owner.abort());
           @nexus-change="set('general', 'runDays', $event.detail.value)"
         />
       </label>
-      <label v-help="t('-1 表示不限制；正整数达到当天成功次数上限后跳过，0 无效。')">
-        {{ t('最多成功运行次数') }}
+      <label v-help="t('-1 表示不限制；正整数达到当天成功次数上限后跳过，0 无效。') +
+        (global ? '' : '\n' + t('当天成功次数达到上限后，该绑定将跳过运行；失败、取消和已跳过不计入成功次数。'))">
+        <span class="field-help-caption"><span>{{ t('最多成功运行次数') }}</span></span>
         <nexus-number-input
         data-draft-field="BindingPolicyFields/groups.general.maximumSuccessfulRunsPerDay ?? -1"
           :placeholder="t('-1 表示不限次数')"
@@ -120,23 +116,11 @@ onBeforeUnmount(() => owner.abort());
           @nexus-change="set('general', 'maximumSuccessfulRunsPerDay', $event.detail.value)"
         />
       </label>
-      <p v-if="!global">
-        {{
-          t(
-            '当天成功次数达到上限后，该绑定将跳过运行；失败、取消和已跳过不计入成功次数。'
-          )
-        }}
-      </p>
     </section>
-    <section>
-      <h3>{{ t('通知') }}</h3>
-      <p v-if="locked('notification')">{{ t('使用全局设置，当前绑定的独立设置已保留。') }}</p>
-      <p>
-        {{
-          t(global ? '统一控制所有脚本绑定的通知开关与 SMTP 收件人。' : '用户绑定允许时发送运行结果通知。')
-        }}
-      </p>
-      <div class="switches">
+    <section data-surface="raised">
+      <h3 :tabindex="locked('notification') ? 0 : undefined"
+        v-help="locked('notification') ? t('使用全局设置，当前绑定的独立设置已保留。') : ''">{{ t('通知') }}</h3>
+      <nexus-switch-list>
         <nexus-switch-setting
         data-draft-field="BindingPolicyFields/(groups.notification as Overrides['notification']).syncEnabled"
           v-if="global"
@@ -153,7 +137,7 @@ onBeforeUnmount(() => owner.abort());
           :value.prop="groups.notification.notifyEnabled"
           @nexus-change="set('notification', 'notifyEnabled', $event.detail.value)"
         />
-      </div>
+      </nexus-switch-list>
       <label>
         {{ t('通知任务') }}
         <nexus-select
@@ -167,13 +151,12 @@ onBeforeUnmount(() => owner.abort());
           @nexus-change="set('notification', 'notificationTaskIds', $event.detail.value)"
         />
       </label>
-      <p v-if="failure" role="alert">{{ failure }}</p>
+      <nexus-toast v-if="failure" tone="danger" :message.prop="t(failure)" />
     </section>
-    <section>
-      <h3>{{ t('高级') }}</h3>
-      <p v-if="locked('advanced')">{{ t('使用全局设置，当前绑定的独立设置已保留。') }}</p>
-      <p>{{ t('任务前后脚本设置。') }}</p>
-      <div v-if="global" class="switches">
+    <section data-surface="raised">
+      <h3 :tabindex="locked('advanced') ? 0 : undefined"
+        v-help="locked('advanced') ? t('使用全局设置，当前绑定的独立设置已保留。') : ''">{{ t('高级') }}</h3>
+      <nexus-switch-list v-if="global">
         <nexus-switch-setting
         data-draft-field="BindingPolicyFields/(groups.advanced as Overrides['advanced']).syncEnabled"
           :title="t('同步高级设置')"
@@ -181,9 +164,9 @@ onBeforeUnmount(() => owner.abort());
           :value.prop="(groups.advanced as Overrides['advanced']).syncEnabled"
           @nexus-change="set('advanced', 'syncEnabled', $event.detail.value)"
         />
-      </div>
+      </nexus-switch-list>
       <label v-help="t('选择后仍可手动编辑；%FIRST% 前缀表示仅首次运行。')">
-        {{ t('任务前运行脚本路径') }}
+        <span class="field-help-caption"><span>{{ t('任务前运行脚本路径') }}</span></span>
         <nexus-path-picker
           :aria-label="t('任务前运行脚本路径')"
           :disabled.prop="locked('advanced')"
@@ -196,7 +179,7 @@ onBeforeUnmount(() => owner.abort());
         />
       </label>
       <label v-help="t('选择后仍可手动编辑；%LAST% 前缀表示仅最终运行。')">
-        {{ t('任务后运行脚本路径') }}
+        <span class="field-help-caption"><span>{{ t('任务后运行脚本路径') }}</span></span>
         <nexus-path-picker
           :aria-label="t('任务后运行脚本路径')"
           :disabled.prop="locked('advanced')"
@@ -223,7 +206,6 @@ section {
   padding: 16px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: var(--content-card);
 }
 h3 {
   margin: 0;
@@ -240,16 +222,8 @@ label {
   font-size: 12px;
   color: var(--muted);
 }
-.switches {
-  display: grid;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  overflow: hidden;
-  background: var(--content-control);
+nexus-switch-list {
   margin-bottom: 12px;
-}
-.switches > nexus-switch-setting + nexus-switch-setting {
-  border-top: 1px solid var(--border);
 }
 nexus-number-input {
   width: 100%;

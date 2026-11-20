@@ -38,9 +38,8 @@ async function read(): Promise<void> {
     );
     current.signal.throwIfAborted();
     show(value);
-  } catch (reason) {
+  } catch {
     if (!current.signal.aborted) {
-      props.store.report(reason);
       error.value = '更新状态读取失败。';
     }
   }
@@ -57,9 +56,8 @@ async function check(): Promise<void> {
       (value) => value
     );
     if (props.visible && props.channel === channel) show(value);
-  } catch (reason) {
+  } catch {
     if (props.visible && props.channel === channel) {
-      props.store.report(reason);
       error.value = '更新检查失败，请重试。';
     }
   } finally {
@@ -81,9 +79,9 @@ async function check(): Promise<void> {
       </div>
     </dl>
     <p role="status">{{ t(message) }}</p>
-    <p v-if="error" role="alert">{{ t(error) }}</p>
+    <nexus-toast v-if="visible && error" tone="danger" :message.prop="t(error)" />
     <div class="actions">
-      <button :disabled="busy || !store.can('maintenance.write')" @click="check">
+      <button type="button" :disabled="busy || !store.can('maintenance.write')" @click="check">
         {{ t(busy ? '检查中…' : '检查更新') }}
       </button>
     </div>
@@ -114,9 +112,6 @@ p {
   margin-top: 12px;
   color: var(--muted);
   font-size: 12px;
-}
-[role='alert'] {
-  color: var(--nx-color-danger);
 }
 .actions {
   display: flex;

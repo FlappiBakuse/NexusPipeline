@@ -85,7 +85,6 @@ async function readCompletion(): Promise<boolean> {
     return true;
   } catch (reason) {
     if (!owner.signal.aborted) {
-      props.store.report(reason);
       completionError.value = reason instanceof Error ? reason.message : '系统操作状态不可用。';
     }
     return false;
@@ -105,7 +104,7 @@ async function cancelCompletion(): Promise<void> {
   else
     completionError.value = cancellationPending.value
       ? '取消结果待确认；请读取 Host 状态，勿重复发送。'
-      : '取消失败。';
+      : commands.state.error;
 }
 async function checkCompletion(): Promise<void> {
   await readCompletion();
@@ -171,6 +170,7 @@ onBeforeUnmount(() => {
     </button>
     <button v-if="cancellationPending" @click="checkCompletion">{{ t('读取状态确认取消结果') }}</button>
   </section>
-  <p v-if="completionError" role="alert">{{ t(completionError) }}</p>
+  <nexus-toast v-if="visible && completionError" :tone="cancellationPending ? 'warning' : 'danger'"
+    :message.prop="t(completionError)" />
 </template>
 <style scoped src="./completion-notice.css"></style>

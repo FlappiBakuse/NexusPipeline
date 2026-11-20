@@ -29,7 +29,7 @@ internal sealed class OwnedDesktop : IDisposable
         try
         {
             var executable = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(payloadRoot, ApplicationTree.DesktopEntry));
-            var profile = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(instance.RuntimeRoot, "desktop-profile"));
+            var profile = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(instance.RuntimeRoot, RuntimeInstance.DesktopProfileDirectory));
             Directory.CreateDirectory(profile);
             foreach (var name in new[] { "session", "dumps", "logs" })
                 Directory.CreateDirectory(PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(profile, name)));

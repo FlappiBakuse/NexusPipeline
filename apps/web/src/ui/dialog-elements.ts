@@ -8,6 +8,7 @@ const dialogStyle =
   controlStyles +
   modalStyles +
   `
+p{overflow-wrap:anywhere}
 button[data-action=cancel]{background:transparent}
 button[data-action=confirm]{background:var(--accent-strong,var(--nx-color-accent));border-color:var(--accent-strong,var(--nx-color-accent));color:#fff}
 dialog[data-tone=danger] button[data-action=confirm]{background:var(--nx-color-danger);border-color:var(--nx-color-danger)}
@@ -22,9 +23,9 @@ export class ConfirmDialog extends NexusElement {
     super(
       'nexus-confirm-dialog',
       dialogStyle,
-      '<dialog aria-labelledby="title"><div class="mask"></div><div class="panel"><header><h2 id="title"></h2><button class="close" type="button">' +
+      '<dialog aria-labelledby="title" aria-describedby="message"><div class="mask"></div><div class="panel"><header><h2 id="title"></h2><button class="close" type="button">' +
         closeIcon +
-        '</button></header><nexus-scroll-area class="content"><p></p></nexus-scroll-area><footer><button autofocus type="button" data-action="cancel">Cancel</button><button type="button" data-action="confirm">Confirm</button></footer></div></dialog>'
+        '</button></header><nexus-scroll-area class="content"><p id="message"></p></nexus-scroll-area><footer><button autofocus type="button" data-action="cancel">Cancel</button><button type="button" data-action="confirm">Confirm</button></footer></div></dialog>'
     );
     this.dialog = this.root.querySelector('dialog')!;
     this.modal = new ModalSurface(this.dialog, (reason) => this.emit('nexus-close', { reason }));

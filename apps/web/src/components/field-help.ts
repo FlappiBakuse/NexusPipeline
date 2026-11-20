@@ -12,9 +12,10 @@ function update(element: HTMLElement, text: string | undefined): void {
   }
   if (!tooltip) {
     tooltip = document.createElement('nexus-tooltip') as UiElement<'nexus-tooltip'>;
-    tooltip.style.cssText = 'position:absolute;width:0;height:0';
     tooltip.anchor = element;
-    element.after(tooltip);
+    const caption = element.querySelector(':scope > .field-help-caption');
+    if (caption) caption.append(tooltip);
+    else element.after(tooltip);
     owners.set(element, tooltip);
   }
   tooltip.content = text;

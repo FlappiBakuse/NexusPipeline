@@ -59,16 +59,28 @@ public static class ConfigurationEditInventory
     private static void VerifyCompletion(SqliteConnection connection, SqliteTransaction transaction,
         ConfigurationEditStatus session, Guid operationId, string subject)
     {
+        var projected = ConfigurationEditController.IsBindingProfile(session);
+        var kind = session.Phase != ConfigurationEditPhase.Saved ? "configuration.edit.cancel" :
+            projected ? "configuration.edit.save-binding" : "configuration.edit.save";
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT subject_id,operation_kind,status FROM main.operations WHERE operation_id=$operation;";
         command.Parameters.AddWithValue("$operation", operationId.ToString("D"));
         using (var row = command.ExecuteReader())
             if (!row.Read() || row.GetString(0) != subject || row.GetString(2) != "completed" ||
-                row.GetString(1) != (session.Phase == ConfigurationEditPhase.Saved ? "configuration.edit.save" : "configuration.edit.cancel"))
+                row.GetString(1) != kind)
                 throw new IOException("configuration_edit_completion_unbound");
         command.CommandText = "SELECT binding_id,resource_id,revision FROM configuration.configuration_batch_items WHERE operation_id=$operation;";
         var actual = new List<(Guid Binding, string Resource, long Revision)>();
         using (var row = command.ExecuteReader()) while (row.Read()) actual.Add((Guid.Parse(row.GetString(0)), row.GetString(1), row.GetInt64(2)));
+        if (projected && session.Phase == ConfigurationEditPhase.Saved)
+        {
+            var bindingId = session.Resources[0].Address.BindingId;
+            if (actual.Count is < 2 or > 32 || actual.Any(item => item.Binding != bindingId || item.Revision < 1 ||
+                item.Resource.StartsWith("$editor:", StringComparison.Ordinal)) ||
+                actual.Count(item => item.Resource == BindingConfigurationSource.ResourceId) != 1)
+                throw new IOException("configuration_edit_result_unrecognized");
+            return;
+        }
         var expected = session.Phase == ConfigurationEditPhase.Saved ? session.Resources.Select(resource =>
             (resource.Address.BindingId, resource.Address.ResourceId, resource.ExpectedRevision + 1)).ToArray() : [];
         if (!actual.OrderBy(item => item.Resource, StringComparer.Ordinal).SequenceEqual(expected))

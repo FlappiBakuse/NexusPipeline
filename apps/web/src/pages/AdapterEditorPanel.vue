@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import DraftNotice from '../components/DraftNotice.vue';
+import { fieldHelp as vHelp } from '../components/field-help';
 import { draftPresentation, draftDirective as vDraft } from '../app/draft-presentation';
 import { createIdentity } from '../control/identity';
-import { computed, onBeforeUnmount, reactive, toRefs, watch } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref, toRefs, watch } from 'vue';
 import type { ConfigurationStore } from '../app/store-ports';
 import { ControlFailure, objectValue } from '../control/client';
 import { t, locale } from '../app/locale';
@@ -39,14 +39,15 @@ watch(
   },
   { immediate: true, flush: 'sync' }
 );
-const { busy, note } = toRefs(state);
+const { busy, note, error } = toRefs(state);
+const availabilityError = ref('');
 let alive = true;
 const { extension, details, loadingExtension, available } = useAdapterAvailability(
   props.store,
   () => props.overview.extensionId,
   () => props.visible,
   (reason) => {
-    note.value = reason instanceof Error ? reason.message : '扩展未安装或未启用，专项配置不可用。';
+    availabilityError.value = reason instanceof Error ? reason.message : '扩展未安装或未启用，专项配置不可用。';
   }
 );
 const selected = computed(() =>
@@ -58,6 +59,7 @@ function toggle(id: string): void {
     ? state.resourceIds.filter((item) => item !== id)
     : [...state.resourceIds, id];
   resetAdapterProposal(state);
+  error.value = '';
 }
 function selection(id: string): Record<string, unknown> {
   return {
@@ -114,6 +116,7 @@ async function execute(action: 'discover' | 'propose' | 'previewRepair' | 'apply
   };
   busy.value = true;
   note.value = '';
+  error.value = '';
   state.pending = operationId;
   state.pendingAction = action;
   try {
@@ -153,14 +156,16 @@ async function execute(action: 'discover' | 'propose' | 'previewRepair' | 'apply
     if (!(error instanceof ControlFailure && error.uncertain)) {
       state.pending = '';
       state.pendingAction = '';
+      state.error = error instanceof Error ? error.message : '操作失败，请重试。';
     }
-    note.value = error instanceof Error ? error.message : '操作失败，请重试。';
   } finally {
     busy.value = false;
   }
 }
 async function checkPending(): Promise<void> {
   if (!state.pending || busy.value || !currentInstance()) return;
+  busy.value = true;
+  note.value = error.value = '';
   try {
     if (state.pendingAction !== 'applyRepair') {
       await props.store.client.read(
@@ -186,7 +191,9 @@ async function checkPending(): Promise<void> {
       if (alive) emit('changed');
     } else note.value = '操作仍在处理中。';
   } catch (error) {
-    note.value = error instanceof Error ? error.message : '操作失败，请重试。';
+    state.error = error instanceof Error ? error.message : '操作失败，请重试。';
+  } finally {
+    busy.value = false;
   }
 }
 onBeforeUnmount(() => {
@@ -197,12 +204,11 @@ onBeforeUnmount(() => {
 <template>
   <AdapterCoverage :coverage="state.coverage" :game-path-check="state.gamePathCheck" />
   <div v-draft="presentation" class="config-fields">
-    <DraftNotice :restored="presentation.state.restored" />
-    <p v-if="loadingExtension" role="status">{{ t('正在读取配置资源…') }}</p>
-    <p v-else-if="!available" role="status">{{ t('扩展未安装或未启用，专项配置不可用。') }}</p>
+    <nexus-spinner v-if="loadingExtension" :label="t('正在读取配置资源…')" />
     <fieldset :disabled="busy || !!state.pending || !available">
       <legend>{{ t('选择要检查的资源') }}</legend>
-      <label v-for="item in overview.resources" :key="item.resourceId" class="choice-row">
+      <label v-for="item in overview.resources" :key="item.resourceId" class="choice-row"
+        v-help="item.isSaved ? '' : t('配置资源尚未保存，无法编辑字段。')">
         <input
         data-draft-field="AdapterEditorPanel/state.resourceIds.includes(item.resourceId)"
           type="checkbox"
@@ -211,7 +217,6 @@ onBeforeUnmount(() => {
           @change="toggle(item.resourceId)"
         />
         {{ item.label }}
-        <small v-if="!item.isSaved">{{ t('配置资源尚未保存，无法编辑字段。') }}</small>
       </label>
     </fieldset>
     <div class="row">
@@ -259,29 +264,29 @@ onBeforeUnmount(() => {
         </option>
       </FormSelect>
     </label>
-    <div v-if="candidate" class="row">
-      <button type="button" :disabled="busy || !!state.pending || !available" @click="execute('previewRepair')">
+    <div v-if="candidate || state.pending" class="row">
+      <button v-if="candidate" type="button" :disabled="busy || !!state.pending || !available" @click="execute('previewRepair')">
         {{ t('预览修复') }}
       </button>
-      <button type="button"
+      <button v-if="candidate" type="button"
         :disabled="busy || !!state.pending || !state.previewed || !store.can('configuration.repair')"
         @click="execute('applyRepair')"
       >
         {{ t('应用修复') }}
       </button>
-    </div>
-    <p v-if="state.pending" role="alert">
-      {{
-        t(
-          state.pendingAction === 'applyRepair'
-            ? '修复操作待确认，请先查询操作状态。'
-            : '读取结果未知，请重新读取资源。'
-        )
-      }}
-      <button type="button" @click="checkPending">
+
+      <button v-if="state.pending" type="button" @click="checkPending">
         {{ t(state.pendingAction === 'applyRepair' ? '查询操作状态' : '读取资源重新开始') }}
       </button>
-    </p>
-    <p v-if="note" role="status">{{ t(note) }}</p>
+    </div>
+    <template v-if="visible && !busy">
+      <nexus-toast v-if="error" :tone="state.pending ? 'warning' : 'danger'" :message.prop="t(error)" />
+      <nexus-toast v-else-if="note" tone="info" :message.prop="t(note)" />
+      <nexus-toast v-else-if="state.pending" tone="warning" :message.prop="t(state.pendingAction === 'applyRepair'
+        ? '修复操作待确认，请先查询操作状态。' : '读取结果未知，请重新读取资源。')" />
+      <nexus-toast v-else-if="!loadingExtension && !available" tone="warning"
+        :message.prop="t(availabilityError || '扩展未安装或未启用，专项配置不可用。')" />
+    </template>
   </div>
 </template>
+<style scoped src="./configuration.css"></style>

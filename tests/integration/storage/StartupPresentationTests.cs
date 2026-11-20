@@ -20,6 +20,45 @@ public sealed class StartupPresentationTests
         Assert.Equal(before, Files(instance));
     }
 
+    [Theory(DisplayName = "First Desktop Startup Initializes Databases Alongside The Desktop Profile")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void InitializesWithDesktopProfile(bool retry)
+    {
+        var instance = Create();
+        using var lease = InstanceLease.Acquire(instance, new());
+        var profile = Directory.CreateDirectory(Path.Combine(instance.RuntimeRoot, "desktop-profile")).FullName;
+        var log = Path.Combine(profile, "logs", "chromium.log");
+        if (retry)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(log)!);
+            File.WriteAllText(log, "prior desktop launch");
+        }
+
+        _ = StartupPresentation.Read(instance, lease);
+        var database = StateDatabase.CreateFresh(instance, lease);
+
+        Assert.Equal(instance.InstanceId, StateDatabase.OpenCurrent(instance, lease).InstanceId);
+        Assert.True(File.Exists(database.DatabasePath));
+        Assert.True(Directory.Exists(profile));
+        if (retry) Assert.Equal("prior desktop launch", File.ReadAllText(log));
+    }
+
+    [Theory(DisplayName = "First Startup Preserves Unexpected Runtime Entries And Rejects Database Initialization")]
+    [InlineData("desktop-profile")]
+    [InlineData("unrecognized-data")]
+    public void RejectsUnexpectedRuntimeFiles(string name)
+    {
+        var instance = Create();
+        using var lease = InstanceLease.Acquire(instance, new());
+        var file = Path.Combine(instance.RuntimeRoot, name);
+        File.WriteAllText(file, "existing data");
+
+        Assert.Throws<IOException>(() => StateDatabase.CreateFresh(instance, lease));
+        Assert.Equal("existing data", File.ReadAllText(file));
+        Assert.False(File.Exists(Path.Combine(instance.RuntimeRoot, "state-initialization.guard")));
+    }
+
     [Theory(DisplayName = "Startup Presentation Reads Saved Desktop Preferences Without Changing Database Bytes")]
     [InlineData(false)]
     [InlineData(true)]

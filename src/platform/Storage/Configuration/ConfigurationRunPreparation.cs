@@ -54,7 +54,7 @@ public sealed class ConfigurationRunPreparation
         if (step.ExclusiveProgram == true)
         {
             if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
-            Processes.ExclusiveProgramAdmission.RequireStopped(step.ExecutablePath);
+            Processes.ExclusiveProgramAdmission.RequireStopped(step.ExecutablePath, step.ExclusiveProgramInUserSession == true);
         }
         var historical = origin?.ForStep(_instance, ownerOperationId, execution, stepId, request);
         if (ownerOperationId == Guid.Empty || request.Resources.Any(item => item.OperationId == ownerOperationId))

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fieldHelp as vHelp } from '../components/field-help';
 import { createIdentity } from '../control/identity';
 import { computed, ref, watch } from 'vue';
 import type { AutomationStore } from '../app/store-ports';
@@ -131,7 +132,6 @@ async function inspect(): Promise<void> {
       ? '预览可应用；请核对路径与附件后执行导入。'
       : '预览发现阻止应用的问题。';
   } catch (reason) {
-    props.store.report(reason);
     error.value = reason instanceof Error ? reason.message : '导入预览失败。';
   } finally {
     busy.value = false;
@@ -159,7 +159,6 @@ async function apply(): Promise<void> {
     notice.value = '导入已受理。';
     await finishApply();
   } catch (reason) {
-    props.store.report(reason);
     if (reason instanceof ControlFailure && reason.uncertain) pendingApply.value = operationId.value;
     error.value = pendingApply.value
       ? '导入结果待确认；请查询状态，勿重复应用。'
@@ -189,8 +188,7 @@ async function checkApply(): Promise<void> {
       await finishApply();
       notice.value = '导入已完成，目录已刷新。';
     } else notice.value = '导入仍在处理，请稍后再查询。';
-  } catch (reason) {
-    props.store.report(reason);
+  } catch {
     error.value = '尚无法确认导入结果；草稿与预览已保留，原命令仍被锁定。';
   } finally {
     busy.value = false;
@@ -200,9 +198,9 @@ async function checkApply(): Promise<void> {
 
 <template>
   <section class="exchange import-only">
-    <p>{{ t('导入使用新版 bundle JSON。根目录和附件路径指向运行 Host 的本机文件系统。') }}</p>
     <div class="file-action">
       <nexus-file-picker
+        v-help="t('导入使用新版 bundle JSON。根目录和附件路径指向运行 Host 的本机文件系统。')"
         :label="t('选择 bundle JSON')"
         :aria-label="t('选择 bundle JSON')"
         accept=".json,application/json"
@@ -217,7 +215,7 @@ async function checkApply(): Promise<void> {
         {{ t('已选择：') }}{{ fileName }} ·
         {{ t(bundle.exportKind === 'scriptTemplate' ? '脚本模板' : '完整定义') }}
       </p>
-      <fieldset>
+      <fieldset data-surface="raised">
         <legend>{{ t('导入根目录') }}</legend>
         <label v-for="root in roots" :key="root.id">
           {{ root.name }}
@@ -230,7 +228,7 @@ async function checkApply(): Promise<void> {
           />
         </label>
       </fieldset>
-      <fieldset v-if="attachments.length">
+      <fieldset v-if="attachments.length" data-surface="raised">
         <legend>{{ t('附件原件路径') }}</legend>
         <label v-for="item in attachments" :key="item.id">
           {{ item.name }}
@@ -255,14 +253,11 @@ async function checkApply(): Promise<void> {
         >
           {{ t('应用已核对预览') }}
         </button>
-      </div>
-      <p v-if="pendingApply" role="status">
-        {{ t('待确认导入：') }}{{ pendingApply }}
-        <button :disabled="busy || !store.can('operations.read')" @click="checkApply">
+        <button v-if="pendingApply" :disabled="busy || !store.can('operations.read')" @click="checkApply">
           {{ t('查询操作状态并刷新') }}
         </button>
-      </p>
-      <div v-if="preview" class="preview">
+      </div>
+      <div v-if="preview" class="preview" data-surface="raised">
         <h3>{{ t('预览') }} · {{ t(preview.canApply ? '可应用' : '不可应用') }}</h3>
         <p>
           {{ t('目录版本') }} {{ preview.expectedRevision }}; {{ preview.paths.length }} {{ t('条路径') }};
@@ -275,8 +270,8 @@ async function checkApply(): Promise<void> {
         </ul>
       </div>
     </template>
-    <p v-if="error" role="alert" class="error">{{ t(error) }}</p>
-    <p v-if="notice" role="status">{{ t(notice) }}</p>
+    <nexus-toast v-if="error" :tone="pendingApply ? 'warning' : 'danger'" :message.prop="t(error)" />
+    <nexus-toast v-else-if="notice" tone="info" :message.prop="t(notice)" />
   </section>
 </template>
 

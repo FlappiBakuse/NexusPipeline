@@ -10,44 +10,51 @@ registerMessages({ '由驱动插件编译并执行项目': 'Compile and run the 
 export type ScriptChoice = { extensionId: string; label: string; artifact: string; driver?: boolean };
 const props = defineProps<{ store: AutomationStore; visible: boolean; active: boolean }>();
 const emit = defineEmits<{ choose: [value?: ScriptChoice]; close: [] }>();
-const installed = ref<ExtensionState[]>([]);
-const choices = computed<ScriptChoice[]>(() => installed.value.filter(item => item.isInstalled && item.desiredEnabled &&
+const installed = defineModel<readonly ExtensionState[] | undefined>('installed', { required: true });
+const choices = computed<ScriptChoice[]>(() => (installed.value ?? []).filter(item => item.isInstalled && item.desiredEnabled &&
   item.activationId && !item.unavailableReason && item.capabilities.includes('task.adapt') && (item.kind === 'data-specialized' ||
     item.kind === 'managed-code' && item.capabilities.includes('source.compile') && item.capabilities.includes('execution.drive')))
   .map(item => ({ extensionId: item.extensionId, label: item.metadata ? metadataText(item.metadata, locale.value).displayName : item.artifactName || item.extensionId,
     driver: item.kind === 'managed-code', artifact: item.artifactName || item.extensionId })).sort((a, b) => Number(!!b.driver) - Number(!!a.driver) || a.artifact.localeCompare(b.artifact, 'en')));
 const loading = ref(false);
 const error = ref('');
-const ready = ref(false);
 let owner: AbortController | undefined;
-const instance = props.store.state.capabilities?.instanceId;
-
-watch(() => [props.active, props.visible, props.store.state.settings?.saved.revision] as const, async ([active]) => {
-  if (!active || !props.store.can('extensions.read')) return;
+const instance = () => props.store.state.capabilities?.instanceId;
+const readAllowed = () => props.store.can('extensions.read');
+async function refresh(): Promise<void> {
+  if (!props.active || !readAllowed()) return;
   owner?.abort();
   const current = new AbortController();
+  const instanceId = instance();
   owner = current;
   loading.value = true;
   error.value = '';
   try {
     const catalog = await props.store.client.read('/control/v1/extensions', extensionList, current.signal);
-    if (!current.signal.aborted && props.store.state.capabilities?.instanceId === instance) {
+    if (!current.signal.aborted && instance() === instanceId) {
       installed.value = catalog.items;
-      ready.value = true;
     }
-  } catch (reason) {
+  } catch {
     if (!current.signal.aborted) error.value = '脚本类型加载失败，请重新打开。';
   } finally {
     if (owner === current) loading.value = false;
   }
+}
+watch([instance, () => props.store.state.events?.extensionGeneration, readAllowed], () => {
+  owner?.abort();
+  installed.value = undefined;
+  loading.value = false;
+  void refresh();
 }, { immediate: true });
+watch(() => props.active, active => { if (active && !installed.value && !loading.value) void refresh(); });
+watch(() => props.visible, visible => { if (visible && !installed.value && !loading.value) void refresh(); });
 onBeforeUnmount(() => owner?.abort());
 </script>
 
 <template>
   <nexus-modal :open.prop="visible" :title="t('新建脚本实例')" @nexus-close="emit('close')">
     <div class="script-types" :aria-busy="loading">
-      <template v-if="ready || !store.can('extensions.read')">
+      <template v-if="installed || !store.can('extensions.read')">
       <button type="button" class="type-choice" @click="emit('choose')">
         <span class="type-icon"><img :src="scriptIcon()" alt="" /></span>
         <span>
@@ -71,9 +78,8 @@ onBeforeUnmount(() => owner?.abort());
         </button>
       </template>
       </template>
-      <p v-if="!ready && loading" role="status">{{ t('加载中…') }}</p>
-      <p v-if="choices.length && !store.can('automation.declare')">{{ t('请在 Host 本机创建专项脚本实例。') }}</p>
-      <p v-if="error" role="alert">{{ t(error) }}</p>
+      <nexus-spinner v-if="!installed && loading" :label="t('加载中…')" />
+      <nexus-toast v-if="visible && error" tone="danger" :message.prop="t(error)" />
     </div>
     <div slot="footer">
       <button type="button" @click="emit('close')">{{ t('取消') }}</button>

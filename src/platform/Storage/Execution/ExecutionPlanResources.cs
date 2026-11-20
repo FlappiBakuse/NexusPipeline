@@ -69,6 +69,8 @@ public static class ExecutionPlanResources
         foreach (var step in plan.Steps)
         {
             claims.Add(new("automation:" + step.ScriptId, ResourceClaimMode.Mutation));
+            if (step.ExclusiveProgramInUserSession == true)
+                claims.Add(Processes.ExclusiveProgramAdmission.UserSessionClaim(step.ExecutablePath));
             if (step.JudgementWorker is not null) claims.Add(new("secrets:fields", ResourceClaimMode.Reference));
             if (step.Target?.Android is { } android) claims.AddRange(TargetResourceKeys.Android(android.Endpoint, ResourceClaimMode.Mutation));
             if (step.Target?.Pc is { } pc)

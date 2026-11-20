@@ -4,6 +4,8 @@ import { joinToastStack } from './toast-stack.js';
 
 export class NexusToastElement extends NexusElement {
   static readonly observedAttributes = elementAttributes('nexus-toast');
+  // The shell owns the lifetime of its installation notification.
+  persistent = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private lastMessage = '';
   private animation?: Animation;
@@ -44,11 +46,12 @@ export class NexusToastElement extends NexusElement {
     this.lastMessage = message;
     clearTimeout(this.timer); this.animation?.cancel();
     if (!message) { this.dismiss(); return; }
-    this.showPopover();
     this.stack?.abort(); this.stack = new AbortController();
     joinToastStack(this, this.stack.signal);
+    this.showPopover();
     this.animation = this.animate([{ opacity: 0, transform: 'translateY(24px)' }, { opacity: 1, transform: 'none' }],
       { duration: this.duration(), easing: 'cubic-bezier(.2,.8,.2,1)' });
+    if (this.persistent) return;
     this.timer = setTimeout(() => {
       this.animation = this.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(24px)' }],
         { duration: this.duration(), easing: 'ease-in', fill: 'forwards' });

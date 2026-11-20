@@ -134,7 +134,7 @@ public sealed class StartupAdmissionTests(ITestOutputHelper output)
         Assert.Equal(ConfigurationRecoveryResult.NotExecuted, new ConfigurationRecovery(session).Recover());
     }
 
-    [Fact(DisplayName = "Completed Families Are Verified During Admission And Recovery Without Rewriting Corrupt History")]
+    [Fact(DisplayName = "Full Admission Rejects Corrupt Completed History And Startup Recovers Only Active Work")]
     public void ChecksCompletedFamilies()
     {
         var fixture = CompletedFamilies();
@@ -147,18 +147,23 @@ public sealed class StartupAdmissionTests(ITestOutputHelper output)
         var path = Directory.GetFiles(journal).Order(StringComparer.Ordinal).Last();
         var document = JsonNode.Parse(File.ReadAllBytes(path))!; document["version"] = 999;
         File.WriteAllBytes(path, JsonSerializer.SerializeToUtf8Bytes(document));
-        var before = Fingerprints(fixture.Instance.RuntimeRoot);
         var roots = new PayloadApplyRoots(fixture.Root, Path.Combine(fixture.Instance.RuntimeRoot, "extensions"));
         var recovery = new StartupJournalRecovery(fixture.Instance, fixture.Contracts, database, roots);
-        Assert.Equal("unsupported_or_invalid_contract", Assert.Throws<JsonException>(() =>
-            StateDatabase.OpenExisting(fixture.Instance, Path.Combine(fixture.Root, "diagnostics"), admission)).Message);
-        Assert.Equal(before, Fingerprints(fixture.Instance.RuntimeRoot));
         using (var lease = InstanceLease.Acquire(fixture.Instance, fixture.Contracts))
-        using (var observation = new DatabaseObservation(database))
         {
-            var beforeRecovery = Fingerprints(fixture.Instance.RuntimeRoot, lockHeld: true);
-            Assert.Equal("unsupported_or_invalid_contract", Assert.Throws<JsonException>(() => recovery.Recover(lease)).Message);
-            Assert.Equal(beforeRecovery, Fingerprints(fixture.Instance.RuntimeRoot, lockHeld: true));
+            using (var observation = new DatabaseObservation(database))
+            {
+                var before = Fingerprints(fixture.Instance.RuntimeRoot, lockHeld: true);
+                Assert.Equal("unsupported_or_invalid_contract", Assert.Throws<JsonException>(() =>
+                    StateDatabase.OpenExisting(fixture.Instance, Path.Combine(fixture.Root, "diagnostics"), admission, lease)).Message);
+                Assert.Equal(before, Fingerprints(fixture.Instance.RuntimeRoot, lockHeld: true));
+            }
+            var history = Path.Combine(fixture.Instance.RuntimeRoot, "journals");
+            var beforeRecovery = Fingerprints(history);
+            Assert.Empty(new RecoveryJournalRegistry(database).ReadActiveSnapshot().Journals);
+            Assert.True(recovery.Recover(lease).Current.IsReady);
+            Assert.Equal(beforeRecovery, Fingerprints(history));
+            AssertCompleted(fixture, database);
             lease.VerifyHeld(fixture.Instance);
         }
         Directory.Move(fixture.Instance.RuntimeRoot, fixture.Instance.RuntimeRoot + "-released");

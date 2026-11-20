@@ -195,6 +195,10 @@ public sealed class StateDatabase
 
     internal long DomainSequence(DatabaseDomain domain) => Interlocked.Read(ref _domainSequences[Array.IndexOf(DatabaseLayout.Domains, domain)]);
 
+    private static bool IsDesktopProfile(string entry) =>
+        StringComparer.OrdinalIgnoreCase.Equals(Path.GetFileName(entry), RuntimeInstance.DesktopProfileDirectory) &&
+        (File.GetAttributes(entry) & (FileAttributes.Directory | FileAttributes.ReparsePoint)) == FileAttributes.Directory;
+
     public static StateDatabase CreateFresh(RuntimeInstance instance, InstanceLease? startupLease = null)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Windows runtime required");
@@ -205,9 +209,10 @@ public sealed class StateDatabase
         DatabaseConnections.RejectLinks(directory);
         if (File.Exists(Path.Combine(directory, "nexus.db"))) throw new IOException("legacy_database_layout_requires_new_instance");
         var initialEntries = new HashSet<string>(["instance.json", "instance.lock", "state"], StringComparer.OrdinalIgnoreCase);
-        if (Directory.EnumerateFileSystemEntries(instance.RuntimeRoot).Any(entry => !initialEntries.Contains(Path.GetFileName(entry))) ||
+        if (Directory.EnumerateFileSystemEntries(instance.RuntimeRoot).Any(entry => !initialEntries.Contains(Path.GetFileName(entry)) &&
+            !IsDesktopProfile(entry)) ||
             Directory.Exists(directory) && Directory.EnumerateFileSystemEntries(directory).Any())
-            throw new IOException("Runtime is not an uninitialized instance");
+            throw new IOException("runtime_not_uninitialized");
         using var guard = new FileStream(Path.Combine(instance.RuntimeRoot, "state-initialization.guard"), FileMode.CreateNew,
             FileAccess.Write, FileShare.Read, 1, FileOptions.WriteThrough);
         guard.WriteByte(1); guard.Flush(flushToDisk: true);

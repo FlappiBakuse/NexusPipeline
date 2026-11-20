@@ -1,0 +1,31 @@
+.entity-card-name {
+  margin: 0;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.entity-card-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.entity-card-actions > nexus-icon-button {
+  --size: 40px;
+  --nx-icon-border: var(--border-strong);
+  inline-size: var(--size);
+  block-size: var(--size);
+}
+
+.entity-card-actions > .danger-action {
+  --nx-icon-border: var(--bad-border);
+  --nx-color-text: var(--bad);
+}
+
+@media (max-width: 600px) or (pointer: coarse) {
+  .entity-card-actions > nexus-icon-button { --size: 44px; }
+}

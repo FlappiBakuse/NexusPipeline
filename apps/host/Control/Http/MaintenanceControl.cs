@@ -15,8 +15,13 @@ internal sealed class MaintenanceControl(ControlAuthentication authority, HostMa
             _ = authority.Require(context, ControlCapability.MaintenanceWrite); Query(context);
             if (context.Request.ContentLength is not (null or 0) || context.Request.Headers.TransferEncoding.Count != 0)
                 throw new ControlRequestException(400, "request_body_invalid");
-            return Results.Json(await maintenance.RestartAsync(ControlQueryValues.Id(operationId), context.RequestAborted),
-                NotificationUseCases.Json, statusCode: 202);
+            try
+            {
+                return Results.Json(await maintenance.RestartAsync(ControlQueryValues.Id(operationId), context.RequestAborted),
+                    NotificationUseCases.Json, statusCode: 202);
+            }
+            catch (IOException error) when (error.Message == "maintenance_handoff_unavailable")
+            { throw new ControlRequestException(409, "host_restart_unavailable"); }
         });
         app.MapGet("/control/v1/maintenance/operations/{operationId}", (HttpContext context, string operationId) =>
         {

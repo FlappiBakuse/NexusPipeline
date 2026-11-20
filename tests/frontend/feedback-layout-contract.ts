@@ -50,6 +50,14 @@ export async function feedbackLayoutContract(fixture: HTMLElement, check: (value
   check(Math.abs(first.getBoundingClientRect().bottom - b.bottom) < 1,
     'dismissing a toast closes the gap in the stack');
   first.remove(); card.remove();
+  const errors = ['Settings are unavailable', 'Settings are unavailable', 'Unable to save the token'].map(message => {
+    const error = document.createElement('nexus-toast') as UiElement<'nexus-toast'>;
+    error.tone = 'danger'; error.message = message; fixture.append(error);
+    return error;
+  });
+  check(errors.every(error => error.matches(':popover-open')),
+    'the stack allows independent errors with the same wording');
+  errors.forEach(error => error.remove());
   const modal = document.createElement('nexus-modal') as UiElement<'nexus-modal'>;
   modal.title = 'Editing configuration'; modal.open = true;
   fixture.append(modal);

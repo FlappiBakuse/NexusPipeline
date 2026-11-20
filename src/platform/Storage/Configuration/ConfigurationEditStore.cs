@@ -10,7 +10,7 @@ using NexusPipeline.Platform.Storage.Sqlite;
 
 namespace NexusPipeline.Platform.Storage.Configuration;
 
-public sealed class ConfigurationEditStore
+public sealed partial class ConfigurationEditStore
 {
     private readonly RuntimeInstance _instance;
     private readonly StateDatabase _database;
@@ -40,14 +40,27 @@ public sealed class ConfigurationEditStore
     public PreparedConfigurationEdit Prepare(Guid sessionId, ConfigurationEditRequest request) =>
         new ConfigurationEditPreparation(_instance, _database, _contracts).Prepare(sessionId, request);
 
-    internal PreparedConfigurationEdit Prepare(Guid sessionId, ConfigurationEditRequest request, AdapterEditHook? adapter) =>
-        new ConfigurationEditPreparation(_instance, _database, _contracts, adapter).Prepare(sessionId, request);
+    internal PreparedConfigurationEdit Prepare(Guid sessionId, ConfigurationEditRequest request, AdapterEditHook? adapter,
+        Func<ConfigurationTarget, FileTreeSnapshot, FileTreeSnapshot>? initialize = null) =>
+        new ConfigurationEditPreparation(_instance, _database, _contracts, adapter).Prepare(sessionId, request, initialize);
 
     public ConfigurationEditStatus? Read(Guid sessionId, string subject)
     {
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration);
         using var transaction = DatabaseConnections.BeginRead(connection);
         return ConfigurationEditRows.Read(connection, transaction, sessionId, subject);
+    }
+
+    internal ConfigurationEditStatus? ReadActiveBinding(Guid bindingId, string subject)
+    {
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration);
+        using var transaction = DatabaseConnections.BeginRead(connection);
+        using var command = connection.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "SELECT s.session_id FROM configuration.configuration_edit_sessions s JOIN main.operations o " +
+            "ON o.operation_id=s.session_id WHERE s.binding_id=$binding AND s.phase=1 AND o.subject_id=$subject;";
+        command.Parameters.AddWithValue("$binding", bindingId.ToString("D"));
+        command.Parameters.AddWithValue("$subject", subject);
+        return command.ExecuteScalar() is string id ? ConfigurationEditRows.Read(connection, transaction, Guid.Parse(id), subject) : null;
     }
 
     public ConfigurationEditStatus? ReadAcceptedSource(Guid sessionId, string subject, string sourceDigest)

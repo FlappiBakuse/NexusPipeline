@@ -191,7 +191,6 @@ export function usePluginBrowser(store: AppStore, visible: () => boolean) {
       if (selectedId.value) await select(selectedId.value);
     } catch (reason) {
       if (!controller.signal.aborted && current()) {
-        store.report(reason);
         error.value = reason instanceof Error ? reason.message : '插件读取失败';
       }
     } finally {

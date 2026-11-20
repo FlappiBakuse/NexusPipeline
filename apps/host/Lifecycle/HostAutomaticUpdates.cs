@@ -37,6 +37,7 @@ internal sealed class HostAutomaticUpdates : IAsyncDisposable
     private bool _hasPending;
     private AutomaticUpdateStatus _status = new(null, null, null);
     internal AutomaticUpdateStatus Status => Volatile.Read(ref _status);
+    internal bool HasStartupPending => _startupPending.Count != 0;
 
     internal HostAutomaticUpdates(RuntimeInstance instance, StateDatabase database,
         HostSettingsService settings, HostUpdateService updates, HostMaintenanceController maintenance,

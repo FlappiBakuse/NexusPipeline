@@ -26,7 +26,7 @@ internal static class ConfigurationBatchInventory
             {
                 var result = BatchResultRows.Read(connection, transaction, operation.Id);
                 if (operation.Status != "completed" || operation.Kind is not ("configuration.save-batch" or "configuration.patch-batch" or "configuration.import-batch" or
-                    "configuration.edit.save" or "configuration.run.sync" or "configuration.run.finish") ||
+                    "configuration.edit.save" or "configuration.edit.save-binding" or "configuration.run.sync" or "configuration.run.finish") ||
                     (result.SourceRequestDigest is not null) != (operation.Kind is "configuration.patch-batch" or "configuration.import-batch"))
                     throw new IOException("configuration_batch_operation_unbound");
                 foreach (var item in result.Items)

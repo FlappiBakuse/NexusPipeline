@@ -44,18 +44,19 @@ public sealed class TaskAdapterExecutor
     internal (byte[] Manifest, byte[] Script) ReadInputs() => (_manifestBytes.ToArray(), _scriptBytes.ToArray());
 
     internal ScriptSource DiscoverSource(Guid operationId, string extensionId, Func<string, string> list, Func<string, string> read,
-        CancellationToken cancellation)
+        CancellationToken cancellation, bool edit = false)
     {
         var identity = new TaskMessageIdentity(extensionId, operationId, "discover", null, null);
         AssertActive(identity, cancellation);
         if (!_canDiscoverSource) throw new UnauthorizedAccessException("script_source_discovery_not_declared");
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellation, _scope.Cancellation);
         var request = new ScriptSource { Format = "nexus.script.source", Version = 1, Direction = "request",
-            OperationId = operationId.ToString("D"), ExtensionId = extensionId };
+            OperationId = operationId.ToString("D"), ExtensionId = extensionId, Purpose = edit ? "edit" : null };
         var bytes = _script.Discover(JsonSerializer.SerializeToUtf8Bytes(request), linked.Token, list, read);
         var response = _reader.Read<ScriptSource>(bytes, "script-source.schema.json");
         AssertActive(identity, cancellation);
-        if (response.Direction != "response" || response.OperationId != request.OperationId || response.ExtensionId != extensionId)
+        if (response.Direction != "response" || response.OperationId != request.OperationId ||
+            response.ExtensionId != extensionId || response.Purpose != request.Purpose)
             throw new JsonException("script_source_response_unbound");
         return response;
     }

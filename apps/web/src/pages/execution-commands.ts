@@ -12,16 +12,16 @@ interface ExecutionCommand {
 interface ExecutionCommandState {
   pending: ExecutionCommand | null;
   sending: boolean;
+  error: string;
   acceptedRunId?: string;
 }
 
 export interface ExecutionCommandContext {
   client: ControlClient;
-  state: { capabilities: { instanceId: string } | null; uncertainOperation: string };
+  state: { capabilities: { instanceId: string } | null };
   drafts: Map<string, Record<string, unknown>>;
   dirty: Set<string>;
   can(capability: string): boolean;
-  report(error: unknown): void;
 }
 
 export class ExecutionCommands {
@@ -32,7 +32,7 @@ export class ExecutionCommands {
   constructor(private readonly store: ExecutionCommandContext) {
     this.instance = store.state.capabilities?.instanceId;
     this.key = 'execution-command/' + this.instance;
-    if (!store.drafts.has(this.key)) store.drafts.set(this.key, { pending: null, sending: false });
+    if (!store.drafts.has(this.key)) store.drafts.set(this.key, { pending: null, sending: false, error: '' });
     this.state = store.drafts.get(this.key) as unknown as ExecutionCommandState;
   }
 
@@ -62,6 +62,7 @@ export class ExecutionCommands {
     if (!this.current() || this.state.pending) return false;
     this.state.pending = command;
     this.state.sending = true;
+    this.state.error = '';
     this.store.dirty.add(this.key);
     const path =
       command.kind === 'start'
@@ -90,8 +91,10 @@ export class ExecutionCommands {
       );
       return this.finish(command);
     } catch (error) {
-      this.store.report(error);
-      if (this.current() && error instanceof ControlFailure && !error.uncertain) this.clear(command);
+      if (this.current() && error instanceof ControlFailure && !error.uncertain) {
+        this.clear(command);
+        this.state.error = error.code;
+      }
       return false;
     } finally {
       this.state.sending = false;
@@ -102,6 +105,7 @@ export class ExecutionCommands {
     const command = this.state.pending;
     if (!command || this.state.sending || !this.current() || !this.store.can('operations.read')) return false;
     this.state.sending = true;
+    this.state.error = '';
     try {
       const result = await this.store.client.read('/control/v1/operations/' + command.id, objectValue);
       const kinds =
@@ -110,8 +114,8 @@ export class ExecutionCommands {
         throw new Error('execution_operation_unbound');
       if (!['accepted', 'completed'].includes(String(result.status))) return false;
       return this.finish(command);
-    } catch (error) {
-      this.store.report(error);
+    } catch {
+      if (this.current()) this.state.error = '无法确认原运行操作，请稍后再次查询。';
       return false;
     } finally {
       this.state.sending = false;
@@ -128,7 +132,6 @@ export class ExecutionCommands {
     if (this.state.pending?.id !== command.id) return;
     this.state.pending = null;
     this.store.dirty.delete(this.key);
-    if (this.store.state.uncertainOperation === command.id) this.store.state.uncertainOperation = '';
   }
 
   private uuid(value: unknown): boolean {

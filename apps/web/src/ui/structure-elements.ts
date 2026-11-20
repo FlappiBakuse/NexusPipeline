@@ -2,9 +2,9 @@ import { NexusElement, elementAttributes } from './element-base.js';
 import { controlStyles } from './control-styles.js';
 
 const cardStyle = `:host{display:block;min-width:0;padding:0;border:1px solid var(--nx-color-border,#394152);
-border-radius:var(--nx-radius-lg,16px);background:var(--nx-color-surface,#1e2330);color:var(--nx-color-text,#e9edf5)}
+border-radius:var(--nx-radius-lg,16px);background:var(--_nexus-card-fill,var(--nx-color-surface,#1e2330));color:var(--nx-color-text,#e9edf5)}
 h2,h3,p{margin:0}h2{font-size:15px;line-height:1.45}h3{font-size:15px}p{margin-top:4px;font-size:12px;line-height:1.5;color:var(--nx-color-muted,#9eacc1)}
-header{display:flex;align-items:start;justify-content:space-between;gap:16px;padding:16px 24px}header[hidden]{display:none}.body{padding:16px 24px 24px}.body[data-no-heading=true]{padding:24px}:host([data-surface=secondary]){background:var(--content-card-soft,#242a38)}`;
+header{display:flex;align-items:start;justify-content:space-between;gap:16px;padding:16px 24px}header[hidden]{display:none}.body{padding:16px 24px 24px}.body[data-no-heading=true]{padding:24px}`;
 
 export class NexusFieldElement extends NexusElement {
   static readonly observedAttributes = elementAttributes('nexus-field');
@@ -164,7 +164,7 @@ export class ScheduleCard extends NexusElement {
     super(
       'nexus-schedule-card',
       controlStyles +
-        `:host{display:block;min-width:0}.head{display:flex;align-items:center;gap:8px;padding:13px 8px}.head>button{flex:1;display:flex;align-items:center;justify-content:space-between;min-width:0;padding:0;border:0;border-radius:0;background:transparent;text-align:left}.head>button:hover{background:transparent}.arrow{width:24px;text-align:center;color:var(--nx-color-muted)}
+        `:host{display:block;min-width:0;background:var(--_nexus-card-fill)}.head{display:flex;align-items:center;gap:8px;padding:13px 8px}.head>button{flex:1;display:flex;align-items:center;justify-content:space-between;min-width:0;padding:0;border:0;border-radius:0;background:transparent;text-align:left}.head>button:hover{background:transparent}.arrow{width:24px;text-align:center;color:var(--nx-color-muted)}
         .body{display:grid;grid-template-columns:minmax(0,3fr) minmax(150px,1fr);gap:16px;padding:0 0 14px 34px}.body[hidden]{display:none}slot[name=actions]{grid-column:1/-1}@media(max-width:820px){.body{grid-template-columns:1fr}}@media(max-width:480px){.body{padding-left:0}}`,
       '<div class="head"><nexus-drag-handle></nexus-drag-handle><button type="button"><span class="summary"></span><span class="arrow" aria-hidden="true"></span></button></div><div class="body"><slot name="days"></slot><slot name="time"></slot><slot name="actions"></slot></div>'
     );
@@ -220,10 +220,12 @@ export class SwitchSetting extends NexusElement {
     super(
       'nexus-switch-setting',
       controlStyles +
-        `:host{display:flex;align-items:center;gap:16px;min-height:64px;padding:12px 16px;border:1px solid var(--content-card-border,var(--nx-color-border));border-radius:var(--nx-radius-md);background:var(--content-card-soft,var(--nx-color-surface))}
-    .copy{flex:1;min-width:0;line-height:1.5}.title{font-size:13px;font-weight:600}.description{color:var(--nx-color-muted,#9eacc1);font-size:12px;font-weight:400;margin-top:4px}
+        `:host{display:flex;align-items:center;gap:16px;min-height:64px;padding:12px 16px;border:1px solid var(--content-card-border,var(--nx-color-border));border-radius:var(--nx-radius-md);background:var(--content-control,var(--nx-color-surface))}
+    .copy{flex:1;min-width:0;line-height:1.5}.title{font-size:13px;font-weight:600}
+    .description{margin-top:4px;color:var(--nx-color-muted,#9eacc1);font-size:12px;font-weight:400;white-space:pre-line;overflow-wrap:break-word}
+    .description:empty{display:none}
     nexus-switch{flex:none;--nx-switch-width:56px;--nx-switch-height:40px;--nx-switch-track-width:52px;--nx-switch-track-height:30px}`,
-      '<div class="copy"><div class="title"></div><div class="description"></div></div><nexus-switch></nexus-switch>'
+      '<div class="copy"><div class="title"></div><div class="description" id="description"></div></div><nexus-switch></nexus-switch>'
     );
     this.control = this.root.querySelector<HTMLElement & { value: boolean; disabled: boolean }>(
       'nexus-switch'
@@ -256,11 +258,13 @@ export class SwitchSetting extends NexusElement {
   }
   protected render(): void {
     this.root.querySelector('.title')!.textContent = String(this.values.title);
-    this.root.querySelector('.description')!.textContent = String(this.values.description);
+    const description = String(this.values.description);
+    this.root.querySelector('.description')!.textContent = description;
     this.control.disabled = Boolean(this.values.disabled);
     this.control.value = Boolean(this.values.value);
     this.control.setAttribute('aria-label', String(this.values.title));
-    this.control.setAttribute('aria-describedby', this.getAttribute('aria-describedby') || '');
+    this.control.setAttribute('aria-describedby',
+      [description && 'description', this.getAttribute('aria-describedby')].filter(Boolean).join(' '));
   }
 }
 
@@ -269,7 +273,11 @@ export class SwitchList extends NexusElement {
   constructor() {
     super(
       'nexus-switch-list',
-      ':host{display:grid;gap:0;border:1px solid var(--content-card-border,var(--nx-color-border));border-radius:var(--nx-radius-md);overflow:hidden}h3{margin:0;padding:12px 16px;font-size:14px;color:var(--nx-color-muted,#9eacc1)}h3:empty{display:none}::slotted(nexus-switch-setting){border:0;border-radius:0;background:transparent}',
+      `:host{display:grid;min-width:0;border:1px solid var(--content-card-border,var(--nx-color-border));border-radius:var(--nx-radius-md);overflow:hidden;background:var(--_nexus-card-fill)}
+      h3{margin:0;padding:12px 16px;font-size:14px;color:var(--nx-color-muted,#9eacc1)}h3:empty{display:none}
+      ::slotted(nexus-switch-setting){border:0;border-radius:0;background:transparent}
+      ::slotted(nexus-switch-setting[hidden]){display:none}
+      ::slotted(nexus-switch-setting:nth-child(n + 2 of nexus-switch-setting:not([hidden]))){border-top:1px solid var(--content-card-border,var(--nx-color-border))}`,
       '<h3></h3><slot></slot>'
     );
   }

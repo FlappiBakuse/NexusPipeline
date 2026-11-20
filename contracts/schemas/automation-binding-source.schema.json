@@ -39,6 +39,12 @@
         "$ref": "automation-paths.schema.json#/$defs/portablePath"
       }
     },
+    "adapterResources": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 31,
+      "items": {"$ref": "automation-script.schema.json#/$defs/adapterResource"}
+    },
     "logPaths": {
       "type": "array",
       "maxItems": 32,

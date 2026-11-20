@@ -88,6 +88,8 @@ async function settings(parent: HTMLElement, check: Check) {
   } });
   app.mount(holder); await settle();
   const session = hostSecretSession(store, 'exit-fixture', 'proxy-password');
+  const tokenSession = hostSecretSession(store, 'exit-fixture', 'control-bearer');
+  const originalFetch = globalThis.fetch;
   session.status = { revision: 3, isConfigured: false, isReadable: true };
   const secret = crypto.randomUUID();
   try {
@@ -100,10 +102,35 @@ async function settings(parent: HTMLElement, check: Check) {
     editor.cancelSecret(); await settle();
     check(editor.secret.value === '' && editor.secretMode.value === 'keep' && editor.secretRevision.value === 9 && writes.length === 0,
       'settings explicit cancellation clears only the selected sensitive draft');
+    store.state.capabilities!.capabilities.push('secrets.read', 'secrets.write');
+    tokenSession.status = { revision: 3, isConfigured: true, isReadable: true };
+    const reading = Promise.withResolvers<Response>();
+    let changed = false, postedToken = '';
+    globalThis.fetch = async (input, options) => {
+      if (String(input).endsWith('/read')) return reading.promise.then(response => response.clone());
+      const headers = new Headers(options?.headers);
+      changed = true; postedToken = String(options?.body);
+      return Response.json({ operationId: headers.get('Nexus-Operation-Id'), revision: 4, isConfigured: true, isReadable: true });
+    };
+    const revealed = editor.revealToken();
+    await editor.blurToken();
+    reading.resolve(new Response('Fixture-token'));
+    await revealed;
+    check(editor.token.value === '' && !editor.tokenVisible.value && !changed,
+      'a delayed reveal cannot show a saved token after blur');
+    await editor.revealToken();
+    check(editor.tokenVisible.value && editor.token.value === 'Fixture-token', 'focusing again can reveal the current token');
+    await editor.blurToken();
+    check(editor.token.value === '' && !editor.tokenVisible.value && !changed,
+      'blurring an already revealed token conceals it without changing it');
+    editor.editToken('New_1');
+    await editor.blurToken();
+    check(changed && postedToken === 'New_1' && editor.tokenRevision.value === 4 && !editor.tokenVisible.value,
+      'blurring a custom token immediately saves the new value and then conceals the input');
     editor.editToken(crypto.randomUUID()); await settle();
     store.editors.dispose();
     check(editor.token.value === '', 'ending the renderer session clears remaining protected inputs');
-  } finally { app.unmount(); holder.remove(); store.dispose(); }
+  } finally { globalThis.fetch = originalFetch; app.unmount(); holder.remove(); store.dispose(); }
 }
 async function layout(check: Check) {
   const { store, writes } = draftFixture();

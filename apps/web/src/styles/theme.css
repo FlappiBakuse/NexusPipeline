@@ -36,14 +36,14 @@ body[data-theme='light'] {
   color-scheme: light;
   --bg: #f7f6f3;
   --bg-raised: #efedea;
-  --panel-opaque: #fff;
-  --panel-soft-opaque: #f7f7f5;
+  --panel-opaque: #efeeeb;
+  --panel-soft-opaque: #fff;
   --panel-hover-opaque: #efedea;
   --panel: var(--panel-opaque);
   --panel-soft: var(--panel-soft-opaque);
   --panel-hover: var(--panel-hover-opaque);
   --text: #37352f;
-  --muted: #787774;
+  --muted: #696662;
   --faint: #a09d98;
   --accent: #2eaadc;
   --accent-strong: #2387b8;
@@ -70,11 +70,11 @@ body[data-theme='system'] {
     color-scheme: light;
     --bg: #f7f6f3;
     --bg-raised: #efedea;
-    --panel-opaque: #fff;
-    --panel-soft-opaque: #f7f7f5;
+    --panel-opaque: #efeeeb;
+    --panel-soft-opaque: #fff;
     --panel-hover-opaque: #efedea;
     --text: #37352f;
-    --muted: #787774;
+    --muted: #696662;
     --faint: #a09d98;
     --accent: #2eaadc;
     --accent-strong: #2387b8;
@@ -98,11 +98,6 @@ body {
   --panel: var(--panel-opaque);
   --panel-soft: var(--panel-soft-opaque);
   --panel-hover: var(--panel-hover-opaque);
-  --content-card: var(--panel);
-  --content-card-soft: var(--panel-soft);
-  --content-control: var(--panel-soft);
-  --content-card-secondary: var(--content-card-soft);
-  --content-control-hover: var(--panel-hover);
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
@@ -121,12 +116,48 @@ nexus-dialog-popover {
   --panel: var(--_nexus-secondary-panel, var(--panel-opaque));
   --panel-soft: var(--_nexus-secondary-soft, var(--panel-soft-opaque));
   --panel-hover: var(--_nexus-secondary-hover, var(--panel-hover-opaque));
+  --nx-color-surface: var(--_nexus-appearance-color-surface, var(--_nexus-theme-color-surface, var(--panel)));
+}
+body,
+nexus-modal,
+nexus-confirm-dialog,
+nexus-dialog-popover {
   --content-card: var(--panel);
   --content-card-soft: var(--panel-soft);
-  --content-card-secondary: var(--panel-soft);
-  --content-control: var(--panel-soft);
+  --content-card-secondary: var(--content-card-soft);
+  --content-control: var(--content-card-soft);
   --content-control-hover: var(--panel-hover);
-  --nx-color-surface: var(--_nexus-appearance-color-surface, var(--_nexus-theme-color-surface, var(--panel)));
+  --_nexus-card-fill: var(--content-card);
+}
+nexus-modal {
+  --content-card-secondary: var(--content-card);
+}
+:where(nexus-collapsible-card, [data-surface='collapsible']) {
+  --_nexus-card-fill: var(--content-card);
+  --content-control: var(--content-card-soft);
+  --content-control-hover: var(--panel-hover);
+}
+:where(
+  [data-surface='raised'],
+  nexus-card:is([data-surface='secondary'], [data-surface='nested']),
+  nexus-section-card[data-surface='secondary'],
+  :is(nexus-modal, nexus-dialog-popover) :is(nexus-card, nexus-section-card, nexus-collapsible-card, nexus-schedule-card, nexus-switch-list, nexus-empty-state, [data-surface='collapsible'])
+) {
+  --_nexus-card-fill: var(--content-card-soft);
+  --content-control: var(--content-card);
+  --content-control-hover: color-mix(in srgb, var(--content-card) 75%, var(--panel-hover));
+}
+:where(:is(nexus-modal, nexus-dialog-popover) :is(nexus-collapsible-card, [data-surface='collapsible']) [data-surface='raised']) {
+  --_nexus-card-fill: var(--content-card);
+  --content-control: var(--content-card-soft);
+  --content-control-hover: var(--panel-hover);
+}
+:where(:is(nexus-collapsible-card, [data-surface='collapsible'], [data-surface='raised']) :is(nexus-switch-list, nexus-empty-state)) {
+  --_nexus-card-fill: var(--content-control);
+  --content-control: inherit;
+}
+:where([data-surface='raised'], [data-surface='collapsible']) {
+  background-color: var(--_nexus-card-fill);
 }
 * {
   box-sizing: border-box;
@@ -152,7 +183,7 @@ textarea {
   padding: 8px 12px;
 }
 button:hover {
-  background: var(--panel-hover);
+  background: var(--content-control-hover);
 }
 button:disabled {
   opacity: 0.5;

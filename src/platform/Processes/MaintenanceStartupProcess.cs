@@ -25,6 +25,13 @@ internal sealed class MaintenanceStartupProcess : IDisposable
 
     internal static MaintenanceStartupProcess Create(SafeKernelHandle job, string executable,
         IReadOnlyList<string> arguments, string workingDirectory, OwnedProcessOutput? output, MaintenanceStartupRole role)
+        => CreateCore(job, executable, arguments, workingDirectory, output, role);
+
+    internal static MaintenanceStartupProcess CreateRestart(string executable, IReadOnlyList<string> arguments,
+        string workingDirectory) => CreateCore(null, executable, arguments, workingDirectory, null, MaintenanceStartupRole.HostRoot);
+
+    private static MaintenanceStartupProcess CreateCore(SafeKernelHandle? job, string executable,
+        IReadOnlyList<string> arguments, string workingDirectory, OwnedProcessOutput? output, MaintenanceStartupRole role)
     {
         var image = PhysicalPathPolicy.NormalizeWithoutLinks(Path.GetFullPath(executable));
         var directoryPath = PhysicalPathPolicy.NormalizeWithoutLinks(Path.GetFullPath(workingDirectory));
@@ -39,7 +46,14 @@ internal sealed class MaintenanceStartupProcess : IDisposable
             if (commandLine.Length >= 32767) throw new IOException("maintenance_startup_command_too_long");
             JobNative.ProcessInformation created;
             using var environment = MaintenanceStartupEnvironment.Freeze(role);
-            if (output is null)
+            if (job is null)
+            {
+                // A service restart inherits its supervisor's job and never replaces the application payload.
+                var startup = new JobNative.StartupInfo { Size = (uint)Marshal.SizeOf<JobNative.StartupInfo>() };
+                if (!JobNative.CreateProcessW(PhysicalPathPolicy.NativePath(image), commandLine, IntPtr.Zero,
+                    IntPtr.Zero, false, 0x40C, environment.Pointer, directoryPath, ref startup, out created)) throw Failure();
+            }
+            else if (output is null)
             {
                 using var attributes = new ProcessHandleAttributes([], job);
                 var startup = new JobNative.ExtendedStartupInfo
@@ -72,8 +86,9 @@ internal sealed class MaintenanceStartupProcess : IDisposable
         if (JobNative.ResumeThread(_thread) != 1) throw Failure();
     }
 
-    internal Exception? StopSuspended()
+    internal Exception? Stop()
     {
+        if (JobNative.WaitForSingleObject(Process, 0) == 0) return null;
         if (!JobNative.TerminateProcess(Process, 1)) return Failure();
         return JobNative.WaitForSingleObject(Process, 5000) == 0 ? null : new IOException("maintenance_startup_stop_pending");
     }

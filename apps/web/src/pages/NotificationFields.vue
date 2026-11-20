@@ -59,7 +59,7 @@ function editSecret(field: SecretField, value: string): void {
         @nexus-change="patch({ remark: $event.detail.value })"
       />
     </label>
-    <div class="switches">
+    <nexus-switch-list>
       <nexus-switch-setting
         data-draft-field="NotificationFields/modelValue.isEnabled"
         :title="t('启用此任务')"
@@ -76,7 +76,7 @@ function editSecret(field: SecretField, value: string): void {
         :disabled.prop="disabled"
         @nexus-change="configure({ screenshotEnabled: $event.detail.value })"
       />
-    </div>
+    </nexus-switch-list>
     <template v-if="modelValue.kind === 'smtp'">
       <div class="columns three">
         <label>
@@ -216,7 +216,7 @@ function editSecret(field: SecretField, value: string): void {
       </div>
       <div v-if="modelValue.configuration.webhookKind === 'feishu'" class="columns">
         <label v-help="t('用于上传通知图片的飞书自建应用凭据。')">
-          {{ t('飞书 App ID') }}
+          <span class="field-help-caption"><span>{{ t('飞书 App ID') }}</span></span>
           <input
         data-draft-field="NotificationFields/modelValue.configuration.feishuAppId"
             :value="modelValue.configuration.feishuAppId"
@@ -234,7 +234,7 @@ function editSecret(field: SecretField, value: string): void {
       </div>
       <div v-if="modelValue.configuration.webhookKind === 'slack'" class="columns">
         <label v-help="t('机器人需已加入目标频道。')">
-          Slack Channel ID
+          <span class="field-help-caption"><span>Slack Channel ID</span></span>
           <input
         data-draft-field="NotificationFields/modelValue.configuration.slackChannelId"
             :value="modelValue.configuration.slackChannelId"
@@ -251,7 +251,7 @@ function editSecret(field: SecretField, value: string): void {
         />
       </div>
       <label v-if="modelValue.configuration.webhookKind === 'generic'" v-help="t('JSON 模板支持 {text}、{imageBase64}、{imageDataUri}、{imageFileName} 和 {imageContentType} 替换。')">
-        {{ t('generic 自定义模板（JSON）') }}
+        <span class="field-help-caption"><span>{{ t('generic 自定义模板（JSON）') }}</span></span>
         <nexus-text-area
         data-draft-field="NotificationFields/modelValue.configuration.webhookTemplate"
           :aria-label="t('generic 自定义模板（JSON）')"

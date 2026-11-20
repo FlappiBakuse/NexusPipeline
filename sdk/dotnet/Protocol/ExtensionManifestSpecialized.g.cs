@@ -16,6 +16,10 @@ public sealed record ExtensionManifestSpecialized
     [JsonPropertyName("exclusiveProgram")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? ExclusiveProgram { get; init; }
+    /// <summary>Schema field <c>exclusiveProgramInUserSession</c>; constraints are owned by extension-manifest.schema.json.</summary>
+    [JsonPropertyName("exclusiveProgramInUserSession")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ExclusiveProgramInUserSession { get; init; }
     /// <summary>Schema field <c>editorForbiddenArguments</c>; constraints are owned by extension-manifest.schema.json.</summary>
     [JsonPropertyName("editorForbiddenArguments")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

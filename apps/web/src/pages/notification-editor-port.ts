@@ -23,7 +23,7 @@ function command(action: EditorAction, target: NotificationTarget): ControlNotif
 }
 
 export function notificationEditorPort(
-  store: Pick<AppStore, 'state' | 'client' | 'can' | 'report' | 'drafts' | 'dirty' | 'editors'>,
+  store: Pick<AppStore, 'state' | 'client' | 'can' | 'drafts' | 'dirty' | 'editors'>,
   instanceId: string,
   draftName: string
 ) {
@@ -47,18 +47,6 @@ export function notificationEditorPort(
       memory().settle(reason);
       drafts.delete(key);
       dirty.delete(key);
-    },
-    report(reason: unknown): void {
-      if (current()) store.report(reason);
-    },
-    clearError(message: string): void {
-      if (current() && state.error === message) state.error = '';
-    },
-    clearOperation(id: string): void {
-      if (id && current() && state.uncertainOperation === id) {
-        state.uncertainOperation = '';
-        state.error = '';
-      }
     },
     readCatalog: (signal: AbortSignal) => client.read(route, notificationCatalog, signal),
     readCredentials(taskId: string, revision: number, signal: AbortSignal) {

@@ -57,6 +57,7 @@ let returnFocus: UiElement<'nexus-button'>;
 let accessibilityFixture: HTMLElement;
 
 import { feedbackLayoutContract } from './feedback-layout-contract';
+import { automationPageContract } from './automation-page-contract';
 
 async function structural(): Promise<string[]> {
   registerElements();
@@ -71,6 +72,7 @@ async function structural(): Promise<string[]> {
   await adapterFormContract(fixture, assert);
   await configurationDraftContract(fixture, assert);
   await draftLifecycleContract(fixture, assert);
+  await automationPageContract(fixture, assert);
   await historyLinkContract(assert);
   await historyIndexContract(fixture, assert);
   await historyPaginationContract(fixture, assert);

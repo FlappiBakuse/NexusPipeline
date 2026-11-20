@@ -56,7 +56,8 @@ internal sealed class StepWriterScope : IConfigurationWriterScope
             throw new IOException("execution_writer_engine_unavailable");
         RequireProvider(step);
         OperationId = state.Journal.OperationId; ProcessScopeId = Guid.Parse(state.Attempt.AttemptId); JournalIds = [parentJournalId];
-        Command = role == "process" ? EditorCommandPolicy.Freeze(new(step.ExecutablePath, step.ImageSha256, step.Arguments.ToImmutableArray(), step.WorkingDirectory) { ExclusiveProgram = step.ExclusiveProgram == true }) :
+        Command = role == "process" ? EditorCommandPolicy.Freeze(new(step.ExecutablePath, step.ImageSha256, step.Arguments.ToImmutableArray(), step.WorkingDirectory)
+            { ExclusiveProgram = step.ExclusiveProgram == true, ExclusiveProgramInUserSession = step.ExclusiveProgramInUserSession == true }) :
             role == "judgement" ? ExecutionJudgementInputs.Command(state.Total, stepId) :
             HookCommand(step, role);
         CommandLineSyntax = ExecutionBindingRoles.IsHook(role) && ExecutionBindingRoles.Hook(step, role).LaunchKind == "command"

@@ -178,6 +178,20 @@ details[open] > summary::before {
 .form-field > nexus-number-input {
   width: 100%;
 }
+.field-help-caption,
+label > span:has(> nexus-tooltip[data-field-help]) {
+  display: flex;
+  align-items: center;
+  min-block-size: 20px;
+  gap: 2px;
+}
+.field-help-caption > :is(span, em),
+label > span:has(> nexus-tooltip[data-field-help]) > :is(span, em) {
+  text-box: trim-both cap alphabetic;
+}
+nexus-tooltip[data-field-help] {
+  flex: none;
+}
 .switch-field {
   grid-column: 1/-1;
   grid-template-columns: minmax(0, 1fr) auto;

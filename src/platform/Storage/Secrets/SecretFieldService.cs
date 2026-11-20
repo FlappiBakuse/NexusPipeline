@@ -120,7 +120,11 @@ public sealed class SecretFieldService : ISecretFieldStore
         using var reservation = await _store.ReserveOperationAsync(operationId, cancellationToken).ConfigureAwait(false);
         var replay = _store.Lookup(operationId, key, expectedRevision, disposition, value, cancellationToken);
         if (replay is not null) return replay;
-        var admission = _resources.TryAcquire(operationId, [new("secrets:fields", ResourceClaimMode.Mutation)]);
+        var admission = _instanceLease.PublishExecution(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return _resources.TryAcquire(operationId, [new("secrets:fields", ResourceClaimMode.Mutation)]);
+        });
         using var mutation = admission.Lease ?? throw new InvalidOperationException(admission.Denial == ResourceLeaseDenial.Conflict
             ? "secret_resource_conflict" : "secret_host_unavailable");
         using var credentialChange = key == SecretFieldKey.HostControlBearer(_instance.InstanceId)
@@ -152,8 +156,11 @@ public sealed class SecretFieldService : ISecretFieldStore
     {
         try
         {
-            var evidence = new JournalRecoveryEvidence(_instance, new(_instance, _contracts), _database);
-            new RecoveryCoordinator(new RecoveryJournalRegistry(_database), evidence, _index).VerifyAndPublish();
+            _instanceLease.PublishExecution(() =>
+            {
+                var evidence = new JournalRecoveryEvidence(_instance, new(_instance, _contracts), _database);
+                new RecoveryCoordinator(new RecoveryJournalRegistry(_database), evidence, _index).VerifyAndPublish();
+            });
         }
         catch (Exception error) when (error is IOException or InvalidOperationException or Microsoft.Data.Sqlite.SqliteException)
         { _index.BlockUnknown("secret_cleanup_reconciliation_required"); }

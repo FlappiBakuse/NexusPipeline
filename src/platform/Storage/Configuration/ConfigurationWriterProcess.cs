@@ -279,12 +279,13 @@ internal sealed class ConfigurationWriterProcess : IDisposable
             if (!_registrationCompleted) throw new IOException("configuration_writer_registration_incomplete");
             if (_closed || _startAttempted) throw new IOException("configuration_editor_start_closed");
             var frozenArguments = arguments.ToImmutableArray();
-            if (_command is not null && !EditorCommandPolicy.Equal(_command, new(executable, expectedSha256, frozenArguments, workingDirectory) { ExclusiveProgram = _command.ExclusiveProgram }))
+            if (_command is not null && !EditorCommandPolicy.Equal(_command, new(executable, expectedSha256, frozenArguments, workingDirectory)
+                { ExclusiveProgram = _command.ExclusiveProgram, ExclusiveProgramInUserSession = _command.ExclusiveProgramInUserSession }))
                 throw new IOException("configuration_editor_command_changed");
             _startAttempted = true;
             _startedOutput = output;
             _scope.RequireStart();
-            if (_command?.ExclusiveProgram == true) ExclusiveProgramAdmission.RequireStopped(executable);
+            if (_command?.ExclusiveProgram == true) ExclusiveProgramAdmission.RequireStopped(executable, _command.ExclusiveProgramInUserSession);
             var started = StartOwned(executable, expectedSha256, frozenArguments, workingDirectory, output);
             _startedTimestamp = Stopwatch.GetTimestamp();
             return started;
@@ -316,6 +317,15 @@ internal sealed class ConfigurationWriterProcess : IDisposable
             _lease.VerifyHeld(_instance);
             if (_root is null || !_rootPublished || _startedTimestamp is null) throw new IOException("configuration_writer_start_outcome_unknown");
             return _job.AwaitRootAsync(_root, timeout, cancellationToken);
+        }
+    }
+
+    internal bool HasExited()
+    {
+        lock (_gate)
+        {
+            _lease.VerifyHeld(_instance);
+            return _rootPublished && _startedTimestamp is not null && _job.GetAccounting().ActiveProcesses == 0;
         }
     }
 

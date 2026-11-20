@@ -89,7 +89,6 @@ async function load(): Promise<void> {
     catalog.value = result;
   } catch (reason) {
     if (!owner.signal.aborted && isCurrent()) {
-      props.store.report(reason);
       session.error = reason instanceof Error ? reason.message : '通知任务加载失败';
     }
   } finally {
@@ -145,9 +144,10 @@ async function command(
     session.notice = '通知任务已更新。';
     return true;
   } catch (reason) {
-    props.store.report(reason);
-    session.error = reason instanceof Error ? reason.message : '操作失败';
-    if (!(reason instanceof ControlFailure && reason.uncertain)) session.pending = null;
+    if (!(reason instanceof ControlFailure && reason.uncertain)) {
+      session.error = reason instanceof Error ? reason.message : '操作失败';
+      session.pending = null;
+    }
     return false;
   } finally {
     session.busy = false;
@@ -157,6 +157,7 @@ async function checkPending(): Promise<void> {
   const body = session.pending;
   if (!isCurrent() || !body || session.busy || !props.store.can('operations.read')) return;
   session.busy = true;
+  session.error = session.notice = '';
   try {
     const result = await props.store.client.read('/control/v1/operations/' + body.operationId, objectValue);
     const kind = body.action === 'delete' ? 'notification.task.delete' : 'notification.catalog.reorder';
@@ -165,14 +166,9 @@ async function checkPending(): Promise<void> {
       session.pending = null;
       session.error = '';
       session.notice = '原通知操作已确认完成。';
-      if (props.store.state.uncertainOperation === body.operationId) {
-        props.store.state.uncertainOperation = '';
-        props.store.state.error = '';
-      }
       await load();
     } else session.notice = '原通知操作仍在处理，请稍后查询。';
-  } catch (reason) {
-    props.store.report(reason);
+  } catch {
     session.error = '无法确认原通知操作；操作 ID 已保留，勿重复发送。';
   } finally {
     session.busy = false;
@@ -219,10 +215,12 @@ async function reorder(ids: string[]): Promise<void> {
       @select="openNew"
       @close="choosing = false"
     />
-    <nexus-toast v-if="session.error" tone="danger" :message.prop="t(session.error)" />
-    <nexus-toast v-if="session.notice" :message.prop="t(session.notice)" @nexus-close="session.notice = ''" />
-    <nexus-toast v-if="session.pending" tone="warning" :message.prop="t('写入结果待确认，请先核实原操作。')" />
-    <p v-if="loading && !catalog" role="status">{{ t('通知任务加载中…') }}</p>
+    <template v-if="visible && !editor">
+      <nexus-toast v-if="session.error" :tone="session.pending ? 'warning' : 'danger'" :message.prop="t(session.error)" />
+      <nexus-toast v-else-if="session.notice" :message.prop="t(session.notice)" @nexus-close="session.notice = ''" />
+      <nexus-toast v-else-if="session.pending && !session.busy" tone="warning" :message.prop="t('写入结果待确认，请先核实原操作。')" />
+    </template>
+    <nexus-spinner v-if="loading && !catalog" :label="t('通知任务加载中…')" />
     <nexus-sortable-list
       v-else-if="catalog && catalog.tasks.length"
       class="task-list"
@@ -239,7 +237,7 @@ async function reorder(ids: string[]): Promise<void> {
         />
         <span class="avatar" aria-hidden="true">{{ task.name.slice(0, 1) }}</span>
         <div class="copy">
-          <h2>{{ task.name }}</h2>
+          <h2 class="entity-card-name">{{ task.name }}</h2>
           <div class="badges">
             <nexus-badge :label="task.kind === 'smtp' ? 'SMTP' : 'Webhook'" />
             <nexus-badge
@@ -248,20 +246,15 @@ async function reorder(ids: string[]): Promise<void> {
             />
           </div>
         </div>
-        <div class="actions">
-          <button
-            :disabled="session.busy || !!session.pending || !store.can('notifications.write')"
+        <div class="entity-card-actions">
+          <nexus-icon-button icon="edit" :label="t('编辑通知')"
+            :disabled.prop="session.busy || !!session.pending || !store.can('notifications.write')"
             @click="openEdit(task)"
-          >
-            {{ t('编辑通知') }}
-          </button>
-          <button
-            class="danger"
-            :disabled="session.busy || !!session.pending || !store.can('notifications.delete')"
+          />
+          <nexus-icon-button icon="trash" class="danger-action" :label="t('删除')"
+            :disabled.prop="session.busy || !!session.pending || !store.can('notifications.delete')"
             @click="deleting = task"
-          >
-            {{ t('删除') }}
-          </button>
+          />
         </div>
       </article>
     </nexus-sortable-list>
@@ -287,7 +280,7 @@ async function reorder(ids: string[]): Promise<void> {
         v-if="deleting"
         :open.prop="visible"
         :title="t('删除通知任务')"
-        :message="t('确定删除') + ' ' + deleting.name + t('？')"
+        :message="t('删除「{name}」会清除其发送凭据。引用它的配置将无法再通过该任务发送通知。').replace('{name}', () => deleting!.name)"
         tone="danger"
         @nexus-confirm="remove"
         @nexus-cancel="deleting = null"

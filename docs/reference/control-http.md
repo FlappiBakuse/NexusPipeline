@@ -39,7 +39,7 @@ MCP 工具列表与实际调用均复核当前启用和写权限，两个开关�
 | 新格式模板与交换 | automation-export、automation-attachment、automation-import-preview/apply | 不开放 |
 | 执行预演、启动、取消 | execution-preview/start/cancel；受理返回原 operation/run/attempt 身份 | 预演只读；启动和取消须写权限 |
 | 通用配置值与文件 | configuration-resources/files/original/value-preview/value-apply、configuration-import；binding resources 汇总只读资源身份与当前修订 | 仅资源清单 |
-| 原生配置编辑与专项修复 | configuration-editor-begin/save/cancel、adapter-*；原生打开和修复仅本机 | 不开放 |
+| 原生配置编辑与专项修复 | configuration-editor-begin/save/cancel、adapter-*。账号原生编辑使用 `configuration/editor/open-binding`、`save-binding`、`resume-binding`，沿用本机权限 | 不开放 |
 | 历史、日志、图片 | records、record-summary/detail、record-attempts/logs/images 及原文；内容退役仅本机 | 受限只读查询，不开放任意删除 |
 | 通知任务 | notifications、notification-save/delete/reorder/limit/test；凭据限声明字段 | 写权限开启后允许对应通知操作；不开放通用秘密读取 |
 | 宿主与服务设置 | settings、service-settings、interface preferences 普通读取和写入可由已认证远程调用 | 不开放 |
@@ -94,7 +94,9 @@ CLI 必须显式提供 `--binary-stdout true`，错误写 stderr；MCP 继续只
 代理密码变更响应包含原 operationId 与状态修订。结果未知时，本机可使用
 `GET /control/v1/local/secrets/proxy-password/operations/{operationId}` 查询原字段操作；
 此入口要求 secrets.status，按当前实例和字段限定主体，不返回秘密明文，也不重放变更。
-令牌继续使用带原生确认的专用变更与操作查询入口。前端将原操作身份与明文寿命分开，
+本机设置页通过 `POST /control/v1/local/control-token/change-from-settings` 即时提交令牌变更。
+该入口要求 `secrets.write`、本机回环连接、当前监听地址的同源 `Origin` 与 `Sec-Fetch-Site: same-origin`。
+CLI 的 `/control/v1/local/control-token/change` 保留原生确认。前端将原操作身份与明文寿命分开，
 只有原操作完成证据和对应状态修订都核验成功才解除未知结果锁定。
 
 历史详情的 `GET /control/v1/records/{runId}/display` 要求 `records.read`，只读取冻结定义及已核验运行预算。

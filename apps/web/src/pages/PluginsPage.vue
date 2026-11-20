@@ -9,7 +9,6 @@ import { usePluginHistory } from './plugin-history';
 import PluginDetails from '../components/PluginDetails.vue';
 import PluginFilters from '../components/PluginFilters.vue';
 import './plugin-messages';
-import { usePanelHeight } from '../app/panel-height';
 
 const props = defineProps<{ store: AppStore; visible: boolean }>();
 const browser = usePluginBrowser(props.store, () => props.visible),
@@ -34,9 +33,7 @@ const session = owner.state;
 const locked = computed(() => busy.value || session.busy || !!session.pending);
 const canManage = computed(() => props.store.can('extensions.write'));
 const descriptionTarget = ref<HTMLElement | null>(null);
-const workspace = ref<HTMLElement>(),
-  mobileDetail = ref(false);
-const { height: workspaceHeight, measure } = usePanelHeight(workspace, () => props.visible);
+const mobileDetail = ref(false);
 const { history, historyNext, historyBusy, loadHistory } = usePluginHistory(
   props.store,
   () => props.visible,
@@ -105,7 +102,6 @@ const selectedHistory = computed(() => history.value.filter((item) => item.exten
 watch(view, () => {
   mobileDetail.value = false;
 });
-watch([() => session.pending, () => session.error, error, () => props.visible], measure, { flush: 'post' });
 function select(id: string): void {
   mobileDetail.value = true;
   void browser.select(id);
@@ -135,15 +131,13 @@ function select(id: string): void {
   <Teleport :to="descriptionTarget || 'body'" :disabled="!descriptionTarget">
     <span v-if="visible && view === 'store'">{{ t('浏览官方插件并管理安装版本。') }}</span>
   </Teleport>
-  <nexus-toast v-if="session.pending" tone="warning" :message.prop="t('原操作尚待确认，请先读取结果。')" />
-  <nexus-toast v-if="session.error || error" tone="danger" :message.prop="t(session.error || error)" />
-  <nexus-toast v-else-if="session.notice" :message.prop="t(session.notice)" @nexus-close="session.notice = ''" />
-  <div
-    ref="workspace"
-    class="plugin-workspace"
-    :class="{ store: view === 'store', detail: mobileDetail }"
-    :style="{ height: workspaceHeight }"
-  >
+  <template v-if="visible">
+    <nexus-toast v-if="session.error" :tone="session.pending ? 'warning' : 'danger'" :message.prop="t(session.error)" />
+    <nexus-toast v-else-if="session.notice" :message.prop="t(session.notice)" @nexus-close="session.notice = ''" />
+    <nexus-toast v-else-if="session.pending && !session.busy" tone="warning" :message.prop="t('原操作尚待确认，请先读取结果。')" />
+    <nexus-toast v-else-if="!session.pending && error" tone="danger" :message.prop="t(error)" />
+  </template>
+  <div class="plugin-workspace" :class="{ store: view === 'store', detail: mobileDetail }">
     <div class="plugin-list-column">
       <div class="plugin-search">
         <nexus-text-input
@@ -248,7 +242,7 @@ function select(id: string): void {
           </template>
         </template>
         <template #history>
-          <p v-if="historyBusy && !selectedHistory.length">{{ t('正在读取更新记录…') }}</p>
+          <nexus-spinner v-if="historyBusy && !selectedHistory.length" :label="t('正在读取更新记录…')" />
           <ol v-else-if="selectedHistory.length" class="plugin-history">
             <li v-for="item in selectedHistory" :key="String(item.operationId)">
               <time>{{ new Date(String(item.createdAt)).toLocaleString(locale) }}</time>

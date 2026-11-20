@@ -56,6 +56,36 @@ public sealed class ControlTokenTests
     }
 
     [Fact]
+    public async Task WaitsForRecoveryPublication()
+    {
+        using var fixture = SecretTestRuntime.Create();
+        await using var service = new ControlTokenService(fixture.Instance, fixture.Database, fixture.Lease,
+            fixture.Resources, fixture.Service);
+        using var value = new SecretValue(Token);
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var release = new ManualResetEventSlim();
+        var publication = Task.Run(() => fixture.Lease.PublishExecution(() =>
+        {
+            var blocked = fixture.Index.BlockUnknown("recovery_verification_in_progress");
+            started.SetResult();
+            Assert.True(release.Wait(TimeSpan.FromSeconds(15)));
+            fixture.Index.PublishVerified(blocked.Revision, blocked.Revision + 1, []);
+        }));
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var saving = service.ChangeAsync(Guid.NewGuid(), 0, SecretDisposition.Set, value, confirm: false);
+        bool queued;
+        try
+        {
+            queued = SpinWait.SpinUntil(() => fixture.Lease.ExecutionPublicationCount > 1 || saving.IsCompleted,
+                TimeSpan.FromSeconds(5)) && !saving.IsCompleted;
+        }
+        finally { release.Set(); }
+        await publication;
+        Assert.True(queued);
+        Assert.Equal(1, (await saving.WaitAsync(TimeSpan.FromSeconds(10))).Revision);
+    }
+
+    [Fact]
     public async Task QueriesProxyOperation()
     {
         using var fixture = SecretTestRuntime.Create();

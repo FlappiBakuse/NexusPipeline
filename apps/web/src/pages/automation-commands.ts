@@ -28,6 +28,8 @@ export class AutomationCommands {
     const body = copyDraft(action.body);
     const pending = { ...action, body };
     this.session.pending = pending;
+    this.session.error = '';
+    this.session.notice = '';
     this.store.dirty.add('automation-pending/' + action.id);
     try {
       const isImport = body.format === 'nexus.control.automation-import';
@@ -51,17 +53,15 @@ export class AutomationCommands {
       pending.definitionCommitted = true;
       return await this.finish(pending);
     } catch (reason) {
-      this.store.report(reason);
+      if (!this.current()) return null;
       if (reason instanceof ControlFailure && !reason.uncertain && !pending.definitionCommitted) {
         this.session.pending = null;
         this.store.dirty.delete('automation-pending/' + action.id);
       }
-      this.resumeSource(pending, reason);
-      this.session.error = this.session.pending
-        ? '操作结果待确认；请查询状态，勿重复提交。'
-        : reason instanceof Error
-          ? reason.message
-          : '保存失败，草稿仍在。';
+      if (this.resumeSource(pending, reason))
+        this.session.error = '实例已保存，所选配置未保存；请修正草稿后重试。';
+      else if (!this.session.pending)
+        this.session.error = reason instanceof Error ? reason.message : '保存失败，草稿仍在。';
       return null;
     } finally {
       this.session.saving = false;
@@ -74,12 +74,13 @@ export class AutomationCommands {
     const pending = this.session.pending;
     this.session.saving = true;
     this.session.error = '';
+    this.session.notice = '';
     try {
       if (!(await this.completed(pending))) return null;
       pending.definitionCommitted = true;
       return await this.finish(pending);
     } catch (reason) {
-      this.store.report(reason);
+      if (!this.current()) return null;
       this.session.error = this.resumeSource(pending, reason)
         ? '实例已保存，所选配置未保存；请修正草稿后重试。'
         : '尚无法确认操作结果；草稿已保留，原命令仍被锁定。';
@@ -147,10 +148,6 @@ export class AutomationCommands {
       }
       this.session.notice = '项目已删除。';
     } else this.session.notice = action.action === 'avatar' ? '头像已更新' : '顺序已保存。';
-    if (this.store.state.uncertainOperation === action.id) {
-      this.store.state.uncertainOperation = '';
-      this.store.state.error = '';
-    }
     this.store.dirty.delete('automation-pending/' + action.id);
     this.session.pending = null;
     this.session.error = '';

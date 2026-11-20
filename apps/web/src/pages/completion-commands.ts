@@ -5,15 +5,14 @@ export interface CompletionContext {
   drafts: Map<string, Record<string, unknown>>;
   state: { capabilities: { instanceId: string } | null };
   can(capability: string): boolean;
-  report(reason: unknown): void;
 }
 export class CompletionCommands {
-  readonly state: { pending: string; busy: boolean };
+  readonly state: { pending: string; busy: boolean; error: string };
   private readonly instance: string;
   constructor(private readonly store: CompletionContext) {
     this.instance = store.state.capabilities?.instanceId || '';
     const key = 'completion/' + this.instance;
-    if (!store.drafts.has(key)) store.drafts.set(key, { pending: '', busy: false });
+    if (!store.drafts.has(key)) store.drafts.set(key, { pending: '', busy: false, error: '' });
     this.state = store.drafts.get(key) as typeof this.state;
   }
   private current(): boolean {
@@ -30,6 +29,7 @@ export class CompletionCommands {
       return false;
     this.state.pending = id;
     this.state.busy = true;
+    this.state.error = '';
     try {
       await this.store.client.write(
         '/control/v1/local/completion/' + encodeURIComponent(id) + '/cancel',
@@ -43,8 +43,10 @@ export class CompletionCommands {
       );
       return this.current();
     } catch (reason) {
-      if (!(reason instanceof ControlFailure && reason.uncertain)) this.state.pending = '';
-      this.store.report(reason);
+      if (this.current() && !(reason instanceof ControlFailure && reason.uncertain)) {
+        this.state.pending = '';
+        this.state.error = reason instanceof ControlFailure ? reason.code : '取消失败。';
+      }
       return false;
     } finally {
       this.state.busy = false;

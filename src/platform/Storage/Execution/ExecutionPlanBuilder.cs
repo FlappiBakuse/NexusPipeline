@@ -138,6 +138,7 @@ public sealed class ExecutionPlanBuilder
                 if (adapter is not null)
                 {
                     input = input with { Step = input.Step with { ExtensionId = item.Script.ExtensionId, Adapter = adapter.Descriptor, ExclusiveProgram = adapter.ExclusiveProgram ? true : null,
+                        ExclusiveProgramInUserSession = adapter.ExclusiveProgramInUserSession ? true : null,
                         Tasks = adapter.Discovery.Tasks.Select(TaskAdapterProtocol.WriteTask).ToArray(), SelectedTaskIds = adapter.Discovery.Tasks.Where(task => task.IsSelected).Select(task => task.TaskId).ToArray() } };
                     if (adapter.ExecutionProvider is { } provider)
                     {
