@@ -4,6 +4,7 @@ import HistoryPage from '../../apps/web/src/pages/HistoryPage.vue';
 import PluginsPage from '../../apps/web/src/pages/PluginsPage.vue';
 import FormSelect from '../../apps/web/src/components/FormSelect';
 import PageActions from '../../apps/web/src/components/PageActions.vue';
+import AppNavigation from '../../apps/web/src/app/AppNavigation.vue';
 import { createStore } from '../../apps/web/src/app/store';
 import { ControlClient } from '../../apps/web/src/control/client';
 import { settle } from './configuration-draft-fixture';
@@ -41,9 +42,46 @@ export async function cardWorkspaceContract(check: Check): Promise<void> {
   style.textContent = [theme, uiTheme, workspace, shell].join('\n');
   document.head.append(style);
   try {
+    await inspectNavigation(check);
     for (const [page, list] of [[HistoryPage, '.history-index-pane'], [PluginsPage, '.plugin-list']] as const)
       await inspectWorkspace(page, list, check);
   } finally { style.remove(); }
+}
+
+async function inspectNavigation(check: Check): Promise<void> {
+  const holder = document.createElement('div');
+  const store = createStore(fixtureClient());
+  const app = createApp({ render: () => h(AppNavigation, { store, desktopMode: false, themeBusy: false, themeIcon: 'moon',
+    routes: [{ extensionId: 'game-checkin', id: 'tasks', path: '/plugin/game-checkin/tasks', label: '签到' }] }) });
+  document.body.append(holder);
+  app.mount(holder);
+  try {
+    if (innerWidth <= 820) {
+      holder.querySelector<HTMLButtonElement>('.menu-toggle')!.click();
+      await nextTick();
+    }
+    const sidebar = holder.querySelector<HTMLElement>('.sidebar')!;
+    const viewport = sidebar.querySelector<Area>('.sidebar-navigation')!.shadowRoot!.querySelector<HTMLElement>('.viewport')!;
+    const lastLink = sidebar.querySelector<HTMLElement>('a[href="#/settings"]')!;
+    const footer = sidebar.querySelector<HTMLElement>('.sidebar-footer')!;
+    viewport.scrollTop = 0;
+    const chrome = sidebar.getBoundingClientRect().height - viewport.clientHeight;
+    const itemHeight = Math.ceil(lastLink.getBoundingClientRect().bottom - viewport.getBoundingClientRect().top);
+    const resize = (extra: number) => { sidebar.style.height = `${chrome + itemHeight + extra}px`; };
+    resize(4);
+    const fits = () => viewport.scrollHeight === viewport.clientHeight && viewport.scrollTop === 0;
+    viewport.scrollTop = 100;
+    check(fits(), 'sidebar cannot scroll when all of its navigation links fit');
+
+    resize(-56);
+    const footerTop = footer.getBoundingClientRect().top;
+    viewport.scrollTop = viewport.scrollHeight;
+    check(viewport.scrollTop > 0 && Math.abs(lastLink.getBoundingClientRect().bottom - viewport.getBoundingClientRect().bottom) <= 1 &&
+      footer.getBoundingClientRect().top === footerTop, 'short sidebars scroll until the last link is visible and keep the footer fixed');
+
+    resize(24);
+    check(fits(), 'growing the sidebar clears the previous scroll position');
+  } finally { app.unmount(); holder.remove(); store.dispose(); }
 }
 
 async function inspectWorkspace(component: typeof HistoryPage | typeof PluginsPage, list: string, check: Check) {
