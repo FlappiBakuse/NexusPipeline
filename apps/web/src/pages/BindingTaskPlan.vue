@@ -6,7 +6,6 @@ import { objectValue } from '../control/client';
 import { extensionDetails, extensionList, type ExtensionDetails } from '../control/extensions';
 import { taskTitle } from '../control/extension-metadata';
 import { createIdentity } from '../control/identity';
-import AdapterCoverage from './AdapterCoverage.vue';
 import AdapterDiagnostics from './AdapterDiagnostics.vue';
 import AdapterEditorPanel from './AdapterEditorPanel.vue';
 import TaskCards from './TaskCards.vue';
@@ -48,7 +47,8 @@ const cards = computed(() => tasks.value?.map(task => ({
   label: t(!task.isEnabled ? '已停用' : task.isSelected ? '计划执行' : '未选择'),
   tone: task.isSelected && task.isEnabled ? 'info' : 'neutral'
 })));
-const resources = computed(() => overview.value?.resources.map(item => item.label || item.relativePath || item.resourceId).join(' · '));
+const resources = computed(() => overview.value?.resources ?? []);
+const gamePathCheck = computed(() => result.value?.coverage && result.value.gamePathCheck);
 const readOverview = (id: string, signal: AbortSignal) => props.store.client.read(
   '/control/v1/configuration/bindings/' + encodeURIComponent(id) + '/resources', configurationOverview, signal);
 
@@ -172,16 +172,14 @@ onBeforeUnmount(() => owner?.abort());
 </script>
 
 <template>
-  <section class="binding-task-plan">
+  <section class="binding-task-plan" data-surface="raised">
     <header>
-      <h3>{{ t('任务计划') }}</h3>
+      <div class="plan-heading">
+        <h3>{{ t('任务计划') }}</h3>
+        <nexus-badge :tone="draft ? 'warning' : 'neutral'" :label="t(draft ? '配置草稿' : '已保存快照')" />
+      </div>
       <button type="button" :disabled="loading" @click="load()">{{ t('重新探测') }}</button>
     </header>
-    <div class="probe-source">
-      <strong>{{ t('探测配置') }}</strong>
-      <nexus-badge :label="t(draft ? '配置草稿' : '已保存快照')" />
-    </div>
-    <p v-if="resources" class="source-paths">{{ resources }}</p>
     <div class="plan-result" :aria-busy="loading">
       <nexus-spinner v-if="loading" :label="t('正在探测配置…')" />
       <p v-else-if="issue" role="status">{{ t(issue) }}</p>
@@ -190,10 +188,22 @@ onBeforeUnmount(() => owner?.abort());
         <TaskSummary :tasks="cards" :label="t('计划状态汇总')" />
         <TaskCards :tasks="cards" :label="t('任务计划')" />
       </template>
-      <details v-if="result?.coverage || result?.diagnostics.length">
-        <summary>{{ t('配置诊断') }}</summary>
-        <AdapterCoverage :coverage="result?.coverage" :game-path-check="result?.gamePathCheck" />
-        <AdapterDiagnostics :items="result?.diagnostics" :details="details" />
+      <details v-if="resources.length || result?.coverage || result?.diagnostics.length">
+        <summary>
+          <span>{{ t('配置来源与诊断') }}</span>
+          <span v-if="result?.coverage" class="diagnostics-summary">
+            {{ t('已启用业务任务') }} {{ result.coverage.selected }} · {{ t('可安全重试') }} {{ result.coverage.retrySafe }}
+          </span>
+        </summary>
+        <div class="diagnostics-body">
+          <ul v-if="resources.length" class="source-paths" :aria-label="t('配置资源路径')">
+            <li v-for="resource in resources" :key="resource.resourceId">{{ resource.relativePath || resource.label || resource.resourceId }}</li>
+          </ul>
+          <p v-if="gamePathCheck && gamePathCheck !== 'notApplicable'" :role="gamePathCheck === 'mismatch' ? 'alert' : 'status'">
+            {{ t(gamePathCheck === 'matches' ? '游戏路径一致' : gamePathCheck === 'mismatch' ? '游戏路径不一致' : '游戏路径无法确认') }}
+          </p>
+          <AdapterDiagnostics :items="result?.diagnostics" :details="details" />
+        </div>
       </details>
     </div>
     <AdapterEditorPanel v-if="!draft" :key="instance + '/' + bindingId" :store="store" :binding-id="bindingId"
@@ -202,17 +212,47 @@ onBeforeUnmount(() => owner?.abort());
 </template>
 
 <style scoped>
-.binding-task-plan { display: grid; gap: 9px; min-width: 0; }
-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.binding-task-plan {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+header, .plan-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
+header { justify-content: space-between; }
 h3 { margin: 0; font-size: 14px; }
-.probe-source { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px; }
 .source-paths, .plan-result > p { margin: 0; color: var(--muted); overflow-wrap: anywhere; font-size: 12px; }
 .plan-result { display: grid; gap: 9px; min-width: 0; }
 .plan-result details {
-  padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   font-size: 12px;
 }
-summary { cursor: pointer; }
+summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 9px;
+  min-block-size: 36px;
+  padding: 8px 12px;
+  list-style: none;
+  cursor: pointer;
+}
+summary::-webkit-details-marker { display: none; }
+summary::before {
+  content: '';
+  inline-size: 6px;
+  block-size: 6px;
+  flex: none;
+  border-block-start: 1px solid var(--muted);
+  border-inline-end: 1px solid var(--muted);
+  transform: rotate(45deg);
+}
+details[open] summary::before { transform: rotate(135deg); }
+.diagnostics-summary { margin-inline-start: auto; color: var(--muted); overflow-wrap: anywhere; }
+.diagnostics-body { display: grid; gap: 10px; padding: 10px 12px; border-block-start: 1px solid var(--border); }
+.diagnostics-body > p { margin: 0; }
+.source-paths { display: grid; gap: 4px; padding-inline-start: 18px; }
 </style>

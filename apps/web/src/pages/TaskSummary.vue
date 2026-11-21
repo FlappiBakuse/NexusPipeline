@@ -1,17 +1,21 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
-const props = defineProps<{ tasks: readonly { label: string }[]; label: string }>();
+const props = defineProps<{ tasks: readonly { label: string; tone: string }[]; label: string }>();
 const counts = computed(() => {
-  const result = new Map<string, number>();
-  for (const { label } of props.tasks) result.set(label, (result.get(label) || 0) + 1);
-  return [...result];
+  const result = new Map<string, { label: string; tone: string; count: number }>();
+  for (const { label, tone } of props.tasks) {
+    const previous = result.get(label);
+    if (previous) previous.count++;
+    else result.set(label, { label, tone, count: 1 });
+  }
+  return [...result.values()];
 });
 </script>
 
 <template>
   <ul v-if="counts.length" role="list" class="task-summary" :aria-label="label">
-    <li v-for="[name, count] in counts" :key="name">{{ name }} <strong>{{ count }}</strong></li>
+    <li v-for="item in counts" :key="item.label" :data-tone="item.tone">{{ item.label }} <strong>{{ item.count }}</strong></li>
   </ul>
 </template>
 
@@ -26,5 +30,19 @@ const counts = computed(() => {
   font-size: 12px;
   list-style: none;
 }
+li::before {
+  content: '';
+  display: inline-block;
+  inline-size: 6px;
+  block-size: 6px;
+  margin-inline-end: 5px;
+  border-radius: 50%;
+  background: var(--muted);
+  vertical-align: 1px;
+}
+li[data-tone='info']::before { background: var(--accent); }
+li[data-tone='success']::before { background: var(--ok); }
+li[data-tone='warning']::before { background: var(--warn); }
+li[data-tone='danger']::before { background: var(--bad); }
 strong { color: var(--text); font-variant-numeric: tabular-nums; }
 </style>

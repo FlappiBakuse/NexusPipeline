@@ -22,38 +22,44 @@ const groups = computed(() => {
       const code = task.isSelected && task.isEnabled
         ? task.reasonCode ?? ((step.phase === 'skipped' || step.phase === 'notExecuted') ? step.reasonCode : undefined)
         : undefined;
-      return { id: task.taskId, title: taskTitle(task, locale.value), ...historyTaskStatus(task, step),
-        ...(code ? { reason: historyReason(code) } : {}) };
+      const status = historyTaskStatus(task, step);
+      return { id: task.taskId, title: taskTitle(task, locale.value), ...status, reason: code ? historyReason(code) : status.reason };
     })
   }));
 });
 const tasks = computed(() => groups.value.flatMap(group => group.tasks));
 </script>
 <template>
-  <section class="history-tasks">
-    <header><h3>{{ t('专项任务') }}</h3><span v-if="groups.length">{{ t('最后一次尝试') }}</span></header>
+  <section class="history-tasks" data-surface="raised">
+    <header class="tasks-heading">
+      <div class="tasks-title">
+        <h3>{{ t('专项任务') }}</h3>
+        <span v-if="groups.length && !loading">{{ t('最后一次尝试') }}</span>
+      </div>
+      <TaskSummary v-if="!loading" :tasks="tasks" :label="t('任务结果汇总')" />
+    </header>
     <nexus-spinner v-if="loading" :label="t('正在读取任务结果…')" />
     <p v-else-if="!groups.length">{{ t('本次运行没有可用的任务明细') }}</p>
     <template v-else>
-      <TaskSummary :tasks="tasks" :label="t('任务结果汇总')" />
       <section v-for="group in groups" :key="group.id" class="task-group">
-        <header>
-          <h4>{{ group.script }}</h4>
-          <span v-if="group.account">{{ group.account }}</span>
-        </header>
         <TaskCards :tasks="group.tasks" :label="group.account ? group.script + ' · ' + group.account : group.script" />
       </section>
     </template>
   </section>
 </template>
 <style scoped>
-.history-tasks, .task-group { display: grid; gap: 9px; min-width: 0; }
-.history-tasks { margin: 20px 0 34px; }
-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 9px; }
-h3, h4 { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
-h4 { font-size: 13px; }
-p, header span { margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
-.task-group + .task-group {
+.history-tasks, .task-group { display: grid; gap: 10px; min-width: 0; }
+.history-tasks {
+  margin: 20px 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.tasks-heading, .tasks-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.tasks-heading { justify-content: space-between; }
+h3 { margin: 0; font-size: 14px; }
+p, .tasks-title span { margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.task-group {
   padding-block-start: 10px;
   border-block-start: 1px solid var(--border);
 }

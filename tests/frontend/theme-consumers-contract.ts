@@ -24,8 +24,7 @@ export async function themeConsumersContract(parent: HTMLElement, check: (value:
   app.mount(holder);
   try {
     const toggle = holder.querySelector<HTMLElement>('.history-log-toggle')!;
-    const expanded = new Promise(resolve => toggle.parentElement!.addEventListener('toggle', resolve, { once: true }));
-    toggle.click(); await expanded; await nextTick();
+    toggle.click(); await nextTick();
     for (const mode of ['dark', 'light', 'system'] as const) {
       store.state.interface = { ...store.state.interface!, revision: store.state.interface!.revision + 1,
         values: { ...values, theme: mode } }; await nextTick();

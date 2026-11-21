@@ -100,7 +100,16 @@ async function taskPlan(parent: HTMLElement, check: Check): Promise<void> {
       { resourceId: 'progress', expectedRevision: 2, relativePath: 'progress.json' },
       { resourceId: 'software', expectedRevision: 3, relativePath: 'software.json' }
     ]), 'an expanded saved binding probes each declared resource once, in declaration order');
-    check(!holder.querySelector('input[type=checkbox]') && holder.textContent?.includes('main · progress · software') &&
+    const diagnostics = holder.querySelector<HTMLDetailsElement>('.binding-task-plan details')!;
+    check(!diagnostics.open && !holder.innerText.includes('main.json'), 'the task plan keeps full paths out of its initial view');
+    const summary = diagnostics.querySelector('summary')!;
+    summary.click();
+    check(diagnostics.open && ['main.json', 'progress.json', 'software.json'].every(path => holder.innerText.includes(path)),
+      'opening task diagnostics exposes every complete resource path');
+    check(summary.innerText.includes('已启用业务任务 1 · 可安全重试 1') && !holder.innerText.includes('完整覆盖') &&
+      !diagnostics.querySelector<HTMLElement>('.diagnostics-body')?.innerText.includes('可安全重试'),
+      'diagnostics show task and retry counts once, in the disclosure summary');
+    check(!holder.querySelector('input[type=checkbox]') &&
       [...holder.querySelectorAll('ol li')].map(card => card.querySelector('.task-number')?.textContent?.trim()).join(',') === '1,2,3',
       'the read-only source and every task keep their positions in the full saved plan');
     const decision = await exitDecision(fixture.store);
@@ -174,11 +183,20 @@ async function draftTaskPlan(parent: HTMLElement, check: Check): Promise<void> {
 async function historyTasks(parent: HTMLElement, check: Check): Promise<void> {
   const title = 'A'.repeat(120);
   const steps: ActiveStep[] = [{ stepId: 'first', scriptId: 'script', userId: 'account-a', bindingId: 'binding',
-    dependsOn: [], phase: 'completed', logRoles: [], tasks: firstTasks.map((task, index) =>
-      ({ ...task, title: index === 0 ? title : task.title, state: 'succeeded', completionKind: 'completed' })) },
+    dependsOn: [], phase: 'completed', logRoles: [], tasks: [
+      ...firstTasks.map((task, index) =>
+        ({ ...task, title: index === 0 ? title : task.title, state: 'succeeded' as const, completionKind: 'completed' as const })),
+      { ...firstTasks[0]!, taskId: 'satisfied', state: 'succeeded', completionKind: 'satisfied' },
+      { ...firstTasks[0]!, taskId: 'failed', state: 'failed', reasonCode: 'adapter_task_missing_terminal' },
+      { ...firstTasks[0]!, taskId: 'partial', state: 'partial' }
+    ] },
   { stepId: 'second', scriptId: 'script', userId: 'account-b', bindingId: 'binding-b',
     dependsOn: [], phase: 'skipped', reasonCode: 'execution_cancel_requested', logRoles: [],
-    tasks: [{ ...firstTasks[0]!, state: 'unknown', completionKind: 'notExecuted' }] }];
+    tasks: [{ ...firstTasks[0]!, state: 'unknown', completionKind: 'notExecuted' }] },
+  { stepId: 'third', scriptId: 'script', userId: 'account-b', bindingId: 'binding-b',
+    dependsOn: [], phase: 'completed', reasonCode: 'execution_cancel_requested', logRoles: [],
+    tasks: [{ ...firstTasks[0]!, state: 'unknown', reasonCode: 'baah_terminal_missing' },
+      { ...firstTasks[0]!, taskId: 'cancelled', state: 'unknown' }] }];
   const holder = document.createElement('section'); holder.style.width = '700px'; parent.append(holder);
   const style = document.createElement('style');
   style.textContent = theme + '\n' + uiTheme;
@@ -192,9 +210,15 @@ async function historyTasks(parent: HTMLElement, check: Check): Promise<void> {
   try {
     await settle();
     const groups = [...holder.querySelectorAll('ol')];
-    check(groups.length === 2 && holder.textContent?.includes('First Account') && holder.textContent?.includes('Second Account') &&
-      [...holder.querySelectorAll('.task-number')].map(item => item.textContent?.trim()).join(',') === '1,2,3,1',
+    check(groups.length === 3 && groups[0]?.getAttribute('aria-label') === 'Frozen Script · First Account' &&
+      groups[1]?.getAttribute('aria-label') === 'Frozen Script · Second Account' && !holder.innerText.includes('Frozen Script') &&
+      !holder.innerText.includes('First Account') && !holder.innerText.includes('Second Account') &&
+      [...holder.querySelectorAll('.task-number')].map(item => item.textContent?.trim()).join(',') === '1,2,3,4,5,6,1,1,2',
       'history separates frozen steps and restarts the full task sequence in each step');
+    const reasons = [...holder.querySelectorAll('ol article')].map(card => card.querySelector('p')?.textContent?.trim());
+    check(reasons.every(Boolean) && reasons[4] === '未检测到任务终态' && reasons[6] === '运行已取消' &&
+      reasons[7] === '未检测到任务终态' && reasons[0] !== reasons[1] && reasons[1] !== reasons[2],
+      'every historical task displays its own short reason while keeping specific task and step evidence');
     const first = groups[0]!;
     const tile = first.querySelector('article')!;
     document.body.dataset.theme = 'dark';

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type { RecordsStore } from '../app/store-ports';
 import { attemptTitle } from './history-detail';
 import { readHistoryLog } from './history-log';
@@ -17,26 +17,31 @@ const props = withDefaults(
   }>(),
   { ordinal: 1 }
 );
-const expanded = ref(false);
+const disclosure = ref<'closed' | 'opening' | 'open'>('closed');
+const trigger = ref<HTMLButtonElement>();
+const content = ref<HTMLElement>();
 const text = ref('');
 const error = ref('');
 const busy = ref(false);
 const selectedId = ref('');
-const lines = computed(() => {
-  const value = text.value;
-  if (!value) return 0;
-  let count = 1;
-  for (let i = value.indexOf('\n'); i !== -1; i = value.indexOf('\n', i + 1)) count++;
-  return count;
-});
 const title = computed(() => t('脚本日志') + '（' + attemptTitle(props.ordinal) + '）');
 const selected = computed(() => props.logs.find(log => historyLogId(log) === selectedId.value) ?? props.logs[0]);
 const request = computed(() => {
   const log = selected.value;
-  return props.visible && expanded.value && log
+  return props.visible && disclosure.value !== 'closed' && log
     ? JSON.stringify([props.runId, props.attemptId, historyLogId(log), log.snapshotSha256]) : '';
 });
 let owner: AbortController | undefined;
+function showLog(): void {
+  const moveFocus = trigger.value === document.activeElement;
+  disclosure.value = 'open';
+  if (moveFocus) void nextTick(() => content.value?.focus({ preventScroll: true }));
+}
+function expand(): void {
+  if (disclosure.value !== 'closed') return;
+  if (selected.value) disclosure.value = 'opening';
+  else showLog();
+}
 async function load(): Promise<void> {
   owner?.abort();
   owner = undefined;
@@ -57,14 +62,12 @@ async function load(): Promise<void> {
     if (owner === controller) {
       owner = undefined;
       busy.value = false;
+      if (!controller.signal.aborted && request.value === fingerprint && disclosure.value === 'opening') showLog();
     }
   }
 }
-function toggle(event: Event): void {
-  expanded.value = (event.currentTarget as HTMLDetailsElement).open;
-}
 watch([() => props.runId, () => props.attemptId], () => {
-  expanded.value = false;
+  disclosure.value = 'closed';
   selectedId.value = '';
 });
 watch(request, load);
@@ -72,13 +75,16 @@ onBeforeUnmount(() => owner?.abort());
 </script>
 
 <template>
-  <details class="history-log-disclosure" :open="expanded" @toggle="toggle">
-    <summary class="history-log-toggle">
-      <strong>{{ title }}</strong>
-      <span v-if="!expanded">{{ t('点击展开') }}</span>
-      <span v-else-if="visible && !busy && !error && selected">{{ lines }} {{ t('行脚本日志') }}</span>
-    </summary>
-    <div v-if="visible && expanded" class="history-log-content" :aria-busy="busy">
+  <div class="history-log-disclosure">
+    <button v-if="disclosure !== 'open'" ref="trigger" type="button" class="history-log-toggle"
+      :aria-disabled="disclosure === 'opening'" @click="expand">
+      <nexus-spinner v-if="disclosure === 'opening'" :label="t('正在读取脚本日志…')" />
+      <template v-else>
+        <strong>{{ title }}</strong>
+        <span>{{ t('点击展开') }}</span>
+      </template>
+    </button>
+    <div v-else-if="visible" ref="content" class="history-log-content" role="region" :aria-label="title" :aria-busy="busy" tabindex="-1">
       <nav v-if="logs.length > 1" :aria-label="t('脚本日志')">
         <HistoryCatalogWindow :items="logs" :item-key="historyLogId" :label="t('脚本日志')" :visible="visible">
           <template #default="{ item: log }">
@@ -98,7 +104,7 @@ onBeforeUnmount(() => owner?.abort());
         <pre>{{ text || t('没有可用的日志') }}</pre>
       </nexus-scroll-area>
     </div>
-  </details>
+  </div>
 </template>
 <style scoped>
 .history-log-disclosure {
@@ -129,8 +135,9 @@ onBeforeUnmount(() => owner?.abort());
   font-size: 12px;
   font-weight: 400;
 }
-.history-log-content {
-  margin-top: 12px;
+.history-log-toggle[aria-disabled='true'] {
+  cursor: progress;
+  opacity: 1;
 }
 .history-log-preview {
   max-width: 100%;

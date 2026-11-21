@@ -7,6 +7,7 @@ import { createStore } from '../../apps/web/src/app/store';
 import type { AttemptFacts } from '../../apps/web/src/control/records';
 import type { ActiveStep } from '../../apps/web/src/control/execution';
 import type { HistoryLog } from '../../apps/web/src/pages/attempt-resources';
+import type { UiElement } from '@nexuspipeline/extension-sdk';
 
 const fullMainLog = 'start\n' + 'middle line\n'.repeat(250) + 'x'.repeat(70000) + '\n你好\nend';
 const postHookLog = 'OE你\nXY好你G�S�';
@@ -72,6 +73,7 @@ export async function historyPaginationContract(fixture: HTMLElement, check: (va
     key: { runId: id, attemptId: id, stepId, captureId: capture(position + 1) },
     reasonCode: 'execution_capture_deadline', resultSha256: digest });
   const requests: string[] = [];
+  let finishOriginal: (() => void) | undefined;
   const client = new ControlClient(location.origin, async input => {
     const url = new URL(String(input)); requests.push(url.pathname + url.search);
     if (url.pathname.endsWith('/report')) return Response.json({ operationId: id, runId: id, attemptId: id,
@@ -85,7 +87,10 @@ export async function historyPaginationContract(fixture: HTMLElement, check: (va
     const role = url.pathname.split('/').at(-2)!;
     const ordinal = url.searchParams.get('invocationOrdinal');
     const key = { runId: id, attemptId: id, stepId: 'wanted', role, invocationOrdinal: ordinal ? Number(ordinal) : null };
-    return historyLogResponse(url, key, digest, role === 'main' ? fullMainLog : interleavedParts);
+    const response = historyLogResponse(url, key, digest, role === 'main' ? fullMainLog : interleavedParts);
+    if (role === 'main' && url.pathname.endsWith('/original'))
+      return new Promise<Response>(resolve => { finishOriginal = () => resolve(response); });
+    return response;
   });
   const owner = createStore(client), store = { ...owner, can: () => true };
   const facts: AttemptFacts = { runId: id, attemptId: id, ordinal: 1, engine: 'succeeded', business: 'succeeded',
@@ -108,9 +113,21 @@ export async function historyPaginationContract(fixture: HTMLElement, check: (va
       !requests.some(path => /\/(tail|description|original)\b/.test(path)), 'catalog pagination waits for user demand and collapsed logs do not read content');
     check(mount.querySelectorAll('.history-image-unavailable').length === 1,
       'the first page retains only the selected account’s screenshots');
-    mount.querySelector<HTMLElement>('.history-log-toggle')!.click();
+    const trigger = mount.querySelector<HTMLElement>('.history-log-toggle')!;
+    trigger.focus();
+    trigger.click();
+    await wait(() => !!finishOriginal);
+    const spinner = trigger.querySelector<UiElement<'nexus-spinner'>>('nexus-spinner');
+    check(trigger.matches('button') && spinner?.label === '正在读取脚本日志…' &&
+      !trigger.textContent?.includes('点击展开') && !mount.querySelector('.history-log-preview'),
+      'a pending log read replaces the disclosure label with progress inside the original button');
+    trigger.click();
+    check(requests.filter(path => path.includes('/original?')).length === 1, 'a busy log trigger cannot start a second read');
+    finishOriginal!();
     const output = () => mount.querySelector<HTMLElement>('.history-log-preview pre');
     await wait(() => output()?.textContent === fullMainLog);
+    check(!trigger.isConnected && document.activeElement === output()?.closest('.history-log-content'),
+      'the completed read removes the disclosure button and moves its focus to the displayed log');
     const viewport = output()!.parentElement!.shadowRoot!.querySelector<HTMLElement>('.viewport')!;
     check(viewport.scrollWidth <= viewport.clientWidth + 1 && viewport.scrollHeight > viewport.clientHeight &&
       getComputedStyle(output()!).overflowWrap === 'anywhere',
@@ -134,7 +151,7 @@ export async function historyPaginationContract(fixture: HTMLElement, check: (va
     button('加载更多截图')!.click();
     await wait(() => mount.querySelectorAll('.history-image-unavailable').length === 2);
     check(!button('加载更多截图'), 'the final screenshot page retains existing items and closes pagination');
-  } finally { app.unmount(); mount.remove(); owner.dispose(); }
+  } finally { finishOriginal?.(); app.unmount(); mount.remove(); owner.dispose(); }
   await scopeChangeContract(fixture, check);
   await invocationContract(fixture, check);
   await userPageContract(fixture, check);
@@ -220,7 +237,8 @@ async function invocationContract(fixture: HTMLElement, check: (value: unknown, 
     invocations: [invocation(1), invocation(2)] }];
   const mount = document.createElement('section'); fixture.prepend(mount);
   const app = createApp({ render: () => h(HistoryInvocations, { store, runId: id, attemptId: id, visible: true,
-    steps, logs: logs.value, images: [], logsReady: true, imagesReady: false }) });
+    steps, stepNames: [{ stepId: 'wanted', scriptName: 'Historical Script' }], logs: logs.value, images: [],
+    logsReady: true, imagesReady: false }) });
   const wait = async (condition: () => boolean) => {
     const until = Date.now() + 5000;
     while (!condition() && Date.now() < until) await new Promise(resolve => setTimeout(resolve, 20));
@@ -230,6 +248,8 @@ async function invocationContract(fixture: HTMLElement, check: (value: unknown, 
   try {
     await nextTick();
     const cards = () => [...mount.querySelectorAll<HTMLElement>('.history-attempt-card')];
+    check(mount.querySelector('section')?.getAttribute('aria-label') === 'Historical Script' &&
+      !mount.innerText.includes('Historical Script'), 'the invocation section retains its accessible name without repeating the script title');
     cards()[0]!.querySelector<HTMLElement>('.history-log-toggle')!.click();
     cards()[1]!.querySelector<HTMLElement>('.history-log-toggle')!.click();
     await wait(() => cards()[0]!.querySelector('.history-log-preview pre')?.textContent === 'main:1' &&

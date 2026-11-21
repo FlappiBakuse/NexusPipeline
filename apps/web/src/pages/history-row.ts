@@ -69,20 +69,40 @@ const outcomeNames: Record<string, string> = {
 };
 export const outcomeName = (value: string): string => t(outcomeNames[value] || value);
 registerMessages({ 已停用: 'Disabled', 未安排核验: 'Not selected for verification', 未执行: 'Not executed',
-  结果未保存: 'Result not saved', 已满足: 'Already satisfied' });
+  结果未保存: 'Result not saved', 已满足: 'Already satisfied',
+  配置中已停用此任务: 'This task is disabled in the configuration',
+  本次运行未选中此任务: 'This task was not selected for this run',
+  所在步骤已跳过: 'The containing step was skipped',
+  运行取消前未取得任务结果: 'The run was cancelled before a task result was recorded',
+  运行结束前未开始此任务: 'This task did not start before the run ended',
+  本次运行条件不适用: 'The task conditions did not apply to this run',
+  '条件已满足，无需执行': 'The conditions were already satisfied',
+  未记录可核验的任务结果: 'No verifiable task result was recorded',
+  已记录成功结果: 'A successful result was recorded',
+  已记录失败结果: 'A failed result was recorded',
+  仅部分操作成功: 'Only some operations succeeded' });
 
-export function historyTaskStatus(task: RunTask, step: Pick<ActiveStep, 'phase' | 'reasonCode'>): { label: string; tone: string } {
-  if (!task.isEnabled) return { label: t('已停用'), tone: 'neutral' };
-  if (!task.isSelected) return { label: t('未安排核验'), tone: 'neutral' };
-  if (step.phase === 'skipped') return { label: t('已跳过'), tone: 'neutral' };
+const taskResultReasons: Record<RunTask['state'], string> = {
+  succeeded: '已记录成功结果',
+  failed: '已记录失败结果',
+  partial: '仅部分操作成功',
+  unknown: '未记录可核验的任务结果'
+};
+
+export function historyTaskStatus(task: RunTask, step: Pick<ActiveStep, 'phase' | 'reasonCode'>) {
+  const neutral = (label: string, reason: string) => ({ label: t(label), tone: 'neutral', reason: t(reason) });
+  if (!task.isEnabled) return neutral('已停用', '配置中已停用此任务');
+  if (!task.isSelected) return neutral('未安排核验', '本次运行未选中此任务');
+  if (step.phase === 'skipped') return neutral('已跳过', '所在步骤已跳过');
   if (task.state === 'unknown' && step.reasonCode === 'execution_cancel_requested' && step.phase !== 'notExecuted')
-    return { label: t('已取消'), tone: 'neutral' };
-  if (step.phase === 'notExecuted' || task.completionKind === 'notExecuted') return { label: t('未执行'), tone: 'neutral' };
-  if (task.completionKind === 'inapplicable') return { label: t('不适用'), tone: 'neutral' };
-  if (task.completionKind === 'satisfied') return { label: t('已满足'), tone: 'neutral' };
-  if (task.state === 'unknown' && !task.reasonCode) return { label: t('结果未保存'), tone: 'neutral' };
+    return neutral('已取消', '运行取消前未取得任务结果');
+  if (step.phase === 'notExecuted' || task.completionKind === 'notExecuted')
+    return neutral('未执行', '运行结束前未开始此任务');
+  if (task.completionKind === 'inapplicable') return neutral('不适用', '本次运行条件不适用');
+  if (task.completionKind === 'satisfied') return neutral('已满足', '条件已满足，无需执行');
+  if (task.state === 'unknown' && !task.reasonCode) return neutral('结果未保存', taskResultReasons.unknown);
   const tone = task.state === 'succeeded' ? 'success' : task.state === 'failed' ? 'danger' : task.state === 'partial' ? 'warning' : 'neutral';
-  return { label: outcomeName(task.state), tone };
+  return { label: outcomeName(task.state), tone, reason: t(taskResultReasons[task.state]) };
 }
 export const recordBusiness = (row: RecordRow): string =>
   outcomeName(row.finalAttempt.business);

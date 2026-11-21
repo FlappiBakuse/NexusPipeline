@@ -7,10 +7,8 @@ defineProps<{ tasks: readonly { id: string; title: string; label: string; tone: 
     <ol class="task-cards" role="list" :aria-label="label">
       <li v-for="(task, index) in tasks" :key="task.id" :data-task-id="task.id">
         <article class="task-card">
-          <header>
-            <span class="task-number" :data-tone="task.tone" aria-hidden="true">{{ index + 1 }}</span>
-            <strong>{{ task.title }}</strong>
-          </header>
+          <span class="task-number" :data-tone="task.tone" aria-hidden="true">{{ index + 1 }}</span>
+          <strong>{{ task.title }}</strong>
           <nexus-badge :tone="task.tone" :label="task.label" />
           <p v-if="task.reason">{{ task.reason }}</p>
         </article>
@@ -35,21 +33,14 @@ defineProps<{ tasks: readonly { id: string; title: string; label: string; tone: 
 li { display: grid; min-width: 0; }
 .task-card {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-columns: 28px minmax(0, 1fr) fit-content(44%);
   align-content: start;
-  align-items: start;
+  align-items: center;
   gap: 6px 9px;
-  min-block-size: 74px;
-  padding: 9px 10px;
+  padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 11px;
-  background: var(--content-card-soft);
-}
-header {
-  display: grid;
-  grid-column: 1 / -1;
-  grid-template-columns: subgrid;
-  align-items: center;
+  background: var(--content-control);
 }
 strong { font-size: 13px; overflow-wrap: anywhere; }
 .task-number {
@@ -66,6 +57,7 @@ strong { font-size: 13px; overflow-wrap: anywhere; }
 .task-number[data-tone='info'] { background: var(--accent-soft); color: var(--accent); }
 .task-number[data-tone='success'] { background: var(--ok-soft); color: var(--ok); }
 .task-number[data-tone='danger'] { background: var(--bad-soft); color: var(--bad); }
-nexus-badge, p { grid-column: 2; justify-self: start; max-width: 100%; }
-p { margin: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.task-number[data-tone='warning'] { background: var(--warn-soft); color: var(--warn); }
+nexus-badge { justify-self: end; min-inline-size: 0; }
+p { grid-column: 2 / -1; margin: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 </style>

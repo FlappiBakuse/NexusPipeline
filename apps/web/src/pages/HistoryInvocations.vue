@@ -19,8 +19,8 @@ function logsFor(stepId: string, ordinal: number) {
 }
 </script>
 <template>
-  <section v-for="step in steps" :key="step.stepId">
-    <h4>{{ stepNames?.find(item => item.stepId === step.stepId)?.scriptName || step.scriptId }}</h4>
+  <section v-for="step in steps" :key="step.stepId"
+    :aria-label="stepNames?.find(item => item.stepId === step.stepId)?.scriptName || step.scriptId">
     <p v-if="!startedInvocations(step).length">{{ t('尚未启动脚本') }}</p>
     <article v-for="invocation in startedInvocations(step)" :key="invocation.ordinal" class="history-attempt-card">
       <header>
