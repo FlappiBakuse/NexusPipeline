@@ -45,9 +45,13 @@ internal sealed class SnapshotCompletionOwner(RuntimeInstance instance, StateDat
                 var session = ReadVerifiedIntent(parent, intent);
                 if (session.CompletionOperationId.HasValue) continue;
                 _ = ConfigurationCompletionBinding.Read(instance, database, contracts, parent.JournalId);
-                using var scene = HoldRestored(session);
-                result.Add(new(parent.OperationId, parent.JournalId, parent.Revision, parent.PlanDigest, session.SessionId,
-                    intent.CompletionOperationId, intent.SubjectId, ConfigurationRunPhase.Interrupted, session.Revision, intent.EvidenceDigest, intent.SlotKeys));
+                try
+                {
+                    using var scene = HoldRestored(session);
+                    result.Add(new(parent.OperationId, parent.JournalId, parent.Revision, parent.PlanDigest, session.SessionId,
+                        intent.CompletionOperationId, intent.SubjectId, ConfigurationRunPhase.Interrupted, session.Revision, intent.EvidenceDigest, intent.SlotKeys));
+                }
+                catch (Exception error) when (ScopedConfigurationRecovery.CanDeferScene(error)) { }
             }
         }
         return result.AsReadOnly();

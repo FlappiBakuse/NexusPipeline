@@ -267,6 +267,15 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
             }
             else continuous = RawOutputReplay.Read(_blobs, raw, line => judgement.ObserveLine(judgement.InputIdentity, line));
         }
+        if (document.DailyAdapterTerminal)
+        {
+            var step = context.Total.Steps.Single(item => item.StepId == binding.StepId);
+            if (judgement.Mode != ExecutionJudgementMode.None || !DailyAdapterEvidence.Applies(step) ||
+                adapterObservation is null || raw is null) throw Invalid();
+            var decision = DailyAdapterEvidence.Decide(step, adapterObservation, raw, document.Engine, prior?.Engine == EngineOutcome.Succeeded);
+            if (decision.Outcome != document.Business || decision.ReasonCode != document.ReasonCode) throw Invalid();
+            return document;
+        }
         if (judgement.Mode == ExecutionJudgementMode.None && document.TaskAdapter is not null &&
             document.Business != BusinessOutcome.Unverified && prior?.Business != document.Business)
         {

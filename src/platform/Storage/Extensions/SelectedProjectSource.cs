@@ -6,6 +6,7 @@ using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Automation;
+using NexusPipeline.Platform.Storage.Configuration;
 using NexusPipeline.Platform.Storage.Sqlite;
 
 namespace NexusPipeline.Platform.Storage.Extensions;
@@ -57,6 +58,7 @@ internal sealed class SelectedProjectSource : IDisposable
     internal AutomationRoot Root => _root;
     internal PhysicalObjectIdentity RootIdentity => _identity;
     internal bool IsScriptAuthority => _binding is null;
+    internal DraftBindingIdentity? Draft { get; }
 
     internal void RequireOwner(RuntimeInstance instance, StateDatabase database, InstanceLease lease, ResourceLeaseManager resources)
     {
@@ -66,18 +68,20 @@ internal sealed class SelectedProjectSource : IDisposable
     }
 
     internal SelectedProjectSource(RuntimeInstance instance, StateDatabase database, InstanceLease lease, ResourceLeaseManager resources,
-        Guid bindingId, long expectedBindingRevision, string extensionId, Action requireCaller, ResourceOperationLease? actualRoot = null)
-        : this(instance, database, lease, resources, bindingId, null, expectedBindingRevision, extensionId, requireCaller, actualRoot) { }
+        Guid bindingId, long expectedBindingRevision, string extensionId, Action requireCaller, ResourceOperationLease? actualRoot = null,
+        DraftBindingIdentity? draft = null)
+        : this(instance, database, lease, resources, bindingId, null, expectedBindingRevision, extensionId, requireCaller, actualRoot, draft) { }
 
     internal static SelectedProjectSource ForScript(RuntimeInstance instance, StateDatabase database, InstanceLease lease,
         ResourceLeaseManager resources, Guid scriptId, long expectedScriptRevision, string extensionId, Action requireCaller) =>
         new(instance, database, lease, resources, null, scriptId, expectedScriptRevision, extensionId, requireCaller, null);
 
     private SelectedProjectSource(RuntimeInstance instance, StateDatabase database, InstanceLease lease, ResourceLeaseManager resources,
-        Guid? bindingId, Guid? scriptId, long expectedRevision, string extensionId, Action requireCaller, ResourceOperationLease? actualRoot)
+        Guid? bindingId, Guid? scriptId, long expectedRevision, string extensionId, Action requireCaller, ResourceOperationLease? actualRoot,
+        DraftBindingIdentity? draft = null)
     {
         _instance = instance; _database = database; _lease = lease; _blobs = new(instance, new()); _manager = resources;
-        _bindingId = bindingId; _scriptId = scriptId; _extensionId = extensionId; _requireCaller = requireCaller; _actualRoot = actualRoot;
+        _bindingId = bindingId; _scriptId = scriptId; _extensionId = extensionId; _requireCaller = requireCaller; _actualRoot = actualRoot; Draft = draft;
         lease.VerifyHeld(instance); requireCaller();
         (_binding, _script, _root) = ReadDefinitions();
         if ((_binding?.Revision ?? _script.Revision) != expectedRevision) throw Changed();
@@ -173,6 +177,7 @@ internal sealed class SelectedProjectSource : IDisposable
 
     internal CapturedProjectSource Freeze(CancellationToken cancellation)
     {
+        if (Draft is not null) throw new IOException("project_binding_authority_required");
         var binding = Binding;
         RequireMutable(); RequireCurrent();
         var files = ImmutableArray.CreateBuilder<(string Path, PhysicalObjectIdentity Identity, BlobReference Content)>();
@@ -283,11 +288,12 @@ internal sealed class SelectedProjectSource : IDisposable
     private (AutomationBinding? Binding, AutomationScript Script, AutomationRoot Root) ReadDefinitions()
     {
         var catalog = new AutomationDefinitionStore(_database).Read();
-        var binding = _bindingId is { } id ? catalog.Bindings.SingleOrDefault(item => item.Id == id) ?? throw Changed() : null;
+        var binding = Draft is not null ? DraftBindingOwner.Resolve(catalog, _bindingId!.Value, Draft) :
+            _bindingId is { } id ? catalog.Bindings.SingleOrDefault(item => item.Id == id) ?? throw Changed() : null;
         var script = catalog.Scripts.SingleOrDefault(item => item.Id == (binding?.ScriptId ?? _scriptId)) ?? throw Changed();
         var root = catalog.Roots.SingleOrDefault(item => item.Id == script.RootId) ?? throw Changed();
         if (script.Kind != AutomationKind.Specialized || script.ExtensionId != _extensionId || root.Kind != AutomationRootKind.Script ||
-            binding is not null && !catalog.Users.Any(item => item.Id == binding.UserId)) throw Changed();
+            binding is not null && Draft is null && !catalog.Users.Any(item => item.Id == binding.UserId)) throw Changed();
         return (binding, binding is null ? script : BindingScriptSource.Resolve(script, binding), root);
     }
 

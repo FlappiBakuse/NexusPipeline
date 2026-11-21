@@ -21,6 +21,7 @@ import { loadTemplate, templateKey } from './script-template';
 import { AutomationEditor, type EntityKind } from './automation-editor';
 import { AutomationSave } from './automation-save';
 import { useAccountSummaries } from './account-summary';
+import { accountDraft, retainBindingCandidate } from './account-draft';
 const props = defineProps<{ store: AutomationStore; kind: EntityKind; visible: boolean }>();
 const summaries = useAccountSummaries(props.store, () => props.visible && props.kind === 'users');
 const session = automationSession(props.store, props.kind);
@@ -37,14 +38,27 @@ const commands = new AutomationCommands(props.store, session, (action) => {
 const saveOwner = new AutomationSave(props.store, editorModel, session, commands);
 const nativeBinding = ref('');
 const bindingEditor = computed(() => {
-  const binding = bundle.value?.bindings.find(row => row.id === nativeBinding.value);
+  if (!nativeBinding.value || !bundle.value) return null;
+  const saved = bundle.value.bindings.find(row => row.id === nativeBinding.value);
+  const draftAccount = activeKind.value === 'users' && editing.value ? accountDraft(props.store, selected.value) : undefined;
+  const binding = saved ?? draftAccount?.items.find(row => row.id === nativeBinding.value);
   const script = bundle.value?.scripts.find(row => row.id === binding?.scriptId);
   const revision = (kind: string, id: string) => catalog.value?.revisions.find(row => row.kind === kind && row.id === id)?.revision ?? 0;
   return binding && script ? {
     bindingId: binding.id, bindingRevision: revision('binding', binding.id),
-    scriptRevision: revision('script', script.id), extensionId: script.extensionId
+    scriptRevision: revision('script', script.id), extensionId: script.extensionId,
+    draftBinding: saved ? undefined : {
+      userId: binding.userId, scriptId: script.id, scriptRevision: revision('script', script.id),
+      candidateId: draftAccount?.candidates[binding.id]
+    }
   } : null;
 });
+function bindDraftCandidate(id: string): void {
+  if (bindingEditor.value?.draftBinding) {
+    retainBindingCandidate(props.store, selected.value, bindingEditor.value.bindingId, id);
+    notice.value = t('已保留到草稿，请保存账号。');
+  }
+}
 const deleting = ref<{ id: string; name: string; revision: number } | null>(null);
 const exchangeOpen = ref(false);
 const exchangeMounted = ref(false);
@@ -258,6 +272,7 @@ function openRow(row: unknown, global = false): void {
     >
       <AutomationExchange
         :store="store"
+        :visible="visible && exchangeOpen"
         :file="importFile"
         @applied="
           exchangeOpen = false;
@@ -269,7 +284,7 @@ function openRow(row: unknown, global = false): void {
   </div>
   <ModalTransition>
     <BindingEditorDialog v-if="bindingEditor" :key="bindingEditor.bindingId" v-bind="bindingEditor" :store="store" :visible="visible"
-      @close="nativeBinding = ''" @changed="notice = t('已保存')" />
+      @close="nativeBinding = ''" @changed="notice = t('已保存')" @draft-candidate="bindDraftCandidate" />
   </ModalTransition>
   <AutomationDeleteDialog :target="deleting" :kind="kind" :visible="visible"
     @confirm="remove" @cancel="deleting = null" />

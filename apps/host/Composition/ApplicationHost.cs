@@ -29,7 +29,7 @@ internal static class ApplicationHost
     [SupportedOSPlatform("windows")]
     internal static async Task<int> RunCoreAsync(string runtimeRoot, int? requestedPort, int? nativeClientProcessId = null,
         InstanceLease? startupLease = null, NexusPipeline.Platform.Processes.MaintenanceStartupOrigin? maintenanceOrigin = null,
-        bool launchDesktop = false, UpdateWindowIntent? resumeWindow = null, string? installationBundle = null,
+        bool launchDesktop = false, UpdateWindowIntent? resumeWindow = null, (string Directory, ExtensionStoreChannel Channel)? installationBundle = null,
         bool showStartupProgress = false, StartupProgress? startup = null)
     {
         using var externalNativeBinding = nativeClientProcessId is { } nativePid ? new NativeClientBinding(nativePid) : null;
@@ -90,7 +90,7 @@ internal static class ApplicationHost
         await using var browserLogins = new NexusPipeline.Core.Desktop.BrowserLoginSessions();
         extensions.ConfigurePorts(new(services.Scheduling, secretService, extensionSecrets, services.LiveMedia.Previews,
             services.LiveMedia, services.LiveMedia, updateNetwork.CreateClient, desktopPresence, nativeClients, browserLogins));
-        var taskAdapters = extensions.CreateAdapterPort(extensionSecrets);
+        var taskAdapters = extensions.CreateAdapterService(extensionSecrets);
         var projectCompilation = new ProjectCompilationService(instance, runtime.Database, instanceLease, resources, contracts, payloadRoots, extensions.Activator,
             new NexusPipeline.Platform.Storage.Secrets.SecretDocumentService(instance, runtime.Database, instanceLease, resources,
                 runtime.Recovery, contracts, secretService: secretService));
@@ -101,7 +101,7 @@ internal static class ApplicationHost
         services.Admission.ConfigureEmulators(emulators);
         builder.Services.AddSingleton<ITaskAdapterPort>(taskAdapters);
         var execution = services.Consumer;
-        var configurationValues = new NexusPipeline.Host.Control.Configuration.ValueUseCases(
+        var configurationValues = new NexusPipeline.Host.Control.Configuration.ConfigurationValueUseCases(
             new ValueService(instance, runtime.Database, contracts, instanceLease, resources));
         var importService = new ConfigurationImportService(instance, runtime.Database, contracts, instanceLease, resources, providers: providers);
         var configurationImports = new NexusPipeline.Host.Control.Configuration.ImportUseCases(importService, contracts,
@@ -279,7 +279,7 @@ internal static class ApplicationHost
                 recoveryRevision = recovery.Revision, pendingOperations = statistics.Counts.PendingOperations,
                 attempts = statistics.Counts.Attempts, completedRuns = statistics.Counts.CompletedRuns };
         });
-        new ControlEvents(controlAuthority, eventFeed).Map(app);
+        new ControlEvents(controlAuthority, eventFeed, execution).Map(app);
         new ExecutionReadControl(controlAuthority, execution, new LiveLogReader(instance, instanceLease)).Map(app);
         WebAssets.Map(app);
         new RuntimeQueries(controlAuthority, runtimeUseCases).Map(app);
@@ -288,18 +288,20 @@ internal static class ApplicationHost
         new ExecutionControl(controlAuthority, executionControlUseCases, contracts).Map(app);
         new AutomationControl(controlAuthority, automationControl, new AutomationControlCodec(contracts),
             new NexusPipeline.Host.Control.Automation.AccountSummaries(definitions,
-                new NexusPipeline.Platform.Storage.Sqlite.RecordSummaryReader(runtime.Database), execution, TimeProvider.System)).Map(app);
+                new NexusPipeline.Platform.Storage.Sqlite.RecordSummaryReader(runtime.Database), execution, TimeProvider.System), configurationEdits.Drafts).Map(app);
         new EmulatorControl(controlAuthority, emulators, contracts).Map(app);
         new ConfigurationValueControl(controlAuthority, configurationValues, contracts).Map(app);
         new ConfigurationReadControl(controlAuthority, new ConfigurationOverviewReader(instance, runtime.Database, instanceLease, contracts, providers)).Map(app);
-        new AdapterControl(controlAuthority, new NexusPipeline.Host.Control.Configuration.AdapterUseCases(taskAdapters, contracts), contracts).Map(app);
+        var adapterControl = new AdapterControl(controlAuthority, new NexusPipeline.Host.Control.Configuration.AdapterUseCases(taskAdapters, contracts), contracts);
+        adapterControl.Map(app);
+        adapterControl.MapDraftDiscovery(app, taskAdapters, configurationEdits.Drafts);
         var scriptProjects = new ScriptProjectService(instance, runtime.Database, instanceLease, resources, contracts, payloadRoots, extensions.Activator);
         var scriptSources = new NexusPipeline.Host.Control.Configuration.SourceUseCases(
             new ScriptSourceService(instance, runtime.Database, instanceLease, resources, contracts, payloadRoots, extensions.Activator), contracts);
         new ScriptSourceControl(controlAuthority, scriptSources).Map(app);
         var projectUseCases = new NexusPipeline.Host.Control.Configuration.ProjectUseCases(projectCompilation, projectPreviews, contracts, scriptProjects);
         new ProjectControl(controlAuthority, projectUseCases, contracts).Map(app);
-        new ProjectFrontendControl(instance.InstanceId, controlAuthority, extensionFrontend, projectUseCases, contracts).Map(app);
+        new ProjectFrontendControl(instance.InstanceId, controlAuthority, extensionFrontend, projectUseCases, contracts, configurationEdits.Drafts).Map(app);
         new RecordControl(controlAuthority, recordUseCases, contracts).Map(app);
         new RecordSummaryControl(controlAuthority, new NexusPipeline.Platform.Storage.Sqlite.RecordSummaryReader(runtime.Database),
             new NexusPipeline.Platform.Storage.Records.RecordDisplayReader(instance, runtime.Database, contracts)).Map(app);
@@ -324,9 +326,9 @@ internal static class ApplicationHost
                 await startup!.PresentInterfaceAsync();
             }
             if (!showBeforeInitialExtensions) startup?.Advance(StartupStage.InstallingExtensions);
-            if (installationBundle is not null)
+            if (installationBundle is { } bundle)
             {
-                await packages.InstallLocalAsync(installationBundle);
+                await packages.InstallLocalAsync(bundle.Directory, bundle.Channel);
                 return 0;
             }
             using (StartupProfile.Begin("extensions.initial"))

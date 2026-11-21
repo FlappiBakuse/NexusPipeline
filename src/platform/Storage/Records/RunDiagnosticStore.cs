@@ -5,16 +5,19 @@ using NexusPipeline.Platform.Storage.Sqlite;
 namespace NexusPipeline.Platform.Storage.Records;
 
 public sealed record RunDiagnostic(DateTimeOffset RecordedAt, string StepId, Guid? UserId,
-    string Phase, string ReasonCode, string ExceptionType);
+    string Phase, string ReasonCode, string ExceptionType)
+{
+    public Guid? ResourceJournalId { get; init; }
+}
 
 internal sealed class RunDiagnosticStore(RuntimeInstance instance, StateDatabase database)
 {
     private sealed record Document(string Format, int Version, Guid JournalId, RunDiagnostic Diagnostic);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow };
 
-    internal void Record(Guid journal, string step, Guid? user, string phase, string reason, Exception error)
+    internal void Record(Guid journal, string step, Guid? user, string phase, string reason, Exception error, Guid? resourceJournalId = null)
     {
-        if (journal == Guid.Empty || step.Length is < 1 or > 120 || reason.Length is < 1 or > 120 || phase.Length is < 1 or > 40)
+        if (journal == Guid.Empty || resourceJournalId == Guid.Empty || step.Length is < 1 or > 120 || reason.Length is < 1 or > 120 || phase.Length is < 1 or > 40)
             throw new ArgumentException("run_diagnostic_invalid");
         lock (database)
         {
@@ -25,7 +28,7 @@ internal sealed class RunDiagnosticStore(RuntimeInstance instance, StateDatabase
             using var output = new FileStream(Path.Combine(directory, Guid.NewGuid().ToString("D") + ".json"),
                 FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough);
             JsonSerializer.Serialize(output, new Document("nexus.run.diagnostic", 1, journal,
-                new(DateTimeOffset.UtcNow, step, user, phase, reason, error.GetType().Name)), Json);
+                new(DateTimeOffset.UtcNow, step, user, phase, reason, error.GetType().Name) { ResourceJournalId = resourceJournalId }), Json);
             output.Flush(flushToDisk: true);
         }
     }
@@ -46,7 +49,7 @@ internal sealed class RunDiagnosticStore(RuntimeInstance instance, StateDatabase
                     if (document.Format != "nexus.run.diagnostic" || document.Version != 1 || document.JournalId != journal ||
                         document.Diagnostic is not { StepId.Length: >= 1 and <= 120, Phase.Length: >= 1 and <= 40,
                             ReasonCode.Length: >= 1 and <= 120, ExceptionType.Length: >= 1 and <= 160 } diagnostic ||
-                        diagnostic.UserId == Guid.Empty || diagnostic.RecordedAt.Offset != TimeSpan.Zero)
+                        diagnostic.UserId == Guid.Empty || diagnostic.ResourceJournalId == Guid.Empty || diagnostic.RecordedAt.Offset != TimeSpan.Zero)
                         throw new IOException("run_diagnostic_invalid");
                     result.Add(diagnostic);
                 }

@@ -35,7 +35,7 @@ public sealed class JournalStore
     internal JournalStore(RuntimeInstance instance, ContractReader contracts, IJournalPublicationObserver observer) : this(instance, contracts)
         => _publicationObserver = observer;
 
-    internal IDisposable ProtectReadHistory(Guid journalId)
+    internal IDisposable ProtectReadHistory(Guid journalId, bool requireFreshInventory = false)
     {
         using var timing = StartupProfile.Measure("history.protect");
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
@@ -43,7 +43,7 @@ public sealed class JournalStore
         {
             if (_protection is not null) throw new IOException("journal_history_scope_already_active");
             using var publication = JournalPublicationGate.Acquire(_instance, journalId);
-            var held = JournalHistoryProtection.TryAcquire(JournalDirectory(journalId));
+            var held = JournalHistoryProtection.TryAcquire(JournalDirectory(journalId), requireFreshInventory);
             if (held is null) return new ProtectionScope(this, null);
             try
             {

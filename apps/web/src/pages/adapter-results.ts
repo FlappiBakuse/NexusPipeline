@@ -1,5 +1,6 @@
 import { arrayValue, booleanValue, integerValue, objectValue, stringValue } from '../control/client';
 import { titleLocales } from '../control/extension-metadata';
+import type { ConfigurationOverview } from './configuration-types';
 
 export type AdapterAction = 'discover' | 'propose' | 'previewRepair' | 'applyRepair';
 export interface AdapterCandidate {
@@ -14,6 +15,18 @@ export interface AdapterTask {
   isSelected: boolean;
   isEnabled: boolean;
 }
+export function adapterTasks(value: unknown): AdapterTask[] {
+  return arrayValue(value, (item) => {
+    const task = objectValue(item);
+    return {
+      taskId: stringValue(task.taskId),
+      title: stringValue(task.title),
+      titleLocales: titleLocales(task.titleLocales),
+      isSelected: booleanValue(task.isSelected),
+      isEnabled: booleanValue(task.isEnabled)
+    };
+  });
+}
 export interface AdapterResult {
   coverage?: { selected: number; projected: number; retrySafe: number; isComplete: boolean; hasBlockingDiagnostics: boolean };
   gamePathCheck?: string;
@@ -23,41 +36,29 @@ export interface AdapterResult {
   proposalDigest: string;
   hasChanges: boolean | null;
 }
-export type AdapterDraft = Omit<AdapterResult, 'hasChanges'> & {
-  resourceIds: string[];
-  operationId: string;
-  candidateIndex: number;
-  previewed: boolean;
-  pending: string;
-  pendingAction: AdapterAction | '';
-  request: Record<string, unknown> | null;
-  busy: boolean;
-  note: string;
-  error: string;
-};
+export interface AdapterSource {
+  overview: ConfigurationOverview;
+  installedRevision: number;
+}
 
-export function resetAdapterProposal(
-  state: Pick<AdapterResult, 'tasks' | 'candidates' | 'diagnostics' | 'proposalDigest'> & {
-    operationId: string;
-    candidateIndex: number;
-    previewed: boolean;
-    request: Record<string, unknown> | null;
-    note: string;
-    coverage?: AdapterResult['coverage'];
-    gamePathCheck?: string;
-  }
-): void {
-  state.operationId = '';
-  state.proposalDigest = '';
-  state.candidateIndex = -1;
-  state.previewed = false;
-  state.request = null;
-  state.candidates = [];
-  state.tasks = [];
-  state.coverage = undefined;
-  state.gamePathCheck = undefined;
-  state.diagnostics = [];
-  state.note = '';
+export function adapterSelection({ overview, installedRevision }: AdapterSource, operationId: string) {
+  return {
+    operationId,
+    bindingId: overview.bindingId,
+    expectedBindingRevision: overview.bindingRevision,
+    extensionId: overview.extensionId,
+    expectedInstalledRevision: installedRevision,
+    resources: overview.resources.map(item => ({
+      resourceId: item.resourceId, expectedRevision: item.revision, relativePath: item.relativePath
+    }))
+  };
+}
+
+export function adapterCommand(action: AdapterAction, selection: ReturnType<typeof adapterSelection>, candidate?: AdapterCandidate, proposalDigest?: string) {
+  return {
+    format: 'nexus.control.adapter-command', version: 1, action, selection,
+    ...(candidate ? { candidateIndex: candidate.index, proposalDigest } : {})
+  };
 }
 
 export function adapterResult(
@@ -65,7 +66,8 @@ export function adapterResult(
   action: AdapterAction,
   request: Record<string, unknown>,
   candidate: AdapterCandidate | undefined,
-  digest: string
+  digest: string,
+  scriptRevision: number
 ): AdapterResult {
   const row = objectValue(value);
   const result: AdapterResult = {
@@ -83,7 +85,7 @@ export function adapterResult(
     )
       throw new Error('adapter_result_unbound');
     integerValue(row.revision);
-  } else requireSource(objectValue(row.source), request);
+  } else requireSource(objectValue(row.source), request, scriptRevision);
   if (action === 'previewRepair' || action === 'applyRepair') {
     if (typeof row.hasChanges !== 'boolean') throw new Error('configuration_response_invalid');
     if (
@@ -106,16 +108,7 @@ export function adapterResult(
     result.gamePathCheck = stringValue(row.gamePathCheck);
   }
   if (action === 'discover')
-    result.tasks = arrayValue(row.tasks, (value) => {
-      const task = objectValue(value);
-      return {
-        taskId: stringValue(task.taskId),
-        title: stringValue(task.title),
-        titleLocales: titleLocales(task.titleLocales),
-        isSelected: booleanValue(task.isSelected),
-        isEnabled: booleanValue(task.isEnabled)
-      };
-    });
+    result.tasks = adapterTasks(row.tasks);
   else {
     result.proposalDigest = stringValue(row.proposalDigest);
     result.candidates = arrayValue(row.candidates, (value) => {
@@ -130,12 +123,13 @@ export function adapterResult(
   return result;
 }
 
-function requireSource(source: Record<string, unknown>, request: Record<string, unknown>): void {
+function requireSource(source: Record<string, unknown>, request: Record<string, unknown>, scriptRevision: number): void {
   if (
     source.bindingId !== request.bindingId ||
     source.bindingRevision !== request.expectedBindingRevision ||
     source.extensionId !== request.extensionId ||
-    source.installedRevision !== request.expectedInstalledRevision
+    source.installedRevision !== request.expectedInstalledRevision ||
+    source.scriptRevision !== scriptRevision
   )
     throw new Error('adapter_source_unbound');
   const expected = arrayValue(request.resources, objectValue),
@@ -154,23 +148,4 @@ function requireSource(source: Record<string, unknown>, request: Record<string, 
     )
   )
     throw new Error('adapter_source_unbound');
-}
-
-export function createAdapterDraft(): AdapterDraft {
-  return {
-    resourceIds: [],
-    operationId: '',
-    proposalDigest: '',
-    candidateIndex: -1,
-    previewed: false,
-    pending: '',
-    pendingAction: '',
-    candidates: [],
-    tasks: [],
-    diagnostics: [],
-    request: null,
-    busy: false,
-    note: '',
-    error: ''
-  };
 }

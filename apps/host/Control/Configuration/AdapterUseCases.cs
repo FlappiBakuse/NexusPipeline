@@ -12,7 +12,7 @@ namespace NexusPipeline.Host.Control.Configuration;
 [SupportedOSPlatform("windows")]
 internal sealed class AdapterUseCases(ITaskAdapterPort adapters, ContractReader contracts)
 {
-    internal async Task<object> ExecuteAsync(AuthenticatedControlRequest request, string action, JsonElement body)
+    internal async Task<object> ExecuteAsync(AuthenticatedControlRequest request, string action, JsonElement body, CancellationToken readCancellation)
     {
         void Current() => request.Require(action is "previewRepair" or "applyRepair" ? ControlCapability.ConfigurationRepair : ControlCapability.ConfigurationRead);
         Current();
@@ -20,17 +20,17 @@ internal sealed class AdapterUseCases(ITaskAdapterPort adapters, ContractReader 
         switch (action)
         {
             case "discover":
-                return await adapters.DiscoverAsync(request.SubjectId, selection, CancellationToken.None, Current);
+                return await adapters.DiscoverAsync(request.SubjectId, selection, readCancellation, Current);
             case "propose":
             {
-                var result = await adapters.ProposeConfigurationAsync(request.SubjectId, selection, CancellationToken.None, Current);
+                var result = await adapters.ProposeConfigurationAsync(request.SubjectId, selection, readCancellation, Current);
                 return new { result.Source, result.Diagnostics, result.ProposalDigest,
                     candidates = result.Patches.Select((item, index) => new { index, item.Binding.ResourceId,
                         expectedRevision = item.Binding.Revision, item.Binding.SourceSha256, editCount = item.Edits.Length }).ToArray() };
             }
             case "previewRepair":
                 return await adapters.PreviewRepairAsync(request.SubjectId, selection,
-                    body.GetProperty("candidateIndex").GetInt32(), body.GetProperty("proposalDigest").GetString()!, CancellationToken.None, Current);
+                    body.GetProperty("candidateIndex").GetInt32(), body.GetProperty("proposalDigest").GetString()!, readCancellation, Current);
             case "applyRepair":
             {
                 var saved = await adapters.ApplyRepairAsync(request.SubjectId, selection,

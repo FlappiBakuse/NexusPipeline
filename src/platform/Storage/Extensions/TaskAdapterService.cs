@@ -56,6 +56,32 @@ internal sealed class TaskAdapterService : ITaskAdapterPort
     {
         RequireSubject(serverSubject);
         using var source = new ResolvedAdapterSelection(_instance, _database, _lease, _resources, _contracts, _roots, selection, requireCaller: requireCaller);
+        return await DiscoverAsync(source, cancellationToken).ConfigureAwait(false);
+    }
+
+    internal async ValueTask<AdapterDiscovery> DiscoverDraftAsync(string serverSubject, Guid bindingId, DraftBindingIdentity owner,
+        BindingDrafts drafts, Guid candidateId, Guid operationId, CancellationToken cancellationToken, Action requireCaller)
+    {
+        RequireSubject(serverSubject); requireCaller();
+        var batch = drafts.ReadNative(candidateId, serverSubject, bindingId, owner);
+        var catalog = new AutomationDefinitionStore(_database).Read();
+        var binding = DraftBindingOwner.Resolve(catalog, bindingId, owner);
+        var script = catalog.Scripts.Single(item => item.Id == owner.ScriptId);
+        var next = BindingConfigurationSource.Apply(new(_instance, _contracts), _contracts, binding, script,
+            batch.Changes.Single(change => change.Address.ResourceId == BindingConfigurationSource.ResourceId).Tree);
+        script = BindingScriptSource.Resolve(script, next);
+        var extension = script.ExtensionId ?? throw new ConfigurationException("configuration_edit_adapter_unavailable");
+        var installed = new ExtensionInstalledEvidence(_instance, _database, _contracts, _roots).ReadCurrent(extension)
+            ?? throw new ConfigurationException("configuration_edit_adapter_unavailable");
+        var selection = new AdapterSelection(operationId, bindingId, binding.Revision, extension, installed.Metadata.Revision,
+            script.AdapterResources.Select(item => new AdapterResourceSelection(item.ResourceId, 1, item.RelativePath)).ToImmutableArray());
+        using var source = new ResolvedAdapterSelection(_instance, _database, _lease, _resources, _contracts, _roots, selection,
+            requireCaller: requireCaller, draft: new(owner, batch));
+        return await DiscoverAsync(source, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async ValueTask<AdapterDiscovery> DiscoverAsync(ResolvedAdapterSelection source, CancellationToken cancellationToken)
+    {
         var response = await PrepareAsync(source, "discover", cancellationToken).ConfigureAwait(false);
         var tasks = response.Tasks!.Select(TaskAdapterProtocol.ReadTask).ToImmutableArray();
         tasks = AdapterTaskPolicy.Freeze(tasks);
@@ -98,6 +124,7 @@ internal sealed class TaskAdapterService : ITaskAdapterPort
 
     internal AdapterPlanSource CaptureForPlan(ExecutionSelectionItem item, ResourceOperationLease? actualRoot = null, bool initialize = false)
     {
+        if (_resources.ReadConfigurationRecovery(item.Binding.Id) is { } recoveryIssue) throw new IOException(recoveryIssue);
         var script = item.Script;
         if (script.AdapterResources.IsEmpty || script.ExtensionId is null) throw new IOException("execution_adapter_declaration_required");
         var installed = new ExtensionInstalledEvidence(_instance, _database, _contracts, _roots).ReadCurrent(script.ExtensionId)

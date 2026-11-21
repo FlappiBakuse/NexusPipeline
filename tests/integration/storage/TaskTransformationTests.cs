@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Text;
+using System.Text.Json;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Configuration;
@@ -55,6 +56,40 @@ public sealed class TaskTransformationTests
         var selected = fixture.Transform.Select(fixture.Operation, fixture.Source, captured);
         Assert.Equal("{\"tasks\":{\"A\":false,\"B\":false,\"other\":true}}", fixture.Read(selected));
         Assert.Equal(fixture.Source.Tree.Entries, fixture.Transform.Restore(fixture.Operation, fixture.Source, captured, selected).Entries);
+    }
+
+    [Theory(DisplayName = "Normalization Reuses A Protected Validation Only When Document Bytes Match")]
+    [InlineData(false, 1)]
+    [InlineData(true, 2)]
+    public void ReusesProtectedValidation(bool changesTask, int expectedReads)
+    {
+        using var fixture = new Fixture("{\"tasks\":{\"A\":true,\"B\":false}}");
+        var progress = fixture.Tree(changesTask
+            ? "{\"tasks\":{\"A\":false,\"B\":false},\"count\":7}"
+            : "{\"tasks\":{\"A\":true,\"B\":false},\"count\":7}");
+        var captured = fixture.Transform.Capture(fixture.Operation, fixture.Source, [Rule("map", ConfigurationSyntax.Json)]);
+        var policy = new EditWritePolicy([""], [FileObjectKind.File]) { Documents = [new("", ConfigurationSyntax.Json, true)] };
+        var rawPath = Path.Combine(fixture.Instance.RuntimeRoot, "blobs/content", progress.Entries.Single().Sha256 + ".bin");
+        var stderr = Console.Error;
+        using var profileOutput = new StringWriter();
+        FileTreeSnapshot normalized;
+        try
+        {
+            Console.SetError(profileOutput);
+            using var profile = StartupProfile.Begin("configuration-validation");
+            normalized = new ConfigurationContentValidation(fixture.Blobs).RequireTransformed(fixture.Operation, fixture.Source.Address,
+                fixture.Source.Revision, policy, progress, raw =>
+                {
+                    Assert.Throws<IOException>(() => File.Open(rawPath, FileMode.Open, FileAccess.Write, FileShare.Read));
+                    return fixture.Transform.Restore(fixture.Operation, fixture.Source, captured, raw);
+                });
+        }
+        finally { Console.SetError(stderr); }
+        Assert.Equal("{\"tasks\":{\"A\":true,\"B\":false},\"count\":7}", fixture.Read(normalized));
+        using var report = JsonDocument.Parse(profileOutput.ToString());
+        var validation = report.RootElement.GetProperty("steps").EnumerateArray().Single(
+            step => step.GetProperty("name").GetString() == "configuration.content.validate");
+        Assert.Equal(expectedReads, validation.GetProperty("count").GetInt32());
     }
 
     [Theory(DisplayName = "Initial Task Facts Cannot Be Transplanted Or Forged Before A Selected Blob Is Published")]

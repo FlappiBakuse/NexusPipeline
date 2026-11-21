@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Runtime.Versioning;
+using NexusPipeline.Core.Automation;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Extensibility.Compilation;
@@ -41,7 +42,8 @@ internal sealed class ProjectConfigMounts : IDisposable
         .DistinctBy(item => (item.Address, item.RelativePath)).ToArray());
 
     internal ProjectConfigMounts(RuntimeInstance instance, StateDatabase database, InstanceLease lease, ResourceLeaseManager resources,
-        SelectedProjectSource source, ResourceOperationLease? actualRoot = null)
+        SelectedProjectSource source, ResourceOperationLease? actualRoot = null, ConfigurationRevisionBatch? staged = null,
+        CancellationToken cancellation = default)
     {
         source.RequireOwner(instance, database, lease, resources);
         _source = source; _lease = lease; _instance = instance; _blobs = new(instance, new()); _revisions = new(instance, database, new());
@@ -52,12 +54,10 @@ internal sealed class ProjectConfigMounts : IDisposable
             var target = script.ConfigurationPaths[declaration.DeclarationIndex];
             if (target.RootId != script.RootId) throw new IOException("project_configuration_root_unbound");
             PhysicalPathPolicy.ValidateRelativePath(target.RelativePath);
-            var saved = AdapterConfigurationPolicy.RequireSaved(binding, script, declaration, _revisions);
-            saved = saved with { Tree = FileTreePolicy.Freeze(saved.Tree) };
+            var mount = ReadMount(target.RelativePath, declaration, staged, cancellation);
+            var saved = mount.Saved;
             var entry = saved.Tree.Entries.Single(item => item.RelativePath == declaration.RelativePath && item.Kind == FileObjectKind.File);
-            var stored = _revisions.ReadStored(saved.Address) ?? throw new IOException("project_configuration_unavailable");
-            if (stored.Revision.Revision != saved.Revision || stored.Revision.Contract != saved.Contract) throw new IOException("project_configuration_changed");
-            mounts.Add(new(target.RelativePath, saved, stored.Manifest));
+            mounts.Add(mount);
             markers.Add(new(saved.Address, saved.Revision, binding.Revision, saved.Contract, entry.RelativePath, entry.Sha256!));
         }
         Mounts = mounts.ToImmutable(); _markers = ConfigurationReadPolicy.Freeze(markers);
@@ -69,11 +69,32 @@ internal sealed class ProjectConfigMounts : IDisposable
         _resources = ProjectReadLease.Acquire(resources, claims, actualRoot);
         try
         {
-            _held.Add(new ConfigurationReadLease(instance, _revisions, _blobs, _markers));
+            if (source.Draft is null) _held.Add(new ConfigurationReadLease(instance, _revisions, _blobs, _markers));
             foreach (var mount in Mounts) _held.Add(_blobs.OpenVerified(mount.Manifest));
             RequireCurrent();
         }
         catch { Dispose(); throw; }
+    }
+
+    private ProjectConfigMount ReadMount(string path, AutomationAdapterResource declaration, ConfigurationRevisionBatch? staged,
+        CancellationToken cancellation)
+    {
+        var binding = _source.Binding; var script = _source.Script;
+        if (_source.Draft is null)
+        {
+            var saved = AdapterConfigurationPolicy.RequireSaved(binding, script, declaration, _revisions);
+            var stored = _revisions.ReadStored(saved.Address) ?? throw new IOException("project_configuration_unavailable");
+            if (stored.Revision.Revision != saved.Revision || stored.Revision.Contract != saved.Contract) throw new IOException("project_configuration_changed");
+            return new(path, saved with { Tree = FileTreePolicy.Freeze(saved.Tree) }, stored.Manifest);
+        }
+        var address = new ConfigurationAddress(binding.Id, declaration.ResourceId);
+        var contract = AdapterConfigurationPolicy.Contract(script, declaration);
+        var change = staged?.Changes.SingleOrDefault(item => item.Address == address);
+        if (staged is not null && (change is null || change.Contract != contract))
+            throw new IOException("project_configuration_changed");
+        var tree = change?.Tree ?? _source.CaptureResource(path, cancellation).Archive.Snapshot;
+        var revision = new ConfigurationRevision(address, 1, binding.UserId, binding.ScriptId, contract, FileTreePolicy.Freeze(tree));
+        return new(path, revision, new ConfigurationSnapshotCodec(_blobs).Write(revision.Tree));
     }
 
     internal bool TryRead(string relative, out SourceFile? file, CancellationToken cancellation)
@@ -125,6 +146,7 @@ internal sealed class ProjectConfigMounts : IDisposable
     internal void RequireCurrent()
     {
         Check(); _source.RequireCurrent();
+        if (_source.Draft is not null) return;
         foreach (var mount in Mounts)
         {
             if (_revisions.ReadCurrentRevision(mount.Saved.Address) == mount.Saved.Revision) continue;

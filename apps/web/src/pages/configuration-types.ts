@@ -9,7 +9,7 @@ export interface ConfigurationResource {
   shape: 'missing' | 'file' | 'directory';
   fileCount: number;
   relativePath: string;
-  syntax: 'json' | 'jsonWithComments' | 'yaml' | null;
+  syntax: 'json' | 'jsonWithComments' | 'yaml' | 'opaque' | null;
 }
 export interface ConfigurationOverview {
   bindingId: string;
@@ -37,7 +37,7 @@ export function configurationOverview(value: unknown): ConfigurationOverview {
       if (shape !== 'missing' && shape !== 'file' && shape !== 'directory')
         throw new TypeError('configuration_shape_invalid');
       const syntax = resource.syntax == null ? null : stringValue(resource.syntax);
-      if (syntax !== null && syntax !== 'json' && syntax !== 'jsonWithComments' && syntax !== 'yaml')
+      if (syntax !== null && syntax !== 'json' && syntax !== 'jsonWithComments' && syntax !== 'yaml' && syntax !== 'opaque')
         throw new TypeError('configuration_syntax_invalid');
       return {
         resourceId: stringValue(resource.resourceId),

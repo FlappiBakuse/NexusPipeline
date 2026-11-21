@@ -69,10 +69,12 @@ def run_check(root, kind, plan, partner, output):
             from legacy_updates import check
             report["discovery"] = check(root, plan["base"])
             save()
-        if not plan["productionRequired"]:
-            report.update(status="PASS", scope="No production input changes; no product compiler or tests invoked")
-            return report
         scope = plan["scope"]
+        if not (scope["projects"] or scope["extensions"]):
+            python("source-check", root, "tooling/nexus.py", "check", "--scope", "source")
+        if not plan["productionRequired"]:
+            report.update(status="PASS", scope="Source check only; no product compiler or tests invoked")
+            return report
         host = root
         consumer = None
         partner_before = None

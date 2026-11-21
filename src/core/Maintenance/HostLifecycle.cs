@@ -20,6 +20,7 @@ public sealed class HostLifecycle(IRecoveryIndex recovery, TimeProvider clock)
     private HostLifecyclePhase _phase;
     private HostClosePermit? _permit;
     private Guid? _closingSession;
+    private Guid? _closingCorrelation;
     private HostCompletionDrain? _completionDrain;
     private bool _completionEffectEntered;
     private bool _completionHostPayloadTaken;
@@ -28,6 +29,19 @@ public sealed class HostLifecycle(IRecoveryIndex recovery, TimeProvider clock)
 
     public HostLifecyclePhase Phase { get { lock (_gate) return _phase; } }
     public bool UsesRecoveryIndex(IRecoveryIndex candidate) => ReferenceEquals(recovery, candidate);
+
+    internal string? ReadConfigurationRecovery(Guid bindingId)
+    {
+        var prefix = $"configuration:{bindingId:D}:";
+        var found = false;
+        foreach (var isolation in recovery.Current.Isolations)
+        {
+            if (!isolation.CanOrdinaryExit || !isolation.ResourceKey.StartsWith(prefix, StringComparison.Ordinal)) continue;
+            if (isolation.ReasonCode == ConfigurationRecoveryCodes.Lost) return ConfigurationRecoveryCodes.Lost;
+            if (isolation.ReasonCode == ConfigurationRecoveryCodes.Pending) found = true;
+        }
+        return found ? ConfigurationRecoveryCodes.Pending : null;
+    }
 
     public HostCompletionActivity ReadCompletionActivity()
     {
@@ -61,19 +75,76 @@ public sealed class HostLifecycle(IRecoveryIndex recovery, TimeProvider clock)
         lock (_gate)
         {
             if (_completionDrain is not null) return new(null, "completion_action_pending");
+            if (_permit is { } current)
+            {
+                if (current.ExpiresAt > clock.GetUtcNow()) return new(null, "close_in_progress");
+                ResetOrdinaryClose();
+            }
             if (_closingSession is { } previous && previous != sessionId) return new(null, "close_session_mismatch");
             var verified = recovery.Current;
+            if (OrdinaryRecoveryBlock(verified) is { } reason)
+            {
+                ResetOrdinaryClose();
+                return new(null, reason);
+            }
             FreezeDrain(verified);
             _closingSession = sessionId;
+            _closingCorrelation = correlationId;
             _phase = HostLifecyclePhase.Draining;
-            _permit = null;
-            if (!verified.IsReady) return new(null, "recovery_unverified");
-            if (verified.Isolations.Count != 0 || verified.ResourceHolds.Count != 0) return new(null, "recovery_pending");
-            if ((_activeWork.Count != 0 || _acceptedRuns.Count != 0 || _notificationQueues.Count != 0)) return new(null, "accepted_writes_pending");
-            _permit = new(Guid.NewGuid(), sessionId, correlationId, verified.Revision, clock.GetUtcNow().AddSeconds(30));
-            _phase = HostLifecyclePhase.ClosePermitted;
-            return new(_permit, "close_permitted");
+            return DecideOrdinaryClose(verified, sessionId, correlationId);
         }
+    }
+
+    public HostCloseDecision ContinueClose(Guid sessionId, Guid correlationId)
+    {
+        lock (_gate)
+        {
+            if (!MatchesOrdinaryClose(sessionId, correlationId) || _phase != HostLifecyclePhase.Draining)
+                return new(null, "close_in_progress");
+            var verified = recovery.Current;
+            if (OrdinaryRecoveryBlock(verified) is not { } reason)
+                return DecideOrdinaryClose(verified, sessionId, correlationId);
+            ResetOrdinaryClose();
+            return new(null, reason);
+        }
+    }
+
+    public bool AbandonClose(Guid sessionId, Guid correlationId)
+    {
+        lock (_gate)
+        {
+            if (!MatchesOrdinaryClose(sessionId, correlationId)) return false;
+            ResetOrdinaryClose();
+            return true;
+        }
+    }
+
+    private bool MatchesOrdinaryClose(Guid sessionId, Guid correlationId) =>
+        _closingSession == sessionId && _closingCorrelation == correlationId;
+
+    private static string? OrdinaryRecoveryBlock(RecoveryProjection verified) =>
+        !verified.IsReady ? "recovery_unverified" :
+        verified.Isolations.Any(item => !item.CanOrdinaryExit) || verified.ResourceHolds.Any(item => !item.CanOrdinaryExit)
+            ? "recovery_pending" : null;
+
+    private bool HasActiveWork() => _activeWork.Count != 0 || _acceptedRuns.Count != 0 || _notificationQueues.Count != 0;
+
+    private HostCloseDecision DecideOrdinaryClose(RecoveryProjection verified, Guid sessionId, Guid correlationId)
+    {
+        if (HasActiveWork()) return new(null, "accepted_writes_pending");
+        _permit = new(Guid.NewGuid(), sessionId, correlationId, verified.Revision, clock.GetUtcNow().AddSeconds(30));
+        _phase = HostLifecyclePhase.ClosePermitted;
+        return new(_permit, "close_permitted");
+    }
+
+    private void ResetOrdinaryClose()
+    {
+        _closingSession = null;
+        _closingCorrelation = null;
+        _permit = null;
+        _drainingContinuations = null;
+        _drainingOperations = null;
+        _phase = HostLifecyclePhase.Running;
     }
 
     internal IDisposable? TryEnterContinuation(RecoveryContinuation continuation, IReadOnlyList<ResourceClaim> claims)
@@ -396,14 +467,15 @@ public sealed class HostLifecycle(IRecoveryIndex recovery, TimeProvider clock)
     private static bool Conflicts(IReadOnlyList<ResourceClaim> claims, string key, ResourceClaimMode held) =>
         claims.Any(claim => claim.ResourceKey == key && (claim.Mode == ResourceClaimMode.Mutation || held == ResourceClaimMode.Mutation));
 
-    public bool CanFinalizeAfterExit(Guid sessionId)
+    public bool CanFinalizeAfterExit(Guid sessionId, Guid? permitId = null)
     {
         lock (_gate)
         {
             var verified = recovery.Current;
             var permit = _permit;
-            return _phase == HostLifecyclePhase.ClosePermitted && permit is not null && permit.SessionId == sessionId && _activeWork.Count == 0 && _acceptedRuns.Count == 0 && _notificationQueues.Count == 0 &&
-                verified.IsReady && verified.Isolations.Count == 0 && verified.ResourceHolds.Count == 0 && verified.Revision == permit.RecoveryRevision;
+            return _phase == HostLifecyclePhase.ClosePermitted && permit is not null && permit.SessionId == sessionId &&
+                (!permitId.HasValue || permit.PermitId == permitId.Value) && permit.ExpiresAt > clock.GetUtcNow() && !HasActiveWork() &&
+                OrdinaryRecoveryBlock(verified) is null && verified.Revision == permit.RecoveryRevision;
         }
     }
 

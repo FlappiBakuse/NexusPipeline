@@ -12,12 +12,12 @@ internal sealed record ExecutionFrozenLaunch(string LaunchKind, ExecutionPlanInt
 internal static class ExecutionLaunchInputs
 {
     internal static ExecutionFrozenLaunch Capture(AutomationPath executable, IReadOnlyList<string> arguments,
-        string workingDirectory, FileTreePhysicalIdentity workingDirectoryIdentity, IReadOnlyDictionary<Guid, AutomationRoot> roots)
+        string workingDirectory, FileTreePhysicalIdentity workingDirectoryIdentity, IReadOnlyDictionary<Guid, AutomationRoot> roots, PlanInputLease? inputs = null)
     {
         var sourcePath = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(roots[executable.RootId].Path, executable.RelativePath));
         var kind = Kind(sourcePath);
-        var source = ExecutionHookImages.Capture(sourcePath, kind == "native" || Path.GetExtension(sourcePath).Equals(".com", StringComparison.OrdinalIgnoreCase));
-        var command = kind == "native" ? source : ExecutionHookImages.Capture(CommandPath(kind), runtime: true);
+        var source = ExecutionHookImages.Capture(sourcePath, kind == "native" || Path.GetExtension(sourcePath).Equals(".com", StringComparison.OrdinalIgnoreCase), inputs);
+        var command = kind == "native" ? source : ExecutionHookImages.Capture(CommandPath(kind), runtime: true, inputs);
         var value = new ExecutionFrozenLaunch(kind, source, command, arguments.ToArray(), Arguments(kind, sourcePath, arguments),
             workingDirectory, workingDirectoryIdentity);
         RequireLength(value);

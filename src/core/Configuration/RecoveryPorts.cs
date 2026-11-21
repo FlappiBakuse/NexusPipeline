@@ -9,6 +9,7 @@ public interface IRecoveryRegistry
 public interface IRecoveryEvidence
 {
     void VerifyAll(IReadOnlyList<RegisteredJournal> registered);
+    IReadOnlyList<ResourceIsolation> ProjectAdmission(RecoveryRegistrySnapshot verified) => verified.Isolations;
 }
 
 public interface ISnapshotCompletionEvidence : IRecoveryEvidence

@@ -1,10 +1,17 @@
 using System.Security.Cryptography;
 using System.Collections.Immutable;
 using NexusPipeline.Core.Automation;
+using NexusPipeline.Core.Configuration;
+using NexusPipeline.Core.Extensions;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Automation;
 using NexusPipeline.Platform.Storage.Extensions;
+using NexusPipeline.Core.Operations;
+using NexusPipeline.Core.Secrets;
+using NexusPipeline.Platform.Storage.Configuration;
+using NexusPipeline.Platform.Storage.Secrets;
+using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
 
 namespace NexusPipeline.StorageTests;
@@ -33,6 +40,167 @@ public sealed class ProjectSourceTests
         source.RequireCurrent();
         var captured = source.Freeze(default);
         Assert.Equal(guiAssets ? 1 : 2, captured.Files.Length);
+    }
+
+    [Fact]
+    public void HoldsDraftMounts()
+    {
+        using var fixture = new ProjectSourceFixture(configuration: true, file: true);
+        var host = fixture.Catalog;
+        var script = Assert.Single(new AutomationDefinitionStore(host.Database).Read().Scripts);
+        var binding = Guid.NewGuid();
+        var owner = new DraftBindingIdentity(Guid.NewGuid(), script.Id, script.Revision);
+        var address = new ConfigurationAddress(binding, "account");
+        var file = Path.GetFileName(fixture.ConfigurationFile!);
+        var selected = File.ReadAllBytes(fixture.ConfigurationFile!);
+        ConfigurationRevisionBatch candidate;
+        using (var source = new SelectedProjectSource(host.Instance, host.Database, host.Lease, host.Resources,
+            binding, 1, "maas", () => { }, draft: owner))
+        using (var mounts = new ProjectConfigMounts(host.Instance, host.Database, host.Lease, host.Resources, source))
+        {
+            Assert.True(mounts.TryRead(file, out var first, default));
+            Assert.Equal(selected, first!.Content.ToArray());
+            var mount = Assert.Single(mounts.Mounts);
+            candidate = new([new(address, 0, 1, mount.Saved.Contract, mount.Saved.Tree, ConfigurationUpdateKind.Manual)]);
+            Assert.Empty(fixture.Revisions.ReadCurrentRevisions(binding));
+        }
+        File.WriteAllText(fixture.ConfigurationFile!, "{}");
+        using var reopened = new SelectedProjectSource(host.Instance, host.Database, host.Lease, host.Resources,
+            binding, 1, "maas", () => { }, draft: owner);
+        using var retained = new ProjectConfigMounts(host.Instance, host.Database, host.Lease, host.Resources, reopened, staged: candidate);
+        Assert.True(retained.TryRead(file, out var previous, default));
+        Assert.Equal(selected, previous!.Content.ToArray());
+        Assert.Empty(fixture.Revisions.ReadCurrentRevisions(binding));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PublishesDraftSecrets(bool cancel)
+    {
+        using var fixture = new ProjectSourceFixture(configuration: true, file: true);
+        var host = fixture.Catalog;
+        using var drafts = new BindingDrafts(host.Instance, host.Database, new());
+        var definitions = new AutomationDefinitionStore(host.Database);
+        var catalog = definitions.Read(); var script = Assert.Single(catalog.Scripts);
+        var user = new AutomationUser(Guid.NewGuid(), 0, "Draft account", 2);
+        var binding = new AutomationBinding(Guid.NewGuid(), 0, user.Id, script.Id, false, 0);
+        var owner = new DraftBindingIdentity(user.Id, script.Id, script.Revision);
+        var candidate = Guid.NewGuid(); var parent = Guid.NewGuid();
+        var key = new SecretFieldKey("maa-framework", binding.Id, "password");
+        var fields = new SecretFieldStore(host.Instance, host.Database);
+        var saved = fixture.Revisions.Read(fixture.Address)!;
+        var address = new ConfigurationAddress(binding.Id, "account");
+        var batch = new ConfigurationRevisionBatch([new(address, 0, 1, saved.Contract, saved.Tree, ConfigurationUpdateKind.Manual)]);
+        using var secret = new SecretValue("fixture-draft-value".AsSpan());
+        using var changed = new SecretValue("different-fixture-value".AsSpan());
+        ProjectProtectedEdit[] Edits(SecretValue value) => [new(new(key.Field, 0, SecretDisposition.Set), value)];
+        var proof = DraftProjectSecrets.Proofs(host.Instance, host.Database, candidate, "maa-framework", binding.Id, Edits(secret));
+        var encrypted = DraftProjectSecrets.Prepare(host.Instance, "maa-framework", binding.Id, [key.Field], Edits(secret), null, proof);
+        var protectedFile = Assert.Single(encrypted.Payloads);
+        var file = Path.Combine(host.Instance.RuntimeRoot, "secrets", "payloads", $"{protectedFile.Id:D}-{protectedFile.Payload.Sha256}.bin");
+        Assert.Throws<OperationConflictException>(() => encrypted.RequireProofs(
+            DraftProjectSecrets.Proofs(host.Instance, host.Database, candidate, "maa-framework", binding.Id, Edits(changed))));
+        drafts.StageManaged(candidate, "editor", new string('a', 64), owner, batch, encrypted);
+        Assert.Contains(new ResourceClaim("secrets:fields", ResourceClaimMode.Mutation), drafts.Claims([candidate], "editor"));
+        Assert.Throws<ConfigurationException>(() => drafts.ReadProtections(candidate, "other", binding.Id, owner));
+        Assert.False(File.Exists(file));
+        Assert.False((await fields.GetStateAsync(key, default)).IsConfigured);
+        if (cancel)
+        {
+            drafts.Discard(candidate, "editor");
+            Assert.Throws<ConfigurationException>(() => drafts.ReadManaged(candidate, "editor", binding.Id, owner));
+            Assert.Empty(fixture.Revisions.ReadCurrentRevisions(binding.Id)); Assert.False(File.Exists(file));
+            return;
+        }
+        using (var failed = new DraftSecretFiles(host.Instance, host.Database, [encrypted]))
+        {
+            Assert.True(File.Exists(file));
+            Assert.Throws<IOException>(() => host.Database.Write<int>((connection, transaction) =>
+            {
+                encrypted.Publish(connection, transaction, parent, DateTimeOffset.UtcNow);
+                throw new IOException("fixture rollback");
+            }));
+        }
+        Assert.False(File.Exists(file)); Assert.False((await fields.GetStateAsync(key, default)).IsConfigured);
+        var changes = new AutomationChanges(catalog.Revision, [], [], [user], [binding], [], [], []);
+        var operation = AutomationDefinitionStore.DraftIdentity(parent, "editor", changes, [candidate]);
+        Assert.True(definitions.CommitDrafts(operation, changes, DateTimeOffset.UtcNow, [candidate], drafts).IsNew);
+        Assert.NotNull(fixture.Revisions.Read(address)); Assert.True(File.Exists(file));
+        var state = Assert.Single(ProjectInputStates.Read(host.Instance, host.Database, new(), "maa-framework", binding.Id));
+        Assert.True(state.IsReadable); Assert.Equal(1, state.Revision);
+        using var material = await fields.ReadAsync(key, default);
+        material.Use(value => Assert.True(value.SequenceEqual("fixture-draft-value".AsSpan())));
+    }
+
+    [Fact]
+    public void RejectsStaleProjectDraft()
+    {
+        using var fixture = new ProjectSourceFixture(configuration: true, file: true);
+        var host = fixture.Catalog;
+        using var drafts = new BindingDrafts(host.Instance, host.Database, new());
+        var definitions = new AutomationDefinitionStore(host.Database);
+        var catalog = definitions.Read();
+        var script = Assert.Single(catalog.Scripts);
+        var root = Assert.Single(catalog.Roots);
+        var user = new AutomationUser(Guid.NewGuid(), 0, "Draft account", 2);
+        var binding = new AutomationBinding(Guid.NewGuid(), 0, user.Id, script.Id, false, 0);
+        var owner = new DraftBindingIdentity(user.Id, script.Id, script.Revision);
+        var candidate = Guid.NewGuid();
+        var saved = fixture.Revisions.Read(fixture.Address)!;
+        var digest = new string('a', 64);
+        ExtensionInstalledMetadata Previous(string id) => new(id, 1, true,
+            new(id, "0.1.0", ExtensionPackageKind.ManagedCode, digest, digest), Guid.NewGuid(), new("fixture", 1, digest));
+        var project = new DraftProjectContract(root.Id, root.Revision, Previous(script.ExtensionId!), Previous("maa-framework"));
+        drafts.StageManaged(candidate, "editor", digest, owner,
+            new([new(ProjectChoiceStore.Address(binding.Id), 0, 1, saved.Contract, saved.Tree, ConfigurationUpdateKind.Manual)]), project: project);
+        Assert.Contains(new ResourceClaim("extension:maa-framework", ResourceClaimMode.Reference), drafts.Claims([candidate], "editor"));
+        var changes = new AutomationChanges(catalog.Revision, [], [], [user], [binding], [], [], []);
+        var operation = AutomationDefinitionStore.DraftIdentity(Guid.NewGuid(), "editor", changes, [candidate]);
+        Assert.Equal("project_selection_contract_changed", Assert.Throws<ConfigurationException>(() =>
+            definitions.CommitDrafts(operation, changes, DateTimeOffset.UtcNow, [candidate], drafts)).Message);
+        Assert.Null(definitions.Lookup(operation, changes, [candidate]));
+        Assert.Equal(catalog.Revision, definitions.Read().Revision);
+        Assert.Empty(fixture.Revisions.ReadCurrentRevisions(binding.Id));
+        Assert.Single(drafts.ReadManaged(candidate, "editor", binding.Id, owner).Changes);
+    }
+
+    [Fact]
+    public void ReclaimsExpiredDrafts()
+    {
+        using var fixture = new ProjectSourceFixture(configuration: true, file: true);
+        var host = fixture.Catalog;
+        var clock = new DraftClock();
+        using var drafts = new BindingDrafts(host.Instance, host.Database, new(), clock);
+        var script = Assert.Single(new AutomationDefinitionStore(host.Database).Read().Scripts);
+        var owner = new DraftBindingIdentity(Guid.NewGuid(), script.Id, script.Revision);
+        var binding = Guid.NewGuid();
+        var digest = new string('a', 64);
+        var saved = fixture.Revisions.Read(fixture.Address)!;
+        var batch = new ConfigurationRevisionBatch([new(new(binding, "account"), 0, 1, saved.Contract, saved.Tree, ConfigurationUpdateKind.Manual)]);
+        Guid Stage()
+        {
+            var id = Guid.NewGuid();
+            drafts.StageManaged(id, "editor", digest, owner, batch);
+            return id;
+        }
+        var abandoned = Stage();
+        for (var index = 1; index < 63; index++) _ = Stage();
+        clock.Advance(TimeSpan.FromMinutes(20));
+        var retained = Stage();
+        clock.Advance(TimeSpan.FromMinutes(11));
+        Assert.False(drafts.IsStaged(abandoned, "editor", Guid.Empty, digest));
+        Assert.True(drafts.IsStaged(retained, "editor", Guid.Empty, digest));
+        Assert.Single(drafts.ReadManaged(Stage(), "editor", binding, owner).Changes);
+        Assert.Empty(fixture.Revisions.ReadCurrentRevisions(binding));
+    }
+
+    private sealed class DraftClock : TimeProvider
+    {
+        private long _ticks;
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() => _ticks;
+        internal void Advance(TimeSpan duration) => _ticks += duration.Ticks;
     }
 
     [Theory(DisplayName = "Script Source Authority Reads Its Own Root Without An Account And Cannot Produce A Binding Execution Snapshot")]

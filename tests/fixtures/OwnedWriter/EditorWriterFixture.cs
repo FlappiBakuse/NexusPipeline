@@ -56,7 +56,8 @@ internal static class EditorWriterFixture
                 }
             }
         }
-        OwnedFixtureEvidence.WriteReport(report, new { status = "edited", processId = Environment.ProcessId });
+        OwnedFixtureEvidence.WriteReport(report, new { status = "edited", processId = Environment.ProcessId,
+            consoleInput = !Console.IsInputRedirected, consoleOutput = !Console.IsOutputRedirected, consoleError = !Console.IsErrorRedirected });
         await Task.Delay(Timeout.InfiniteTimeSpan); return 0;
     }
 }

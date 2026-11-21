@@ -23,6 +23,7 @@ public sealed class CapturePlanTests
         using var draft = fixture.Prepare();
         var plan = Assert.IsType<FrozenExecutionPlan>(draft.ReadPlan()).ReadWire();
         var runtime = Assert.IsType<ExecutionPlanCaptureRuntime>(plan.CaptureRuntime);
+        Assert.Null(runtime.BrokerDeployment);
         Assert.Equal(fixture.Broker, runtime.Broker.Path); Assert.NotEmpty(runtime.Broker.RuntimeFiles);
         if (runtimeFiles > 0) Assert.Equal(runtimeFiles, runtime.Broker.RuntimeFiles.Count);
         Assert.Equal(5000, runtime.TimeoutMilliseconds); Assert.Equal(8388608, runtime.MaximumPngBytes);
@@ -44,8 +45,28 @@ public sealed class CapturePlanTests
     public void RejectsOversizedRuntime()
     {
         using var fixture = new CapturePlanFixture(513);
-        var error = Assert.Throws<IOException>(() => fixture.Prepare());
-        Assert.Equal("judgement_runtime_asset_limit", error.Message);
+        using var draft = fixture.Prepare();
+        Assert.Null(draft.ReadPlan());
+        Assert.Contains(draft.Explanation.Items, item => item.ReasonCode == "execution_capture_runtime_unbound");
+    }
+
+    [Fact(DisplayName = "An Unbundled Broker Cannot Bypass Runtime Closure By Dropping Its Sidecars Or Claiming The Published Host Role")]
+    public void RequiresPublishedHost()
+    {
+        using var fixture = new CapturePlanFixture();
+        using var draft = fixture.Prepare();
+        var plan = Assert.IsType<FrozenExecutionPlan>(draft.ReadPlan()).ReadWire();
+        var runtime = plan.CaptureRuntime!;
+        var image = runtime.Broker with { Path = Path.Combine(Path.GetDirectoryName(fixture.Broker)!, "NexusPipeline.exe"), RuntimeFiles = [] };
+        var marked = runtime with { Broker = image, BrokerDeployment = "singleFileHost" };
+        ExecutionCaptureInputs.Require(plan with { CaptureRuntime = marked });
+        Assert.Throws<IOException>(() => ExecutionCaptureInputs.RequireCurrentHost(marked));
+        Assert.Throws<IOException>(() => ExecutionCaptureInputs.Require(plan with { CaptureRuntime = marked with { BrokerDeployment = null } }));
+        Assert.Throws<IOException>(() => ExecutionCaptureInputs.Require(plan with { CaptureRuntime = marked with { Broker = runtime.Broker } }));
+        File.Delete(Path.ChangeExtension(fixture.Broker, ".deps.json"));
+        using var missing = fixture.Prepare();
+        Assert.Null(missing.ReadPlan());
+        Assert.Contains(missing.Explanation.Items, item => item.ReasonCode == "execution_capture_runtime_unbound");
     }
 
     [Fact(DisplayName = "A Changed Capture Broker Cannot Acquire The Original Plan Input Lease And Historical Metadata Does Not Reopen It")]

@@ -1,6 +1,7 @@
 import type { FrontendTransport, FrontendImage, FrontendPreview, SurfaceContext } from '@nexuspipeline/extension-sdk';
 import { ControlFailure, ControlClient, objectValue, stringValue } from '../control/client';
 import type { MediaPool } from '../control/media-pool';
+import { projectDraft } from './project-draft';
 
 export class InstalledTransport implements FrontendTransport {
   private readonly listeners = new Set<() => void>();
@@ -36,9 +37,15 @@ export class InstalledTransport implements FrontendTransport {
         (action === 'select') !== Boolean(operationId)) throw new Error('project_operation_invalid');
     const active = AbortSignal.any([this.signal, signal]); active.throwIfAborted();
     const path = this.base + '/project/' + action;
-    const body = { context, input, ...(operationId ? { operationId } : {}) };
+    const draft = projectDraft(context, this.extensionId);
+    const body = { context, input, ...(draft ? { draftBinding: draft.read() } : {}), ...(operationId ? { operationId } : {}) };
     const result = operationId ? await this.client.write(path, body, value => value, operationId, active) :
       await this.client.query(path, body, value => value, active);
+    if (draft && (action === 'select' || action === 'result') && result && typeof result === 'object' && 'candidateId' in result && result.candidateId) {
+      const submitted = operationId || objectValue(input).operationId;
+      if (result.candidateId !== submitted || typeof submitted !== 'string') throw new Error('project_operation_invalid');
+      if (projectDraft(context, this.extensionId) === draft) draft.stage(submitted);
+    }
     active.throwIfAborted(); if (operationId) this.notify(); return result;
   }
 

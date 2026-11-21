@@ -3,7 +3,7 @@ import type { AutomationDraft } from '../app/automation-draft';
 import type { AutomationBundle, ControlAutomationChange } from '../control/wire.generated';
 import { copyDraft } from '../app/draft-copy';
 import { validateForm } from '../components/form-validation';
-import { accountChanges, validAccountLimits } from './account-draft';
+import { accountChanges, accountDraft, canCancelAccount, validAccountLimits } from './account-draft';
 import { prepareHooks } from './hook-paths';
 import { prepareScript } from './script-paths';
 import { previewTemplate, templateKey } from './script-template';
@@ -32,6 +32,10 @@ export class AutomationSave {
     const kind = editor.activeKind.value,
       key = editor.draftKey.value,
       id = editor.selected.value;
+    if (kind === 'users' && !canCancelAccount(this.store, id)) {
+      session.error = '请先完成配置草稿中的编辑，再保存账号。';
+      return;
+    }
     if (kind === 'queues' && (editor.draft.value.scriptIds as string[]).some((id) => !id)) {
       session.error = '请选择每个任务的脚本实例。';
       return;
@@ -107,6 +111,7 @@ export class AutomationSave {
         key,
         name: entityTitles[kind],
         body,
+        candidates: kind === 'users' ? Object.values(accountDraft(this.store, id).candidates) : undefined,
         target: id,
         kind
       });

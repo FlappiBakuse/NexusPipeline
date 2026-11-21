@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
@@ -21,14 +22,21 @@ public sealed class RunWriterTests
         await using var fixture = new RunWriterFixture();
         await fixture.StartAsync(); var stopped = await fixture.StopAsync();
         var target = fixture.Prepared.Use(resources => resources[0].Plan.TargetPath);
+        var source = Path.Combine(target, "tasks.json");
+        string digest;
+        using (var input = File.OpenRead(source))
+            digest = Convert.ToHexStringLower(SHA256.HashData(input));
+        var blob = Path.Combine(fixture.Base.Source.Instance.RuntimeRoot, "blobs", "content", digest + ".bin");
+        Assert.False(File.Exists(blob));
         var alias = Path.Combine(fixture.Base.Source.Root, "outside-run-alias.json");
-        Assert.True(CreateHardLink(alias, Path.Combine(target, "tasks.json"), IntPtr.Zero));
+        Assert.True(CreateHardLink(alias, source, IntPtr.Zero));
         try
         {
             var journal = fixture.Session.Resources[0].JournalId;
             var before = new JournalStore(fixture.Base.Source.Instance, new()).Read(journal).Export();
             Assert.Equal("configuration_multiple_links_rejected", Assert.Throws<IOException>(() => fixture.Recorder.Seal(journal, stopped)).Message);
             Assert.Equal(before, new JournalStore(fixture.Base.Source.Instance, new()).Read(journal).Export());
+            Assert.False(File.Exists(blob));
             foreach (var resource in fixture.Session.Resources)
                 Assert.Equal(1, new ConfigurationRevisionStore(fixture.Base.Source.Instance, fixture.Base.Source.Database, new()).Read(resource.Address)!.Revision);
         }

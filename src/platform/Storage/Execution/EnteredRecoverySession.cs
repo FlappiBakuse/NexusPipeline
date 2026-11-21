@@ -20,8 +20,10 @@ internal sealed class EnteredRecoverySession(RuntimeInstance instance, StateData
         var state = _store.Read(parentJournalId); var terminal = AttemptResultCodec.Read(state.Latest.Root, state.Attempt);
         var agrees = state.Journal.Revision == state.Latest.Revision && state.Journal.Phase == state.Latest.Phase;
         var committed = state.Latest.Phase == JournalPhase.Committed;
+        var cancellationAccepted = state.Cancellation?.ReasonCode == DispatchIntentCodec.Reason;
         if (committed && agrees && terminal is not null)
-            return new(JournalPhase.Committed, true, state.Gate.State, true, WriterState.Stopped, true, true, true, terminal.Facts);
+            return new(JournalPhase.Committed, true, state.Gate.State, true, WriterState.Stopped, true, true, true, terminal.Facts)
+                { CancellationAccepted = cancellationAccepted };
         var observed = Observe(); var collected = Collected(state); var physicalRestored = Restored(state, completeGroups: false);
         var complete = physicalRestored && Restored(state, completeGroups: true);
         var facts = terminal?.Facts ?? ActiveFacts(state);
@@ -29,6 +31,7 @@ internal sealed class EnteredRecoverySession(RuntimeInstance instance, StateData
             state.Latest.Phase == JournalPhase.Quarantined ? physicalRestored : complete,
             committed && collected && complete, facts)
         {
+            CancellationAccepted = cancellationAccepted,
             CanDeferConfigurationCompletion = !committed && state.Latest.Phase == JournalPhase.Applied && collected &&
                 state.Attempt.ConfigurationPlans.Count != 0 && !complete
         };
@@ -139,12 +142,12 @@ internal sealed class EnteredRecoverySession(RuntimeInstance instance, StateData
             throw new IOException("attempt_pending_configuration_completion_unverified");
         _ = ConfigurationCompletionBinding.Read(instance, database, contracts, parentJournalId);
     }
-    public void CommitInterrupted(AttemptFacts facts)
+    public void CommitStopped(AttemptFacts facts)
     {
         var state = _store.Read(parentJournalId);
-        var expected = ActiveFacts(state).AfterInterruption(WriterState.Stopped, true);
+        var expected = EnteredAttemptRecovery.RecoveredFacts(ActiveFacts(state), state.Cancellation?.ReasonCode == DispatchIntentCodec.Reason);
         if (facts != expected) throw new IOException("execution_terminal_facts_unbound");
-        if (_store.Commit(parentJournalId, LifecycleOutcome.Interrupted, "host_interrupted").Facts != facts)
+        if (_store.Commit(parentJournalId, facts.Lifecycle, facts.ReasonCode).Facts != facts)
             throw new IOException("execution_terminal_facts_unbound");
     }
     public void Quarantine(AttemptFacts facts)

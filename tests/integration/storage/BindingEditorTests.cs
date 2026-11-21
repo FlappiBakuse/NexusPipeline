@@ -18,9 +18,10 @@ namespace NexusPipeline.StorageTests;
 public sealed class BindingEditorTests
 {
     [Theory(DisplayName = "The binding editor isolates siblings, rejects a second profile and atomically binds a replacement")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task SavesOneConfirmedProfile(bool exitsBeforeSave)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task SavesOneConfirmedProfile(bool exitsBeforeSave, bool draft)
     {
         await using var fixture = new InstalledBettergiFixture();
         await fixture.InstallAsync();
@@ -41,7 +42,7 @@ public sealed class BindingEditorTests
             RootId = root.Id, Executable = new(root.Id, "BetterGI.exe"), Arguments = [], ConfigurationPaths = [], AdapterResources = [], LogPaths = []
         };
         var binding = new AutomationBinding(Guid.NewGuid(), 0, source.UserA, script.Id, false, 0);
-        var change = new AutomationChanges(catalog.Revision, [root], [script], [], [binding], [], [], []);
+        var change = new AutomationChanges(catalog.Revision, [root], [script], [], draft ? [] : [binding], [], [], []);
         source.Definitions.Commit(AutomationDefinitionStore.Identity(Guid.NewGuid(), "editor", change), change, DateTimeOffset.UtcNow);
         script = source.Definitions.Read().Scripts.Single(item => item.Id == script.Id);
         var contracts = new ContractReader();
@@ -53,7 +54,10 @@ public sealed class BindingEditorTests
         var sources = new ScriptSourceService(source.Instance, source.Database, source.Lease, resources, contracts,
             fixture.Installation.Roots, fixture.Installation.Activator);
         var editor = new BindingEditorService(source.Instance, source.Database, contracts, resources, controller, native, sources);
-        var request = new BindingEditorSelection(Guid.NewGuid(), binding.Id, 1, script.Revision, null);
+        var request = new BindingEditorSelection(Guid.NewGuid(), binding.Id, draft ? 0 : 1, script.Revision, null)
+        {
+            Draft = draft ? new(binding.UserId, script.Id, script.Revision) : null
+        };
         try
         {
             if (exitsBeforeSave) File.WriteAllText(empty, "");
@@ -63,6 +67,7 @@ public sealed class BindingEditorTests
             if (exitsBeforeSave) File.Delete(empty);
             var selected = request with { CandidateId = offered.Options[0].Id };
             var session = Assert.IsType<ConfigurationEditStatus>((await editor.OpenAsync("editor", selected, () => { }, default)).Session);
+            await WaitEditorAsync(directory);
             Assert.True(File.Exists(first));
             Assert.False(File.Exists(second));
             var attached = await editor.OpenAsync("editor", request with { SessionId = Guid.NewGuid() }, () => { }, default);
@@ -71,25 +76,47 @@ public sealed class BindingEditorTests
             var rejected = await controller.SaveBindingAsync(Guid.NewGuid(), "editor", session.SessionId, session.Revision, null, DateTimeOffset.UtcNow);
             Assert.Equal("configuration_editor_multiple_profiles", rejected.Inspection?.Issue);
             Assert.True(File.Exists(replacement));
-            Assert.Null(source.Definitions.Read().Bindings.Single(item => item.Id == binding.Id).Source);
+            Assert.Null(source.Definitions.Read().Bindings.SingleOrDefault(item => item.Id == binding.Id)?.Source);
             File.Delete(first);
             var review = await controller.SaveBindingAsync(Guid.NewGuid(), "editor", session.SessionId, session.Revision, null, DateTimeOffset.UtcNow);
             Assert.Equal("configuration_editor_confirm_replacement", review.Inspection?.Issue);
             var candidate = Assert.Single(review.Inspection!.Options).Id;
             var operation = Guid.NewGuid();
             var accepted = await controller.SaveBindingAsync(operation, "editor", session.SessionId, session.Revision, candidate, DateTimeOffset.UtcNow);
-            Assert.True(accepted.Saved?.IsNew);
+            if (draft)
+            {
+                Assert.Equal(operation, accepted.DraftCandidate);
+                Assert.DoesNotContain(source.Definitions.Read().Bindings, item => item.Id == binding.Id);
+                Assert.Empty(new ConfigurationRevisionStore(source.Instance, source.Database, contracts).ReadCurrentRevisions(binding.Id));
+                File.Delete(Path.Combine(directory, "nexus-editor-started"));
+                var staged = Assert.IsType<ConfigurationEditStatus>((await editor.OpenAsync("editor", request with {
+                    SessionId = Guid.NewGuid(), DraftCandidateId = operation
+                }, () => { }, default)).Session);
+                await WaitEditorAsync(directory);
+                Assert.Equal("{\"Name\":\"C\"}", File.ReadAllText(replacement));
+                await controller.CancelAsync(Guid.NewGuid(), "editor", staged.SessionId, staged.Revision, DateTimeOffset.UtcNow);
+                var parent = new AutomationChanges(source.Definitions.ReadRevision(), [], [], [], [binding], [], [], []);
+                var parentOperation = AutomationDefinitionStore.DraftIdentity(Guid.NewGuid(), "editor", parent, [operation]);
+                Assert.True(source.Definitions.CommitDrafts(parentOperation, parent, DateTimeOffset.UtcNow, [operation], controller.Drafts).IsNew);
+                Assert.NotNull(source.Definitions.Lookup(parentOperation, parent, [operation]));
+                request = request with { Draft = null, ExpectedBindingRevision = 1 };
+            }
+            else Assert.True(accepted.Saved?.IsNew);
             Assert.Equal(new[] { "startOneDragon", "C" }, source.Definitions.Read().Bindings.Single(item => item.Id == binding.Id).Source!.Arguments);
             Assert.Equal("{\"Name\":\"A\"}", File.ReadAllText(first));
             Assert.Equal("{\"Name\":\"B\"}", File.ReadAllText(second));
             Assert.False(File.Exists(replacement));
-            var replay = await controller.SaveBindingAsync(operation, "editor", session.SessionId, session.Revision, candidate, DateTimeOffset.UtcNow);
-            Assert.False(replay.Saved?.IsNew);
+            if (!draft)
+            {
+                var replay = await controller.SaveBindingAsync(operation, "editor", session.SessionId, session.Revision, candidate, DateTimeOffset.UtcNow);
+                Assert.False(replay.Saved?.IsNew);
+            }
             ConfigurationEditInventory.VerifyReadOnly(source.Database);
             ConfigurationBatchInventory.VerifyReadOnly(source.Instance, source.Database, contracts);
             File.Delete(Path.Combine(directory, "nexus-editor-started"));
             var reopened = Assert.IsType<ConfigurationEditStatus>((await editor.OpenAsync("editor",
                 request with { SessionId = Guid.NewGuid() }, () => { }, default)).Session);
+            await WaitEditorAsync(directory);
             Assert.Equal("{\"Name\":\"C\"}", File.ReadAllText(replacement));
             Assert.False(File.Exists(first));
             Assert.False(File.Exists(second));
@@ -119,7 +146,7 @@ public sealed class BindingEditorTests
         finally { await controller.StopAsync(TimeSpan.FromSeconds(25)); }
     }
 
-    [Fact(DisplayName = "A bound profile blocks an ambiguous native launch and supplies its actual configuration to observation")]
+    [Fact(DisplayName = "An unpublished profile can be probed and the accepted profile controls later execution")]
     public async Task RunsBoundProfile()
     {
         await using var fixture = new InstalledBettergiFixture();
@@ -142,7 +169,7 @@ public sealed class BindingEditorTests
             Arguments = [], ConfigurationPaths = [], AdapterResources = [], LogPaths = []
         };
         var binding = new AutomationBinding(Guid.NewGuid(), 0, source.UserA, script.Id, true, 0);
-        var change = new AutomationChanges(catalog.Revision, [root], [script], [], [binding], [], [], []);
+        var change = new AutomationChanges(catalog.Revision, [root], [script], [], [], [], [], []);
         source.Definitions.Commit(AutomationDefinitionStore.Identity(Guid.NewGuid(), "editor", change), change, DateTimeOffset.UtcNow);
         script = source.Definitions.Read().Scripts.Single(item => item.Id == script.Id);
         var contracts = new ContractReader();
@@ -153,7 +180,8 @@ public sealed class BindingEditorTests
         var sources = new ScriptSourceService(source.Instance, source.Database, source.Lease, resources, contracts,
             fixture.Installation.Roots, fixture.Installation.Activator);
         var editor = new BindingEditorService(source.Instance, source.Database, contracts, resources, controller, native, sources);
-        var request = new BindingEditorSelection(Guid.NewGuid(), binding.Id, 1, script.Revision, null);
+        var owner = new DraftBindingIdentity(binding.UserId, script.Id, script.Revision);
+        var request = new BindingEditorSelection(Guid.NewGuid(), binding.Id, 0, script.Revision, null) { Draft = owner };
         var siblingDirectory = Directory.CreateDirectory(Path.Combine(source.Root, "another-bettergi")).FullName;
         InstalledEditorPackage.PrepareImage(siblingDirectory, "BetterGI.exe");
         try
@@ -163,13 +191,11 @@ public sealed class BindingEditorTests
             {
                 try
                 {
-                    using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-                    while (!File.Exists(Path.Combine(siblingDirectory, "nexus-editor-started")))
-                        await Task.Delay(20, deadline.Token);
+                    await WaitEditorAsync(siblingDirectory);
                     var occupied = await Assert.ThrowsAsync<IOException>(() => editor.OpenAsync("editor", request, () => { }, default));
                     Assert.Equal("upstream_program_already_running", occupied.Message);
                     Assert.Equal(profile, File.ReadAllText(selected));
-                    Assert.Null(source.Definitions.Read().Bindings.Single(item => item.Id == binding.Id).Source);
+                    Assert.DoesNotContain(source.Definitions.Read().Bindings, item => item.Id == binding.Id);
                 }
                 finally
                 {
@@ -178,8 +204,16 @@ public sealed class BindingEditorTests
                 }
             }
             var session = Assert.IsType<ConfigurationEditStatus>((await editor.OpenAsync("editor", request, () => { }, default)).Session);
-            Assert.NotNull((await controller.SaveBindingAsync(Guid.NewGuid(), "editor", session.SessionId,
-                session.Revision, null, DateTimeOffset.UtcNow)).Saved);
+            await WaitEditorAsync(directory);
+            var candidate = Assert.IsType<Guid>((await controller.SaveBindingAsync(Guid.NewGuid(), "editor", session.SessionId,
+                session.Revision, null, DateTimeOffset.UtcNow)).DraftCandidate);
+            var discovered = await fixture.Adapters.DiscoverDraftAsync("editor", binding.Id, owner, controller.Drafts,
+                candidate, Guid.NewGuid(), default, () => { });
+            Assert.Contains(discovered.Tasks, item => item.TaskId == "bettergi:mail" && item.IsEnabled);
+            Assert.DoesNotContain(source.Definitions.Read().Bindings, item => item.Id == binding.Id);
+            var parent = new AutomationChanges(source.Definitions.ReadRevision(), [], [], [], [binding], [], [], []);
+            var operation = AutomationDefinitionStore.DraftIdentity(Guid.NewGuid(), "editor", parent, [candidate]);
+            Assert.True(source.Definitions.CommitDrafts(operation, parent, DateTimeOffset.UtcNow, [candidate], controller.Drafts).IsNew);
             AttemptAcceptanceResult Start() => fixture.Service.Start(Guid.NewGuid(), "editor",
                 source.Request(new BindingTarget(binding.Id)), DateTimeOffset.UtcNow);
             _ = Start();
@@ -205,13 +239,19 @@ public sealed class BindingEditorTests
         finally { await controller.StopAsync(TimeSpan.FromSeconds(25)); }
     }
 
-    private static async Task ExitEditorAsync(string directory)
+    private static async Task<int> WaitEditorAsync(string directory)
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var started = Path.Combine(directory, "nexus-editor-started");
         while (!File.Exists(started) || new FileInfo(started).Length == 0) await Task.Delay(20, deadline.Token);
+        return int.Parse(File.ReadAllText(started), System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static async Task ExitEditorAsync(string directory)
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var exit = Path.Combine(directory, "nexus-editor-exit");
-        using var editor = Process.GetProcessById(int.Parse(File.ReadAllText(started), System.Globalization.CultureInfo.InvariantCulture));
+        using var editor = Process.GetProcessById(await WaitEditorAsync(directory));
         File.WriteAllText(exit, "");
         await editor.WaitForExitAsync(deadline.Token);
         File.Delete(exit);

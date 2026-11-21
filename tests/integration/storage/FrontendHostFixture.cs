@@ -26,7 +26,7 @@ internal sealed class FrontendHostFixture : IAsyncDisposable
     private string _runtimeRoot = "";
     private string _executable = "";
 
-    internal async Task StartAsync(BuiltExtensionInputs inputs, Uri? deniedProxy = null,
+    internal async Task StartAsync(BuiltExtensionInputs? inputs, Uri? deniedProxy = null,
         IReadOnlyList<BuiltExtensionInputs>? additional = null, Action<ExtensionCatalogFixture>? seed = null,
         string? application = null, bool bundleInstall = false, bool defaultBundle = false, bool remoteAccess = false,
         Func<ExtensionCatalogFixture, BoundPackageFixture>? controlledPackage = null, bool interruptible = false,
@@ -44,7 +44,8 @@ internal sealed class FrontendHostFixture : IAsyncDisposable
             if (application is null) MaintenanceBinaryFixture.CopyBuild(software);
             else CopyApplication(application, software);
             executable = Path.Combine(software, "NexusPipeline.exe");
-            using var packages = new FrontendPackages(catalog, new[] { inputs }.Concat(additional ?? []).ToArray(), controlledPackage?.Invoke(catalog));
+            var archives = inputs is null ? additional ?? [] : new[] { inputs }.Concat(additional ?? []).ToArray();
+            using var packages = new FrontendPackages(catalog, archives, controlledPackage?.Invoke(catalog));
             packages.Publish();
             seed?.Invoke(catalog);
             var settings = new HostSettingsStore(catalog.Database); var before = settings.Read();
@@ -84,10 +85,10 @@ internal sealed class FrontendHostFixture : IAsyncDisposable
         await StartExistingAsync(_executable, _runtimeRoot, port);
     }
 
-    internal async Task ReinstallBundleAsync()
+    internal async Task ReinstallBundleAsync(bool develop = false)
     {
         await DisposeAsync(); _host = null; _errors = null;
-        await InstallBundleAsync(_executable, _runtimeRoot, Path.Combine(Root, "installation-bundle"));
+        await InstallBundleAsync(_executable, _runtimeRoot, Path.Combine(Root, "installation-bundle"), develop);
         await StartExistingAsync(_executable, _runtimeRoot);
     }
 
@@ -170,11 +171,12 @@ internal sealed class FrontendHostFixture : IAsyncDisposable
         }
     }
 
-    private async Task InstallBundleAsync(string executable, string runtimeRoot, string bundle)
+    private async Task InstallBundleAsync(string executable, string runtimeRoot, string bundle, bool develop = false)
     {
         var start = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var argument in new[] { "install-bundle", "--runtime-root", runtimeRoot, "--bundle", bundle }) start.ArgumentList.Add(argument);
+        if (develop) { start.ArgumentList.Add("--channel"); start.ArgumentList.Add("develop"); }
         using var process = Process.Start(start) ?? throw new IOException("bundle_installer_start_failed");
         var output = process.StandardOutput.ReadToEndAsync();
         var errors = process.StandardError.ReadToEndAsync();

@@ -82,6 +82,44 @@ public sealed class AdapterTaskTests
         Assert.Equal(BusinessOutcome.Unverified, AdapterBusinessPolicy.Decide(tasks.RemoveAt(1), observations.RemoveAt(1)).Outcome);
     }
 
+    [Theory]
+    [InlineData("adapter_task_missing_logs", null, EngineOutcome.Succeeded, BusinessOutcome.Failed, AdapterObservationState.Failed)]
+    [InlineData("adapter_task_missing_terminal", null, EngineOutcome.Succeeded, BusinessOutcome.Failed, AdapterObservationState.Failed)]
+    [InlineData("adapter_task_opaque", null, EngineOutcome.Succeeded, BusinessOutcome.Succeeded, AdapterObservationState.Unknown)]
+    [InlineData("adapter_task_opaque", null, EngineOutcome.Failed, BusinessOutcome.Unverified, AdapterObservationState.Unknown)]
+    [InlineData("adapter_task_opaque", null, EngineOutcome.Unknown, BusinessOutcome.Unverified, AdapterObservationState.Unknown)]
+    [InlineData("adapter_observation_unavailable", null, EngineOutcome.Succeeded, BusinessOutcome.Failed, AdapterObservationState.Failed)]
+    [InlineData("adapter_log_gap", null, EngineOutcome.Succeeded, BusinessOutcome.Failed, AdapterObservationState.Failed)]
+    [InlineData("skipped", AdapterCompletion.Inapplicable, EngineOutcome.Succeeded, BusinessOutcome.Unverified, AdapterObservationState.Succeeded)]
+    [InlineData("satisfied", AdapterCompletion.Satisfied, EngineOutcome.Succeeded, BusinessOutcome.Unverified, AdapterObservationState.Succeeded)]
+    [InlineData("not_executed", AdapterCompletion.NotExecuted, EngineOutcome.Succeeded, BusinessOutcome.Unverified, AdapterObservationState.Unknown)]
+    public void ClosesDailyScope(string reason, AdapterCompletion? completion, EngineOutcome engine,
+        BusinessOutcome expected, AdapterObservationState expectedState)
+    {
+        var task = Original[0];
+        var raw = new AdapterTaskObservation(task.TaskId,
+            completion is AdapterCompletion.Inapplicable or AdapterCompletion.Satisfied ? AdapterObservationState.Succeeded : AdapterObservationState.Unknown, reason, completion);
+        var result = AdapterBusinessPolicy.DecideDaily([task], [raw], engine, true, false);
+        Assert.Equal(expected, result.Outcome);
+        Assert.Equal(expectedState, Assert.Single(result.Tasks).State);
+        if (raw.State == AdapterObservationState.Unknown)
+            Assert.Throws<ArgumentException>(() => AdapterTaskPolicy.RequireOriginalResults([task], [raw], [task.TaskId]));
+    }
+
+    [Fact]
+    public void ProtectsAuthoritativeParent()
+    {
+        ImmutableArray<AdapterTask> tasks = [Original[0], Original[1]];
+        ImmutableArray<AdapterTaskObservation> observations = [
+            new("mail", AdapterObservationState.Partial, "okww_parent_completed_child_failure_retry_forbidden"),
+            new("unsafe", AdapterObservationState.Failed, "child_failure")];
+        Assert.Equal(BusinessOutcome.Partial, AdapterBusinessPolicy.DecideDaily(tasks, observations, EngineOutcome.Succeeded, true, false).Outcome);
+        var independent = tasks.SetItem(1, tasks[1] with { Dependencies = [] });
+        Assert.Equal(BusinessOutcome.Failed, AdapterBusinessPolicy.DecideDaily(independent, observations, EngineOutcome.Succeeded, true, false).Outcome);
+        var missing = observations.SetItem(1, observations[1] with { State = AdapterObservationState.Unknown, ReasonCode = "adapter_task_missing_logs" });
+        Assert.Equal(BusinessOutcome.Failed, AdapterBusinessPolicy.DecideDaily(tasks, missing, EngineOutcome.Succeeded, true, false).Outcome);
+    }
+
     [Theory(DisplayName = "Normal Completion Metadata Must Agree With The Frozen Observation State")]
     [InlineData(AdapterCompletion.Satisfied, AdapterObservationState.Succeeded, true)]
     [InlineData(AdapterCompletion.Inapplicable, AdapterObservationState.Succeeded, true)]

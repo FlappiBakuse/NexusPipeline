@@ -27,6 +27,7 @@ let locale = 'zh-CN'; let revision = 1; let currentMode = mode;
 let rightClick, leftClick, nextAction = 0, peer, lastMenu;
 const presentations = []; let dismissed = false;
 let modeSaves = 0; let deniedSaves = false; let closePermits = 0;
+let closeRecoveryPending = false;
 const warnings = [], opened = [], cases = [];
 const values = { autoStart: false, desktop: { mode, minimizeToTray: true, openOnStartup: false }, extensions: [] };
 const pipeName = 'NexusDesktop-' + crypto.randomUUID().replaceAll('-', '');
@@ -91,9 +92,17 @@ const server = http.createServer(async (request, response) => {
     else if (url.pathname.endsWith('/desktop/login')) value = sign({ ...body, type: 'offers', offers: [] });
     else if (url.pathname.endsWith('/desktop/mode')) { currentMode = body.mode; value = sign(body); }
     else if (url.pathname.endsWith('/desktop/authorize')) {
-      closePermits++;
-      value = sign({ ...body, type: 'close.permit', isApproved: true, permitId: crypto.randomUUID(),
-        expiresAt: new Date(Date.now() + 30000).toISOString() });
+      if (['file.select', 'folder.select'].includes(body.type)) value = sign({ ...body, type: 'reply', isApproved: true });
+      else if (closeRecoveryPending) {
+        value = sign({ ...body, type: 'close.rejected', isApproved: false, code: 'recovery_pending' });
+        response.writeHead(409, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        response.end(JSON.stringify(value)); return;
+      }
+      else {
+        closePermits++;
+        value = sign({ ...body, type: 'close.permit', isApproved: true, permitId: crypto.randomUUID(),
+          expiresAt: new Date(Date.now() + 30000).toISOString() });
+      }
     } else if (url.pathname.endsWith('/settings/interface')) {
       await localeReady; value = { values: { locale } };
     }
@@ -219,6 +228,23 @@ async function run() {
   }
   let window = await renderer();
   assert.equal(window.isVisible(), true);
+  if (mode === 'desktop') {
+    const scope = crypto.randomUUID(), folder = path.join(output, 'profile');
+    const initialDirectories = [];
+    const original = dialog.showOpenDialog;
+    try {
+      dialog.showOpenDialog = async (parent, options) => {
+        assert.equal(parent, window); initialDirectories.push(options.defaultPath);
+        return { canceled: false, filePaths: [options.properties.includes('openFile') ? path.join(folder, 'selected.txt') : folder] };
+      };
+      await window.webContents.executeJavaScript(`nexusDesktopChannel.chooseFile(${JSON.stringify(scope)})`);
+      await window.webContents.executeJavaScript(`nexusDesktopChannel.chooseFolder(${JSON.stringify(scope)})`);
+      await window.webContents.executeJavaScript(`nexusDesktopChannel.releasePathPicker(${JSON.stringify(scope)})`);
+      await window.webContents.executeJavaScript(`nexusDesktopChannel.chooseFile(${JSON.stringify(crypto.randomUUID())})`);
+      assert.deepEqual(initialDirectories, [app.getPath('documents'), folder, app.getPath('documents')]);
+      cases.push('signed-file-and-folder-actions-share-only-the-open-editor-directory');
+    } finally { dialog.showOpenDialog = original; }
+  }
   await leftClick(); await waitFor(() => window.isVisible());
   await window.webContents.executeJavaScript('document.querySelector("input").value="ordinary-draft"');
   window.close(); assert.equal(window.isVisible(), false);
@@ -267,6 +293,11 @@ async function run() {
   assert.equal(warnings.length, warningCount);
   await click(0); assert.equal(lastMenu.busy, false);
   await window.webContents.executeJavaScript('window.acceptExit=true;document.querySelector("input").value="retained-draft"');
+  closeRecoveryPending = true; await click(3); closeRecoveryPending = false;
+  assert.equal(closePermits, 0); assert.equal(window.isDestroyed(), false);
+  assert.equal(await window.webContents.executeJavaScript('window.exitStates.at(-1).code'), 'recovery_pending');
+  assert.equal(await window.webContents.executeJavaScript('document.querySelector("input").value'), 'retained-draft');
+  cases.push('signed-recovery-rejection-releases-native-exit-and-retains-the-renderer-draft');
   window.close(); assert.equal(window.isVisible(), false);
   cases.push('real-writes-refuse-exit-with-status-and-hidden-drafts-do-not-require-confirmation');
   const closed = new Promise(resolve => window.once('closed', () => {

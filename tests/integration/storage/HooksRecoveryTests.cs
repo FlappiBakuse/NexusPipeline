@@ -39,7 +39,8 @@ public sealed class HooksRecoveryTests
         var installed = File.ReadAllBytes(source.Configuration); var installedIdentity = PhysicalObjectIdentity.Read(source.Configuration);
         var instance = new InstanceRoot(new()).OpenExisting(source.Instance.RuntimeRoot);
         using var lease = InstanceLease.Acquire(instance, new());
-        var database = StateDatabase.OpenExisting(instance, Path.Combine(source.Root, "restart-diagnostics"), new JournalStartupAdmission(instance, new()));
+        var database = StateDatabase.OpenExisting(instance, Path.Combine(source.Root, "restart-diagnostics"),
+            new JournalStartupAdmission(instance, new()), lease);
         Assert.ThrowsAny<IOException>(() => new StartupJournalRecovery(instance, new(), database,
             new(Path.Combine(source.Root, "host"), Path.Combine(instance.RuntimeRoot, "extensions"))).Recover(lease));
         Assert.Equal(installed, File.ReadAllBytes(source.Configuration));

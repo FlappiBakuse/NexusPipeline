@@ -11,8 +11,9 @@ export interface DesktopChannel {
   retireFrontend(clientId: string): Promise<void>;
   prepareExit(callback: (reason: 'close' | 'maintenance') => Promise<ExitReadiness>): void;
   onExitState(callback: (state: ExitState) => void): () => void;
-  chooseFile(): Promise<{ canceled: boolean; paths: string[] }>;
-  chooseFolder(): Promise<{ canceled: boolean; paths: string[] }>;
+  chooseFile(pickerId: string): Promise<{ canceled: boolean; paths: string[] }>;
+  chooseFolder(pickerId: string): Promise<{ canceled: boolean; paths: string[] }>;
+  releasePathPicker(pickerId: string): Promise<void>;
   openExternal(url: string): Promise<void>;
   hide(): Promise<void>;
   show(): Promise<void>;

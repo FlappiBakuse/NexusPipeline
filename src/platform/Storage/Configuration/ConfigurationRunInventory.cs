@@ -108,7 +108,7 @@ internal static class ConfigurationRunInventory
                 }
                 var physical = new JournalStore(instance, contracts).Read(resource.JournalId);
                 if (physical.Phase == JournalPhase.Quarantined) throw new IOException("attempt_configuration_child_quarantined");
-                _ = ConfigurationJournalBinding.Read(instance, physical, contracts, database);
+                _ = ConfigurationJournalBinding.ReadForRestoration(instance, physical, contracts, database);
             }
         }
         if (groups.IsEmpty || registered.Any(item => expected.ContainsKey(item.JournalId) && !covered.Contains(item.JournalId)))

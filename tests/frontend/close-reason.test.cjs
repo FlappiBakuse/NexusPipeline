@@ -1,21 +1,32 @@
 'use strict';
 const assert = require('node:assert/strict');
-const test = require('node:test');
 const crypto = require('node:crypto');
-const { readClosePending } = require('../../apps/desktop/proof-reader.cjs');
-const frame = code => ({ format: 'nexus.control.error', version: 1, code,
-  message: 'The control request could not be completed.', correlationId: crypto.randomUUID() });
+const { test } = require('node:test');
+const { readCloseRejection } = require('../../apps/desktop/proof-reader.cjs');
 
-test('only the bounded current pending-work conflict permits another close attempt', async () => {
-  assert.equal(await readClosePending(new Response(JSON.stringify(frame('accepted_writes_pending')), { status: 409 })), true);
-  for (const code of ['close_session_mismatch', 'recovery_pending', 'access_denied'])
-    assert.equal(await readClosePending(new Response(JSON.stringify(frame(code)), { status: 409 })), false);
-  assert.equal(await readClosePending(new Response('{}', { status: 200 })), false);
-  assert.equal(await readClosePending(new Response(JSON.stringify({ ...frame('accepted_writes_pending'), extra: true }), { status: 409 })), false);
+const { publicKey, privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+const trust = publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
+const request = {
+  format: 'nexus.desktop.channel', version: 1, instanceId: crypto.randomUUID(), clientId: crypto.randomUUID(),
+  sessionId: crypto.randomUUID(), correlationId: crypto.randomUUID()
+};
+const rejection = { ...request, type: 'close.rejected', isApproved: false, code: 'recovery_pending' };
+
+function sign(value) {
+  const payload = Buffer.from(JSON.stringify(value));
+  const signature = crypto.sign('sha256', payload, { key: privateKey, dsaEncoding: 'ieee-p1363' });
+  return JSON.stringify({ format: 'nexus.desktop.proof', version: 1, algorithm: 'ES256',
+    payloadBase64: payload.toString('base64'), signatureBase64: signature.toString('base64') });
+}
+
+test('ordinary quit can surface the signed reason for its own rejection', () => {
+  assert.equal(readCloseRejection(sign(rejection), trust, request), 'recovery_pending');
 });
 
-test('ambiguous or oversized close conflicts cannot authorize retries', async () => {
-  const valid = JSON.stringify(frame('accepted_writes_pending'));
-  await assert.rejects(readClosePending(new Response(valid.replace('"code":', '"code":"access_denied","code":'), { status: 409 })));
-  await assert.rejects(readClosePending(new Response(' '.repeat(32769), { status: 409 })), /desktop_response_limit/);
+test('ordinary quit rejects unsigned, mismatched and unknown rejection reasons', () => {
+  assert.throws(() => readCloseRejection(JSON.stringify(rejection), trust, request), { message: 'desktop_proof_format' });
+  assert.throws(() => readCloseRejection(sign({ ...rejection, correlationId: crypto.randomUUID() }), trust, request),
+    { message: 'desktop_close_rejection_invalid' });
+  assert.throws(() => readCloseRejection(sign({ ...rejection, code: 'unknown' }), trust, request),
+    { message: 'desktop_close_rejection_invalid' });
 });

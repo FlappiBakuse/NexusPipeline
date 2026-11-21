@@ -23,7 +23,7 @@ public sealed class EditOutputRecorder(RuntimeInstance instance, StateDatabase d
         lease.VerifyHeld(instance);
         if (stopped.Closure.InstanceId != instance.InstanceId || !stopped.Closure.JournalIds.Contains(journalId) ||
             stopped.Closure.Creator != lease.ExecutorIdentity.ReadCurrent()) throw new IOException("configuration_editor_stop_proof_unbound");
-        return SealCore(journalId, stopped.Closure, stopped.Reference);
+        return SealCore(journalId, stopped.Closure, stopped.Reference) ?? throw new IOException("configuration_edit_output_scene_unverified");
     }
 
     internal void SealRecoveredRun(Guid journalId)
@@ -58,10 +58,10 @@ public sealed class EditOutputRecorder(RuntimeInstance instance, StateDatabase d
         }
         if (actual.Count == 0) return;
         var stopped = actual.LastOrDefault(item => item.WasExecuted) ?? actual[^1];
-        _ = SealCore(journalId, stopped, closures.RequireStoredReference(journalId, stopped));
+        _ = SealCore(journalId, stopped, closures.RequireStoredReference(journalId, stopped), recovering: true);
     }
 
-    private FileTreeSnapshot SealCore(Guid journalId, FrozenJobClosure closure, BlobReference stopReference)
+    private FileTreeSnapshot? SealCore(Guid journalId, FrozenJobClosure closure, BlobReference stopReference, bool recovering = false)
     {
         lease.VerifyHeld(instance);
         var closures = new JobClosureStore(instance, database, contracts);
@@ -69,7 +69,8 @@ public sealed class EditOutputRecorder(RuntimeInstance instance, StateDatabase d
         StepWritersEvidence.RequireConfigurationStopped(instance, database, contracts, journalId, parent);
         closures.RequireReference(journalId, closure, stopReference, parent);
         var store = new JournalStore(instance, contracts); var registry = new RecoveryJournalRegistry(database);
-        var physical = store.Read(journalId); var binding = ConfigurationJournalBinding.Read(instance, physical, contracts, database);
+        var physical = store.Read(journalId);
+        var binding = ConfigurationJournalBinding.ReadForRestoration(instance, physical, contracts, database, verifyOutputContent: true);
         var prepared = binding.Prepared ?? throw new IOException("configuration_edit_workspace_missing");
         var run = physical.Kind == JournalKind.ConfigExchange && prepared.Plan.RunState is not null && prepared.Plan.EditPolicy is not null &&
             !prepared.Plan.PhysicalClaims.IsDefaultOrEmpty;
@@ -82,10 +83,8 @@ public sealed class EditOutputRecorder(RuntimeInstance instance, StateDatabase d
         var observed = new ConfigurationWriterObservation(instance.InstanceId, journalId, true, WriterState.Stopped);
         var scanner = new FileTreeScanner(SnapshotBudget.Default); var blobs = new ImmutableBlobStore(instance, contracts);
         var archive = new FileTreeArchive(scanner, blobs); var swap = new ConfigurationSwap(scanner, archive);
-        swap.VerifyEditableScene(prepared, observed);
-        var output = archive.Capture(prepared.Plan.TargetPath, default);
-        using var scene = TreeReadLease.Acquire(prepared.Plan.TargetPath, prepared.Plan.ParentIdentity, output);
-        PhysicalTreeIdentity.RequireSingleLinks(prepared.Plan.TargetPath, output.Snapshot);
+        using var scene = HoldOutput(prepared, observed, swap, archive, recovering, out var output);
+        if (scene is null) return null;
         observer?.Reached(ConfigurationOutputBoundary.ContentArchived, journalId);
         var codec = new EditOutputCodec(instance, contracts, blobs);
         var reference = codec.Write(prepared, physical.PlanDigest, output, stopReference, database, parent);
@@ -93,6 +92,7 @@ public sealed class EditOutputRecorder(RuntimeInstance instance, StateDatabase d
         using var plan = blobs.OpenVerified(reference); using var stop = blobs.OpenVerified(stopReference);
         observer?.Reached(ConfigurationOutputBoundary.PlanFrozen, journalId);
         lease.VerifyHeld(instance);
+        scene.RequireNamespace();
         var document = binding.Document; var previous = physical.Revision;
         document["participants"]!.AsArray().Add(new JsonObject
         {
@@ -109,5 +109,26 @@ public sealed class EditOutputRecorder(RuntimeInstance instance, StateDatabase d
         registry.Advance(registered with { Revision = physical.Revision }, previous);
         observer?.Reached(ConfigurationOutputBoundary.SqlProjected, journalId);
         return output.Snapshot;
+    }
+
+    private static TreeReadLease? HoldOutput(PreparedConfigurationExchange prepared, ConfigurationWriterObservation observed,
+        ConfigurationSwap swap, FileTreeArchive archive, bool recovering, out ArchivedFileTree output)
+    {
+        TreeReadLease? scene = null;
+        try
+        {
+            swap.VerifyEditableScene(prepared, observed);
+            var plan = prepared.Plan;
+            scene = archive.CaptureProtected(plan.TargetPath, plan.ParentIdentity, default, out output);
+            if (recovering) ConfigurationOutputEvidence.Require(prepared, output);
+            return scene;
+        }
+        catch (Exception error) when (recovering && error is IOException or UnauthorizedAccessException or ConfigurationException)
+        {
+            scene?.Dispose();
+            output = null!;
+            return null;
+        }
+        catch { scene?.Dispose(); throw; }
     }
 }

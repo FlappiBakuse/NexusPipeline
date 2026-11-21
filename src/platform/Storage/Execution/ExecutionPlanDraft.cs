@@ -9,6 +9,7 @@ public sealed class ExecutionPlanDraft : IDisposable
     private readonly object _builder;
     private FrozenExecutionPlan? _plan;
     private byte[]? _definitions;
+    private PlanInputLease? _inputs;
     private readonly Dictionary<string, byte[]> _providerManifests;
     internal IReadOnlyDictionary<string, byte[]> ProviderManifests
     {
@@ -46,12 +47,23 @@ public sealed class ExecutionPlanDraft : IDisposable
         }
     }
 
+    internal void RetainInputs(PlanInputLease inputs) => _inputs = inputs;
+
+    internal PlanInputLease? TakeInputs()
+    {
+        var inputs = _inputs;
+        _inputs = null;
+        return inputs;
+    }
+
     public void Dispose()
     {
         lock (_gate)
         {
             if (_disposed) return;
             _disposed = true; _plan = null;
+            _inputs?.Dispose();
+            _inputs = null;
             if (_definitions is not null) CryptographicOperations.ZeroMemory(_definitions);
             _definitions = null;
             foreach (var bytes in _providerManifests.Values) CryptographicOperations.ZeroMemory(bytes);

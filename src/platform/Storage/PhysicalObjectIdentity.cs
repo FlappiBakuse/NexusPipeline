@@ -15,9 +15,15 @@ public sealed record PhysicalObjectIdentity(string VolumeSerial, string FileId)
     }
 
     internal static SafeFileHandle OpenRead(string requestedPath, FileShare share)
+        => OpenRead(requestedPath, share, access: 0x80);
+
+    internal static FileStream OpenContentRead(string requestedPath)
+        => new(OpenRead(requestedPath, FileShare.Read, access: 0x80000000), FileAccess.Read, bufferSize: 1);
+
+    private static SafeFileHandle OpenRead(string requestedPath, FileShare share, uint access)
     {
         var path = PhysicalPathPolicy.NormalizeWithoutLinks(requestedPath);
-        var handle = CreateFile(PhysicalPathPolicy.NativePath(path), 0x80, (uint)share, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero);
+        var handle = CreateFile(PhysicalPathPolicy.NativePath(path), access, (uint)share, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero);
         if (!handle.IsInvalid) return handle;
         var error = new Win32Exception(Marshal.GetLastWin32Error());
         handle.Dispose();
@@ -58,10 +64,24 @@ public sealed record PhysicalObjectIdentity(string VolumeSerial, string FileId)
 
     internal static void RequireSingleLink(SafeFileHandle handle)
     {
-        if (!ReadStandard(handle, 1, out var info, (uint)Marshal.SizeOf<FileStandardInformation>()))
-            throw new IOException("physical_link_count_unavailable", new Win32Exception(Marshal.GetLastWin32Error()));
+        var info = ReadStandard(handle);
         // Hard links do not have one exclusive namespace within the declared edit tree.
         if (info.Directory == 0 && info.NumberOfLinks != 1) throw new IOException("configuration_multiple_links_rejected");
+    }
+
+    internal static long ReadSingleLinkLength(SafeFileHandle handle)
+    {
+        var info = ReadStandard(handle);
+        if (info.Directory != 0) throw new IOException("file_tree_lease_original_changed");
+        if (info.NumberOfLinks != 1) throw new IOException("configuration_multiple_links_rejected");
+        return info.EndOfFile;
+    }
+
+    private static FileStandardInformation ReadStandard(SafeFileHandle handle)
+    {
+        if (!ReadStandard(handle, 1, out var info, (uint)Marshal.SizeOf<FileStandardInformation>()))
+            throw new IOException("physical_link_count_unavailable", new Win32Exception(Marshal.GetLastWin32Error()));
+        return info;
     }
 
     [StructLayout(LayoutKind.Sequential)]

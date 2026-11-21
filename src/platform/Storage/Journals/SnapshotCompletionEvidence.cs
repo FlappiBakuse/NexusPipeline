@@ -26,4 +26,7 @@ internal sealed class SnapshotCompletionEvidence(RuntimeInstance instance, State
 
     public IReadOnlyList<SnapshotCompletionProjection> ReadPendingCompletions(RecoveryRegistrySnapshot verified) =>
         new SnapshotCompletionOwner(instance, database, contracts).ReadPending(verified);
+
+    public IReadOnlyList<ResourceIsolation> ProjectAdmission(RecoveryRegistrySnapshot verified) =>
+        new ScopedConfigurationRecovery(instance, database, contracts).Project(verified);
 }

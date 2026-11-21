@@ -6,7 +6,7 @@ namespace NexusPipeline.CoreTests;
 
 public sealed class HostLifecycleTests
 {
-    [Fact(DisplayName = "Unverified Startup Cannot Admit Writes Or Permit Closure And Verification Cannot Undo The Exit Freeze")]
+    [Fact(DisplayName = "Unverified Startup Rejects Closure Without Freezing Later Verified Writes")]
     public void RequiresVerifiedStartup()
     {
         var recovery = new RecoveryIndex();
@@ -15,7 +15,8 @@ public sealed class HostLifecycleTests
         var session = Guid.NewGuid();
         Assert.Equal("recovery_unverified", lifecycle.RequestClose(session, Guid.NewGuid()).ReasonCode);
         recovery.PublishVerified(recovery.Current.Revision, 1, []);
-        Assert.Null(lifecycle.TryEnterWrite(new HashSet<string>()));
+        Assert.Equal(HostLifecyclePhase.Running, lifecycle.Phase);
+        using (var admitted = lifecycle.TryEnterWrite(new HashSet<string>())) Assert.NotNull(admitted);
         Assert.NotNull(lifecycle.RequestClose(session, Guid.NewGuid()).Permit);
     }
 
@@ -52,6 +53,46 @@ public sealed class HostLifecycleTests
         using var unrelated = lifecycle.TryEnterWrite(new HashSet<string> { "config-b" });
         Assert.NotNull(unrelated);
         Assert.Equal("recovery_pending", lifecycle.RequestClose(Guid.NewGuid(), Guid.NewGuid()).ReasonCode);
+        Assert.Equal(HostLifecyclePhase.Running, lifecycle.Phase);
+        using var next = lifecycle.TryEnterWrite(new HashSet<string> { "config-c" });
+        Assert.NotNull(next);
+    }
+
+    [Fact(DisplayName = "Ordinary Closure Preserves Verified Isolations And Holds While Maintenance Waits")]
+    public void AllowsPreservedRecovery()
+    {
+        var recovery = new RecoveryIndex();
+        recovery.PublishVerified(0, 1, [new("config-a", Guid.NewGuid(), "restoration_required") { CanOrdinaryExit = true }]);
+        recovery.UpdateResourceHolds(RecoveryHoldOwner.ConfigurationOperations,
+            [new(Guid.NewGuid(), "config-b", "restoration_required") { CanOrdinaryExit = true }]);
+        var lifecycle = new HostLifecycle(recovery, TimeProvider.System);
+        Assert.Null(lifecycle.BeginCompletionDrain(Guid.NewGuid(), onlyWhenIdle: true));
+        var session = Guid.NewGuid(); var correlation = Guid.NewGuid();
+        using (var active = lifecycle.TryEnterWrite(new HashSet<string> { "unrelated" }))
+        {
+            Assert.NotNull(active);
+            Assert.Equal("accepted_writes_pending", lifecycle.RequestClose(session, correlation).ReasonCode);
+        }
+        Assert.NotNull(lifecycle.ContinueClose(session, correlation).Permit);
+        Assert.True(lifecycle.CanFinalizeAfterExit(session));
+        Assert.Single(recovery.Current.Isolations);
+        Assert.Single(recovery.Current.ResourceHolds);
+    }
+
+    [Fact(DisplayName = "Abandoning A Drain Releases Admission Only For Its Current Session And Correlation")]
+    public void AbandonsOnlyMatchingDrain()
+    {
+        var lifecycle = new HostLifecycle(Ready(), TimeProvider.System);
+        using var active = lifecycle.TryEnterWrite(new HashSet<string> { "config-a" });
+        var session = Guid.NewGuid(); var correlation = Guid.NewGuid();
+        Assert.Equal("accepted_writes_pending", lifecycle.RequestClose(session, correlation).ReasonCode);
+        Assert.False(lifecycle.AbandonClose(Guid.NewGuid(), correlation));
+        Assert.False(lifecycle.AbandonClose(session, Guid.NewGuid()));
+        Assert.Equal(HostLifecyclePhase.Draining, lifecycle.Phase);
+        Assert.True(lifecycle.AbandonClose(session, correlation));
+        Assert.Null(lifecycle.ContinueClose(session, correlation).Permit);
+        using var next = lifecycle.TryEnterWrite(new HashSet<string> { "config-b" });
+        Assert.NotNull(next);
     }
 
     [Fact(DisplayName = "A Close Permit Is Bound To Its Session Recovery Revision And Fresh Expiry")]
@@ -67,6 +108,7 @@ public sealed class HostLifecycleTests
         Assert.Equal(correlation, first.CorrelationId);
         Assert.Equal(clock.GetUtcNow().AddSeconds(30), first.ExpiresAt);
         clock.Now = clock.Now.AddMinutes(1);
+        Assert.False(lifecycle.CanFinalizeAfterExit(session, first.PermitId));
         var renewed = lifecycle.RequestClose(session, Guid.NewGuid()).Permit!;
         Assert.NotEqual(first.PermitId, renewed.PermitId);
         Assert.True(renewed.ExpiresAt > first.ExpiresAt);

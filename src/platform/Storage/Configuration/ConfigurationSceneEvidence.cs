@@ -102,7 +102,8 @@ internal sealed class ConfigurationSceneEvidence(RuntimeInstance instance, State
             !physical.Root.GetProperty("resourceKeys").EnumerateArray().Select(item => item.GetString()!).Order(StringComparer.Ordinal).SequenceEqual(registered.ResourceKeys) ||
             physical.Phase != (installed ? JournalPhase.Applied : JournalPhase.Committed))
             throw new IOException("configuration_edit_journal_not_settled");
-        var binding = ConfigurationJournalBinding.Read(instance, physical, contracts, database, opened);
+        var binding = installed ? ConfigurationJournalBinding.Read(instance, physical, contracts, database, opened) :
+            ConfigurationJournalBinding.ReadForRestoration(instance, physical, contracts, database, opened);
         var observed = new JournalWriterStore(database).ObserveForCurrentExecutor(resource.JournalId);
         if (!observed.IsComplete || observed.State != WriterState.Stopped) throw new IOException("configuration_writer_stop_unconfirmed");
         var plan = binding.Plan;
@@ -114,7 +115,7 @@ internal sealed class ConfigurationSceneEvidence(RuntimeInstance instance, State
         else if (binding.Prepared is { } workspace)
         {
             var writers = new ConfigurationWriterObservation(instance.InstanceId, resource.JournalId, true, WriterState.Stopped);
-            held.Add(swap.HoldRestored(workspace, writers));
+            held.Add(swap.HoldRestored(workspace, writers, OperatingSystem.IsWindows() && ConfigurationWorkspaceCleanup.IsRetired(instance, binding)));
         }
         else
         {

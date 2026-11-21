@@ -26,13 +26,35 @@ public sealed class ExecutionRuntimeConsumer
     private readonly List<AttemptRuntimeSession> _reconciliation = [];
     private readonly Dictionary<Guid, ExecutionProgress> _active = [];
     private long _progressRevision;
+    private readonly object _progressGate = new();
+    private TaskCompletionSource? _progressChanged;
     private readonly object _gate = new();
     private readonly IAttemptTerminalObserver? _terminalObserver;
     private bool _reconciliationRequired;
+    private int _scopedReconciliations;
     private int _consuming;
     private bool _started;
     public string? FailureCode { get; private set; }
     public long ProgressRevision => Interlocked.Read(ref _progressRevision);
+    public Task WaitForProgressAsync(long revision, CancellationToken cancellationToken)
+    {
+        lock (_progressGate)
+        {
+            if (revision != ProgressRevision) return Task.CompletedTask;
+            _progressChanged ??= new(TaskCreationOptions.RunContinuationsAsynchronously);
+            return _progressChanged.Task.WaitAsync(cancellationToken);
+        }
+    }
+
+    private void AdvanceProgress()
+    {
+        lock (_progressGate)
+        {
+            Interlocked.Increment(ref _progressRevision);
+            _progressChanged?.TrySetResult();
+            _progressChanged = null;
+        }
+    }
     public IReadOnlyList<ExecutionRunView> ReadActive(string subject)
     { lock (_gate) return _active.Values.Select(progress => progress.Read(subject)).ToArray(); }
     internal void ObserveCancellation(Guid operationId, Guid runId, Guid attemptId)
@@ -41,7 +63,9 @@ public sealed class ExecutionRuntimeConsumer
         lock (_gate) if (_active.TryGetValue(operationId, out var progress)) progress.CancelAccepted(runId, attemptId);
     }
     internal Exception? FailureException { get; private set; }
-    public int PendingReconciliationCount { get { lock (_gate) return _reconciliationRequired ? Math.Max(_reconciliation.Count, 1) : 0; } }
+    public int PendingReconciliationCount
+    { get { lock (_gate) return (_reconciliationRequired ? Math.Max(_reconciliation.Count, 1) : 0) + _scopedReconciliations; } }
+    private bool RequiresGlobalReconciliation { get { lock (_gate) return _reconciliationRequired; } }
 
     public ExecutionRuntimeConsumer(RuntimeInstance instance, StateDatabase database, ContractReader contracts, InstanceLease lease,
         ResourceLeaseManager resources, RecoveryIndex index, ExecutionAdmissionInbox inbox, IAttemptTerminalObserver? terminalObserver = null, ExecutionLiveMedia? liveMedia = null, ConfigurationSessionFactory? configurationFactory = null)
@@ -88,7 +112,7 @@ public sealed class ExecutionRuntimeConsumer
 
         async Task ConsumeAsync()
         {
-            while (PendingReconciliationCount == 0)
+            while (!RequiresGlobalReconciliation)
             {
                 AcceptedExecutionAdmission? accepted;
                 if (hostStopping.IsCancellationRequested)
@@ -100,7 +124,7 @@ public sealed class ExecutionRuntimeConsumer
                 }
                 try { _ = await ExecuteAsync(accepted, hostStopping).ConfigureAwait(false); }
                 catch when (FailureCode is not null)
-                { if (PendingReconciliationCount != 0) { dispatch.Cancel(); return; } }
+                { if (RequiresGlobalReconciliation) { dispatch.Cancel(); return; } }
             }
         }
     }
@@ -109,9 +133,9 @@ public sealed class ExecutionRuntimeConsumer
     {
         AttemptRuntimeSession? session = null;
         var terminalObserved = false;
-        var progress = new ExecutionProgress(accepted, () => Interlocked.Increment(ref _progressRevision));
+        var progress = new ExecutionProgress(accepted, AdvanceProgress);
         lock (_gate) _active.Add(accepted.Identity.OperationId, progress);
-        Interlocked.Increment(ref _progressRevision);
+        AdvanceProgress();
         try
         {
             session = new(_instance, _database, _contracts, _lease, _resources, _index, accepted, liveMedia: _liveMedia, adapters: _adapters, progress: progress, configurationFactory: _configurationFactory);
@@ -128,8 +152,14 @@ public sealed class ExecutionRuntimeConsumer
                 if (recovered.Facts.Lifecycle == LifecycleOutcome.Cancelled) return recovered;
             }
             FailureException = error;
-            FailureCode = session?.IsTerminal == true ? "execution_runtime_attempt_failed" : "execution_runtime_reconciliation_required";
-            if (session?.IsTerminal != true)
+            var isolated = session?.IsDurablyIsolated == true;
+            FailureCode = session?.IsTerminal == true || isolated ? "execution_runtime_attempt_failed" : "execution_runtime_reconciliation_required";
+            if (isolated)
+            {
+                progress.Phase("reconciliationRequired");
+                lock (_gate) _scopedReconciliations++;
+            }
+            else if (session?.IsTerminal != true)
             {
                 progress.Phase("reconciliationRequired");
                 lock (_gate) { _reconciliationRequired = true; if (session is not null) _reconciliation.Add(session); }
@@ -142,7 +172,7 @@ public sealed class ExecutionRuntimeConsumer
             if (session?.IsTerminal == true)
             {
                 lock (_gate) _active.Remove(accepted.Identity.OperationId);
-                Interlocked.Increment(ref _progressRevision);
+                AdvanceProgress();
                 session.Dispose();
             }
             else if (session is null) accepted.Dispose();
@@ -168,7 +198,7 @@ public sealed class ExecutionRuntimeConsumer
     private void Enter()
     {
         _lease.VerifyHeld(_instance);
-        if (PendingReconciliationCount != 0) throw new IOException("execution_runtime_reconciliation_required");
+        if (RequiresGlobalReconciliation) throw new IOException("execution_runtime_reconciliation_required");
         lock (_gate)
         {
             if (Interlocked.CompareExchange(ref _consuming, 1, 0) != 0) throw new IOException("execution_runtime_consumer_already_active");

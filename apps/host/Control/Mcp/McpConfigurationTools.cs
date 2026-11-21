@@ -8,7 +8,7 @@ using NexusPipeline.Host.Control.Notifications;
 namespace NexusPipeline.Host.Control.Mcp;
 
 [SupportedOSPlatform("windows")]
-internal sealed class McpConfigurationTools(ValueUseCases values, ImportUseCases imports)
+internal sealed class McpConfigurationTools(ConfigurationValueUseCases values, ImportUseCases imports)
 {
     internal IReadOnlyList<McpToolDescription> List(AuthenticatedControlRequest request)
     {

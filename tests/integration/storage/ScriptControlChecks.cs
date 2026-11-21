@@ -37,7 +37,8 @@ internal static class ScriptControlChecks
         app.Use(ControlExceptionBoundary.InvokeAsync); app.Use(authority.InvokeAsync);
         new ProjectControl(authority, cases, catalog.Contracts).Map(app);
         var frontends = new ExtensionFrontendControl(authority, provider.Activator); frontends.Map(app);
-        new ProjectFrontendControl(catalog.Instance.InstanceId, authority, frontends, cases, catalog.Contracts).Map(app);
+        using var drafts = new NexusPipeline.Platform.Storage.Configuration.BindingDrafts(catalog.Instance, catalog.Database, catalog.Contracts);
+        new ProjectFrontendControl(catalog.Instance.InstanceId, authority, frontends, cases, catalog.Contracts, drafts).Map(app);
         await app.StartAsync();
         using var http = new HttpClient(new SocketsHttpHandler { UseProxy = false })
         { BaseAddress = new(app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single()) };

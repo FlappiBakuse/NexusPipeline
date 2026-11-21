@@ -173,18 +173,6 @@
 .selected {
   border-color: var(--accent);
 }
-.log-window {
-  background: var(--log-bg);
-  color: var(--log-text);
-  overflow: hidden;
-  white-space: pre;
-  max-width: 100%;
-  margin: 12px 0;
-  padding: 16px;
-  font:
-    12px/1.6 Consolas,
-    monospace;
-}
 .image-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
@@ -259,9 +247,4 @@
   .entity-line {
     padding: 14px;
   }
-}
-
-.log-window pre {
-  margin: 0;
-  font: inherit;
 }

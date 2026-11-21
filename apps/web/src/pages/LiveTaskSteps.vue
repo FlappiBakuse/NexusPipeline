@@ -12,18 +12,22 @@ const labels: Record<string, string> = {
   failed: '失败',
   partial: '部分完成',
   skipped: '已跳过',
+  satisfied: '已满足',
+  inapplicable: '不适用',
+  notExecuted: '未执行',
   unknown: '未确认',
   unverified: '未核验'
 };
 function state(task: RunTask): string {
-  return task.isSelected ? task.state : 'unverified';
+  if (!task.isSelected) return 'unverified';
+  return task.completionKind && task.completionKind !== 'completed' ? task.completionKind : task.state;
 }
 function label(task: RunTask): string {
   return t(labels[state(task)] || '未执行');
 }
 function tone(task: RunTask): string {
   const value = state(task);
-  return value === 'succeeded' || value === 'skipped'
+  return value === 'succeeded'
     ? 'success'
     : value === 'failed'
       ? 'danger'
@@ -35,9 +39,10 @@ registerMessages({
   专项任务: 'Specialized tasks',
   完成: 'Completed',
   部分完成: 'Partially completed',
+  已满足: 'Already satisfied',
   未确认: 'Unconfirmed',
   未核验: 'Unverified',
-  未执行: 'Not started'
+  未执行: 'Not executed'
 });
 </script>
 

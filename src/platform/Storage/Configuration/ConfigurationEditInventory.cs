@@ -21,11 +21,12 @@ public static class ConfigurationEditInventory
             foreach (var item in sessions)
             {
                 var session = ConfigurationEditRows.Read(connection, transaction, item.Id, item.Subject)!;
-                if (item.Kind != "configuration.edit.begin" || session.Phase != ConfigurationEditPhase.Prepared && item.Status != "completed")
+                if (item.Kind is not ("configuration.edit.begin" or ConfigurationEditStore.DraftBeginKind) ||
+                    session.Phase != ConfigurationEditPhase.Prepared && item.Status != "completed")
                     throw new IOException("configuration_edit_operation_unbound");
                 foreach (var resource in session.Resources) VerifyResource(connection, transaction, session, resource);
                 if (session.CompletionOperationId is { } completion) VerifyCompletion(connection, transaction, session, completion, item.Subject);
-                else _ = ConfigurationRevisionRows.Binding(connection, transaction, session.Resources[0].Address.BindingId);
+                else if (!session.IsDraft) _ = ConfigurationRevisionRows.Binding(connection, transaction, session.Resources[0].Address.BindingId);
             }
         }
         catch (Exception error) when (error is ConfigurationException or FormatException or InvalidOperationException or ArgumentException)

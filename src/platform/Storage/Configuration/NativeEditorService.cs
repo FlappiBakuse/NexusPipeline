@@ -23,7 +23,7 @@ public sealed class NativeEditorService(RuntimeInstance instance, StateDatabase 
         => await BeginAsync(subject, selection, acceptedAt, null);
 
     internal Task<ConfigurationEditStatus> BeginBindingAsync(string subject, BindingEditorSelection selection,
-        AutomationCatalog catalog, AutomationBinding binding, AutomationScript script, string digest)
+        AutomationCatalog catalog, AutomationBinding binding, AutomationScript script, string digest, ConfigurationRevisionBatch? prior)
     {
         var root = catalog.Roots.Single(item => item.Id == script.Executable.RootId);
         var revisions = new ConfigurationRevisionStore(instance, database, contracts);
@@ -33,11 +33,11 @@ public sealed class NativeEditorService(RuntimeInstance instance, StateDatabase 
             return new GenericEditorResource(id, revisions.ReadCurrentRevision(new(binding.Id, id)) ?? 0);
         }).ToImmutableArray();
         return BeginAsync(subject, new(selection.SessionId, binding.Id, binding.Revision, script.Revision, root.Id,
-            root.Revision, script.Executable.RelativePath, [], selected), DateTimeOffset.UtcNow, digest);
+            root.Revision, script.Executable.RelativePath, [], selected), DateTimeOffset.UtcNow, digest, selection.Draft, prior);
     }
 
     private async Task<ConfigurationEditStatus> BeginAsync(string subject, GenericEditorSelection selection, DateTimeOffset acceptedAt,
-        string? bindingRequestDigest)
+        string? bindingRequestDigest, DraftBindingIdentity? draft = null, ConfigurationRevisionBatch? prior = null)
     {
         instanceLease.VerifyHeld(instance);
         if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot || selection is null ||
@@ -45,13 +45,14 @@ public sealed class NativeEditorService(RuntimeInstance instance, StateDatabase 
             selection.Resources.Select(item => item.ResourceId).Distinct(StringComparer.Ordinal).Count() != selection.Resources.Length ||
             selection.Arguments.IsDefault || selection.Arguments.Length > 256) throw new ConfigurationException("configuration_editor_selection_invalid");
         var digest = bindingRequestDigest ?? Convert.ToHexStringLower(SHA256.HashData(BoundedJson.Serialize(selection)));
-        var replay = controller.ReadAcceptedSource(selection.SessionId, subject, digest);
+        var replay = controller.ReadAcceptedSource(selection.SessionId, subject, digest, draft);
         if (replay is not null) return replay;
         using var root = resources.TryAcquire(Guid.NewGuid(), [new("automation:definitions", ResourceClaimMode.Reference),
             new("blobs:content", ResourceClaimMode.Reference)]).Lease ?? throw new ConfigurationException("configuration_resource_conflict");
         var catalog = new AutomationDefinitionStore(database).Read();
-        var binding = catalog.Bindings.SingleOrDefault(item => item.Id == selection.BindingId)
-            ?? throw new ConfigurationException("configuration_binding_missing");
+        var binding = draft is not null ? DraftBindingOwner.Resolve(catalog, selection.BindingId, draft) :
+            catalog.Bindings.SingleOrDefault(item => item.Id == selection.BindingId)
+                ?? throw new ConfigurationException("configuration_binding_missing");
         var script = Core.Automation.BindingScriptSource.Resolve(catalog.Scripts.Single(item => item.Id == binding.ScriptId), binding);
         if (script.Kind != AutomationKind.Generic) throw new ConfigurationException("configuration_editor_binding_open_required");
         if (binding.Revision != selection.ExpectedBindingRevision ||
@@ -69,7 +70,7 @@ public sealed class NativeEditorService(RuntimeInstance instance, StateDatabase 
             var path = script.ConfigurationPaths.SingleOrDefault(item => GenericConfigurationPolicy.ResourceId(item) == selected.ResourceId)
                 ?? throw new ConfigurationException("configuration_resource_missing");
             var address = new ConfigurationAddress(binding.Id, selected.ResourceId);
-            var saved = revisions.Read(address);
+            var saved = draft is null ? revisions.Read(address) : null;
             if ((saved?.Revision ?? 0) != selected.ExpectedRevision) throw new ConfigurationException("configuration_revision_conflict");
             if (saved is not null) _ = GenericConfigurationPolicy.RequireSaved(binding, script, path, revisions);
             var declaredRoot = catalog.Roots.Single(item => item.Id == path.RootId);
@@ -78,7 +79,9 @@ public sealed class NativeEditorService(RuntimeInstance instance, StateDatabase 
                 { WritePolicy = new([""], [FileObjectKind.Missing, FileObjectKind.File, FileObjectKind.Directory]) });
         }
         return await controller.BeginAsync(selection.SessionId, subject,
-            new(selection.ExpectedBindingRevision, targets.ToImmutable()) { Editor = command, SourceRequestDigest = digest }, acceptedAt);
+            new(selection.ExpectedBindingRevision, targets.ToImmutable()) { Editor = command, SourceRequestDigest = digest, DraftBinding = draft },
+            acceptedAt, prior is null ? null : (target, original) =>
+                prior.Changes.SingleOrDefault(change => change.Address == target.Address)?.Tree ?? original);
     }
 
     internal static ConfigurationEditorCommand Command(AutomationRoot root, string relative, ImmutableArray<string> arguments,

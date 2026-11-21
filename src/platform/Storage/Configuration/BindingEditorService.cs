@@ -13,7 +13,13 @@ using NexusPipeline.Platform.Storage.Sqlite;
 namespace NexusPipeline.Platform.Storage.Configuration;
 
 public sealed record BindingEditorSelection(Guid SessionId, Guid BindingId, long ExpectedBindingRevision,
-    long ExpectedScriptRevision, string? CandidateId);
+    long ExpectedScriptRevision, string? CandidateId)
+{
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public DraftBindingIdentity? Draft { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? DraftCandidateId { get; init; }
+}
 public sealed record BindingEditorOpen(ConfigurationEditStatus? Session, IReadOnlyList<BindingEditorOption> Options, string? Issue, bool CanResume = false);
 
 [SupportedOSPlatform("windows")]
@@ -27,29 +33,40 @@ internal sealed class BindingEditorService(RuntimeInstance instance, StateDataba
     {
         current();
         var digest = Convert.ToHexStringLower(SHA256.HashData(BoundedJson.Serialize(selection)));
-        if (controller.ReadAcceptedSource(selection.SessionId, subject, digest) is { } replay)
+        if (controller.ReadAcceptedSource(selection.SessionId, subject, digest, selection.Draft) is { } replay)
             return new(replay, [], null, controller.CanResumeBinding(replay.SessionId));
-        if (selection.CandidateId is null && controller.ReadActiveBinding(selection.BindingId, subject) is { } active)
+        if (selection.CandidateId is null && controller.ReadActiveBinding(selection.BindingId, subject, selection.Draft) is { } active)
             return new(active, [], null, controller.CanResumeBinding(active.SessionId));
+        if (resources.ReadConfigurationRecovery(selection.BindingId) is { } recoveryIssue)
+            return new(null, [], recoveryIssue);
         using var definitions = resources.TryAcquire(Guid.NewGuid(), [new("automation:definitions", ResourceClaimMode.Reference),
             new("blobs:content", ResourceClaimMode.Reference)]).Lease ?? throw new ConfigurationException("configuration_resource_conflict");
         var baseline = _revisions.ReadCurrentRevisions(selection.BindingId);
         var catalog = new AutomationDefinitionStore(database).Read();
-        var binding = catalog.Bindings.SingleOrDefault(item => item.Id == selection.BindingId)
-            ?? throw new ConfigurationException("configuration_binding_missing");
+        var binding = selection.Draft is { } draft ? DraftBindingOwner.Resolve(catalog, selection.BindingId, draft) :
+            catalog.Bindings.SingleOrDefault(item => item.Id == selection.BindingId)
+                ?? throw new ConfigurationException("configuration_binding_missing");
         var script = catalog.Scripts.Single(item => item.Id == binding.ScriptId);
-        if (binding.Revision != selection.ExpectedBindingRevision || script.Revision != selection.ExpectedScriptRevision)
+        if (selection.ExpectedBindingRevision != (selection.Draft is null ? binding.Revision : 0) ||
+            script.Revision != selection.ExpectedScriptRevision)
             throw new ConfigurationException("configuration_binding_revision_conflict");
+        var prior = selection.DraftCandidateId is { } id ? controller.Drafts.ReadNative(id, subject, binding.Id,
+            selection.Draft ?? throw new ConfigurationException("configuration_draft_missing")) : null;
         var root = catalog.Roots.Single(item => item.Id == script.RootId);
         if (script.Kind == AutomationKind.Generic)
-            return new(await native.BeginBindingAsync(subject, selection, catalog, binding, script, digest), [], null);
+            return new(await native.BeginBindingAsync(subject, selection, catalog, binding, script, digest, prior), [], null);
+        if (prior is not null)
+        {
+            var source = prior.Changes.Single(change => change.Address.ResourceId == BindingConfigurationSource.ResourceId);
+            binding = BindingConfigurationSource.Apply(new(instance, contracts), contracts, binding, script, source.Tree);
+        }
         var extensionId = script.ExtensionId ?? throw new ConfigurationException("configuration_edit_adapter_unavailable");
         var (revision, exclusiveInUserSession) = sources.ReadEditorPolicy(extensionId);
         var discovered = await sources.UseAsync(Guid.NewGuid(), extensionId, revision, root.Path, current,
             cancellation, (result, _) => result, edit: true);
         if (discovered.Editor is not { } editor) return new(null, [], "configuration_editor_program_required");
         var rows = discovered.Candidates!;
-        var saved = ReadSaved(binding, script, baseline);
+        var saved = ReadSaved(binding, script, baseline, selection.Draft is not null, prior);
         var (candidate, choices) = Choose(rows, binding, script, saved, selection.CandidateId);
         if (binding.Source is null && candidate is null)
         {
@@ -71,18 +88,22 @@ internal sealed class BindingEditorService(RuntimeInstance instance, StateDataba
             editor.ExclusiveProgram, exclusiveInUserSession);
         current(); cancellation.ThrowIfCancellationRequested();
         var status = await controller.BeginBindingAsync(selection.SessionId, subject,
-            new(binding.Revision, scopes) { Editor = command, SourceRequestDigest = digest }, owner);
+            new(binding.Revision, scopes) { Editor = command, SourceRequestDigest = digest, DraftBinding = selection.Draft }, owner);
         return new(status, [], null);
     }
 
     private Dictionary<string, ConfigurationRevision> ReadSaved(AutomationBinding binding, AutomationScript script,
-        IReadOnlyDictionary<string, long> baseline)
+        IReadOnlyDictionary<string, long> baseline, bool unpublished, ConfigurationRevisionBatch? prior)
     {
         var resolved = BindingScriptSource.Resolve(script, binding);
         var saved = new Dictionary<string, ConfigurationRevision>(StringComparer.OrdinalIgnoreCase);
         foreach (var resource in resolved.AdapterResources)
         {
-            var snapshot = _revisions.Read(new(binding.Id, resource.ResourceId));
+            var address = new ConfigurationAddress(binding.Id, resource.ResourceId);
+            var change = prior?.Changes.SingleOrDefault(item => item.Address == address);
+            var snapshot = unpublished ? null : _revisions.Read(address);
+            if (change is not null)
+                snapshot = new(address, change.ExpectedRevision, binding.UserId, binding.ScriptId, change.Contract, change.Tree);
             if ((snapshot?.Revision ?? 0) != baseline.GetValueOrDefault(resource.ResourceId))
                 throw new ConfigurationException("configuration_revision_conflict");
             if (snapshot is null) continue;

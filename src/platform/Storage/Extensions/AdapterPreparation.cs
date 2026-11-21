@@ -31,7 +31,9 @@ internal sealed class AdapterPreparation(StateDatabase database, ExtensionActiva
             async (executor, requireCurrent) =>
             {
                 void Check() { source.RequireCurrent(); requireCurrent(); }
-                using var authorization = secrets.EnterSelectedBinding(source.Root, source.Selection.BindingId, identity.ExtensionId, Check);
+                if (source.IsDraft && (phase != "discover" || executor.UsesCompilation))
+                    throw new IOException("adapter_draft_discovery_unavailable");
+                using var authorization = source.IsDraft ? null : secrets.EnterSelectedBinding(source.Root, source.Selection.BindingId, identity.ExtensionId, Check);
                 if (!executor.UsesCompilation)
                 {
                     var result = executor.Execute(JsonSerializer.SerializeToUtf8Bytes(request), identity, cancellation, null, source.ReadSources(executor, cancellation));

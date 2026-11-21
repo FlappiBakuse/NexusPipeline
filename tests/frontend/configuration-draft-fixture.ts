@@ -1,11 +1,9 @@
-import { createApp, h, nextTick, ref, type Component } from 'vue';
+import { createApp, h, nextTick, ref } from 'vue';
 import BindingEditorDialog from '../../apps/web/src/pages/BindingEditorDialog.vue';
 import { FrontendRegistry } from '../../apps/web/src/extensions/frontend-registry';
 import { registryKey } from '../../apps/web/src/extensions/registry-context';
-import FormSelect from '../../apps/web/src/components/FormSelect';
 import { ControlClient } from '../../apps/web/src/control/client';
 import { createStore } from '../../apps/web/src/app/store';
-import type { ConfigurationOverview } from '../../apps/web/src/pages/configuration-types';
 import { prepareAppExit } from '../../apps/web/src/app/exit-preparation';
 
 export const settle = async () => {
@@ -13,11 +11,13 @@ export const settle = async () => {
     await nextTick(); await new Promise(resolve => setTimeout(resolve, 0));
   }
 };
-export function draftFixture() {
+export function draftFixture(respond?: (route: string, options: RequestInit | undefined) => Response | Promise<Response> | undefined) {
   const writes: string[] = [];
   const send: typeof fetch = async (input, options) => {
     const route = new URL(String(input)).pathname;
     if (options?.method && options.method !== 'GET') writes.push(route);
+    const response = respond?.(route, options);
+    if (response) return response;
     if (route === '/control/v1/extensions') return Response.json({ hasReleaseTrust: false,
       items: [{ extensionId: 'fixture', installedRevision: 1, isInstalled: true, desiredEnabled: true,
         activationId: 'active', unavailableReason: null, capabilities: [] }] });
@@ -35,7 +35,7 @@ export function draftFixture() {
   };
   const store = createStore(new ControlClient(location.origin, send));
   store.state.capabilities = { instanceId: 'exit-fixture', hostVersion: '0.18.0',
-    capabilities: ['configuration.read', 'configuration.edit', 'configuration.native.open', 'configuration.repair'] };
+    capabilities: ['configuration.read', 'configuration.edit', 'configuration.native.open', 'configuration.repair', 'extensions.read', 'operations.read'] };
   store.state.automation = { catalogRevision: 1, revisions: [], roots: [{ id: 'root', revision: 1, path: 'D:/fixture' }],
     bundle: { scripts: [{ id: 'script', executable: { rootId: 'root', relative: 'editor.exe' } }],
       users: [], bindings: [], queues: [], schedules: [] } } as never;
@@ -53,16 +53,6 @@ export function bindingEditorFixture(parent: HTMLElement) {
   app.provide(registryKey, new FrontendRegistry({ locale: 'zh-CN', appearance: 'dark', translate: (_id, key) => key }));
   app.mount(holder);
   return { holder, writes, reopen: () => { visible.value = true; }, dispose: () => { app.unmount(); holder.remove(); store.dispose(); } };
-}
-export function mountAdapter(component: Component, fixture: ReturnType<typeof draftFixture>, parent: HTMLElement) {
-  const holder = document.createElement('section'); parent.append(holder);
-  const overview: ConfigurationOverview = { bindingId: 'binding-adapter', bindingRevision: 1, scriptId: 'script',
-    scriptRevision: 1, kind: 'specialized', extensionId: 'fixture',
-    resources: [{ resourceId: 'resource', declarationIndex: 0, label: 'Saved configuration', revision: 1,
-      isSaved: true, shape: 'file', fileCount: 1, relativePath: 'config.json', syntax: 'json' }] };
-  const app = createApp({ render: () => h(component, { store: fixture.store, overview, visible: true }) });
-  app.component('FormSelect', FormSelect); app.mount(holder);
-  return { holder, dispose() { app.unmount(); holder.remove(); } };
 }
 export async function exitDecision(store: ReturnType<typeof draftFixture>['store']) {
   const result = prepareAppExit(store.client)('close');

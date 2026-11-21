@@ -16,7 +16,7 @@ internal sealed class InitialConfigurationJournal(RuntimeInstance instance, Cont
         var blobs = new ImmutableBlobStore(instance, contracts);
         var path = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(instance.RuntimeRoot, journal.PlanPath));
         var reference = new BlobReference(journal.PlanPath, new FileInfo(path).Length, journal.PlanDigest);
-        var plan = new ConfigurationPlanCodec(instance, contracts, blobs).Read(reference);
+        var plan = new ConfigurationPlanCodec(instance, contracts, blobs).ReadStructure(reference);
         if (plan.InstanceId != instance.InstanceId || plan.OperationId != journal.OperationId || plan.JournalId != journal.JournalId || plan.Kind != journal.Kind)
             throw new IOException("missing_configuration_journal_plan_unbound");
         var effects = new FileEffectOutbox(database).Read(journal.JournalId);

@@ -88,8 +88,14 @@ public sealed class ConfigurationPlanCodec(RuntimeInstance instance, ContractRea
 
         internal FrozenConfigurationExchange ReadContents(RuntimeInstance runtime, JournalDocument physical)
         {
-            RequireReference(runtime, physical);
+            ReadStructure(runtime, physical);
             _owner.VerifyContents(Plan, State);
+            return Plan;
+        }
+
+        internal FrozenConfigurationExchange ReadStructure(RuntimeInstance runtime, JournalDocument physical)
+        {
+            RequireReference(runtime, physical);
             return Plan;
         }
 
@@ -116,6 +122,7 @@ public sealed class ConfigurationPlanCodec(RuntimeInstance instance, ContractRea
         held.Add(input);
         var plan = DecodeStream(input, held, out state);
         if (metadataOnly) return plan;
+        PhysicalPathPolicy.NormalizeWithoutLinks(plan.TargetPath);
         var references = plan.Before.Contents.Concat(plan.Candidate.Contents);
         if (state is not null) references = references.Concat(RunStateCodec.Contents(state));
         foreach (var content in references.Distinct()) held.Add(blobs.OpenVerified(content));
@@ -162,7 +169,7 @@ public sealed class ConfigurationPlanCodec(RuntimeInstance instance, ContractRea
         if (plan.InstanceId != instance.InstanceId || plan.OperationId == Guid.Empty || plan.JournalId == Guid.Empty ||
             plan.Kind is not (JournalKind.ConfigExchange or JournalKind.ConfigEdit))
             throw new IOException("configuration_plan_identity_invalid");
-        var target = PhysicalPathPolicy.NormalizeWithoutLinks(plan.TargetPath);
+        var target = PhysicalPathPolicy.NormalizeSyntax(plan.TargetPath);
         var root = Path.GetPathRoot(target)!;
         if (target == root || target != plan.TargetPath || IsWithin(instance.RuntimeRoot, target) || IsWithin(target, instance.RuntimeRoot))
             throw new IOException("configuration_plan_target_invalid");
@@ -210,6 +217,7 @@ public sealed class ConfigurationPlanCodec(RuntimeInstance instance, ContractRea
 
     private void VerifyContents(FrozenConfigurationExchange plan, FrozenRunState? state)
     {
+        PhysicalPathPolicy.NormalizeWithoutLinks(plan.TargetPath);
         var contents = plan.Before.Contents.Concat(plan.Candidate.Contents);
         if (state is not null) contents = contents.Concat(RunStateCodec.Contents(state));
         foreach (var blob in contents.Distinct()) blobs.Verify(blob);

@@ -15,11 +15,12 @@ export function useSurfaceAvailability(target: AvailableSurface, extensionId: ()
 }
 </script>
 <script setup lang="ts">
-import { computed, inject } from 'vue';
+import { computed, inject, watch } from 'vue';
 import type { SurfaceId, SurfaceContext } from '@nexuspipeline/extension-sdk';
 import type { SurfaceStore } from '../app/store-ports';
 import { registryKey } from './registry-context';
 import SurfaceOutlet from './SurfaceOutlet.vue';
+import { registerProjectDraft, type ProjectDraftBinding } from './project-draft';
 const props = defineProps<{
   target: SurfaceId;
   store: SurfaceStore;
@@ -29,7 +30,9 @@ const props = defineProps<{
   attemptId?: string;
   entry?: { extensionId: string; id: string };
   extensionIds?: readonly string[];
+  draftBinding?: ProjectDraftBinding;
 }>();
+const emit = defineEmits<{ 'draft-candidate': [candidate: string] }>();
 const registry = inject(registryKey);
 const context = computed<SurfaceContext>(() => ({
   surfaceId: props.target,
@@ -38,6 +41,14 @@ const context = computed<SurfaceContext>(() => ({
   ...(props.runId ? { runId: props.runId } : {}),
   ...(props.attemptId ? { attemptId: props.attemptId } : {})
 }));
+watch([context, () => props.extensionIds?.[0], () => props.draftBinding?.scriptId, () => props.draftBinding?.userId,
+  () => props.draftBinding?.scriptRevision], (_, __, cleanup) => {
+  const extension = props.extensionIds?.[0];
+  if (context.value.surfaceId === 'automation.binding.editor' && props.draftBinding && extension)
+    cleanup(registerProjectDraft(context.value, extension, {
+      read: () => props.draftBinding!, stage: candidate => emit('draft-candidate', candidate)
+    }));
+}, { immediate: true, flush: 'sync' });
 </script>
 <template>
   <SurfaceOutlet

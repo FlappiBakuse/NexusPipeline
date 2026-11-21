@@ -72,13 +72,13 @@ public sealed class RecoveryContinuationTests
         Assert.NotNull(lifecycle.RequestClose(closing, Guid.NewGuid()).Permit);
     }
 
-    [Fact(DisplayName = "Exit Draining Allows Only Intents Already Held At Its Freeze And Waits For Their Completion")]
+    [Fact(DisplayName = "Maintenance Draining Allows Only Intents Already Held At Its Freeze And Waits For Their Completion")]
     public void FreezesDrainIntents()
     {
         var (index, lifecycle, manager) = Ready(); var accepted = Guid.NewGuid(); var late = Guid.NewGuid();
         index.UpdateResourceHolds(RecoveryHoldOwner.ConfigurationOperations, [new(accepted, "slot:a", "pending")]);
-        var closing = Guid.NewGuid();
-        Assert.Equal("recovery_pending", lifecycle.RequestClose(closing, Guid.NewGuid()).ReasonCode);
+        using var drain = lifecycle.BeginCompletionDrain(Guid.NewGuid());
+        Assert.NotNull(drain);
         index.UpdateResourceHolds(RecoveryHoldOwner.ConfigurationOperations, [new(accepted, "slot:a", "pending"), new(late, "slot:b", "pending"),
             new(accepted, "slot:expanded", "pending")]);
         var expandedProof = index.AuthorizeContinuation(RecoveryHoldOwner.ConfigurationOperations, accepted, new HashSet<string> { "slot:expanded" })!;
@@ -89,10 +89,10 @@ public sealed class RecoveryContinuationTests
         using var lease = manager.TryContinue(acceptedProof, [new("slot:a", ResourceClaimMode.Mutation)]).Lease;
         Assert.NotNull(lease);
         Assert.Equal(ResourceLeaseDenial.HostUnavailable, manager.TryAcquire(Guid.NewGuid(), [new("unrelated", ResourceClaimMode.Reference)]).Denial);
-        Assert.Equal("recovery_pending", lifecycle.RequestClose(closing, Guid.NewGuid()).ReasonCode);
+        Assert.False(drain.TryReserve());
         index.UpdateResourceHolds(RecoveryHoldOwner.ConfigurationOperations, []);
-        Assert.Equal("accepted_writes_pending", lifecycle.RequestClose(closing, Guid.NewGuid()).ReasonCode);
-        lease.Dispose(); Assert.NotNull(lifecycle.RequestClose(closing, Guid.NewGuid()).Permit);
+        Assert.False(drain.TryReserve());
+        lease.Dispose(); Assert.True(drain.TryReserve());
         index.UpdateResourceHolds(RecoveryHoldOwner.ConfigurationOperations, [new(accepted, "slot:a", "pending")]);
         Assert.Equal(ResourceLeaseDenial.HostUnavailable, manager.TryContinue(acceptedProof, [new("slot:a", ResourceClaimMode.Mutation)]).Denial);
     }

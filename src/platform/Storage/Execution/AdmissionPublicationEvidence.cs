@@ -1,6 +1,7 @@
 using System.Runtime.Versioning;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Platform.Serialization;
+using NexusPipeline.Platform.Storage.Configuration;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
 
@@ -10,6 +11,9 @@ namespace NexusPipeline.Platform.Storage.Execution;
 internal sealed class AdmissionPublicationEvidence(RuntimeInstance instance, StateDatabase database,
     ContractReader contracts, PayloadApplyRoots roots, Guid? completedCleanup = null) : IRecoveryEvidence
 {
+    public IReadOnlyList<ResourceIsolation> ProjectAdmission(RecoveryRegistrySnapshot verified) =>
+        new ScopedConfigurationRecovery(instance, database, contracts).Project(verified);
+
     public void VerifyAll(IReadOnlyList<RegisteredJournal> registered)
     {
         if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot)

@@ -7,7 +7,7 @@ using NexusPipeline.Platform.Serialization;
 namespace NexusPipeline.Host.Control.Http;
 
 [SupportedOSPlatform("windows")]
-internal sealed class ConfigurationValueControl(ControlAuthentication authority, ValueUseCases values, ContractReader contracts)
+internal sealed class ConfigurationValueControl(ControlAuthentication authority, ConfigurationValueUseCases values, ContractReader contracts)
 {
     internal void Map(WebApplication app)
     {

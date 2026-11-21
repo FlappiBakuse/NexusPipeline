@@ -61,7 +61,7 @@ internal sealed class ExecutionAdmissionPreparation(object owner, RuntimeInstanc
             }
             var guards = new List<IDisposable>();
             var candidate = BuildAttempt(identity, draft.Draft.Explanation.Selection.Request, total, configurations, guards, held, retry);
-            var attempt = new AttemptPlanCodec(instance, contracts, new(instance, contracts)).Freeze(candidate); held.Add(attempt);
+            var attempt = new AttemptPlanCodec(instance, contracts, new(instance, contracts)).Freeze(candidate, total); held.Add(attempt);
             return new(owner, identity, total, attempt, new ReadOnlyDictionary<string, PreparedConfigurationRun>(configurations), guards.AsReadOnly(), held, draft.TimeBudget, network, roots, providers, draft.FirstPreparedAtUtc)
             {
                 Display = ExecutionRunDisplay.From(draft.Draft.Explanation.Selection, wire.RetryPolicy.MaximumAttempts, draft.Automatic), Emulators = builder.Emulators

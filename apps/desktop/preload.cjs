@@ -34,7 +34,7 @@ if (process.isMainFrame) {
       if (exiting === current) exiting = undefined;
     }
   });
-  const action = (type, url) => ipcRenderer.invoke('desktop.action', { type, sessionId, ...(url === undefined ? {} : { url }) });
+  const action = (type, fields) => ipcRenderer.invoke('desktop.action', { type, sessionId, ...fields });
   contextBridge.exposeInMainWorld('nexusDesktopChannel', Object.freeze({
     version: 1,
     presented: () => ipcRenderer.invoke('desktop.presented'),
@@ -53,8 +53,9 @@ if (process.isMainFrame) {
       return () => ipcRenderer.removeListener('desktop.exit-state', listener);
     },
     setLocale: locale => ipcRenderer.invoke('desktop.locale', locale),
-    chooseFile: () => action('file.select'), chooseFolder: () => action('folder.select'),
-    openExternal: url => action('external.open', url), hide: () => action('hide'), show: () => action('show'),
+    chooseFile: pickerId => action('file.select', { pickerId }), chooseFolder: pickerId => action('folder.select', { pickerId }),
+    releasePathPicker: pickerId => action('picker.release', { pickerId }),
+    openExternal: url => action('external.open', { url }), hide: () => action('hide'), show: () => action('show'),
     minimize: () => action('window.minimize'), toggleMaximize: () => action('window.maximize'),
     close: () => action('window.close'), windowState: () => action('window.state'),
     onWindowState: callback => {

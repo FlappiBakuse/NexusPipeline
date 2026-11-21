@@ -14,9 +14,7 @@ public sealed class FileTreeScanner(SnapshotBudget budget)
 {
     public FileTreeSnapshot Capture(string selectedRoot, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (budget.MaximumEntries < 1 || budget.MaximumTotalBytes < 0)
-            throw new ArgumentException("Invalid snapshot budget");
+        RequireBudget(cancellationToken);
         var root = PhysicalPathPolicy.NormalizeWithoutLinks(selectedRoot);
         var first = Scan(root, cancellationToken);
         var second = Scan(root, cancellationToken);
@@ -27,13 +25,24 @@ public sealed class FileTreeScanner(SnapshotBudget budget)
 
     internal FileTreeSnapshot CaptureArchive(string selectedRoot, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (budget.MaximumEntries < 1 || budget.MaximumTotalBytes < 0)
-            throw new ArgumentException("Invalid snapshot budget");
+        RequireBudget(cancellationToken);
         return Scan(PhysicalPathPolicy.NormalizeWithoutLinks(selectedRoot), cancellationToken);
     }
 
-    private FileTreeSnapshot Scan(string root, CancellationToken cancellationToken)
+    internal FileTreeSnapshot CaptureProtected(string root, TreeReadLease.CaptureSources sources, CancellationToken cancellationToken)
+    {
+        RequireBudget(cancellationToken);
+        return Scan(root, cancellationToken, sources);
+    }
+
+    private void RequireBudget(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (budget.MaximumEntries < 1 || budget.MaximumTotalBytes < 0)
+            throw new ArgumentException("Invalid snapshot budget");
+    }
+
+    private FileTreeSnapshot Scan(string root, CancellationToken cancellationToken, TreeReadLease.CaptureSources? sources = null)
     {
         FileAttributes attributes;
         try { attributes = File.GetAttributes(root); }
@@ -43,40 +52,39 @@ public sealed class FileTreeScanner(SnapshotBudget budget)
         var result = new List<FileTreeEntry>();
         long total = 0;
         var shape = (attributes & FileAttributes.Directory) != 0 ? FileObjectKind.Directory : FileObjectKind.File;
-        if (shape == FileObjectKind.File) result.Add(ReadFile(root, "", ref total, cancellationToken));
-        else
-        {
-            result.Add(new("", FileObjectKind.Directory, 0, null));
-            ReadDirectory(root, root, result, ref total, cancellationToken);
-        }
+        ReadEntry(root, root, "", attributes, result, ref total, cancellationToken, sources);
         if (result.Select(entry => entry.RelativePath).Distinct(StringComparer.OrdinalIgnoreCase).Count() != result.Count)
             throw new IOException("snapshot_path_collision");
         return new(shape, Array.AsReadOnly(result.OrderBy(entry => Encoding.UTF8.GetBytes(entry.RelativePath), Utf8PathComparer.Instance).ToArray()));
     }
 
-    private void ReadDirectory(string root, string directory, List<FileTreeEntry> result, ref long total, CancellationToken cancellationToken)
+    private void ReadEntry(string root, string path, string relative, FileAttributes attributes,
+        List<FileTreeEntry> result, ref long total, CancellationToken cancellationToken, TreeReadLease.CaptureSources? sources)
     {
-        foreach (var path in Directory.EnumerateFileSystemEntries(directory))
+        if ((attributes & FileAttributes.Directory) == 0)
+        {
+            using var temporary = sources is null ? new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read) : null;
+            var source = temporary ?? sources!.OpenFile(path, relative);
+            using var timing = sources is null ? default : StartupProfile.Measure(sources.HashMeasurement);
+            result.Add(ReadFile(source, relative, ref total, cancellationToken));
+            return;
+        }
+        sources?.HoldDirectory(path, relative);
+        result.Add(new(relative, FileObjectKind.Directory, 0, null));
+        foreach (var child in Directory.EnumerateFileSystemEntries(path))
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (result.Count >= budget.MaximumEntries) throw new IOException("snapshot_entry_limit");
-            PhysicalPathPolicy.NormalizeWithoutLinks(path);
-            var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
-            ValidateRelativePath(relative);
-            var attributes = File.GetAttributes(path);
-            if ((attributes & FileAttributes.Directory) != 0)
-            {
-                result.Add(new(relative, FileObjectKind.Directory, 0, null));
-                ReadDirectory(root, path, result, ref total, cancellationToken);
-            }
-            else result.Add(ReadFile(path, relative, ref total, cancellationToken));
+            PhysicalPathPolicy.NormalizeWithoutLinks(child);
+            var childRelative = Path.GetRelativePath(root, child).Replace('\\', '/');
+            ValidateRelativePath(childRelative);
+            ReadEntry(root, child, childRelative, File.GetAttributes(child), result, ref total, cancellationToken, sources);
         }
     }
 
-    private FileTreeEntry ReadFile(string path, string relative, ref long total, CancellationToken cancellationToken)
+    private FileTreeEntry ReadFile(FileStream source, string relative, ref long total, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        using var source = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
         var length = source.Length;
         total = checked(total + length);
         if (total > budget.MaximumTotalBytes) throw new IOException("snapshot_byte_limit");

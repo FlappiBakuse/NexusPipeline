@@ -88,9 +88,9 @@ internal sealed class StepEvidenceFactory(RuntimeInstance instance, StateDatabas
             EngineOutcome.Succeeded => "execution_engine_succeeded", EngineOutcome.Failed => "execution_engine_failed",
             EngineOutcome.NotStarted => "execution_not_started", _ => "execution_output_unverified"
         };
-        if (previousObservation is { } previous)
+        var prior = previousObservation is { } previous ? _reader.Read(binding, previous, false) : null;
+        if (prior is not null)
         {
-            var prior = _reader.Read(binding, previous, false);
             if (prior.Business != BusinessOutcome.Unverified) { business = prior.Business; reason = prior.ReasonCode; }
             if (prior.Engine is EngineOutcome.Succeeded or EngineOutcome.Failed) engine = prior.Engine;
         }
@@ -104,13 +104,23 @@ internal sealed class StepEvidenceFactory(RuntimeInstance instance, StateDatabas
         {
             business = BusinessOutcome.NotApplicable; reason = "execution_judgement_not_applicable";
         }
+        var dailyAdapterTerminal = false;
         if (judgement?.Mode == ExecutionJudgementMode.None && root is not null && taskAdapter is not null &&
             collected && close is null && acceptedClose is null)
         {
             var step = context.Total.Steps.Single(item => item.StepId == binding.StepId);
             var observed = AdapterObservationCodec.Read(_blobs, binding, rawOutput, step, taskAdapter);
-            var adapterDecision = AdapterBusinessPolicy.Decide(step.Tasks.Select(TaskAdapterProtocol.ReadTask).ToImmutableArray(), observed.Observations);
-            business = adapterDecision.Outcome; reason = adapterDecision.ReasonCode;
+            dailyAdapterTerminal = stopProof is null && DailyAdapterEvidence.Applies(step);
+            if (dailyAdapterTerminal)
+            {
+                var decisionDaily = DailyAdapterEvidence.Decide(step, observed, raw, engine, prior?.Engine == EngineOutcome.Succeeded);
+                business = decisionDaily.Outcome; reason = decisionDaily.ReasonCode;
+            }
+            else if (!DailyAdapterEvidence.Applies(step))
+            {
+                var adapterDecision = AdapterBusinessPolicy.Decide(step.Tasks.Select(TaskAdapterProtocol.ReadTask).ToImmutableArray(), observed.Observations);
+                business = adapterDecision.Outcome; reason = adapterDecision.ReasonCode;
+            }
         }
         var ordinary = context.Total.Steps.Single(item => item.StepId == binding.StepId);
         if (collected && raw.IsComplete && root is not null && exitCode == 0 && business == BusinessOutcome.Unverified &&
@@ -122,7 +132,6 @@ internal sealed class StepEvidenceFactory(RuntimeInstance instance, StateDatabas
         }
         if (close is not null || acceptedClose is not null)
         {
-            var prior = previousObservation is null ? null : _reader.Read(binding, previousObservation, false);
             business = prior?.Business ?? (!suppresses ? business : BusinessOutcome.Unverified);
             if (prior is { Business: not BusinessOutcome.Unverified }) reason = prior.ReasonCode;
             else if (business == BusinessOutcome.NotApplicable) reason = "execution_judgement_not_applicable";
@@ -138,7 +147,7 @@ internal sealed class StepEvidenceFactory(RuntimeInstance instance, StateDatabas
         var artifact = StepEvidenceCodec.Write(_blobs, new(StepEvidenceCodec.Format, 1, binding,
             collected ? "collected" : "observed", rawOutput, root, exitCode, engine, business, script?.Exchanges.Length ?? 0, reason, previousObservation,
             collected ? _reader.ClosureReference(binding) : null) { Stop = stop, Judgement = judgementEvidence, ProviderControl = providerControl, TaskAdapter = taskAdapter,
-                WorkspaceOutput = workspaceOutput });
+                WorkspaceOutput = workspaceOutput, DailyAdapterTerminal = dailyAdapterTerminal });
         return _reader.Read(binding, artifact, collected);
     }
 
@@ -147,13 +156,13 @@ internal sealed class StepEvidenceFactory(RuntimeInstance instance, StateDatabas
     {
         var document = StepEvidenceCodec.Read(_blobs, binding, evidence.Artifact);
         var business = prior?.Latest.Business ?? BusinessOutcome.Unverified;
-        if (document.Stop is null && document.Business == business) return evidence;
+        if (document.Stop is null && document.Business == business && !document.DailyAdapterTerminal) return evidence;
         var reason = prior is { Latest.Business: not BusinessOutcome.Unverified } ? prior.Latest.ReasonCode : evidence.Engine switch
             {
                 EngineOutcome.Succeeded => "execution_engine_succeeded", EngineOutcome.Failed => "execution_engine_failed",
                 EngineOutcome.NotStarted => "execution_not_started", _ => "execution_output_unverified"
             };
-        var artifact = StepEvidenceCodec.Write(_blobs, document with { Stop = null, Business = business, ReasonCode = reason });
+        var artifact = StepEvidenceCodec.Write(_blobs, document with { Stop = null, Business = business, ReasonCode = reason, DailyAdapterTerminal = false });
         return _reader.Read(binding, artifact, true);
     }
 

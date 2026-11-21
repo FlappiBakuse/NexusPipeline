@@ -49,7 +49,9 @@ internal sealed class RunProgressCapture(RuntimeInstance instance, StateDatabase
     {
         var binding = bound ?? ConfigurationRunBinding.Read(instance, database, contracts, session);
         var blobs = new ImmutableBlobStore(instance, contracts);
-        var archive = new FileTreeArchive(new(SnapshotBudget.Default), blobs);
+        var scanner = new FileTreeScanner(SnapshotBudget.Default);
+        var archive = new FileTreeArchive(scanner, blobs);
+        var swap = new ConfigurationSwap(scanner, archive);
         var revisions = new ConfigurationRevisionStore(instance, database, contracts);
         var result = ImmutableArray.CreateBuilder<RunProgressItem>();
         foreach (var resource in session.Resources)
@@ -72,17 +74,17 @@ internal sealed class RunProgressCapture(RuntimeInstance instance, StateDatabase
                 if (physical.Revision != registered.Revision || physical.Phase != registered.Phase ||
                     !sealedOutput && (physical.Phase != JournalPhase.Applied || session.Phase != ConfigurationRunPhase.Running || session.IsWriterAdmissionClosed))
                     throw new IOException("configuration_run_sampling_closed");
-                var workspace = ConfigurationJournalBinding.Read(instance, physical, contracts, database).Prepared ?? throw new IOException("configuration_run_workspace_missing");
-                using var backup = sealedOutput ? null : new ConfigurationSwap(new(SnapshotBudget.Default), archive).HoldWritableWorkspace(workspace);
-                if (sealedOutput && physical.Root.GetProperty("participants").GetArrayLength() != 2)
+                var child = ConfigurationJournalBinding.ReadForRestoration(instance, physical, contracts, database, verifyOutputContent: sealedOutput);
+                var workspace = child.Prepared ?? throw new IOException("configuration_run_workspace_missing");
+                if (sealedOutput && !ConfigurationJournalBinding.HasSealedOutput(physical))
                     throw new IOException("configuration_run_output_not_sealed");
-                var raw = sealedOutput ? workspace.Plan.Candidate : archive.Capture(frozen.Plan.TargetPath, default);
-                using var scene = sealedOutput ? null : TreeReadLease.Acquire(frozen.Plan.TargetPath, frozen.Plan.ParentIdentity, raw);
-                if (!sealedOutput) PhysicalTreeIdentity.RequireSingleLinks(frozen.Plan.TargetPath, raw.Snapshot);
+                var raw = workspace.Plan.Candidate;
+                using var backup = sealedOutput ? null : swap.HoldWritableWorkspace(workspace);
+                using var scene = sealedOutput ? null : archive.CaptureProtected(frozen.Plan.TargetPath, frozen.Plan.ParentIdentity, default, out raw);
                 ConfigurationOutputEvidence.Require(workspace, raw);
-                new ConfigurationContentValidation(blobs).Require(resource.OperationId, resource.Address, frozen.State.Source.Revision, frozen.Plan.EditPolicy!, raw.Snapshot);
-                var normalized = new ConfigurationTaskTransformation(blobs).Restore(resource.OperationId, frozen.State.Source, frozen.State.Tasks, raw.Snapshot);
-                new ConfigurationContentValidation(blobs).Require(resource.OperationId, resource.Address, frozen.State.Source.Revision, frozen.Plan.EditPolicy!, normalized);
+                var normalized = new ConfigurationContentValidation(blobs).RequireTransformed(resource.OperationId, resource.Address,
+                    frozen.State.Source.Revision, frozen.Plan.EditPolicy!, raw.Snapshot,
+                    tree => new ConfigurationTaskTransformation(blobs).Restore(resource.OperationId, frozen.State.Source, frozen.State.Tasks, tree));
                 var trigger = sealedOutput ? ConfigurationSyncTrigger.Finalization : ConfigurationSyncTrigger.InitialDetection;
                 var baseline = ConfigurationSynchronizationPolicy.Evaluate(frozen.State.Source.Tree, normalized, elapsed, true, trigger);
                 var current = ConfigurationSynchronizationPolicy.Evaluate(saved.Tree, normalized, elapsed, true, trigger);

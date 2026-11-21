@@ -42,9 +42,15 @@ internal sealed class NativeConfigurationControl(ControlAuthentication authority
             var request = authority.Require(context, ControlCapability.NativeConfigurationOpen); Query(context);
             using var body = await ControlRequestBody.ReadAsync(context, 4096);
             var root = body.Root;
-            ControlRequestBody.RequireMembers(root, "sessionId", "bindingId", "expectedBindingRevision", "expectedScriptRevision", "candidateId");
+            ControlRequestBody.RequireMembers(root, "sessionId", "bindingId", "expectedBindingRevision", "expectedScriptRevision", "candidateId", "draft", "draftCandidateId");
+            var scriptRevision = Revision(root, "expectedScriptRevision");
+            var draft = ReadDraft(root, scriptRevision);
             var selection = new BindingEditorSelection(Identity(root, "sessionId"), Identity(root, "bindingId"),
-                Revision(root, "expectedBindingRevision"), Revision(root, "expectedScriptRevision"), Candidate(root));
+                draft is null ? Revision(root, "expectedBindingRevision") : DraftRevision(root), scriptRevision, Candidate(root))
+            {
+                Draft = draft,
+                DraftCandidateId = root.TryGetProperty("draftCandidateId", out var prior) ? ControlRequestBody.Uuid(prior) : null
+            };
             var opened = await bindings.OpenAsync(request.SubjectId, selection,
                 () => request.Require(ControlCapability.NativeConfigurationOpen), context.RequestAborted);
             return Results.Json(new { session = opened.Session is { } status ? Public(status) : null, opened.Options, opened.Issue, opened.CanResume },
@@ -58,8 +64,14 @@ internal sealed class NativeConfigurationControl(ControlAuthentication authority
             var id = ControlQueryValues.Id(sessionId);
             var result = await edits.SaveBindingAsync(Identity(body.Root, "operationId"), request.SubjectId, id,
                 Revision(body.Root, "expectedSessionRevision"), Candidate(body.Root), DateTimeOffset.UtcNow);
-            return Results.Json(new { session = Public(edits.Read(id, request.SubjectId)!), result.Inspection, result.CanResume },
+            return Results.Json(new { session = Public(edits.Read(id, request.SubjectId)!), result.Inspection, result.CanResume, result.DraftCandidate },
                 NotificationUseCases.Json);
+        });
+        app.MapPost("/control/v1/configuration/editor/drafts/{draftId}/discard", (HttpContext context, string draftId) =>
+        {
+            var request = authority.Require(context, ControlCapability.ConfigurationEdit); Query(context);
+            edits.Drafts.Discard(ControlQueryValues.Id(draftId), request.SubjectId);
+            return Results.Json(new { discarded = true }, NotificationUseCases.Json);
         });
         app.MapPost("/control/v1/configuration/editor/{sessionId}/resume-binding", async (HttpContext context, string sessionId) =>
         {
@@ -97,6 +109,15 @@ internal sealed class NativeConfigurationControl(ControlAuthentication authority
     private static long Revision(JsonElement value, string name) => value.TryGetProperty(name, out var member) &&
         member.ValueKind == JsonValueKind.Number && member.TryGetInt64(out var revision) && revision is >= 1 and <= 9007199254740991
         ? revision : throw new ControlRequestException(400, "request_revision_invalid");
+    private static long DraftRevision(JsonElement value) =>
+        value.TryGetProperty("expectedBindingRevision", out var revision) && revision.ValueKind == JsonValueKind.Number &&
+        revision.TryGetInt64(out var number) && number == 0 ? number : throw new ControlRequestException(400, "request_revision_invalid");
+    private static DraftBindingIdentity? ReadDraft(JsonElement root, long scriptRevision)
+    {
+        if (!root.TryGetProperty("draft", out var draft)) return null;
+        ControlRequestBody.RequireMembers(draft, "userId", "scriptId");
+        return new(Identity(draft, "userId"), Identity(draft, "scriptId"), scriptRevision);
+    }
     private static string? Candidate(JsonElement value)
     {
         if (!value.TryGetProperty("candidateId", out var member)) return null;

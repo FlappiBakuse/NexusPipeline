@@ -10,6 +10,7 @@ internal sealed class JournalHistoryProtection : IDisposable
     private readonly List<FileStream> _revisions = [];
     private readonly List<string> _names = [];
     private readonly List<JournalDocument> _documents = [];
+    private readonly bool _requireFreshInventory;
     private IReadOnlyList<JournalDocument>? _view;
     private readonly StableDirectoryLease _directoryLease;
     private StableDirectoryLease? _planDirectory;
@@ -18,16 +19,20 @@ internal sealed class JournalHistoryProtection : IDisposable
     internal Guid JournalId { get; private set; }
     internal long TotalBytes { get; private set; }
 
-    private JournalHistoryProtection(string directory)
-    { _directory = directory; _directoryLease = StableDirectoryLease.Acquire(directory); }
+    private JournalHistoryProtection(string directory, bool requireFreshInventory)
+    {
+        _directory = directory;
+        _requireFreshInventory = requireFreshInventory;
+        _directoryLease = StableDirectoryLease.Acquire(directory);
+    }
 
-    internal static JournalHistoryProtection? TryAcquire(string directory)
+    internal static JournalHistoryProtection? TryAcquire(string directory, bool requireFreshInventory = false)
     {
         var names = Directory.EnumerateFileSystemEntries(directory).Take(MaximumProtectedRevisions + 1)
             .Order(StringComparer.Ordinal).ToArray();
         if (names.Length > MaximumProtectedRevisions) return null;
         using var paths = JournalStore.HoldHistoryDirectory(directory, names.Length);
-        var result = new JournalHistoryProtection(directory);
+        var result = new JournalHistoryProtection(directory, requireFreshInventory);
         try
         {
             foreach (var path in names)
@@ -72,7 +77,7 @@ internal sealed class JournalHistoryProtection : IDisposable
 
     internal IReadOnlyList<JournalDocument> Read()
     {
-        if (DirectoryAttributeScope.FirstRead(this)) RequireInventory();
+        if (_requireFreshInventory || DirectoryAttributeScope.FirstRead(this)) RequireInventory();
         return _view ??= Array.AsReadOnly(_documents.ToArray());
     }
 

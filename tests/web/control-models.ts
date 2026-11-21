@@ -6,11 +6,11 @@ import { adapterResult } from '../../apps/web/src/pages/adapter-results';
 export async function run(): Promise<string[]> {
   const selection = { bindingId: 'binding', expectedBindingRevision: 2, extensionId: 'bettergi',
     expectedInstalledRevision: 1, resources: [] };
-  const discovery = adapterResult({ source: { bindingId: 'binding', bindingRevision: 2, extensionId: 'bettergi',
+  const discovery = adapterResult({ source: { bindingId: 'binding', bindingRevision: 2, scriptRevision: 3, extensionId: 'bettergi',
     installedRevision: 1, resources: [] }, diagnostics: [],
     coverage: { selected: 1, projected: 1, retrySafe: 1, isComplete: true, hasBlockingDiagnostics: false },
     gamePathCheck: 'notApplicable', tasks: [{ taskId: 'task', title: '任务', titleLocales: {}, isSelected: true, isEnabled: true }] },
-    'discover', selection, undefined, '');
+    'discover', selection, undefined, '', 3);
   assert.equal(discovery.tasks[0]?.title, '任务');
   const cases = ['adapter discovery accepts an empty optional locale map and preserves the task title'];
   const preview = { hasRunnable: true, canPrepareInitialConfiguration: false, hasBlockedItems: false, reasonCode: null, completionAction: 'hibernate',

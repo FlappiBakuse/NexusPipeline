@@ -16,6 +16,7 @@ public sealed class ResourceLeaseManager(HostLifecycle lifecycle)
     private TaskCompletionSource? _changed;
     private int _waiters;
     public bool UsesRecoveryIndex(IRecoveryIndex candidate) => lifecycle.UsesRecoveryIndex(candidate);
+    public string? ReadConfigurationRecovery(Guid bindingId) => lifecycle.ReadConfigurationRecovery(bindingId);
 
     public ResourceLeaseAdmission TryAcquire(Guid operationId, IReadOnlyList<ResourceClaim> claims)
         => Acquire(operationId, claims, null);

@@ -232,18 +232,8 @@ public sealed class BlobReferenceIndex
         if (Directory.Exists(directory))
         {
             var physical = new JournalStore(_instance, _contracts).Read(journal.JournalId);
-            using var document = StrictJson.Parse(physical.Export());
-            var participants = document.RootElement.GetProperty("participants");
-            if (participants.GetArrayLength() > 2) throw new IOException("blob_reference_edit_participant_unknown");
-            if (participants.GetArrayLength() == 2)
-            {
-                if (participants[1].GetProperty("kind").GetString() != "file" || participants[1].GetProperty("identity").GetProperty("format").GetString() != "nexus.configuration.edit-output-reference")
-                    throw new IOException("blob_reference_edit_participant_unknown");
-                var workspace = new ConfigurationWorkspaceCodec(_contracts).Decode(participants[0].GetProperty("identity"), plan, journal.PlanDigest);
-                var codec = new EditOutputCodec(_instance, _contracts, _blobs);
-                var output = codec.Read(codec.ReadReference(participants[1].GetProperty("identity")), workspace, journal.PlanDigest, _database, verifyContents: false);
-                references.AddRange(output.Plan.Candidate.Contents);
-            }
+            var bound = ConfigurationJournalBinding.ReadForRestoration(_instance, physical, _contracts, _database);
+            if (ConfigurationJournalBinding.HasSealedOutput(physical)) references.AddRange(bound.Prepared!.Plan.Candidate.Contents);
         }
         if (journal.Phase == JournalPhase.Committed) _database.ReferenceFacts.Store(journal, references);
         return references;

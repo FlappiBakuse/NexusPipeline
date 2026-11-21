@@ -25,7 +25,7 @@ public sealed class ConfigurationImportTests
     {
         using var fixture = new Fixture(false);
         var imports = new ImportUseCases(fixture.Service(), new());
-        var tools = new McpConfigurationTools(new ValueUseCases(new(fixture.Base.Instance, fixture.Base.Database, new(),
+        var tools = new McpConfigurationTools(new ConfigurationValueUseCases(new(fixture.Base.Instance, fixture.Base.Database, new(),
             fixture.Lease, fixture.Resources)), imports);
         var parameters = System.Text.Json.JsonSerializer.SerializeToElement(new { name = "configuration_import", arguments = new
         {

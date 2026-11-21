@@ -3,14 +3,22 @@ using NexusPipeline.Core.Maintenance;
 
 namespace NexusPipeline.Core.Configuration;
 
+public static class ConfigurationRecoveryCodes
+{
+    public const string Pending = "configuration_recovery_pending";
+    public const string Lost = "configuration_original_lost";
+}
+
 public sealed record ResourceIsolation(string ResourceKey, Guid JournalId, string ReasonCode)
 {
     public ResourceClaimMode Mode { get; init; } = ResourceClaimMode.Mutation;
+    public bool CanOrdinaryExit { get; init; }
 }
 
 public sealed record RecoveryProjection(bool IsReady, long Revision, string? GlobalBlockReason,
     IReadOnlyList<ResourceIsolation> Isolations)
 {
+    public long RegistryRevision { get; internal init; }
     public IReadOnlyList<RecoveryResourceHold> ResourceHolds { get; init; } = [];
     public ImmutableArray<SnapshotCompletionProjection> SnapshotCompletions { get; internal init; } = [];
 }
@@ -19,6 +27,7 @@ public sealed record RecoveryResourceHold(Guid OperationId, string ResourceKey, 
 {
     public RecoveryHoldOwner? Owner { get; init; }
     public ResourceClaimMode Mode { get; init; } = ResourceClaimMode.Mutation;
+    public bool CanOrdinaryExit { get; init; }
 }
 
 public interface IRecoveryIndex
@@ -43,7 +52,7 @@ public sealed class RecoveryIndex : IRecoveryIndex
         {
             _snapshotCompletionGeneration = new();
             var next = new RecoveryProjection(false, checked(_current.Revision + 1), reasonCode, _current.Isolations)
-                { ResourceHolds = _current.ResourceHolds };
+                { ResourceHolds = _current.ResourceHolds, RegistryRevision = _current.RegistryRevision };
             Volatile.Write(ref _current, next);
             return next;
         }
@@ -80,7 +89,7 @@ public sealed class RecoveryIndex : IRecoveryIndex
             var revision = Math.Max(committedRevision, checked(_current.Revision + 1));
             _snapshotCompletionGeneration = new();
             Volatile.Write(ref _current, new(true, revision, null, frozen)
-                { ResourceHolds = _current.ResourceHolds, SnapshotCompletions = completions });
+                { ResourceHolds = _current.ResourceHolds, RegistryRevision = committedRevision, SnapshotCompletions = completions });
         }
     }
 

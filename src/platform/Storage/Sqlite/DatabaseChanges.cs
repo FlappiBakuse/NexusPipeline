@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using NexusPipeline.Platform.Storage.Configuration;
 
 namespace NexusPipeline.Platform.Storage.Sqlite;
 
@@ -32,7 +33,7 @@ internal sealed class DatabaseChanges : IDisposable
             {
                 if (DatabaseRelations.TracksParent(target)) DeletedParents.Add(target);
             }
-            else if (DatabaseRelations.TracksChild(target))
+            else if (DatabaseRelations.TracksChild(target) || ConfigurationCleanupInbox.Tracks(target))
             {
                 if (!Rows.TryGetValue(target, out var rows)) Rows.Add(target, rows = []);
                 rows.Add(rowId);

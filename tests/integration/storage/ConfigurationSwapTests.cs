@@ -9,7 +9,7 @@ using Xunit;
 
 namespace NexusPipeline.StorageTests;
 
-public sealed class ConfigurationSwapTests
+public sealed partial class ConfigurationSwapTests
 {
     [Theory(DisplayName = "A Reopened Plan Drives Real Same Volume Swap And Restores Original Bytes And Physical Objects")]
     [InlineData("missing", "missing")]
@@ -82,6 +82,16 @@ public sealed class ConfigurationSwapTests
             var unknown = Path.Combine(instance.RuntimeRoot, "journals", plan.JournalId.ToString("D"), "unknown");
             File.WriteAllText(unknown, "unexpected journal entry");
             Assert.Throws<IOException>(() => store.Read(plan.JournalId, opened));
+            File.Delete(unknown);
+        }
+        if (OperatingSystem.IsWindows())
+        {
+            using var paths = DirectoryAttributeScope.Hold(instance);
+            using var history = store.ProtectReadHistory(plan.JournalId, requireFreshInventory: true);
+            Assert.Equal(plan.JournalId, store.Read(plan.JournalId).JournalId);
+            var unknown = Path.Combine(instance.RuntimeRoot, "journals", plan.JournalId.ToString("D"), "unknown");
+            File.WriteAllText(unknown, "unexpected journal entry");
+            Assert.Throws<IOException>(() => store.Read(plan.JournalId));
             File.Delete(unknown);
         }
         File.WriteAllText(path, "changed after release");
@@ -224,11 +234,12 @@ public sealed class ConfigurationSwapTests
         Assert.Equal(fixture.Plan.Before.OriginalObjects, PhysicalTreeIdentity.Capture(fixture.Plan.TargetPath, restored));
     }
 
-    private static Fixture Create(string before, string candidate)
+    private static Fixture Create(string before, string candidate, Action<RuntimeInstance>? initialize = null)
     {
         var root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT") ?? throw new InvalidOperationException(), Guid.NewGuid().ToString("N"));
         var contracts = new ContractReader();
         var instance = new InstanceRoot(contracts).OpenOrCreate(Path.Combine(root, "runtime"));
+        initialize?.Invoke(instance);
         var parent = Path.Combine(root, "configuration");
         Directory.CreateDirectory(parent);
         var target = Path.Combine(parent, "target");

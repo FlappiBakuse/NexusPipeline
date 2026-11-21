@@ -11,29 +11,45 @@ internal sealed class DesktopExitWatch(NativeClientBinding binding, HostLifecycl
     private bool _ending;
     private readonly CancellationTokenSource _stop = CancellationTokenSource.CreateLinkedTokenSource(application.ApplicationStopping);
 
-    public void Begin(Guid sessionId)
+    public void Begin(HostClosePermit permit)
     {
         lock (_gate)
         {
-            if (!_ending && (_watch is null || _watch.IsCompleted)) _watch = WatchAsync(sessionId);
+            if (!_ending) _watch = WatchAsync(permit);
         }
     }
 
-    private async Task WatchAsync(Guid sessionId)
+    private async Task WatchAsync(HostClosePermit permit)
     {
+        using var waiting = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
+        var remaining = permit.ExpiresAt - TimeProvider.System.GetUtcNow();
+        waiting.CancelAfter(remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero);
+        var finalizing = false;
         try
         {
-            if (waitForFamilyExit is null) await binding.WaitForExitAsync(_stop.Token);
-            else await waitForFamilyExit(_stop.Token);
-            if (lifecycle.CanFinalizeAfterExit(sessionId)) application.StopApplication();
+            if (waitForFamilyExit is null) await binding.WaitForExitAsync(waiting.Token);
+            else await waitForFamilyExit(waiting.Token);
+            if (lifecycle.CanFinalizeAfterExit(permit.SessionId, permit.PermitId))
+            {
+                finalizing = true;
+                application.StopApplication();
+            }
             else Console.Error.WriteLine("desktop_exit_recovery_changed");
         }
         catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (waiting.IsCancellationRequested)
+        {
+            Console.Error.WriteLine("desktop_exit_permit_expired");
+        }
         catch (Exception exception) when (exception is IOException or System.ComponentModel.Win32Exception or InvalidOperationException)
         {
             var reason = exception is IOException && exception.Message.StartsWith("worker_stopped_family_", StringComparison.Ordinal)
                 ? exception.Message : exception.GetType().Name;
             Console.Error.WriteLine("desktop_exit_unverified:" + reason);
+        }
+        finally
+        {
+            if (!finalizing) lifecycle.AbandonClose(permit.SessionId, permit.CorrelationId);
         }
     }
 

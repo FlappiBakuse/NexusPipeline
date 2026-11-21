@@ -203,6 +203,13 @@ internal sealed class RunBudgetOwner(InstanceLease lease)
         Remove(receipt.Facts.RunId);
     }
 
+    internal void ReleaseStoppedIsolation(StateDatabase database, AcceptedExecutionAdmission accepted)
+    {
+        Require(database);
+        RequireMeasured(accepted);
+        Remove(Guid.Parse(accepted.Prepared.Total.Plan.ReadWire().RunId));
+    }
+
     private void Remove(Guid runId)
     {
         MeasuredRun? removed;

@@ -5,7 +5,7 @@ import { initialValue, schemaAt } from '../control/schema';
 import type { AutomationDraft } from '../app/automation-draft';
 import type { AutomationBundle } from '../control/wire.generated';
 import { copyDraft } from '../app/draft-copy';
-import { accountDraft, accountKey, clearAccountDraft, canCancelAccount } from './account-draft';
+import { accountDraft, accountKey, clearAccountDraft, canCancelAccount, replaceAccountBindings } from './account-draft';
 import { hookPathKey } from './hook-paths';
 import { scriptPathKey, scriptPaths } from './script-paths';
 import { templateKey } from './script-template';
@@ -14,6 +14,7 @@ import type { AutomationSession } from './automation-session';
 
 export type EntityKind = 'scripts' | 'users' | 'queues';
 export const entityTitles: Record<EntityKind, string> = { scripts: '脚本', users: '账号', queues: '队列' };
+const bindingRemovalBlocked = '请先在绑定中保存或取消配置编辑，再移除绑定。';
 interface QueueDraft {
   items: AutomationBundle['schedules'];
   baseline: AutomationBundle['schedules'];
@@ -66,7 +67,11 @@ export class AutomationEditor {
   readonly accountBindings = computed({
     get: () => accountDraft(this.store, this.selected.value).items,
     set: (items) => {
-      accountDraft(this.store, this.selected.value).items = items;
+      if (!replaceAccountBindings(this.store, this.selected.value, items)) {
+        this.session.error = bindingRemovalBlocked;
+        return;
+      }
+      if (this.session.error === bindingRemovalBlocked) this.session.error = '';
       this.store.dirty.add(this.draftKey.value);
     }
   });

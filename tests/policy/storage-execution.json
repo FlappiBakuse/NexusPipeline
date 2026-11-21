@@ -41,6 +41,7 @@
     "NexusPipeline.StorageTests.ExecutionHooksTests",
     "NexusPipeline.StorageTests.ExecutionPlanTests",
     "NexusPipeline.StorageTests.ExecutionPublicationTests",
+    "NexusPipeline.StorageTests.ExecutionRestorationTests",
     "NexusPipeline.StorageTests.ExecutionRuntimeTests",
     "NexusPipeline.StorageTests.ExecutionSequentialTests",
     "NexusPipeline.StorageTests.GenericConfigurationTests",

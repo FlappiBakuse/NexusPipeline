@@ -1,4 +1,5 @@
 using System.Reflection;
+using NexusPipeline.Core.Extensions;
 using NexusPipeline.Host.Composition;
 using NexusPipeline.Host.Desktop;
 using NexusPipeline.Platform.Execution.Judgement;
@@ -20,7 +21,12 @@ if (interactiveDesktopLaunch)
 }
 
 if (args is ["install-bundle", "--runtime-root", var installationRoot, "--bundle", var bundleRoot] && OperatingSystem.IsWindows())
-    return await NexusPipeline.Host.Desktop.DesktopStartup.RunAsync(installationRoot, 0, installationBundle: bundleRoot);
+    return await DesktopStartup.RunAsync(installationRoot, 0, installationBundle: (bundleRoot, ExtensionStoreChannel.Stable));
+
+#if NEXUS_TEST_HOST
+if (args is ["install-bundle", "--runtime-root", var testRoot, "--bundle", var testBundle, "--channel", "develop"] && OperatingSystem.IsWindows())
+    return await DesktopStartup.RunAsync(testRoot, 0, installationBundle: (testBundle, ExtensionStoreChannel.Develop));
+#endif
 
 if (args is ["--mumu-live-capture-worker"] && OperatingSystem.IsWindows())
     return await NexusPipeline.Platform.Media.MuMuLiveWorker.RunAsync();

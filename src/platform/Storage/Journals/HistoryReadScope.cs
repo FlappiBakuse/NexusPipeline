@@ -11,6 +11,7 @@ internal sealed class HistoryReadScope : IDisposable
     private readonly HistoryReadScope? _previous = _current;
     private readonly StateDatabase _database;
     private readonly HistoryReadScope? _owner;
+    private readonly bool _observeExternalCommits;
     private HistoryReadScope Owner => _owner ?? this;
     private readonly int _thread = Environment.CurrentManagedThreadId;
     private readonly DatabaseReadScope _reads;
@@ -23,9 +24,10 @@ internal sealed class HistoryReadScope : IDisposable
     private bool _reading;
     private bool _disposed;
 
-    internal HistoryReadScope(RuntimeInstance instance, StateDatabase database, ContractReader contracts)
+    internal HistoryReadScope(RuntimeInstance instance, StateDatabase database, ContractReader contracts, bool observeExternalCommits = false)
     {
         _database = database;
+        _observeExternalCommits = observeExternalCommits;
         if (_previous is { } prior && ReferenceEquals(prior._database, database)) _owner = prior.Owner;
         _reads = DatabaseReadScope.Hold(database.DatabasePath);
         try
@@ -73,7 +75,7 @@ internal sealed class HistoryReadScope : IDisposable
         return value;
     }
 
-    private static long? ReadVersion(HistoryReadScope scope) => scope._database.RuntimeLease is not null
+    private static long? ReadVersion(HistoryReadScope scope) => !scope._observeExternalCommits && scope._database.RuntimeLease is not null
         ? scope._database.ReadInstallationVersion(DatabaseDomain.Runtime)?.Runtime
         : (long)DatabaseConnections.Scalar(scope._sql!, "PRAGMA main.data_version;");
 

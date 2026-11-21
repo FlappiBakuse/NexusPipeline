@@ -34,27 +34,31 @@ public sealed class ConfigurationRecoveryHandler : IJournalRecoveryHandler
         return new Work(() =>
         {
             initial.MaterializeIfAbsent(frozen);
+            using var history = OperatingSystem.IsWindows() && _executionLease is not null
+                ? JournalReadScope.Hold(new(_instance, _contracts), frozen.JournalId, requireFreshInventory: true) : null;
             if (_executionLease is not null)
             {
                 if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
                 new EditOutputRecorder(_instance, _database, _contracts, _executionLease).SealRecoveredRun(frozen.JournalId);
             }
-            return CreateSession(frozen.JournalId);
+            var session = CreateSession(frozen.JournalId);
+            var retry = _executionLease is not null && frozen.Phase == JournalPhase.Quarantined && session.Inspect() is { CanRestore: true };
+            return new ConfigurationRecovery(session).Recover(retry) switch
+            {
+                ConfigurationRecoveryResult.NotExecuted => JournalRecoveryResult.NotExecuted,
+                ConfigurationRecoveryResult.Restored => JournalRecoveryResult.Restored,
+                ConfigurationRecoveryResult.Quarantined => JournalRecoveryResult.Quarantined,
+                ConfigurationRecoveryResult.AlreadyCompleted => JournalRecoveryResult.AlreadyCompleted,
+                _ => throw new InvalidOperationException("configuration_recovery_result_unknown")
+            };
         }, parent is { } id ? [id] : []);
     }
 
     private ConfigurationRecoverySession CreateSession(Guid id) => new(_instance, id, _contracts, _database, () => _writers(id));
 
-    private sealed class Work(Func<ConfigurationRecoverySession> open, IReadOnlyList<Guid> dependencies) : IJournalRecoveryWork
+    private sealed class Work(Func<JournalRecoveryResult> execute, IReadOnlyList<Guid> dependencies) : IJournalRecoveryWork
     {
         public IReadOnlyList<Guid> MustRunAfter => dependencies;
-        public JournalRecoveryResult Execute() => new ConfigurationRecovery(open()).Recover() switch
-        {
-            ConfigurationRecoveryResult.NotExecuted => JournalRecoveryResult.NotExecuted,
-            ConfigurationRecoveryResult.Restored => JournalRecoveryResult.Restored,
-            ConfigurationRecoveryResult.Quarantined => JournalRecoveryResult.Quarantined,
-            ConfigurationRecoveryResult.AlreadyCompleted => JournalRecoveryResult.AlreadyCompleted,
-            _ => throw new InvalidOperationException("configuration_recovery_result_unknown")
-        };
+        public JournalRecoveryResult Execute() => execute();
     }
 }

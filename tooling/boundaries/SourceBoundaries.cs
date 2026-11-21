@@ -110,7 +110,9 @@ internal static class SourceBoundaries
                         Error("SCHEDULE_NOTIFICATION_PORT_REQUIRED", identifier, dependency.ToDisplayString());
                     if (notifications && ownerNamespace == "NexusPipeline.Platform.Storage.Scheduling" &&
                         dependency.Name is not ("WorkInvocationEvidence" or "WorkStartEvidence" or "WorkNotificationOrigin" or "IWorkNotificationPorts") &&
-                        !(dependency.Name == "PersistentScheduleService" && source == "src/platform/Storage/Notifications/NotificationRuntime.cs"))
+                        !(dependency.Name == "PersistentScheduleService" && source == "src/platform/Storage/Notifications/NotificationRuntime.cs" &&
+                          identifier.FirstAncestorOrSelf<MethodDeclarationSyntax>() is
+                              { Identifier.ValueText: "BindSchedules", Parent: ClassDeclarationSyntax { Identifier.ValueText: "NotificationRuntime" } }))
                         Error("NOTIFICATION_WORK_EVIDENCE_REQUIRED", identifier, dependency.ToDisplayString());
                 }
                 var declaration = identifier.Ancestors().OfType<BaseTypeDeclarationSyntax>().FirstOrDefault();

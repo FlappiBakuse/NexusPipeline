@@ -78,7 +78,7 @@ internal sealed class ExecutionProgress
     }
 
     internal ExecutionRunView Read(string subject)
-    { lock (_gate) return _view with { CanCancel = subject == _subject && !_view.CancellationRequested, Steps = Array.AsReadOnly(_view.Steps.ToArray()) }; }
+    { lock (_gate) return _view with { CanCancel = subject == _subject && !_view.CancellationRequested && _view.Phase != "reconciliationRequired", Steps = Array.AsReadOnly(_view.Steps.ToArray()) }; }
 
     internal void CancelAccepted(Guid runId, Guid attemptId)
     {

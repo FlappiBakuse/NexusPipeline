@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using System.Reflection.PortableExecutable;
 using System.Security.Cryptography;
 using NexusPipeline.Platform.Storage;
 
@@ -55,6 +56,17 @@ internal sealed class ProcessIdentityLease : IDisposable
                 ObjectDisposedException.ThrowIf(_disposed, this);
                 return _sha256;
             }
+        }
+    }
+
+    internal bool HasConsoleSubsystem()
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            _image.Position = 0;
+            using var reader = new PEReader(_image, PEStreamOptions.LeaveOpen);
+            return reader.PEHeaders.PEHeader?.Subsystem == Subsystem.WindowsCui;
         }
     }
 

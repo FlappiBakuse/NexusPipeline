@@ -36,7 +36,8 @@ internal static class ProjectControlChecks
         app.Use(ControlExceptionBoundary.InvokeAsync); app.Use(authority.InvokeAsync);
         new ProjectControl(authority, useCases, new()).Map(app);
         var frontends = new ExtensionFrontendControl(authority, provider.Activator); frontends.Map(app);
-        new ProjectFrontendControl(catalog.Instance.InstanceId, authority, frontends, useCases, new()).Map(app);
+        using var drafts = new NexusPipeline.Platform.Storage.Configuration.BindingDrafts(catalog.Instance, catalog.Database, new());
+        new ProjectFrontendControl(catalog.Instance.InstanceId, authority, frontends, useCases, new(), drafts).Map(app);
         await app.StartAsync();
         var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
         using var http = new HttpClient(new SocketsHttpHandler { UseProxy = false }) { BaseAddress = new(address) };

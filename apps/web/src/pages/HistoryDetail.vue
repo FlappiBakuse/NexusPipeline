@@ -24,6 +24,7 @@ const steps = ref<ActiveStep[]>([]);
 const report = ref<ActiveRun>();
 const error = ref('');
 const active = ref(true);
+const loading = ref(false);
 let owner: AbortController | undefined;
 const name = computed(() =>
   String(
@@ -52,29 +53,33 @@ async function load(): Promise<void> {
   const controller = new AbortController();
   owner = controller;
   error.value = '';
+  loading.value = true;
+  const runId = props.row.runId, attemptId = finalFacts.value.attemptId, userId = props.row.userId;
   try {
-    const base = '/control/v1/records/' + props.row.runId;
+    const base = '/control/v1/records/' + runId;
     const result = await props.store.client.read(
       base + '/attempts?limit=100&afterOrdinal=0',
-      value => historyAttempts(value, props.row.runId),
+      value => historyAttempts(value, runId),
       controller.signal
     );
     controller.signal.throwIfAborted();
     attempts.value = result;
     const details = await Promise.allSettled([
-      props.store.client.read(base + '/display', value => historyDisplay(value, props.row.runId), controller.signal),
+      props.store.client.read(base + '/display', value => historyDisplay(value, runId), controller.signal),
       props.store.client.read(
-        base + '/attempts/' + finalFacts.value.attemptId + '/report',
-        executionRun,
+        base + '/attempts/' + attemptId + '/report',
+        value => {
+          const report = executionRun(value);
+          if (report.runId !== runId || report.attemptId !== attemptId) throw new Error('history_report_unbound');
+          return report;
+        },
         controller.signal
       )
     ]);
     controller.signal.throwIfAborted();
     if (details[0].status === 'fulfilled') display.value = details[0].value;
-    if (details[1].status === 'fulfilled') {
-      report.value = details[1].value;
-      steps.value = details[1].value.steps.filter(step => !props.row.userId || step.userId === props.row.userId);
-    }
+    report.value = details[1].status === 'fulfilled' ? details[1].value : undefined;
+    steps.value = report.value?.steps.filter(step => !userId || step.userId === userId) || [];
     const failed = details.find(result => result.status === 'rejected');
     if (failed) throw failed.reason;
     if (props.attemptId) {
@@ -83,6 +88,8 @@ async function load(): Promise<void> {
     }
   } catch (reason) {
     if (!controller.signal.aborted) error.value = reason instanceof Error ? reason.message : String(reason);
+  } finally {
+    if (owner === controller) loading.value = false;
   }
 }
 function close(): void {
@@ -91,11 +98,11 @@ function close(): void {
   emit('close');
 }
 watch(
-  () => [props.visible, props.row.runId, props.row.userId] as const,
+  () => [props.visible, props.row.runId, props.row.userId, finalFacts.value.attemptId] as const,
   ([visible], before) => {
     owner?.abort();
     active.value = visible;
-    if (before?.[1] !== props.row.runId || before?.[2] !== props.row.userId) {
+    if (before?.[1] !== props.row.runId || before?.[2] !== props.row.userId || before?.[3] !== finalFacts.value.attemptId) {
       attempts.value = [];
       display.value = undefined;
       steps.value = [];
@@ -164,7 +171,7 @@ onBeforeUnmount(() => owner?.abort());
           <dd>{{ historyReason(finalFacts.reasonCode) }}</dd>
         </div>
       </dl>
-      <HistoryTasks :steps="steps" />
+      <HistoryTasks :steps="steps" :display="display" :loading="loading" />
       <AttemptDetail
         v-for="item in display || !row.userId ? attempts : []"
         :id="'history-attempt-' + item.attemptId"

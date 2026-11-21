@@ -54,6 +54,7 @@ registerMessages({
         </span>
       </div>
       <button
+        v-if="run.phase !== 'reconciliationRequired'"
         class="danger"
         :disabled="cancelling || !run.canCancel || !store.can('execution.cancel')"
         @click="emit('cancel', run)"

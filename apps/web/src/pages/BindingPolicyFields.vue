@@ -4,6 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { AutomationStore } from '../app/store-ports';
 import type { AutomationBundle } from '../control/wire.generated';
 import { desktop } from '../app/desktop';
+import { usePathPicker } from './editor-path-picker';
 import { notificationCatalog, type NotificationTask } from './notification-types';
 import { hookPaths } from './hook-paths';
 import { t } from '../app/locale';
@@ -22,6 +23,7 @@ const emit = defineEmits<{ 'update:modelValue': [value: Binding | Overrides] }>(
 const notifications = ref<NotificationTask[]>([]);
 const failure = ref('');
 const owner = new AbortController();
+const choosePath = usePathPicker();
 const locked = (group: keyof Overrides) => !props.global && props.overrides?.[group]?.syncEnabled === true;
 const groups = computed(() => props.global ? props.modelValue as Overrides : {
   general: locked('general') ? props.overrides!.general : props.modelValue as Binding,
@@ -45,8 +47,8 @@ function path(kind: 'pre' | 'post', value: string): void {
 }
 async function browse(kind: 'pre' | 'post'): Promise<void> {
   if (locked('advanced')) return;
-  const result = await desktop?.chooseFile();
-  if (result && !result.canceled && result.paths[0]) path(kind, result.paths[0]);
+  const id = props.id, selected = await choosePath('file');
+  if (selected && props.id === id) path(kind, selected);
 }
 onMounted(async () => {
   if (!props.store.can('notifications.read')) return;

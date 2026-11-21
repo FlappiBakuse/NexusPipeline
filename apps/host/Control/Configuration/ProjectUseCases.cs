@@ -4,6 +4,7 @@ using NexusPipeline.Core.Control;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Host.Control.Http;
 using NexusPipeline.Platform.Storage.Extensions;
+using NexusPipeline.Platform.Storage.Configuration;
 using NexusPipeline.Platform.Serialization;
 
 namespace NexusPipeline.Host.Control.Configuration;
@@ -13,7 +14,8 @@ internal sealed class ProjectUseCases(ProjectCompilationService compilation, Pro
     ScriptProjectService? scripts = null)
 {
     internal async ValueTask<object> ExecuteAsync(AuthenticatedControlRequest request, string action, JsonElement body, CancellationToken cancellation,
-        Action? requireOwner = null, string? previewSubject = null, CancellationToken ownerLifetime = default)
+        Action? requireOwner = null, string? previewSubject = null, CancellationToken ownerLifetime = default,
+        ProjectBindingDraft? bindingDraft = null, BindingDrafts? drafts = null)
     {
         void Current()
         {
@@ -45,10 +47,21 @@ internal sealed class ProjectUseCases(ProjectCompilationService compilation, Pro
             }
             var binding = Id(body, "bindingId"); var revision = body.GetProperty("expectedBindingRevision").GetInt64();
             var extension = body.GetProperty("extensionId").GetString()!;
-            if (action == "discover") return await compilation.DiscoverAsync(binding, revision, extension, body.GetProperty("selection"), Current, cancellation);
+            if (action == "discover") return await compilation.DiscoverAsync(binding, revision, extension, body.GetProperty("selection"), Current, cancellation, bindingDraft);
+            if (bindingDraft is not null && action is "select" or "result")
+            {
+                using var edits = ProjectProtectedEdits.Read(body, action == "select");
+                var operation = Id(body, "operationId");
+                var outcome = await compilation.DraftOperationAsync(drafts!, bindingDraft, operation, request.SubjectId, binding,
+                    body.GetProperty("expectedSelectionRevision").GetInt64(), extension, body.GetProperty("providerId").GetString()!,
+                    body.GetProperty("selection"), edits, action == "select", body.TryGetProperty("finish", out var finish) && finish.GetBoolean(),
+                    Current, cancellation);
+                return new { OperationId = operation, Found = outcome == "staged", Pending = outcome == "pending", Outcome = outcome,
+                    Revision = outcome == "staged" ? 1 : 0, CandidateId = outcome == "staged" ? operation : (Guid?)null };
+            }
             if (action == "result") return await ResultAsync(request, body, Current, cancellation);
             if (action == "preview") return await previews.PrepareAsync(compilation, subject, binding, revision, extension, Current,
-                cancellation, ownerLifetime, body.TryGetProperty("selection", out var draft) ? draft : null);
+                cancellation, ownerLifetime, body.TryGetProperty("selection", out var draft) ? draft : null, bindingDraft);
             if (action != "select") throw new ControlRequestException(404, "control_not_found");
             using var protectedInputs = ProjectProtectedEdits.Read(body, true);
             var result = await compilation.SaveAsync(Id(body, "operationId"), request.SubjectId, binding, revision,
@@ -90,12 +103,13 @@ internal sealed class ProjectUseCases(ProjectCompilationService compilation, Pro
 
     private static Guid Id(JsonElement body, string name) => ControlRequestBody.Uuid(body.GetProperty(name));
 
-    internal ProjectEditorContext ReadContext(AuthenticatedControlRequest request, Guid bindingId, string requiredProvider, Action current, bool readSelection = true)
+    internal ProjectEditorContext ReadContext(AuthenticatedControlRequest request, Guid bindingId, string requiredProvider, Action current,
+        bool readSelection = true, ProjectBindingDraft? draft = null)
     {
         request.Require(ControlCapability.ConfigurationRead); current();
         try
         {
-            var result = compilation.ReadContext(bindingId, current, requiredProvider, readSelection);
+            var result = compilation.ReadContext(bindingId, current, requiredProvider, readSelection, draft);
             if (result.ProtectedInputs.Count > 0) request.Require(ControlCapability.SecretStatus);
             return result;
         }

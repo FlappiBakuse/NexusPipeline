@@ -73,6 +73,14 @@ public sealed class ImmutableBlobStore
         Persist(source, expected, cancellationToken);
     }
 
+    internal BlobReference PersistCapturedContent(FileStream source, FileTreeEntry expected, CancellationToken cancellationToken)
+    {
+        var reference = new BlobReference($"blobs/content/{expected.Sha256}.bin", expected.SizeBytes, expected.Sha256!);
+        source.Position = 0;
+        Persist(source, reference, cancellationToken, measureCaptureCopy: true);
+        return reference;
+    }
+
     public void Verify(BlobReference reference)
     {
         using var input = OpenVerified(reference);
@@ -95,7 +103,7 @@ public sealed class ImmutableBlobStore
         catch { input.Dispose(); throw; }
     }
 
-    private bool Persist(Stream source, BlobReference reference, CancellationToken cancellationToken)
+    private bool Persist(Stream source, BlobReference reference, CancellationToken cancellationToken, bool measureCaptureCopy = false)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var path = Resolve(reference);
@@ -110,6 +118,7 @@ public sealed class ImmutableBlobStore
             using (var output = new FileStream(staging, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, FileOptions.WriteThrough))
             {
                 owned = PhysicalObjectIdentity.Read(output.SafeFileHandle);
+                using var timing = measureCaptureCopy ? StartupProfile.Measure("configuration.capture.copy") : default;
                 WriteStaged(source, output, reference, cancellationToken);
             }
             cancellationToken.ThrowIfCancellationRequested();

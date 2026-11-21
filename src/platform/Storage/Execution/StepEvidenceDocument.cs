@@ -19,6 +19,8 @@ internal sealed record StepEvidenceDocument(string Format, int Version, StepEvid
     public BlobReference? ProviderControl { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public BlobReference? TaskAdapter { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool DailyAdapterTerminal { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public BlobReference? WorkspaceOutput { get; init; }
 }
@@ -75,6 +77,7 @@ internal static class StepEvidenceCodec
                 value.ReasonCode != "execution_judgement_not_applicable" && value.ReasonCode != value.Stop?.ReasonCode) ||
             value.Generation != 0 && value.Judgement is null) throw Invalid();
         if (value.TaskAdapter is not null && (value.Stage != "collected" || value.RawOutput is null)) throw Invalid();
+        if (value.DailyAdapterTerminal && (value.TaskAdapter is null || value.Root is null || value.Stop is not null)) throw Invalid();
         if (value.WorkspaceOutput is not null && (value.Stage != "collected" || value.ProviderControl is null || value.Root is null)) throw Invalid();
         if (value.Stop is { } stop && (value.Stage != "collected" || value.Root is null ||
             stop.ElapsedMilliseconds < 0 || stop.LastOutputElapsedMilliseconds < 0 || stop.LastOutputElapsedMilliseconds > stop.ElapsedMilliseconds ||

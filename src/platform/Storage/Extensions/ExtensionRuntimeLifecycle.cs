@@ -60,7 +60,9 @@ public sealed class ExtensionRuntimeLifecycle : IExtensionRuntimeLifecycle, IAsy
         }
     }
 
-    public ITaskAdapterPort CreateAdapterPort(SecretAccessPolicy secrets)
+    public ITaskAdapterPort CreateAdapterPort(SecretAccessPolicy secrets) => CreateAdapterService(secrets);
+
+    internal TaskAdapterService CreateAdapterService(SecretAccessPolicy secrets)
     {
         lock (_gate)
         {

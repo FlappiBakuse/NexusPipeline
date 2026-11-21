@@ -4,16 +4,18 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using NexusPipeline.Core.Control;
+using NexusPipeline.Core.Configuration;
 using NexusPipeline.Host.Control.Configuration;
 using NexusPipeline.Host.Control.Notifications;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Extensions;
+using NexusPipeline.Platform.Storage.Configuration;
 
 namespace NexusPipeline.Host.Control.Http;
 
 [SupportedOSPlatform("windows")]
 internal sealed class ProjectFrontendControl(Guid instanceId, ControlAuthentication authority, ExtensionFrontendControl frontends,
-    ProjectUseCases projects, ContractReader contracts)
+    ProjectUseCases projects, ContractReader contracts, BindingDrafts drafts)
 {
     internal void Map(WebApplication app)
     {
@@ -35,12 +37,25 @@ internal sealed class ProjectFrontendControl(Guid instanceId, ControlAuthenticat
                 throw new UnauthorizedAccessException("project_frontend_instance_unbound");
             var ownerId = ControlRequestBody.Uuid(surface.GetProperty("entityId"));
             var isScript = surface.GetProperty("surfaceId").GetString() == "automation.script.editor";
+            ProjectBindingDraft? draft = null;
+            Guid? candidate = null;
+            if (body.Root.TryGetProperty("draftBinding", out var target))
+            {
+                if (isScript) throw new ControlRequestException(400, "project_draft_surface_invalid");
+                caller.Require(ControlCapability.AutomationWrite);
+                var owner = new DraftBindingIdentity(ControlRequestBody.Uuid(target.GetProperty("userId")),
+                    ControlRequestBody.Uuid(target.GetProperty("scriptId")), target.GetProperty("scriptRevision").GetInt64());
+                candidate = target.TryGetProperty("candidateId", out var id) ? ControlRequestBody.Uuid(id) : null;
+                draft = candidate is { } previous ? new(owner, drafts.ReadManaged(previous, caller.SubjectId, ownerId, owner),
+                    drafts.ReadProtections(previous, caller.SubjectId, ownerId, owner), previous) : new(owner, null);
+            }
             if ((action == "select") != body.Root.TryGetProperty("operationId", out _))
                 throw new ControlRequestException(400, "project_operation_identity_invalid");
             void Caller()
             {
                 caller.Require(capability);
                 caller.Require(ControlCapability.ExtensionsRead);
+                if (draft is not null) caller.Require(ControlCapability.AutomationWrite);
                 client.RequireCurrent();
                 if (action == "result") caller.Require(ControlCapability.OperationsRead);
                 if (!ReferenceEquals(frontend, frontends.Current(extensionId, activationId)))
@@ -52,15 +67,16 @@ internal sealed class ProjectFrontendControl(Guid instanceId, ControlAuthenticat
             {
                 var selected = isScript
                     ? ScriptOwner(projects.ReadScriptContext(caller, ownerId, extensionId, current))
-                    : BindingOwner(projects.ReadContext(caller, ownerId, extensionId, current, action is not ("select" or "result")));
+                    : BindingOwner(projects.ReadContext(caller, ownerId, extensionId, current, action is not ("select" or "result"), draft));
                 if (action == "context")
                 {
                     ControlRequestBody.RequireMembers(body.Root.GetProperty("input")); current(); return selected.Context;
                 }
                 var command = Command(action, selected, body.Root);
                 var subject = "project-ui:" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
-                    caller.SubjectId + "\n" + client.ClientId.ToString("D") + "\n" + surface.GetProperty("surfaceId").GetString() + "\n" + ownerId.ToString("D"))));
-                return await projects.ExecuteAsync(caller, action, command, cancellation, current, subject, client.Lifetime);
+                    caller.SubjectId + "\n" + client.ClientId.ToString("D") + "\n" + surface.GetProperty("surfaceId").GetString() + "\n" + ownerId.ToString("D") +
+                    (draft is null ? "" : $"\n{draft.Owner.UserId:D}\n{draft.Owner.ScriptId:D}\n{draft.Owner.ScriptRevision}\n{candidate:D}"))));
+                return await projects.ExecuteAsync(caller, action, command, cancellation, current, subject, client.Lifetime, draft, drafts);
             }, Caller, deadline.Token, client.Lifetime);
             return Results.Json(result, NotificationUseCases.Json);
         });

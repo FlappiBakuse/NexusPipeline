@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using NexusPipeline.Core.Automation;
 using NexusPipeline.Core.Execution;
@@ -13,6 +14,63 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class TargetInputsTests
 {
+    [Fact(DisplayName = "A PC Preview And Start Each Read The Shared Image Once And Respect The Admission Lifetime")]
+    public void ReadsPcImageOnce()
+    {
+        using var fixture = new ExecutionAdmissionFixture();
+        var source = fixture.Source;
+        const int size = 64 * 1024 * 1024;
+        var path = Path.Combine(Path.GetDirectoryName(source.Image)!, "game.exe");
+        using (var file = File.Create(path)) file.SetLength(size);
+        var catalog = source.Definitions.Read();
+        var script = catalog.Scripts.Single(item => item.Id == source.ScriptId);
+        var image = new AutomationPath(script.RootId, Path.GetFileName(path));
+        var target = new NexusPipeline.Core.Automation.AutomationTarget(AutomationTargetKind.Pc, false, 15, false,
+            new(image, [], image, AutomationPcReadiness.Process), null);
+        var changes = new AutomationChanges(catalog.Revision, [], [script with { Target = target }], [], [], [], [], []);
+        source.Definitions.Commit(AutomationDefinitionStore.Identity(Guid.NewGuid(), "pc-image-fixture", changes),
+            changes, PlanBuilderFixture.CreatedAt);
+
+        var request = source.Request(new BindingTarget(source.BindingA));
+        var before = ReadBytes();
+        using var draft = fixture.Service.DryRun(request, PlanBuilderFixture.CreatedAt);
+        var read = ReadBytes() - before;
+        var pc = Assert.Single(draft.ReadPlan()!.ReadWire().Steps).Target!.Pc!;
+        Assert.Equal(pc.Launch.Source.Sha256, pc.ReadyImage.Sha256);
+        Assert.InRange(read, (ulong)size, (ulong)(size * 3 / 2));
+        using (var writable = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.None)) writable.WriteByte(1);
+
+        var operation = Guid.NewGuid();
+        before = ReadBytes();
+        var accepted = fixture.Service.Start(operation, "pc-image-fixture", request, PlanBuilderFixture.CreatedAt);
+        read = ReadBytes() - before;
+        Assert.True(accepted.Acceptance.IsNew);
+        Assert.InRange(read, (ulong)size, (ulong)(size * 3 / 2));
+        using (var owner = fixture.Take(operation))
+        {
+            var ready = Assert.Single(owner.Prepared.Total.Plan.ReadWire().Steps).Target!.Pc!.ReadyImage;
+            Assert.NotEqual(pc.ReadyImage.Sha256, ready.Sha256);
+            Assert.Throws<IOException>(() => File.Open(path, FileMode.Open, FileAccess.Write, FileShare.Read).Dispose());
+        }
+        using var released = File.Open(path, FileMode.Open, FileAccess.Write, FileShare.None);
+    }
+
+    private static ulong ReadBytes()
+    {
+        if (!GetProcessIoCounters(new IntPtr(-1), out var counters)) throw new IOException("native_process_io_unavailable");
+        return counters.ReadBytes;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IoCounters
+    {
+        public ulong ReadOperations, WriteOperations, OtherOperations, ReadBytes, WriteBytes, OtherBytes;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetProcessIoCounters(IntPtr process, out IoCounters counters);
+
     [Fact(DisplayName = "Dry Run With A Mu Mu Declaration Never Starts Info And Requires Explicit Discovery")]
     public void RequiresExplicitDiscovery()
     {

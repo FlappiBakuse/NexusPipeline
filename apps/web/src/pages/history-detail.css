@@ -61,32 +61,6 @@
 .history-attempt-card .history-detail-metadata > div {
   min-height: 40px;
 }
-.history-tasks {
-  margin: 20px 0 34px;
-}
-.history-tasks h3 {
-  margin: 0 0 20px;
-  font-size: 14px;
-}
-.history-tasks > p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 12px;
-}
-.history-tasks ol {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 8px;
-}
-.history-tasks li {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  font-size: 13px;
-}
 @media (max-width: 600px) {
   .history-detail-metadata,
   .history-attempt-card .history-detail-metadata {

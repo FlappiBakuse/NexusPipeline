@@ -51,4 +51,8 @@ public sealed record DesktopChannel
     [JsonPropertyName("expiresAt")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ExpiresAt { get; init; }
+    /// <summary>Schema field <c>code</c>; constraints are owned by desktop-channel.schema.json.</summary>
+    [JsonPropertyName("code")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Code { get; init; }
 }

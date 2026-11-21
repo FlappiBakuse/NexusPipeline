@@ -13,10 +13,13 @@ export interface PlanAccount {
 
 const reasons: Record<string, string> = {
   execution_inputs_verified: '符合当前运行条件',
+  execution_capture_runtime_unbound: '截图助手校验失败，请检查 Host 安装文件。',
   execution_binding_disabled: '账号绑定未启用',
   execution_run_days_exhausted: '运行天数已用完',
   execution_daily_success_limit: '今日成功运行次数已达上限',
   execution_extension_disabled: '专项插件未启用',
+  configuration_original_lost: '脚本实例配置丢失，请重新编辑或导入。',
+  configuration_recovery_pending: '此脚本实例的配置还在恢复。',
   execution_queue_dependency_not_successful: '前置任务未满足成功条件',
   execution_no_enabled_bindings: '没有可用的账号绑定，请启用账号及其脚本实例。',
   execution_script_missing: '脚本实例不存在',
@@ -73,10 +76,13 @@ registerMessages({
   退出程序: 'Exit application',
   运行完成操作: 'After completion',
   符合当前运行条件: 'Eligible under current conditions',
+  '截图助手校验失败，请检查 Host 安装文件。': 'The capture helper failed verification. Check the Host installation files.',
   账号绑定未启用: 'The account binding is disabled',
   运行天数已用完: 'No run days remain',
   今日成功运行次数已达上限: 'The daily successful-run limit has been reached',
   专项插件未启用: 'The specialized plugin is disabled',
+  '脚本实例配置丢失，请重新编辑或导入。': 'The script instance lost its configuration. Edit or import it again.',
+  '此脚本实例的配置还在恢复。': 'This script instance still has configuration recovery pending.',
   前置任务未满足成功条件: 'A prerequisite has not succeeded',
   '没有可用的账号绑定，请启用账号及其脚本实例。':
     'No eligible account bindings. Enable an account and its script.',

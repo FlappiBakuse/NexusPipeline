@@ -6,7 +6,8 @@ import type { AutomationBundle } from '../../apps/web/src/control/wire.generated
 
 export async function bindingLayoutContract(fixture: HTMLElement, check: (value: unknown, name: string) => void): Promise<void> {
   const store = createStore(new ControlClient(location.origin));
-  store.state.capabilities = { instanceId: 'binding-layout', hostVersion: '0.18.0', capabilities: ['configuration.read'] };
+  store.state.capabilities = { instanceId: 'binding-layout', hostVersion: '0.18.0',
+    capabilities: ['configuration.read', 'configuration.edit', 'configuration.native.open'] };
   const user = { id: 'user', name: 'User' } as AutomationBundle['users'][number];
   const binding = { id: 'binding', userId: 'user', scriptId: 'script', enabled: false, runDays: -1,
     maximumSuccessfulRunsPerDay: -1, notifyEnabled: false, notificationTaskIds: [] } as AutomationBundle['bindings'][number];
@@ -16,7 +17,7 @@ export async function bindingLayoutContract(fixture: HTMLElement, check: (value:
   const mount = document.createElement('section'); mount.style.width = '900px'; fixture.append(mount);
   let configured = '';
   const app = createApp({ render: () => h(AccountFields, { store, modelValue: user, bindings, bundle,
-    existing: true, visible: true, onConfigure: id => { configured = id; } }) });
+    visible: true, onConfigure: id => { configured = id; } }) });
   app.mount(mount);
   try {
     await nextTick();

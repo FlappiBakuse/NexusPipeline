@@ -4,6 +4,7 @@ import { computed, onBeforeUnmount, ref } from 'vue';
 import type { AutomationBundle } from '../control/wire.generated';
 import type { AutomationStore } from '../app/store-ports';
 import { desktop } from '../app/desktop';
+import { usePathPicker } from './editor-path-picker';
 import { t, registerMessages } from '../app/locale';
 import { templateKey } from './script-template';
 import { scriptPaths, scriptPathKey, scriptRootValid, type ScriptPaths } from './script-paths';
@@ -18,6 +19,7 @@ type Script = AutomationBundle['scripts'][number];
 const props = defineProps<{ modelValue: Script; store: AutomationStore }>();
 const emit = defineEmits<{ 'update:modelValue': [value: Script] }>();
 const paths = computed(() => scriptPaths(props.store, props.modelValue));
+const choosePath = usePathPicker();
 const rootInput = ref<HTMLElement>();
 const { rootReady, rootMessage } = useScriptRoot(props.store, () => props.modelValue.id,
   () => props.modelValue.kind === 'generic' ? paths.value.root : '', rootInput);
@@ -39,15 +41,11 @@ function path(key: Exclude<keyof ScriptPaths, 'judgeLanguage' | 'emulatorRoot'>,
   }
   props.store.dirty.add(scriptPathKey(props.modelValue.id));
 }
-async function browse(key: Exclude<keyof ScriptPaths, 'judgeLanguage' | 'emulatorRoot'>, kind: string): Promise<void> {
+async function browse(key: Exclude<keyof ScriptPaths, 'judgeLanguage' | 'emulatorRoot'>, kind: 'file' | 'folder'): Promise<void> {
   if (key !== 'root' && !rootReady.value) return;
   const root = paths.value.root;
-  try {
-    const result = kind === 'folder' ? await desktop?.chooseFolder() : await desktop?.chooseFile();
-    if (result && !result.canceled && result.paths[0] && (key === 'root' || root === paths.value.root)) path(key, result.paths[0]);
-  } catch (reason) {
-    props.store.report(reason);
-  }
+  const selected = await choosePath(kind);
+  if (selected && root === paths.value.root) path(key, selected);
 }
 function keywords(key: 'successKeywords' | 'failureKeywords', value: string): void {
   update('judgement', {

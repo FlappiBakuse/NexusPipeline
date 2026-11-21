@@ -22,7 +22,7 @@ internal sealed class ConfigurationEditPreparation(RuntimeInstance instance, Sta
             foreach (var target in request.Targets)
             {
                 var targetPath = ConfigurationTargetPaths.Canonical(target.TargetPath);
-                var saved = revisions.Read(target.Address);
+                var saved = request.DraftBinding is null ? revisions.Read(target.Address) : null;
                 if ((saved?.Revision ?? 0) != target.ExpectedRevision) throw new ConfigurationException("configuration_revision_conflict");
                 if (saved is not null) ConfigurationRevisionPolicy.RequireCurrentContract(saved, target.Contract);
                 var before = archive.Capture(targetPath, default);

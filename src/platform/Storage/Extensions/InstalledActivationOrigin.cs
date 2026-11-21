@@ -130,7 +130,11 @@ internal sealed class InstalledActivationOrigin : IDisposable
             {
                 var saved = RecoveryJournalRegistry.ReadValidatedSnapshotInside(connection, transaction);
                 var settings = HostSettingsRows.ReadCurrent(connection, transaction);
-                if (settings.Revision != _settingsRevision || !saved.IsReady || saved.Isolations.Any(item => Conflicts(item.ResourceKey, item.Mode)) ||
+                var projection = _recovery.Current;
+                var isolations = projection.RegistryRevision == saved.Revision ? projection.Isolations : saved.Isolations;
+                if (settings.Revision != _settingsRevision || !saved.IsReady || !projection.IsReady ||
+                    isolations.Any(item => Conflicts(item.ResourceKey, item.Mode)) ||
+                    projection.ResourceHolds.Any(item => Conflicts(item.ResourceKey, item.Mode)) ||
                     ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, _installed.ExtensionId) != _installed ||
                     settings.Values.Extensions
                         .SingleOrDefault(item => item.ExtensionId == _installed.ExtensionId)?.Enabled != true) throw Invalid();

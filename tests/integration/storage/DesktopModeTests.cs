@@ -21,6 +21,61 @@ namespace NexusPipeline.StorageTests;
 
 public sealed class DesktopModeTests
 {
+    [Fact(DisplayName = "The Native Close Route Binds Signed Rejections And Releases A Disconnected Drain")]
+    public async Task ReleasesAbandonedClose()
+    {
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
+        await using var app = builder.Build();
+        var recovery = new RecoveryIndex(); var instance = Guid.NewGuid();
+        recovery.PublishVerified(0, 1, [new("config-a", Guid.NewGuid(), "writer_unknown")]);
+        var lifecycle = new HostLifecycle(recovery, TimeProvider.System);
+        using var binding = new NativeClientBinding(Environment.ProcessId);
+        await using var desktop = new DesktopControl(binding, instance, new(), lifecycle,
+            new DesktopExitWatch(binding, lifecycle, app.Lifetime));
+        desktop.Map(app); await app.StartAsync();
+        var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
+        using var http = new HttpClient(new SocketsHttpHandler { UseProxy = false }) { BaseAddress = new(address) };
+        using var connected = await http.GetAsync("/control/v1/desktop/session?correlationId=" + Guid.NewGuid());
+        connected.EnsureSuccessStatusCode();
+        var proof = new NexusPipeline.Platform.Security.DesktopProofReader(new ContractReader());
+        using var session = proof.Read(await connected.Content.ReadAsByteArrayAsync(), desktop.VerificationKeyBase64,
+            "desktop-session.schema.json");
+        var clientId = session.RootElement.GetProperty("clientId").GetGuid();
+        var sessionId = session.RootElement.GetProperty("sessionId").GetGuid();
+        var correlationId = Guid.NewGuid();
+        await Send(HttpStatusCode.Conflict, "close.request", correlationId);
+        Assert.Equal(HostLifecyclePhase.Running, lifecycle.Phase);
+        await Send(HttpStatusCode.OK, "file.select", Guid.NewGuid());
+
+        recovery.PublishVerified(1, 2, []);
+        using var active = lifecycle.TryEnterWrite(new HashSet<string> { "config-a" });
+        Assert.NotNull(active);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var connection = new CancellationTokenSource();
+        var pending = http.PostAsJsonAsync("/control/v1/desktop/authorize", Request("close.request", Guid.NewGuid()), connection.Token);
+        while (lifecycle.Phase != HostLifecyclePhase.Draining) await Task.Delay(20, deadline.Token);
+        connection.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
+        while (lifecycle.Phase != HostLifecyclePhase.Running) await Task.Delay(20, deadline.Token);
+        await Send(HttpStatusCode.OK, "file.select", Guid.NewGuid());
+
+        object Request(string type, Guid correlation) => new
+        { format = "nexus.desktop.channel", version = 1, instanceId = instance, clientId, sessionId, correlationId = correlation, type };
+
+        async Task Send(HttpStatusCode status, string type, Guid correlation)
+        {
+            using var reply = await http.PostAsJsonAsync("/control/v1/desktop/authorize", Request(type, correlation));
+            Assert.Equal(status, reply.StatusCode);
+            if (status != HttpStatusCode.Conflict) return;
+            using var rejection = proof.Read(await reply.Content.ReadAsByteArrayAsync(), desktop.VerificationKeyBase64,
+                "desktop-channel.schema.json");
+            Assert.Equal("close.rejected", rejection.RootElement.GetProperty("type").GetString());
+            Assert.Equal("recovery_pending", rejection.RootElement.GetProperty("code").GetString());
+            Assert.Equal(correlation, rejection.RootElement.GetProperty("correlationId").GetGuid());
+        }
+    }
+
     [Fact(DisplayName = "Only The Original Native Socket Owner Can Confirm An Actual Desktop Mode And Failed Or Retired Requests Keep The Prior Effective Mode")]
     public async Task ConfirmsOwnedMode()
     {

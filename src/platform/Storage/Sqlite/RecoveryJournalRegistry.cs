@@ -137,7 +137,16 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
     internal static RegisteredJournal ReadJournalInside(SqliteConnection connection, SqliteTransaction transaction, Guid journalId) =>
         FindJournalInside(connection, transaction, journalId) ?? throw new IOException("journal_not_registered");
 
-    private static RegisteredJournal? FindJournalInside(SqliteConnection connection, SqliteTransaction transaction, Guid journalId)
+    internal static (RegisteredJournal Journal, Dictionary<string, ResourceClaimMode> Claims) ReadWithClaimsInside(
+        SqliteConnection connection, SqliteTransaction transaction, Guid journalId)
+    {
+        var claims = new Dictionary<string, ResourceClaimMode>(StringComparer.Ordinal);
+        var journal = FindJournalInside(connection, transaction, journalId, claims) ?? throw new IOException("journal_not_registered");
+        return (journal, claims);
+    }
+
+    private static RegisteredJournal? FindJournalInside(SqliteConnection connection, SqliteTransaction transaction, Guid journalId,
+        Dictionary<string, ResourceClaimMode>? claims = null)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT operation_id,operation_kind,phase,revision,plan_path,plan_digest FROM main.operation_journals WHERE journal_id=$id;";
@@ -151,9 +160,26 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
             result = new(journalId, Guid.ParseExact(row.GetString(0), "D"), kind, phase,
                 row.GetInt64(3), row.GetString(4), row.GetString(5), []);
         }
-        command.CommandText = "SELECT resource_key FROM main.journal_resources WHERE journal_id=$id ORDER BY resource_key LIMIT 4097;";
+        command.CommandText = claims is null
+            ? "SELECT resource_key FROM main.journal_resources WHERE journal_id=$id ORDER BY resource_key LIMIT 4097;"
+            : "SELECT resource_key,MAX(registered),MAX(mode) FROM (" +
+              "SELECT resource_key,1 AS registered,NULL AS mode FROM main.journal_resources WHERE journal_id=$id UNION ALL " +
+              "SELECT resource_key,0 AS registered,mode FROM main.journal_resource_claims WHERE journal_id=$id" +
+              ") GROUP BY resource_key ORDER BY resource_key LIMIT 4097;";
         var resources = new List<string>();
-        using (var rows = command.ExecuteReader()) while (rows.Read()) resources.Add(rows.GetString(0));
+        using (StartupProfile.Measure("journal.resources-query"))
+        using (var rows = command.ExecuteReader())
+            while (rows.Read())
+            {
+                var key = rows.GetString(0);
+                resources.Add(key);
+                if (claims is null) continue;
+                if (rows.GetInt32(1) != 1) throw new IOException("configuration_hold_claims_unbound");
+                if (rows.IsDBNull(2)) continue;
+                var mode = (ResourceClaimMode)rows.GetInt32(2);
+                if (!Enum.IsDefined(mode)) throw new IOException("configuration_hold_claims_unbound");
+                claims.Add(key, mode);
+            }
         if (resources.Count is 0 or > 4096) throw new IOException("recovery_registry_resource_limit");
         result = result with { ResourceKeys = resources.AsReadOnly() };
         try { Validate(result); }

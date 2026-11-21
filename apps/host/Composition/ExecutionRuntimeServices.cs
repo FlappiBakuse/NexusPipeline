@@ -12,6 +12,7 @@ using NexusPipeline.Platform.Storage.Scheduling;
 using NexusPipeline.Platform.Storage.Sqlite;
 using NexusPipeline.Platform.Storage.Notifications;
 using NexusPipeline.Platform.Storage.Secrets;
+using NexusPipeline.Platform.Storage.Configuration;
 
 namespace NexusPipeline.Host.Composition;
 
@@ -22,6 +23,8 @@ internal sealed class ExecutionRuntimeServices : IAsyncDisposable
     private Task _consumerTask = Task.CompletedTask;
     private Task _retryTask = Task.CompletedTask;
     private Task _retentionTask = Task.CompletedTask;
+    private Task _configurationCleanupTask = Task.CompletedTask;
+    private readonly ConfigurationWorkspaceCleanup _configurationCleanup;
     private readonly NexusPipeline.Platform.Storage.Records.RecordHistoryRetention _retention;
     private int _stopped;
     internal HistoryProjection History { get; }
@@ -44,9 +47,10 @@ internal sealed class ExecutionRuntimeServices : IAsyncDisposable
         using var blobs = BlobReadScope.Hold(instance);
         var inbox = new ExecutionAdmissionInbox();
         _retention = new(database, new(instance, database, contracts, lease, resources, recovery, payloadRoots));
+        _configurationCleanup = new(instance, database, contracts, lease, resources);
         Admission = new(instance, database, contracts, lease, resources, recovery, inbox, new(5, 5, 30),
             judgementRuntime: new(PhysicalPathPolicy.RuntimeProcessPath(),
-                JudgementRuntimeDiscovery.FindPython()), providers: providers);
+                JudgementRuntimeDiscovery.FindPython()) { SingleFileCaptureHost = ExecutionCaptureInputs.IsSingleFileHost() }, providers: providers);
         History = new(instance, database, contracts, lease);
         Notifications = new(instance, database, contracts, lease, resources, recovery, secrets);
         try { Notifications.InitializeStartup(notifications); }
@@ -90,6 +94,7 @@ internal sealed class ExecutionRuntimeServices : IAsyncDisposable
         _consumerTask = Consumer.RunAsync(lifetime.ApplicationStopping);
         Scheduling.Start();
         _retryTask = Retry.RunAsync(_retryStopping.Token);
+        _configurationCleanupTask = _configurationCleanup.RunAsync(_retryStopping.Token);
         _retentionTask = Task.Run(async () =>
         {
             await History.RunAsync(_retryStopping.Token).ConfigureAwait(false);
@@ -104,7 +109,7 @@ internal sealed class ExecutionRuntimeServices : IAsyncDisposable
         finally
         {
             _shutdown.Dispose(); _retryStopping.Cancel();
-            try { await Task.WhenAll(_retryTask, _retentionTask).ConfigureAwait(false); }
+            try { await Task.WhenAll(_retryTask, _retentionTask, _configurationCleanupTask).ConfigureAwait(false); }
             finally
             {
                 try { await _consumerTask.ConfigureAwait(false); }

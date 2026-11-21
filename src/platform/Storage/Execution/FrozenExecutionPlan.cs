@@ -16,9 +16,16 @@ public sealed class PreparedExecutionPlan : IDisposable
     private List<IDisposable>? _held;
     private readonly FrozenExecutionPlan _plan;
     private readonly BlobReference _reference;
+    private readonly PlanInputLease _inputs;
 
-    internal PreparedExecutionPlan(FrozenExecutionPlan plan, BlobReference reference, List<IDisposable> held)
-        { _plan = plan; _reference = reference; _held = held; }
+    internal PreparedExecutionPlan(FrozenExecutionPlan plan, BlobReference reference, List<IDisposable> held, PlanInputLease inputs)
+        { _plan = plan; _reference = reference; _held = held; _inputs = inputs; }
+
+    internal void RequireInputs(BlobReference reference, ExecutionPlan wire)
+    {
+        if (Reference != reference) throw new IOException("run_attempt_total_plan_unbound");
+        _inputs.Require(wire);
+    }
 
     public FrozenExecutionPlan Plan
     {

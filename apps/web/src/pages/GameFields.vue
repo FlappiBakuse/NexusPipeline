@@ -5,6 +5,7 @@ import { useAdapterAvailability } from './adapter-availability';
 import type { AutomationBundle } from '../control/wire.generated';
 import type { AutomationStore } from '../app/store-ports';
 import { desktop } from '../app/desktop';
+import { usePathPicker } from './editor-path-picker';
 import { scriptPaths, scriptPathKey, type ScriptPaths } from './script-paths';
 import { t, registerMessages } from '../app/locale';
 registerMessages({ '客户端由脚本自身启动': 'The script launches its own client' });
@@ -14,6 +15,7 @@ type Target = NonNullable<Script['target']>;
 const props = defineProps<{ modelValue: Script; store: AutomationStore }>();
 const emit = defineEmits<{ 'update:modelValue': [value: Script] }>();
 const paths = computed(() => scriptPaths(props.store, props.modelValue));
+const choosePath = usePathPicker();
 const available = useAdapterAvailability(props.store, () => props.modelValue.extensionId || null, () => true, () => {});
 const policyPending = computed(() => props.modelValue.kind === 'specialized' && !available.details.value);
 const policy = computed(() => available.details.value?.manifest.specialized?.instancePolicy);
@@ -37,13 +39,12 @@ function path(key: Exclude<keyof ScriptPaths, 'judgeLanguage' | 'emulatorRoot'>,
     update({ android: manual });
   }
 }
-async function browse(key: Exclude<keyof ScriptPaths, 'judgeLanguage' | 'emulatorRoot'>): Promise<void> {
-  try {
-    const result = await desktop?.chooseFile();
-    if (result && !result.canceled && result.paths[0]) path(key, result.paths[0]);
-  } catch (reason) {
-    props.store.report(reason);
-  }
+async function browse(key: 'gamePath' | 'androidTool'): Promise<void> {
+  const mode = target.value.kind;
+  const selected = await choosePath('file');
+  if (!selected || mode !== target.value.kind) return;
+  if (key === 'gamePath') pcPath(selected);
+  else path(key, selected);
 }
 const target = computed<Target>(
   () =>

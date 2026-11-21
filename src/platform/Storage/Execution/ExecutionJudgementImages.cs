@@ -7,25 +7,33 @@ namespace NexusPipeline.Platform.Storage.Execution;
 public sealed record ExecutionJudgementRuntime(string BrokerExecutable, string? PythonExecutable)
 {
     public int CaptureFrameCount { get; init; } = 1;
+    internal bool SingleFileCaptureHost { get; init; }
 }
 
 internal static class ExecutionJudgementImages
 {
-    internal static ExecutionPlanJudgementWorker? Capture(AutomationJudgement judgement, ExecutionJudgementRuntime? runtime)
+    internal static ExecutionPlanJudgementWorker? Capture(AutomationJudgement judgement, ExecutionJudgementRuntime? runtime, PlanInputLease inputs)
     {
         if (judgement.Language == AutomationJudgementLanguage.Keywords) return null;
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
         if (runtime is null || judgement.Script is null) throw new IOException("execution_judgement_runtime_unavailable");
-        var broker = JudgementInterpreterLease.Inspect(runtime.BrokerExecutable);
+        var broker = ReadInterpreter(runtime.BrokerExecutable, inputs);
         if (!broker.RuntimeFiles.Any(file => file.RelativePath == Path.GetFileNameWithoutExtension(broker.Path) + ".deps.json"))
             throw new IOException("execution_judgement_broker_assets_missing");
         return new()
         {
-            Broker = ToWire(broker), Python = judgement.Language == AutomationJudgementLanguage.Python
-                ? ToWire(JudgementInterpreterLease.Inspect(runtime.PythonExecutable ?? throw new IOException("execution_judgement_python_unavailable"))) : null,
+            Broker = broker, Python = judgement.Language == AutomationJudgementLanguage.Python
+                ? ReadInterpreter(runtime.PythonExecutable ?? throw new IOException("execution_judgement_python_unavailable"), inputs) : null,
             ScriptSha256 = JudgementWorkerProtocol.Hash(JudgementWorkerProtocol.Utf8.GetBytes(judgement.Script)),
             MaximumInvocations = 4095, MaximumEvidenceBytes = 64L * 1024 * 1024
         };
+    }
+
+    private static ExecutionPlanInterpreterImage ReadInterpreter(string requested, PlanInputLease inputs)
+    {
+        var path = PhysicalPathPolicy.NormalizeWithoutLinks(requested);
+        var image = inputs.ReadImage(path, "judgement_interpreter_size_invalid");
+        return image with { RuntimeFiles = ExecutionHookImages.RuntimeFiles(path, inputs).ToArray() };
     }
 
     internal static JudgementInterpreterImage FromWire(ExecutionPlanInterpreterImage image) => new(image.Path, image.SizeBytes, image.Sha256,
@@ -44,15 +52,4 @@ internal static class ExecutionJudgementImages
         }
     }
 
-    private static ExecutionPlanInterpreterImage ToWire(JudgementInterpreterImage image) => new()
-    {
-        Path = image.Path, SizeBytes = image.SizeBytes, Sha256 = image.Sha256, Identity = Wire(image.Identity), ParentIdentity = Wire(image.ParentIdentity),
-        RuntimeFiles = image.RuntimeFiles.Select(file => new ExecutionPlanRuntimeFile
-        {
-            RelativePath = file.RelativePath, SizeBytes = file.SizeBytes, Sha256 = file.Sha256,
-            Identity = Wire(file.Identity), ParentIdentity = Wire(file.ParentIdentity)
-        }).ToArray()
-    };
-
-    private static FileTreePhysicalIdentity Wire(PhysicalObjectIdentity identity) => new() { VolumeSerial = identity.VolumeSerial, FileId = identity.FileId };
 }

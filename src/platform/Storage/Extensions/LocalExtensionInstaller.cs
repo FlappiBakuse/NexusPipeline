@@ -15,13 +15,13 @@ internal sealed class LocalExtensionInstaller(RuntimeInstance instance, StateDat
     ContractReader contracts, PayloadApplyRoots roots, ResourceLeaseManager resources, RecoveryIndex recovery,
     ExtensionRuntimeLifecycle runtime)
 {
-    internal async Task InstallAllAsync(string directory, CancellationToken cancellation)
+    internal async Task InstallAllAsync(string directory, ExtensionStoreChannel channel, CancellationToken cancellation)
     {
         directory = PhysicalPathPolicy.NormalizeWithoutLinks(directory);
         if (!Directory.Exists(directory)) throw new IOException("extension_bundle_missing");
         var trust = runtime.ReleaseTrust ?? throw new IOException("extension_release_trust_unprovisioned");
         var catalog = new ExtensionCatalogVerifier(contracts, trust.Policy).Verify(
-            Read(directory, "index.json"), Read(directory, "catalog.json"), Read(directory, "catalog.sig.json"), ExtensionStoreChannel.Stable);
+            Read(directory, "index.json"), Read(directory, "catalog.json"), Read(directory, "catalog.sig.json"), channel);
         var ids = catalog.Entries.Select(item => item.ExtensionId).ToArray();
         var evidence = new ExtensionInstalledEvidence(instance, database, contracts, roots);
         var selected = ids.Select(id => (Entry: catalog.Entries.SingleOrDefault(item => item.ExtensionId == id)

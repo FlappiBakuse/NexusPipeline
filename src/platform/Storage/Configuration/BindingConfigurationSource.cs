@@ -36,17 +36,25 @@ internal static class BindingConfigurationSource
             var script = catalog.Scripts.Single(item => item.Id == binding.ScriptId);
             var saved = stored.Revision;
             ConfigurationRevisionPolicy.RequireCurrentContract(saved, Contract(script));
-            if (saved.UserId != binding.UserId || saved.ScriptId != binding.ScriptId || saved.Tree.Shape != FileObjectKind.File ||
-                saved.Tree.Entries.Count != 1) throw new IOException("configuration_binding_source_invalid");
-            var entry = saved.Tree.Entries.Single();
-            using var stream = blobs.OpenVerified(new($"blobs/content/{entry.Sha256}.bin", entry.SizeBytes, entry.Sha256!));
-            var bytes = new byte[checked((int)stream.Length)]; stream.ReadExactly(bytes);
-            var source = BindingSourceCodec.Read(contracts.Read<NexusPipeline.Platform.Serialization.Protocol.AutomationBindingSource>(bytes,
-                "automation-binding-source.schema.json"));
-            var next = binding with { Source = source };
-            _ = Core.Automation.BindingScriptSource.Resolve(script, next);
-            return next;
+            if (saved.UserId != binding.UserId || saved.ScriptId != binding.ScriptId)
+                throw new IOException("configuration_binding_source_invalid");
+            return Apply(blobs, contracts, binding, script, saved.Tree);
         }).ToImmutableArray() };
+    }
+
+    internal static AutomationBinding Apply(ImmutableBlobStore blobs, ContractReader contracts, AutomationBinding binding,
+        AutomationScript script, FileTreeSnapshot tree)
+    {
+        if (tree.Shape != FileObjectKind.File || tree.Entries.Count != 1)
+            throw new IOException("configuration_binding_source_invalid");
+        var entry = tree.Entries.Single();
+        using var stream = blobs.OpenVerified(new($"blobs/content/{entry.Sha256}.bin", entry.SizeBytes, entry.Sha256!));
+        var bytes = new byte[checked((int)stream.Length)]; stream.ReadExactly(bytes);
+        var source = BindingSourceCodec.Read(contracts.Read<NexusPipeline.Platform.Serialization.Protocol.AutomationBindingSource>(bytes,
+            "automation-binding-source.schema.json"));
+        var next = binding with { Source = source };
+        _ = Core.Automation.BindingScriptSource.Resolve(script, next);
+        return next;
     }
 
     internal static ConfigurationRevisionChange Change(RuntimeInstance instance, ContractReader contracts, AutomationBinding binding,

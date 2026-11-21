@@ -17,20 +17,24 @@ internal sealed class StableDirectoryLease : IDisposable
         try
         {
             foreach (var path in ancestors)
-            {
-                var handle = CreateFile(PhysicalPathPolicy.NativePath(path), 0xa0, 3, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero);
-                if (handle.IsInvalid)
-                {
-                    handle.Dispose();
-                    throw new IOException("directory_lease_unavailable", new Win32Exception(Marshal.GetLastWin32Error()));
-                }
-                lease._handles.Add(handle);
-                PhysicalObjectIdentity.Read(handle);
-                if (!Directory.Exists(path)) throw new IOException("directory_lease_shape_changed");
-            }
+                lease._handles.Add(OpenEntry(path, out _));
             return lease;
         }
         catch { lease.Dispose(); throw; }
+    }
+
+    internal static SafeFileHandle OpenEntry(string path, out PhysicalObjectIdentity identity)
+    {
+        var handle = CreateFile(PhysicalPathPolicy.NativePath(path), 0xa0, 3, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero);
+        try
+        {
+            if (handle.IsInvalid)
+                throw new IOException("directory_lease_unavailable", new Win32Exception(Marshal.GetLastWin32Error()));
+            identity = PhysicalObjectIdentity.Read(handle);
+            if (!Directory.Exists(path)) throw new IOException("directory_lease_shape_changed");
+            return handle;
+        }
+        catch { handle.Dispose(); throw; }
     }
 
     public void Dispose()

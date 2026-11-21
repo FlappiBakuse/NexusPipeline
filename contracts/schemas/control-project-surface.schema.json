@@ -16,6 +16,17 @@
       }
     },
     "input": {"type": "object", "additionalProperties": true},
+    "draftBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["userId", "scriptId", "scriptRevision"],
+      "properties": {
+        "userId": {"$ref": "common.schema.json#/$defs/uuid"},
+        "scriptId": {"$ref": "common.schema.json#/$defs/uuid"},
+        "scriptRevision": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "candidateId": {"$ref": "common.schema.json#/$defs/uuid"}
+      }
+    },
     "operationId": {"$ref": "common.schema.json#/$defs/uuid"}
   }
 }

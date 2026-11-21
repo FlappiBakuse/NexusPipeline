@@ -15,7 +15,7 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class EditCompletionTests
 {
-    [Theory(DisplayName = "Reopened Restored Edit Finishes Its Own Snapshots During Exit Draining And Replays Without New Effects")]
+    [Theory(DisplayName = "Reopened Restored Edit Finishes Its Own Snapshots After Exit Rejection And Replays Without New Effects")]
     [InlineData("missing", false)]
     [InlineData("file", false)]
     [InlineData("directory", false)]
@@ -32,6 +32,7 @@ public sealed class EditCompletionTests
         Assert.Equal(ResourceLeaseDenial.HostUnavailable, resources.TryAcquire(Guid.NewGuid(),
             [new(ConfigurationRevisionService.ResourceKey(edit.Session.Resources[0].Address), ResourceClaimMode.Mutation)]).Denial);
         var closing = Guid.NewGuid(); Assert.Equal("recovery_pending", lifecycle.RequestClose(closing, Guid.NewGuid()).ReasonCode);
+        Assert.Equal(HostLifecyclePhase.Running, lifecycle.Phase);
         if (save)
         {
             var completion = edit.Completion(); var operation = ConfigurationEditStore.SaveIdentity(Guid.NewGuid(), "fixture", completion);

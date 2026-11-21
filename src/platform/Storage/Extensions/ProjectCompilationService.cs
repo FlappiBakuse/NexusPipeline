@@ -39,7 +39,7 @@ internal sealed class ProjectCompilationService
     }
 
     internal async ValueTask<JsonElement> DiscoverAsync(Guid bindingId, long bindingRevision, string extensionId,
-        JsonElement selection, Action requireCaller, CancellationToken cancellation)
+        JsonElement selection, Action requireCaller, CancellationToken cancellation, ProjectBindingDraft? draft = null)
     {
         requireCaller(); cancellation.ThrowIfCancellationRequested();
         if (selection.ValueKind != JsonValueKind.Object) throw new IOException("project_selection_invalid");
@@ -55,11 +55,13 @@ internal sealed class ProjectCompilationService
             if (!root.IsActive || !providerRoot.IsActive) throw new IOException("project_compiler_lease_ended");
             consumer.RequireActive(); provider.RequireActive();
         }
-        using var selected = new SelectedProjectSource(_instance, _database, _lease, _resources, bindingId, bindingRevision, extensionId, Live);
+        using var selected = new SelectedProjectSource(_instance, _database, _lease, _resources, bindingId, bindingRevision, extensionId, Live, draft: draft?.Owner);
+        using var mounts = draft?.Batch is null ? null : new ProjectConfigMounts(_instance, _database, _lease, _resources, selected,
+            staged: draft.Batch, cancellation: cancellation);
         return await _activator.Compilers.UseAsync(use.ExtensionId, use.CompilerId, async (compiler, current) =>
         {
             void Check() { Live(); current(); }
-            using var source = new SelectedSourcePort(selected, Check, cancellation);
+            using var source = new SelectedSourcePort(selected, Check, cancellation, mounts);
             var result = await compiler.DiscoverAsync(source, choice, cancellation).ConfigureAwait(false);
             using var output = StrictJson.Parse(BoundedJson.Serialize(result, null, 262144));
             selected.RequireCurrent(); consumer.RequireCurrent(); provider.RequireCurrent(); Check();
@@ -67,17 +69,41 @@ internal sealed class ProjectCompilationService
         }, cancellation).ConfigureAwait(false);
     }
 
-    internal ProjectEditorContext ReadContext(Guid bindingId, Action requireCaller, string? requiredProvider = null, bool readSelection = true)
+    internal ProjectEditorContext ReadContext(Guid bindingId, Action requireCaller, string? requiredProvider = null, bool readSelection = true,
+        ProjectBindingDraft? draft = null)
     {
         requireCaller(); _lease.VerifyHeld(_instance);
         var definitions = new AutomationDefinitionStore(_database).Read();
-        var binding = definitions.Bindings.SingleOrDefault(item => item.Id == bindingId) ?? throw new IOException("project_binding_missing");
+        var binding = draft is null ? definitions.Bindings.SingleOrDefault(item => item.Id == bindingId) ?? throw new IOException("project_binding_missing") :
+            DraftBindingOwner.Resolve(definitions, bindingId, draft.Owner);
         var script = definitions.Scripts.SingleOrDefault(item => item.Id == binding.ScriptId) ?? throw new IOException("project_script_missing");
         var extension = script.ExtensionId ?? throw new IOException("project_compiler_declaration_required");
         using var root = Hold(extension); using var consumer = Installation(extension); var use = RequireConsumer(consumer);
         if (requiredProvider is not null && use.ExtensionId != requiredProvider) throw new UnauthorizedAccessException("project_frontend_provider_unbound");
         using var providerRoot = Hold(use.ExtensionId); using var provider = Installation(use.ExtensionId); RequireProvider(provider, use.CompilerId);
-        using var selected = new SelectedProjectSource(_instance, _database, _lease, _resources, binding.Id, binding.Revision, extension, requireCaller);
+        using var selected = new SelectedProjectSource(_instance, _database, _lease, _resources, binding.Id, binding.Revision, extension, requireCaller, draft: draft?.Owner);
+        if (draft is not null)
+        {
+            var change = draft.Batch?.Changes.Single(item => item.Address == ProjectChoiceStore.Address(binding.Id));
+            JsonElement? staged = null;
+            if (change is not null)
+            {
+                if (change.Contract != ProjectChoiceStore.Contract(script.Revision, selected.Root.Id, selected.Root.Revision,
+                    consumer.Metadata.Package.ManifestSha256, provider.Metadata.Package.ManifestSha256, use.CompilerId))
+                    throw new IOException("project_selection_contract_changed");
+                if (readSelection)
+                {
+                    var entry = change.Tree.Entries.Single();
+                    var blobs = new ImmutableBlobStore(_instance, _contracts);
+                    using var input = blobs.OpenVerified(new($"blobs/content/{entry.Sha256}.bin", entry.SizeBytes, entry.Sha256!));
+                    var bytes = new byte[checked((int)input.Length)]; input.ReadExactly(bytes);
+                    using var value = StrictJson.Parse(bytes); staged = value.RootElement.Clone();
+                }
+            }
+            selected.RequireCurrent(); consumer.RequireCurrent(); provider.RequireCurrent(); requireCaller();
+            return new(binding.Id, binding.Revision, extension, use.ExtensionId, use.CompilerId, script.Name, change is null ? 0 : 1, staged)
+                { IsDraft = true, ProtectedInputs = readSelection ? draft.Secrets?.States ?? [] : [] };
+        }
         var saved = new ConfigurationRevisionStore(_instance, _database, _contracts).ReadStored(ProjectChoiceStore.Address(binding.Id));
         JsonElement? selection = null; long revision = 0;
         if (saved is not null)
@@ -143,8 +169,9 @@ internal sealed class ProjectCompilationService
             cancellation, choice, actualRoot);
 
     internal async ValueTask<T> PreviewAsync<T>(Guid bindingId, long bindingRevision, string extensionId, JsonElement? selection,
-        Action requireCaller, Func<ProjectPreviewSource, Action, ValueTask<T>> publish, CancellationToken cancellation)
+        Action requireCaller, Func<ProjectPreviewSource, Action, ValueTask<T>> publish, CancellationToken cancellation, ProjectBindingDraft? draft = null)
     {
+        if (draft is not null && selection is null) selection = ReadContext(bindingId, requireCaller, draft: draft).Selection ?? throw new IOException("project_selection_unavailable");
         using var choice = selection is null ? new ProjectChoiceLease(_instance, _database, _lease, _resources, _contracts,
             bindingId, bindingRevision, extensionId) : null;
         return await CompileAsync(bindingId, bindingRevision, extensionId, selection ?? choice!.Selection, requireCaller,
@@ -153,16 +180,18 @@ internal sealed class ProjectCompilationService
                 choice?.RequirePreview(selected, consumer, provider, compilerId, chosen);
                 var readSet = choice is null ? configurations.ReadSet : ConfigurationReadPolicy.Freeze(
                     configurations.ReadSet.Append(choice.Proof.Source).ToArray());
-                var executable = graph.CanExecute && BindProtected(graph.ProtectedInputs, provider, bindingId, cancellation)
-                    .All(input => input.Reference.SecretId is not null);
+                RequireSecretPermission(graph.ProtectedInputs, provider);
+                var executable = graph.CanExecute && (draft is null ? BindProtected(graph.ProtectedInputs, provider, bindingId, cancellation)
+                    .All(input => input.Reference.SecretId is not null) : graph.ProtectedInputs.All(input =>
+                        draft.Secrets?.States.Any(state => state.Key == input.Key && state.IsReadable) == true));
                 return publish(ProjectPreviewSource.Create(selected, graph, consumer, provider, chosen, readSet, executable), current);
-            }, cancellation, choice).ConfigureAwait(false);
+            }, cancellation, choice, draft: draft).ConfigureAwait(false);
     }
 
     private async ValueTask<T> CompileAsync<T>(Guid bindingId, long expectedBindingRevision, string extensionId, JsonElement selection,
         Action requireCaller, Func<SelectedProjectSource, ProjectConfigMounts, ProjectCompilerInstallation, ProjectCompilerInstallation,
             string, JsonElement, FrozenCompilation, Action, Action, ValueTask<T>> publish, CancellationToken cancellation,
-        ProjectChoiceLease? choice = null, ResourceOperationLease? actualRoot = null)
+        ProjectChoiceLease? choice = null, ResourceOperationLease? actualRoot = null, ProjectBindingDraft? draft = null)
     {
         ArgumentNullException.ThrowIfNull(requireCaller); ArgumentNullException.ThrowIfNull(publish);
         cancellation.ThrowIfCancellationRequested(); requireCaller(); _lease.VerifyHeld(_instance);
@@ -190,10 +219,10 @@ internal sealed class ProjectCompilationService
             consumer.RequireActive(); provider.RequireActive(); choice?.RequireLive();
         }
         using var selected = new SelectedProjectSource(_instance, _database, _lease, _resources,
-            bindingId, expectedBindingRevision, extensionId, Check, actualRoot);
+            bindingId, expectedBindingRevision, extensionId, Check, actualRoot, draft?.Owner);
         if (selected.Script.AdapterResources.Any(item => item.ResourceId == ProjectChoiceStore.ResourceId))
             throw new IOException("project_selection_resource_collision");
-        using var configurations = new ProjectConfigMounts(_instance, _database, _lease, _resources, selected, actualRoot);
+        using var configurations = new ProjectConfigMounts(_instance, _database, _lease, _resources, selected, actualRoot, draft?.Batch, cancellation);
         return await _activator.Compilers.UseAsync(use.ExtensionId, use.CompilerId, async (compiler, requireProvider) =>
         {
             var active = true;
@@ -252,6 +281,56 @@ internal sealed class ProjectCompilationService
                     operationId, subject, expectedRevision, snapshot.Value, protectedInputs ?? [], current, acceptedAt, cancellation).ConfigureAwait(false);
             return store.Save(operationId, subject, expectedRevision, snapshot.Value, current, acceptedAt);
         }, cancellation).ConfigureAwait(false);
+    }
+
+    internal async ValueTask<string> DraftOperationAsync(BindingDrafts drafts, ProjectBindingDraft draft, Guid operationId,
+        string subject, Guid bindingId, long expectedChoice, string extensionId, string providerId, JsonElement selection,
+        ProjectProtectedEdits edits, bool submit, bool finish, Action requireCaller, CancellationToken cancellation)
+    {
+        requireCaller(); cancellation.ThrowIfCancellationRequested();
+        var digest = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(BoundedJson.Serialize(new
+        {
+            draft.Owner, draft.CandidateId, request = ProjectSaveClosure.Digest(bindingId, 1, expectedChoice, extensionId, providerId, selection, edits.Intents)
+        })));
+        if (!submit)
+        {
+            using var closing = finish ? _saves.Close(operationId, subject, digest) : null;
+            if (closing is not null) await closing.DrainAsync(cancellation).ConfigureAwait(false);
+            requireCaller();
+            if (drafts.IsStaged(operationId, subject, Guid.Empty, digest)) return "staged";
+            if (finish) ProjectSaveClosure.CloseAbsent(_database, operationId, subject, digest, requireCaller);
+            return finish || ProjectSaveClosure.IsClosed(_database, operationId, subject, digest) ? "notAccepted" : "pending";
+        }
+        using var callback = _saves.Begin(operationId, subject, digest);
+        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(callback.Cancellation, cancellation);
+        if (ProjectSaveClosure.IsClosed(_database, operationId, subject, digest)) throw new IOException("project_operation_closed");
+        var proofs = DraftProjectSecrets.Proofs(_instance, _database, operationId, providerId, bindingId, edits.Values);
+        if (drafts.IsStaged(operationId, subject, Guid.Empty, digest))
+        {
+            drafts.ReadProtections(operationId, subject, bindingId, draft.Owner)?.RequireProofs(proofs);
+            return "staged";
+        }
+        if (expectedChoice != (draft.Batch is null ? 0 : 1)) throw new ConfigurationException("configuration_revision_conflict");
+        return await CompileAsync(bindingId, 1, extensionId, selection, requireCaller,
+            (source, mounts, consumer, provider, compilerId, chosen, graph, current, _) =>
+            {
+                if (provider.Metadata.ExtensionId != providerId) throw new IOException("project_provider_changed");
+                if (graph.PreviewIndex is null) throw new IOException("project_preview_undeclared");
+                RequireSecretPermission(graph.ProtectedInputs, provider);
+                var secrets = DraftProjectSecrets.Prepare(_instance, providerId, bindingId, graph.ProtectedInputs.Select(item => item.Key).ToArray(),
+                    edits.Values, draft.Secrets, proofs);
+                var saved = mounts.Mounts.Select(mount => new ConfigurationRevisionChange(mount.Saved.Address, 0, 1,
+                    mount.Saved.Contract, mount.Saved.Tree, ConfigurationUpdateKind.Manual)).ToList();
+                var content = new ImmutableBlobStore(_instance, _contracts).PersistContent(BoundedJson.Serialize(chosen, null, 65536), lifetime.Token);
+                var tree = new FileTreeSnapshot(FileObjectKind.File, [new("", FileObjectKind.File, content.SizeBytes, content.Sha256)]);
+                var contract = ProjectChoiceStore.Contract(source.Script.Revision, source.Root.Id, source.Root.Revision,
+                    consumer.Metadata.Package.ManifestSha256, provider.Metadata.Package.ManifestSha256, compilerId);
+                saved.Add(new(ProjectChoiceStore.Address(bindingId), 0, 1, contract, tree, ConfigurationUpdateKind.Manual));
+                current(); lifetime.Token.ThrowIfCancellationRequested();
+                drafts.StageManaged(operationId, subject, digest, draft.Owner, new(saved.ToImmutableArray()), secrets,
+                    new(source.Root.Id, source.Root.Revision, consumer.Metadata, provider.Metadata));
+                return ValueTask.FromResult("staged");
+            }, lifetime.Token, draft: draft).ConfigureAwait(false);
     }
 
     internal async ValueTask<T> UseSavedAsync<T>(Guid bindingId, long bindingRevision, string extensionId, Action requireCaller,
@@ -324,14 +403,18 @@ internal sealed class ProjectCompilationService
     private ImmutableArray<CompiledProjectSecret> BindProtected(ImmutableArray<Extensibility.Compilation.ProjectProtectedInput> inputs,
         ProjectCompilerInstallation provider, Guid binding, CancellationToken cancellation)
     {
-        if (!inputs.IsEmpty && provider.Manifest.Permissions.SecretAccess?.Contains("selected-binding", StringComparer.Ordinal) != true)
-            throw new UnauthorizedAccessException("project_secret_permission_required");
+        RequireSecretPermission(inputs, provider);
         var store = new SecretFieldStore(_instance, _database);
         return inputs.Select(input =>
         {
             var state = store.GetStateAsync(new(provider.Metadata.ExtensionId, binding, input.Key), cancellation).GetAwaiter().GetResult();
             return new CompiledProjectSecret(input.Key, new(state.Revision, state.IsReadable ? state.SecretId : null), input.OccurrenceIds.ToImmutableArray());
         }).ToImmutableArray();
+    }
+    private static void RequireSecretPermission(ImmutableArray<Extensibility.Compilation.ProjectProtectedInput> inputs, ProjectCompilerInstallation provider)
+    {
+        if (!inputs.IsEmpty && provider.Manifest.Permissions.SecretAccess?.Contains("selected-binding", StringComparer.Ordinal) != true)
+            throw new UnauthorizedAccessException("project_secret_permission_required");
     }
     private static bool Overlaps(string left, string right) => left.Equals(right, StringComparison.OrdinalIgnoreCase) ||
         left.StartsWith(right + "/", StringComparison.OrdinalIgnoreCase) || right.StartsWith(left + "/", StringComparison.OrdinalIgnoreCase);

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Collections.Immutable;
 using System.Runtime.Versioning;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
@@ -63,11 +64,15 @@ public sealed class EditorControlTests
             return;
         }
         var opened = await service.BeginAsync("editor-control", selection, DateTimeOffset.UtcNow);
-        var pid = (await OwnedCrashProcess.ReadReportAsync(report)).GetProperty("processId").GetInt32();
+        var editor = await OwnedCrashProcess.ReadReportAsync(report);
+        var pid = editor.GetProperty("processId").GetInt32();
         using var process = Process.GetProcessById(pid); Assert.False(process.HasExited);
         try
         {
             Assert.Equal(ConfigurationEditPhase.Editing, opened.Phase);
+            Assert.True(editor.GetProperty("consoleInput").GetBoolean());
+            Assert.True(editor.GetProperty("consoleOutput").GetBoolean());
+            Assert.True(editor.GetProperty("consoleError").GetBoolean());
             var saved = await controller.SaveAsync(Guid.NewGuid(), "editor-control", selection.SessionId, opened.Revision, DateTimeOffset.UtcNow);
             Assert.Equal(2, Assert.Single(saved.Items).Saved.Revision);
             Assert.True(process.HasExited); Assert.Equal(original, File.ReadAllBytes(source.Configuration));
@@ -85,6 +90,66 @@ public sealed class EditorControlTests
             if (current?.Phase is ConfigurationEditPhase.Prepared or ConfigurationEditPhase.Editing)
                 await controller.CancelAsync(Guid.NewGuid(), "editor-control", selection.SessionId, current.Revision, DateTimeOffset.UtcNow);
         }
+    }
+
+    [Theory(DisplayName = "Generic editor changes stay private until a new account and binding are accepted")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StagesGenericDraft(bool discard)
+    {
+        await using var fixture = new EditControllerFixture();
+        var definitions = new AutomationDefinitionStore(fixture.Base.Database);
+        var catalog = definitions.Read();
+        var script = catalog.Scripts.Single(item => item.Id == catalog.Bindings.Single(binding => binding.Id == fixture.Base.Binding).ScriptId);
+        var user = catalog.Users[0] with { Id = Guid.NewGuid(), Revision = 0, Name = "Draft account" };
+        var binding = new AutomationBinding(Guid.NewGuid(), 0, user.Id, script.Id, false, 0);
+        var sessionId = Guid.NewGuid();
+        var targets = fixture.Request.Targets.Select(target => target with {
+            Address = new(binding.Id, target.Address.ResourceId), ExpectedRevision = 0
+        }).ToImmutableArray();
+        var request = fixture.WithCommand(sessionId, new(1, targets) { DraftBinding = new(user.Id, script.Id, script.Revision) },
+            "file", "{\"draft\":true}");
+        await fixture.BeginAsync(sessionId, request);
+        var session = fixture.Controller.Read(sessionId, "fixture")!;
+        var candidate = Guid.NewGuid();
+        var staged = await fixture.Controller.SaveBindingAsync(candidate, "fixture", sessionId, session.Revision, null, DateTimeOffset.UtcNow);
+        Assert.Equal(candidate, staged.DraftCandidate);
+        fixture.VerifyOriginals();
+        Assert.DoesNotContain(definitions.Read().Users, item => item.Id == user.Id);
+        Assert.Empty(fixture.Base.Revisions.ReadCurrentRevisions(binding.Id));
+        if (discard)
+        {
+            fixture.Controller.Drafts.Discard(candidate, "fixture");
+            var error = await Assert.ThrowsAsync<ConfigurationException>(() =>
+                fixture.Controller.SaveBindingAsync(candidate, "fixture", sessionId, session.Revision, null, DateTimeOffset.UtcNow));
+            Assert.Equal("configuration_draft_missing", error.Message);
+            fixture.VerifyOriginals();
+            return;
+        }
+        var changes = new AutomationChanges(catalog.Revision, [], [], [user], [binding], [], [], []);
+        var operation = AutomationDefinitionStore.DraftIdentity(Guid.NewGuid(), "fixture", changes, [candidate]);
+        Assert.True(definitions.CommitDrafts(operation, changes, DateTimeOffset.UtcNow, [candidate], fixture.Controller.Drafts).IsNew);
+        Assert.Equal(2, fixture.Base.Revisions.ReadCurrentRevisions(binding.Id).Count);
+        Assert.Contains(definitions.Read().Users, item => item.Id == user.Id);
+        ConfigurationEditInventory.VerifyReadOnly(fixture.Base.Database);
+    }
+
+    [Fact(DisplayName = "A Native Graphical Editor Runs Without An Extra Console And Cancelling Restores Its Files")]
+    public async Task KeepsGraphicalEditor()
+    {
+        await using var fixture = new EditControllerFixture();
+        var executable = Environment.GetEnvironmentVariable("NEXUS_TARGET_GAME_FIXTURE_EXE")!;
+        var marker = Path.Combine(fixture.Base.Root, "graphical-editor.json");
+        using var image = NexusPipeline.Platform.Processes.ProcessIdentityLease.HoldImage(executable);
+        var request = fixture.Request with { Editor = new(executable, image.Sha256, [marker, "edit"], fixture.Base.Root) };
+        var opened = await fixture.Controller.BeginAsync(fixture.SessionId, "fixture", request, DateTimeOffset.UtcNow);
+        var observed = await OwnedCrashProcess.ReadReportAsync(marker);
+        using var process = Process.GetProcessById(observed.GetProperty("processId").GetInt32());
+        Assert.False(observed.GetProperty("consoleInput").GetBoolean());
+        Assert.False(observed.GetProperty("consoleOutput").GetBoolean());
+        await fixture.Controller.CancelAsync(Guid.NewGuid(), "fixture", fixture.SessionId, opened.Revision, DateTimeOffset.UtcNow);
+        Assert.True(process.HasExited);
+        fixture.VerifyOriginals();
     }
 
     [Fact(DisplayName = "Stopping The Original Controller Actually Stops And Restores Its Live Editor Before Disposal")]

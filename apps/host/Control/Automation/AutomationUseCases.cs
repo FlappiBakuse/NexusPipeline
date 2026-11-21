@@ -2,9 +2,11 @@ using System.Text.Json;
 using System.Runtime.Versioning;
 using NexusPipeline.Core.Automation;
 using NexusPipeline.Core.Control;
+using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Host.Control.Http;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Automation;
+using NexusPipeline.Platform.Storage.Configuration;
 
 namespace NexusPipeline.Host.Control.Automation;
 
@@ -80,16 +82,22 @@ internal sealed class AutomationUseCases(AutomationDefinitionService definitions
         return new { catalogRevision = saved.Revision, schedules = saved.Schedules };
     }
 
-    internal object Change(AuthenticatedControlRequest request, AutomationControlChange command)
+    internal object Change(AuthenticatedControlRequest request, AutomationControlChange command,
+        IReadOnlyList<Guid>? candidateIds = null, BindingDrafts? drafts = null)
     {
         request.Require(ControlCapability.AutomationWrite);
         if (!command.Changes.Removed.IsEmpty) request.Require(ControlCapability.AutomationDelete);
-        var identity = AutomationDefinitionStore.Identity(command.OperationId, request.SubjectId, command.Changes);
-        var prior = definitions.ReadAccepted(identity, command.Changes);
+        if (candidateIds is not null) request.Require(ControlCapability.ConfigurationEdit);
+        var identity = candidateIds is null ? AutomationDefinitionStore.Identity(command.OperationId, request.SubjectId, command.Changes)
+            : AutomationDefinitionStore.DraftIdentity(command.OperationId, request.SubjectId, command.Changes, candidateIds);
+        var prior = definitions.ReadAccepted(identity, command.Changes, candidateIds);
         if (prior is not null) return Result(prior);
         RequireLocalDeclarations(request, definitions.Read(), command.Changes);
         request.Require(ControlCapability.AutomationWrite);
-        var result = definitions.Change(identity, command.Changes, DateTimeOffset.UtcNow);
+        if (candidateIds is not null && drafts!.Claims(candidateIds, identity.SubjectId)
+                .Contains(new ResourceClaim("secrets:fields", ResourceClaimMode.Mutation)))
+            request.Require(ControlCapability.SecretWrite);
+        var result = definitions.Change(identity, command.Changes, DateTimeOffset.UtcNow, candidateIds, drafts);
         return Result(result);
     }
 

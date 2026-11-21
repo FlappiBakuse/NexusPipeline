@@ -139,7 +139,7 @@ public sealed class EnteredRecoveryTests
         public void CollectWorkers() { Events.Add("collect"); if (Failure != "collect") State = State with { AreWorkersCollected = true }; }
         public void MarkApplied() { Events.Add("applied"); State = State with { Phase = JournalPhase.Applied }; }
         public void RestoreConfiguration() { Events.Add("restore"); if (Failure != "restore") State = State with { IsConfigurationRestored = true }; }
-        public void CommitInterrupted(AttemptFacts facts) { Events.Add("commit"); State = State with { Phase = JournalPhase.Committed, Facts = facts }; }
+        public void CommitStopped(AttemptFacts facts) { Events.Add("commit"); State = State with { Phase = JournalPhase.Committed, Facts = facts }; }
         public void Quarantine(AttemptFacts facts) { Events.Add("quarantine"); State = State with { Phase = JournalPhase.Quarantined, Facts = facts }; }
         public void ReconcileRecordedCommit() { Events.Add("reconcile"); State = State with { DatabaseAgrees = true }; }
         public void VerifyPendingCompletion() => Events.Add("pending");

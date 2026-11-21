@@ -105,10 +105,11 @@ public sealed class RecoveryCoordinator(IRecoveryRegistry registry, IRecoveryEvi
                     completions = SnapshotCompletionProjection.FreezeAll(snapshotEvidence.ReadPendingCompletions(snapshot), snapshot);
                     RequireSameInventory(snapshot, registry.ReadSnapshot(), compareRevision: true);
                 }
+                var admission = evidence.ProjectAdmission(snapshot);
                 var published = registry.PublishVerified(snapshot.Revision, checked(blocked.Revision + 1));
                 if (evidence is ISnapshotCompletionEvidence)
                     RequireSameInventory(snapshot, published, compareRevision: false);
-                index.PublishVerifiedCompletions(generation, blocked.Revision, published.Revision, published.Isolations, completions);
+                index.PublishVerifiedCompletions(generation, blocked.Revision, published.Revision, admission, completions);
                 return index.Current;
             }
             catch

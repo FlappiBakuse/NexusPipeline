@@ -16,7 +16,8 @@ var marker = args[0]; var nonce = args[1];
 var observedConfiguration = args.Length >= 3 && args[2] != "-" ? File.ReadAllText(args[2]) : null;
 using (var output = new FileStream(marker + ".prepared", FileMode.CreateNew, FileAccess.Write, FileShare.Read))
 {
-    output.Write(JsonSerializer.SerializeToUtf8Bytes(new { processId = Environment.ProcessId, nonce, observedConfiguration }));
+    output.Write(JsonSerializer.SerializeToUtf8Bytes(new { processId = Environment.ProcessId, nonce, observedConfiguration,
+        consoleInput = !Console.IsInputRedirected, consoleOutput = !Console.IsOutputRedirected }));
     output.Flush(flushToDisk: true);
 }
 File.Move(marker + ".prepared", marker);

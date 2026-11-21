@@ -6,6 +6,7 @@ using NexusPipeline.Platform.Storage.Extensions;
 using NexusPipeline.Extensibility.Lifecycle;
 using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Serialization;
+using System.Text.Json;
 
 namespace NexusPipeline.Platform.Extensions;
 
@@ -446,5 +447,70 @@ public sealed class ExtensionActivator
                 _released = true; _slot.Reservation = null;
             }
         }
+    }
+}
+
+internal sealed record ExtensionEntryActivation(ExtensionManifest Manifest, Func<ExtensionScope, CancellationToken, ValueTask> Callback)
+{
+    internal static ExtensionEntryActivation Managed(ContractReader reader, ReadOnlyMemory<byte> bytes, string extensionId,
+        Func<ExtensionManifest, ExtensionScope, IExtension> factory)
+    {
+        var manifest = new ExtensionManifestAdmission(reader).ReadCurrent(bytes, extensionId);
+        if (manifest.Kind != "managed-code") throw new JsonException("extension_identity_mismatch");
+        return new(manifest, async (scope, cancellation) =>
+        {
+            var extension = factory(manifest, scope) ?? throw new InvalidOperationException("extension_factory_returned_null");
+            await extension.ActivateAsync(scope, cancellation).ConfigureAwait(false);
+        });
+    }
+
+    internal static ExtensionEntryActivation Specialized(ContractReader reader, ReadOnlyMemory<byte> bytes, string extensionId,
+        Func<ExtensionManifest, ExtensionScope, CancellationToken, ValueTask> activate)
+    {
+        var manifest = new ExtensionManifestAdmission(reader).ReadCurrent(bytes, extensionId);
+        if (manifest.Kind != "data-specialized") throw new JsonException("extension_identity_mismatch");
+        return new(manifest, (scope, cancellation) => activate(manifest, scope, cancellation));
+    }
+}
+
+internal static class ExtensionScopeShutdown
+{
+    internal sealed class State
+    {
+        internal bool IsStopping { get; private set; }
+        private Task? _stopped;
+        internal Task Stop(IReadOnlyList<Member> batch)
+        {
+            IsStopping = true;
+            if (_stopped is null)
+            {
+                foreach (var item in batch) item.Scope.Activation.Revoke();
+                _stopped = CloseAsync(batch);
+            }
+            return _stopped;
+        }
+    }
+
+    internal sealed record Member(ExtensionScope Scope, Task Callback);
+    internal static IEnumerable<Member> Members(ExtensionScope? current, Task currentCallback,
+        ExtensionScope? candidate, Task? candidateCallback)
+    {
+        if (current is not null) yield return new(current, currentCallback);
+        if (candidate is not null && !ReferenceEquals(candidate, current))
+            yield return new(candidate, candidateCallback ?? throw new IOException("extension_candidate_callback_unconfirmed"));
+    }
+
+    internal static async Task CloseAsync(IReadOnlyList<Member> batch)
+    {
+        await Task.Yield();
+        var cleanup = batch.Select(item => item.Scope.DisposeAsync().AsTask()).ToArray();
+        var callbacks = batch.Select(item => EndedAsync(item.Callback)).ToArray();
+        await Task.WhenAll(cleanup.Concat(callbacks)).ConfigureAwait(false);
+    }
+
+    private static async Task EndedAsync(Task actual)
+    {
+        try { await actual.ConfigureAwait(false); }
+        catch { }
     }
 }

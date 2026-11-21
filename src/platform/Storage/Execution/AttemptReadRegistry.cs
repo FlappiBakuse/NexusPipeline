@@ -9,13 +9,14 @@ internal sealed class AttemptReadRegistry : IDisposable
     private readonly Dictionary<Guid, AttemptReadSession> _sessions = [];
     private bool _disposed;
 
-    internal AttemptReadSession? Start(RuntimeInstance instance, StateDatabase database, ContractReader contracts, Guid journal)
+    internal AttemptReadSession? Start(RuntimeInstance instance, StateDatabase database, ContractReader contracts, Guid journal,
+        bool requireFreshInventory = false)
     {
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (_sessions.Count >= 64) return null;
-            var session = new AttemptReadSession(instance, database, contracts, journal, () => Remove(journal));
+            var session = new AttemptReadSession(instance, database, contracts, journal, () => Remove(journal), requireFreshInventory);
             try { _sessions.Add(journal, session); return session; }
             catch { session.Dispose(); throw; }
         }
@@ -24,12 +25,13 @@ internal sealed class AttemptReadRegistry : IDisposable
     internal AttemptReadSession? Find(Guid journal)
     { lock (_gate) return _sessions.GetValueOrDefault(journal); }
 
-    internal IDisposable? HoldTerminal(RuntimeInstance instance, StateDatabase database, ContractReader contracts, Guid journal)
+    internal IDisposable? HoldTerminal(RuntimeInstance instance, StateDatabase database, ContractReader contracts, Guid journal,
+        bool requireFreshInventory = false)
     {
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            return _sessions.ContainsKey(journal) ? null : Start(instance, database, contracts, journal);
+            return _sessions.ContainsKey(journal) ? null : Start(instance, database, contracts, journal, requireFreshInventory);
         }
     }
 

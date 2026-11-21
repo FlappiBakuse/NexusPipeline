@@ -35,6 +35,9 @@ registerMessages({
   '按顺序先后执行，拖拽左侧把手排序；长时运行与标准运行不能混合编排':
     'Tasks run in order. Drag the left handle to reorder; continuous and standard runs cannot be mixed.',
   '请修正无效字段后再保存。': 'Correct the invalid fields before saving.',
+  '请先在绑定中保存或取消配置编辑，再移除绑定。': 'Save or cancel configuration editing for this binding before removing it.',
+  放弃配置草稿: 'Discard configuration draft',
+  '请先结束当前配置编辑，再放弃草稿。': 'Finish the active configuration edit before discarding the draft.',
   导入与导出: 'Import and export',
   管理范围: 'Management scope',
   暂无项目: 'No items yet',

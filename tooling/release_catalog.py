@@ -85,6 +85,9 @@ def create_catalog(args):
 
 
 def assemble_catalog(args):
+    channel = args.channel
+    if channel == 'develop' and (args.profile != 'test' or args.key_id != 'fixture-only'):
+        raise ValueError('Local develop catalogs require the test fixture signing identity')
     root = Path(__file__).resolve().parent.parent
     source = source_files(root)
     generation = str(uuid.UUID(args.generation))
@@ -123,12 +126,12 @@ def assemble_catalog(args):
         entries.append(entry)
     catalog = bundle / 'catalog.json'
     write_json(catalog, dict(format='nexus.store.catalog', version=1, generationId=generation, sequence=args.sequence,
-        channel='stable', publishedAt=args.published_at, entries=sorted(entries, key=lambda item: item['extensionId'])))
+        channel=channel, publishedAt=args.published_at, entries=sorted(entries, key=lambda item: item['extensionId'])))
     signed = sign_metadata(root, args, catalog)
     write_json(bundle / 'catalog.sig.json', dict(format='nexus.detached.signature', version=1, keyId=args.key_id,
         algorithm='ecdsa-p256-sha256', encoding='base64-p1363', signature=signed['signature']))
-    prefix = metadata + 'stable/generations/' + generation + '/'
-    pointer = dict(format='nexus.store.pointer', version=1, generationId=generation, sequence=args.sequence, channel='stable',
+    prefix = metadata + channel + '/generations/' + generation + '/'
+    pointer = dict(format='nexus.store.pointer', version=1, generationId=generation, sequence=args.sequence, channel=channel,
         catalogUrl=prefix + 'catalog.json', catalogSha256=hash_file(catalog), signatureUrl=prefix + 'catalog.sig.json')
     write_json(bundle / 'index.json', pointer)
     if source_files(root) != source:
@@ -146,6 +149,8 @@ def sign_metadata(root, args, catalog):
     result = subprocess.run([str(args.node), str(root / 'tooling/metadata_sign.mjs'), str(args.key), str(catalog)],
         check=True, capture_output=True, encoding='utf-8', timeout=30)
     signed = json.loads(result.stdout)
+    if args.channel == 'develop' and signed['publicKey'] != FIXTURE_PUBLIC:
+        raise ValueError('Local develop catalog public key differs from the test Host trust')
     if args.profile == 'production' and (signed['publicKey'] == FIXTURE_PUBLIC or
             any(word in args.key_id.lower() for word in ('test', 'fixture'))):
         raise ValueError('Fixture signing keys cannot produce production metadata')
@@ -167,6 +172,7 @@ def main():
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--sequence', type=int, required=True)
     parser.add_argument('--profile', choices=('test', 'production'), required=True)
+    parser.add_argument('--channel', choices=('stable', 'develop'), default='stable')
     parser.add_argument('--distribution-catalog', type=Path)
     print(json.dumps(create_catalog(parser.parse_args()), indent=2))
 

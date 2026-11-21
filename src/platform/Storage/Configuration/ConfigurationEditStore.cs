@@ -7,11 +7,13 @@ using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
+using NexusPipeline.Platform.Storage.Automation;
 
 namespace NexusPipeline.Platform.Storage.Configuration;
 
-public sealed partial class ConfigurationEditStore
+public sealed class ConfigurationEditStore
 {
+    internal const string DraftBeginKind = "configuration.edit.begin-draft";
     private readonly RuntimeInstance _instance;
     private readonly StateDatabase _database;
     private readonly ContractReader _contracts;
@@ -27,7 +29,8 @@ public sealed partial class ConfigurationEditStore
     }
 
     public static OperationIdentity BeginIdentity(Guid operationId, string subject, ConfigurationEditRequest request) =>
-        new(operationId, subject, Digest(ConfigurationEditPolicy.Freeze(request)), "configuration.edit.begin");
+        new(operationId, subject, Digest(ConfigurationEditPolicy.Freeze(request)),
+            request.DraftBinding is null ? "configuration.edit.begin" : DraftBeginKind);
     public static OperationIdentity SaveIdentity(Guid operationId, string subject, ConfigurationEditCompletion completion) =>
         new(operationId, subject, Digest(ConfigurationEditPolicy.Freeze(completion)), "configuration.edit.save");
     public static OperationIdentity CancelIdentity(Guid operationId, string subject, ConfigurationEditCancel cancel)
@@ -63,13 +66,14 @@ public sealed partial class ConfigurationEditStore
         return command.ExecuteScalar() is string id ? ConfigurationEditRows.Read(connection, transaction, Guid.Parse(id), subject) : null;
     }
 
-    public ConfigurationEditStatus? ReadAcceptedSource(Guid sessionId, string subject, string sourceDigest)
+    public ConfigurationEditStatus? ReadAcceptedSource(Guid sessionId, string subject, string sourceDigest, DraftBindingIdentity? draft = null)
     {
         if (!FileTreePolicy.Digest(sourceDigest)) throw new ConfigurationException("configuration_source_request_invalid");
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = DatabaseConnections.BeginRead(connection);
         var status = ConfigurationEditRows.Read(connection, transaction, sessionId, subject);
         if (status is null) return null;
+        if (status.IsDraft != (draft is not null)) throw new OperationConflictException();
         using var command = ConfigurationEditRows.Command(connection, transaction, sessionId);
         command.CommandText = "SELECT source_request_digest FROM configuration.configuration_edit_sessions WHERE session_id=$session;";
         if (command.ExecuteScalar() is not string saved || saved != sourceDigest) throw new OperationConflictException();
@@ -89,7 +93,7 @@ public sealed partial class ConfigurationEditStore
                 { WritePolicy = bound.Plan.EditPolicy });
         }
         var request = new ConfigurationEditRequest(status.ExpectedBindingRevision, targets.ToImmutable())
-            { Editor = editor, SourceRequestDigest = sourceDigest };
+            { Editor = editor, SourceRequestDigest = sourceDigest, DraftBinding = draft };
         var identity = BeginIdentity(sessionId, subject, request);
         if (OperationRows.ReadExisting(connection, transaction, identity) is null) throw new IOException("configuration_edit_source_unbound");
         return status;
@@ -113,8 +117,8 @@ public sealed partial class ConfigurationEditStore
             {
                 if (!OperationRows.Accept(connection, transaction, operation, acceptedAt).IsNew)
                     return Required(connection, transaction, operation.OperationId, operation.SubjectId);
-                var binding = ConfigurationRevisionRows.Binding(connection, transaction, resources[0].Address.BindingId);
-                if (binding.Revision != request.ExpectedBindingRevision) throw new ConfigurationException("configuration_binding_revision_conflict");
+                var address = resources[0].Address;
+                var scriptId = RequireEditBinding(connection, transaction, request, address.BindingId);
                 using (var pending = ConfigurationRevisionRows.KeyCommand(connection, transaction, resources[0].Address))
                 {
                     pending.CommandText = "SELECT EXISTS(SELECT 1 FROM configuration.configuration_edit_sessions WHERE binding_id=$binding AND phase IN (0,1));";
@@ -126,7 +130,7 @@ public sealed partial class ConfigurationEditStore
                     if ((saved?.Revision ?? 0) != resource.ExpectedRevision) throw new ConfigurationException("configuration_revision_conflict");
                     if (saved is not null) ConfigurationRevisionPolicy.RequireCurrentContract(saved, resource.Contract);
                     var physical = prepared.PhysicalClaims(resource.JournalId);
-                    var logical = new[] { "automation:definitions", $"configuration:script:{binding.ScriptId:D}", ConfigurationRevisionService.ResourceKey(resource.Address) };
+                    var logical = new[] { "automation:definitions", $"configuration:script:{scriptId:D}", ConfigurationRevisionService.ResourceKey(resource.Address) };
                     var keys = logical.Concat(physical.Select(item => item.ResourceKey)).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
                     var journal = new RegisteredJournal(resource.JournalId, operation.OperationId, JournalKind.ConfigEdit, JournalPhase.Prepared, 1,
                         resource.PlanPath, resource.PlanDigest, keys);
@@ -139,6 +143,18 @@ public sealed partial class ConfigurationEditStore
                 return Required(connection, transaction, operation.OperationId, operation.SubjectId) with { IsNew = true };
             });
         });
+
+    private static Guid RequireEditBinding(SqliteConnection connection, SqliteTransaction transaction, ConfigurationEditRequest request, Guid id)
+    {
+        if (request.DraftBinding is not { } draft)
+        {
+            var binding = ConfigurationRevisionRows.Binding(connection, transaction, id);
+            if (binding.Revision != request.ExpectedBindingRevision) throw new ConfigurationException("configuration_binding_revision_conflict");
+            return binding.ScriptId;
+        }
+        DraftBindingOwner.Resolve(AutomationRows.Read(connection, transaction), id, draft);
+        return draft.ScriptId;
+    }
 
     public ConfigurationEditStatus MarkEditing(Guid sessionId, string subject, long expectedRevision)
     {
@@ -193,6 +209,49 @@ public sealed partial class ConfigurationEditStore
         }));
     }
 
+    internal static string ProjectedDigest(Guid sessionId, long revision, string? confirmedCandidateId) =>
+        Digest(new { sessionId, revision, confirmedCandidateId });
+
+    internal ConfigurationBatchResult? LookupProjectedSave(OperationIdentity operation, Guid sessionId)
+    {
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true,
+            domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Content);
+        using var transaction = DatabaseConnections.BeginRead(connection);
+        if (OperationRows.ReadExisting(connection, transaction, operation) is null) return null;
+        RequireTerminal(Required(connection, transaction, sessionId, operation.SubjectId), operation.OperationId, ConfigurationEditPhase.Saved);
+        return _batches.ReadResult(connection, transaction, operation.OperationId);
+    }
+
+    internal ConfigurationBatchResult PublishProjected(OperationIdentity operation, ConfigurationEditCompletion captured,
+        ConfigurationRevisionBatch publication, DateTimeOffset acceptedAt)
+    {
+        var session = Read(captured.SessionId, operation.SubjectId) ?? throw new ConfigurationException("configuration_edit_missing");
+        ConfigurationEditPolicy.RequireCompletion(session, captured);
+        var bindingId = session.Resources[0].Address.BindingId;
+        if (publication.Changes.Any(change => change.Address.BindingId != bindingId ||
+            change.ExpectedBindingRevision != session.ExpectedBindingRevision ||
+            change.Address.ResourceId.StartsWith("$editor:", StringComparison.Ordinal)) ||
+            publication.Changes.Count(change => change.Address.ResourceId == BindingConfigurationSource.ResourceId) != 1)
+            throw new ConfigurationException("configuration_edit_resources_changed");
+        using var prepared = _batches.Prepare(publication);
+        using var evidence = new ConfigurationEditEvidence(_instance, _database, _contracts).Hold(session, installed: false, captured.Batch);
+        return prepared.Use((batch, manifests) => _database.Write((connection, transaction) =>
+        {
+            if (!OperationRows.Accept(connection, transaction, operation, acceptedAt).IsNew)
+            {
+                RequireTerminal(Required(connection, transaction, session.SessionId, operation.SubjectId), operation.OperationId, ConfigurationEditPhase.Saved);
+                return _batches.ReadResult(connection, transaction, operation.OperationId, batch);
+            }
+            session = Required(connection, transaction, session.SessionId, operation.SubjectId);
+            ConfigurationEditPolicy.RequireCompletion(session, captured);
+            RequireBaseline(connection, transaction, session);
+            var saved = _batches.PublishInside(connection, transaction, operation.OperationId, batch, manifests);
+            ConfigurationEditRows.Advance(connection, transaction, session, ConfigurationEditPhase.Saved, operation.OperationId);
+            CompleteOperation(connection, transaction, operation.OperationId);
+            return saved;
+        }));
+    }
+
     public ConfigurationEditStatus? LookupCancel(OperationIdentity operation, ConfigurationEditCancel cancel)
     {
         Require(operation, CancelIdentity(operation.OperationId, operation.SubjectId, cancel));
@@ -235,8 +294,15 @@ public sealed partial class ConfigurationEditStore
 
     private void RequireBaseline(SqliteConnection connection, SqliteTransaction transaction, ConfigurationEditStatus session)
     {
-        var binding = ConfigurationRevisionRows.Binding(connection, transaction, session.Resources[0].Address.BindingId);
-        if (binding.Revision != session.ExpectedBindingRevision) throw new ConfigurationException("configuration_binding_revision_conflict");
+        var bindingId = session.Resources[0].Address.BindingId;
+        if (session.IsDraft)
+        {
+            using var command = ConfigurationRevisionRows.KeyCommand(connection, transaction, session.Resources[0].Address);
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM automation.bindings WHERE binding_id=$binding);";
+            if ((long)command.ExecuteScalar()! != 0) throw new ConfigurationException("configuration_draft_binding_changed");
+        }
+        else if (ConfigurationRevisionRows.Binding(connection, transaction, bindingId).Revision != session.ExpectedBindingRevision)
+            throw new ConfigurationException("configuration_binding_revision_conflict");
         foreach (var resource in session.Resources)
         {
             var saved = ConfigurationRevisionRows.Current(connection, transaction, resource.Address, _snapshots)?.Revision;

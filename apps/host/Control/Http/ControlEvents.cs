@@ -1,11 +1,12 @@
 using System.Runtime.Versioning;
 using NexusPipeline.Core.Control;
 using NexusPipeline.Host.Control.Events;
+using NexusPipeline.Platform.Storage.Execution;
 
 namespace NexusPipeline.Host.Control.Http;
 
 [SupportedOSPlatform("windows")]
-internal sealed class ControlEvents(ControlAuthentication authority, ControlEventFeed feed)
+internal sealed class ControlEvents(ControlAuthentication authority, ControlEventFeed feed, ExecutionRuntimeConsumer execution)
 {
     internal void Map(WebApplication app)
     {
@@ -25,16 +26,16 @@ internal sealed class ControlEvents(ControlAuthentication authority, ControlEven
             context.Response.ContentType = "text/event-stream";
             context.Response.Headers.CacheControl = "no-store";
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
-            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
             var lastSent = System.Diagnostics.Stopwatch.GetTimestamp();
             try
             {
                 await context.Response.StartAsync(deadline.Token);
                 await context.Response.WriteAsync(": connected\n\n", deadline.Token);
                 await context.Response.Body.FlushAsync(deadline.Token);
-                do
+                while (!deadline.IsCancellationRequested)
                 {
                     request.Require(ControlCapability.StatusRead);
+                    var executionRevision = execution.ProgressRevision;
                     var values = feed.Read(stream, after);
                     foreach (var value in values)
                     {
@@ -42,11 +43,17 @@ internal sealed class ControlEvents(ControlAuthentication authority, ControlEven
                         after = value.Sequence;
                         if (value.Kind == "resync") return;
                     }
-                    if (values.Count == 0 && System.Diagnostics.Stopwatch.GetElapsedTime(lastSent) < TimeSpan.FromSeconds(25)) continue;
-                    if (values.Count == 0) await context.Response.WriteAsync(": keepalive\n\n", deadline.Token);
-                    await context.Response.Body.FlushAsync(deadline.Token);
-                    lastSent = System.Diagnostics.Stopwatch.GetTimestamp();
-                } while (await timer.WaitForNextTickAsync(deadline.Token));
+                    if (values.Count > 0 || System.Diagnostics.Stopwatch.GetElapsedTime(lastSent) >= TimeSpan.FromSeconds(25))
+                    {
+                        if (values.Count == 0) await context.Response.WriteAsync(": keepalive\n\n", deadline.Token);
+                        await context.Response.Body.FlushAsync(deadline.Token);
+                        lastSent = System.Diagnostics.Stopwatch.GetTimestamp();
+                    }
+                    using var sample = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
+                    sample.CancelAfter(TimeSpan.FromSeconds(1));
+                    try { await execution.WaitForProgressAsync(executionRevision, sample.Token); }
+                    catch (OperationCanceledException) when (!deadline.IsCancellationRequested) { }
+                }
             }
             catch (OperationCanceledException) when (deadline.IsCancellationRequested) { }
         });

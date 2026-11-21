@@ -5,19 +5,19 @@ export function adapterResults(): string[] {
   const request = { operationId: 'operation-a', bindingId: 'binding-a', expectedBindingRevision: 2,
     extensionId: 'extension-a', expectedInstalledRevision: 4,
     resources: [{ resourceId: 'main', expectedRevision: 3, relativePath: 'config.json' }] };
-  const source = { bindingId: 'binding-a', bindingRevision: 2, extensionId: 'extension-a', installedRevision: 4,
+  const source = { bindingId: 'binding-a', bindingRevision: 2, scriptRevision: 7, extensionId: 'extension-a', installedRevision: 4,
     resources: [{ resourceId: 'main', revision: 3, relativePath: 'config.json' }] };
   const candidate = { index: 1, resourceId: 'main', editCount: 1 };
   const reject = (body: unknown, action: 'discover' | 'previewRepair' | 'applyRepair', description: string): void => {
     let rejected = false;
-    try { adapterResult(body, action, request, candidate, 'digest-a'); } catch { rejected = true; }
+    try { adapterResult(body, action, request, candidate, 'digest-a', 7); } catch { rejected = true; }
     if (!rejected) throw new Error(description);
     checks.push(description);
   };
   const discovery = { source, tasks: [{ taskId: 'task-a', title: 'Daily task', isSelected: true, isEnabled: true,
     titleLocales: { 'zh-CN': '每日任务', 'en-US': 'Daily task' } }], diagnostics: [], gamePathCheck: 'unknown',
     coverage: { selected: 1, projected: 1, retrySafe: 1, isComplete: true, hasBlockingDiagnostics: false } };
-  const accepted = adapterResult(discovery, 'discover', request, undefined, '');
+  const accepted = adapterResult(discovery, 'discover', request, undefined, '', 7);
   if (accepted.tasks[0]?.taskId !== 'task-a')
     throw new Error('Bound discovery must remain usable');
   checks.push('a discovery bound to the selected extension, binding and saved resources is accepted');
@@ -27,7 +27,7 @@ export function adapterResults(): string[] {
   for (const coverage of [{ ...discovery.coverage, selected: '1' }, { ...discovery.coverage, isComplete: 'true' },
     { ...discovery.coverage, hasBlockingDiagnostics: null }])
     reject({ ...discovery, coverage }, 'discover', 'malformed coverage remains rejected: ' + JSON.stringify(coverage));
-  for (const change of [{ bindingId: 'other' }, { bindingRevision: 9 }, { extensionId: 'other' },
+  for (const change of [{ bindingId: 'other' }, { bindingRevision: 9 }, { scriptRevision: 8 }, { extensionId: 'other' },
     { installedRevision: 9 }, { resources: [{ ...source.resources[0], relativePath: 'other.json' }] },
     { resources: [...source.resources, ...source.resources] }]) {
     reject({ ...discovery, source: { ...source, ...change } }, 'discover',
@@ -37,7 +37,7 @@ export function adapterResults(): string[] {
   reject({ ...preview, candidateIndex: 2 }, 'previewRepair', 'preview rejects a different candidate');
   reject({ ...preview, proposalDigest: 'digest-b' }, 'previewRepair', 'preview rejects a different proposal');
   const applied = { operationId: 'operation-a', bindingId: 'binding-a', resourceId: 'main', revision: 4, hasChanges: true };
-  if (!adapterResult(applied, 'applyRepair', request, candidate, 'digest-a').hasChanges)
+  if (!adapterResult(applied, 'applyRepair', request, candidate, 'digest-a', 7).hasChanges)
     throw new Error('Bound repair must remain usable');
   checks.push('an exact applied operation, binding and resource is accepted');
   for (const change of [{ operationId: 'other' }, { bindingId: 'other' }, { resourceId: 'other' }])

@@ -24,6 +24,13 @@
   font-size: 15px;
   line-height: 1.35;
 }
+.dispatch-review {
+  padding: 12px 0;
+}
+.dispatch-review p {
+  margin: 6px 0;
+  color: var(--muted);
+}
 .target-controls {
   align-items: end;
   margin: 0;

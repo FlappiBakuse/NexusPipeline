@@ -13,6 +13,10 @@ public sealed record ExecutionPlanCaptureRuntime
     /// <summary>Schema field <c>broker</c>; constraints are owned by execution-plan.schema.json.</summary>
     [JsonPropertyName("broker")]
     public required ExecutionPlanInterpreterImage Broker { get; init; }
+    /// <summary>Schema field <c>brokerDeployment</c>; constraints are owned by execution-plan.schema.json.</summary>
+    [JsonPropertyName("brokerDeployment")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? BrokerDeployment { get; init; }
     /// <summary>Schema field <c>timeoutMilliseconds</c>; constraints are owned by execution-plan.schema.json.</summary>
     [JsonPropertyName("timeoutMilliseconds")]
     public required long TimeoutMilliseconds { get; init; }

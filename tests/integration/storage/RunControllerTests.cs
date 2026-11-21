@@ -1,9 +1,11 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Core.Operations;
+using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Configuration;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
@@ -17,6 +19,29 @@ public sealed class RunControllerTests
     private const string Raw = "{\"tasks\":{\"one\":true,\"new\":false},\"count\":41}";
     private const string Normalized = "{\"tasks\":{\"one\":false,\"new\":false},\"count\":41}";
     private const string Initial = "{\"tasks\":{\"one\":false},\"count\":17}";
+
+    [Fact(DisplayName = "Publishing Pending Configuration Holds Reads Each Journal Resource Set Once")]
+    public async Task ReadsConfigurationHoldsOnce()
+    {
+        await using var fixture = new ControllerFixture();
+        await fixture.StartAsync();
+        var writer = Console.Error;
+        using var captured = new StringWriter();
+        try
+        {
+            Console.SetError(captured);
+            using var profile = StartupProfile.Begin("configuration-claim-test");
+            ConfigurationRecoveryHolds.Publish(fixture.Base.Source.Database, fixture.Base.Index);
+        }
+        finally { Console.SetError(writer); }
+        using var report = JsonDocument.Parse(captured.ToString().Split('\n').Single(line =>
+            line.Contains("\"phase\":\"configuration-claim-test\"", StringComparison.Ordinal)));
+        var steps = report.RootElement.GetProperty("steps").EnumerateArray().ToArray();
+        var reads = steps.Single(item => item.GetProperty("name").GetString() == "journal.resources-query");
+        Assert.DoesNotContain(steps, item => item.GetProperty("name").GetString() == "journal.claims-query");
+        AssertPendingClaims(fixture);
+        Assert.Equal(fixture.Controller.Read().Resources.Length, reads.GetProperty("count").GetInt64());
+    }
 
     [Fact(DisplayName = "The Actual Timer Saves Both Normalized Resources While The Live Writer And Borrow Retain Ownership Until Finish")]
     public async Task PublishesSampledResources()

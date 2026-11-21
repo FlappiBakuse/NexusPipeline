@@ -1,4 +1,5 @@
 using NexusPipeline.Core.Configuration;
+using NexusPipeline.Platform.Storage.Configuration;
 using NexusPipeline.Platform.Storage.Sqlite;
 
 namespace NexusPipeline.Platform.Storage.Journals;
@@ -36,6 +37,11 @@ public sealed class JournalRecoveryEvidence(RuntimeInstance instance, JournalSto
             VerifyAgreement(journal, physical);
         }
     }
+
+    public IReadOnlyList<ResourceIsolation> ProjectAdmission(RecoveryRegistrySnapshot verified) =>
+        database is not null && OperatingSystem.IsWindows()
+            ? new ScopedConfigurationRecovery(instance, database, new()).Project(verified)
+            : verified.Isolations;
 
     private void VerifyRegisteredDirectory(IReadOnlyList<RegisteredJournal> registered, bool allowMissingPrepared = false)
     {

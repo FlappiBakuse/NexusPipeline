@@ -12,15 +12,17 @@ internal static class ConfigurationEditRows
         ConfigurationEditPhase phase;
         Guid? completion;
         Guid binding;
+        bool draft;
         using (var command = Command(connection, transaction, sessionId))
         {
-            command.CommandText = "SELECT s.revision,s.phase,s.expected_binding_revision,s.binding_id,s.completion_operation_id,o.subject_id " +
+            command.CommandText = "SELECT s.revision,s.phase,s.expected_binding_revision,s.binding_id,s.completion_operation_id,o.subject_id,o.operation_kind " +
                 "FROM configuration.configuration_edit_sessions s JOIN main.operations o ON o.operation_id=s.session_id WHERE s.session_id=$session;";
             using var row = command.ExecuteReader();
             if (!row.Read()) return null;
             if (row.GetString(5) != subject) throw new NexusPipeline.Core.Operations.OperationConflictException();
             revision = row.GetInt64(0); phase = (ConfigurationEditPhase)row.GetInt32(1); bindingRevision = row.GetInt64(2);
             binding = Guid.Parse(row.GetString(3)); completion = row.IsDBNull(4) ? null : Guid.Parse(row.GetString(4));
+            draft = row.GetString(6) == ConfigurationEditStore.DraftBeginKind;
         }
         using var items = Command(connection, transaction, sessionId);
         items.CommandText = "SELECT resource_id,expected_revision,contract_revision,contract_digest,instance_key,requires_instance,journal_id," +
@@ -33,7 +35,8 @@ internal static class ConfigurationEditRows
         if (!Enum.IsDefined(phase) || resources.Count is < 1 or > 32 || (phase is ConfigurationEditPhase.Saved or ConfigurationEditPhase.Cancelled) != completion.HasValue)
             throw new IOException("configuration_edit_metadata_unrecognized");
         foreach (var resource in resources) ConfigurationRevisionPolicy.ValidateContract(resource.Contract);
-        return new(sessionId, revision, phase, bindingRevision, resources.OrderBy(item => item.Address.ResourceId, StringComparer.Ordinal).ToImmutableArray(), completion, false);
+        return new(sessionId, revision, phase, bindingRevision, resources.OrderBy(item => item.Address.ResourceId, StringComparer.Ordinal).ToImmutableArray(), completion, false)
+            { IsDraft = draft };
     }
 
     internal static void Insert(SqliteConnection connection, SqliteTransaction transaction, Guid sessionId,

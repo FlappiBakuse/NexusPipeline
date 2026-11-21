@@ -2,6 +2,7 @@ using System.Globalization;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Operations;
 using NexusPipeline.Platform.Serialization;
+using NexusPipeline.Platform.Storage.Configuration;
 
 namespace NexusPipeline.Platform.Storage.Sqlite;
 
@@ -29,6 +30,7 @@ public sealed class StateDatabase
     internal InstanceLease? RuntimeLease { get; set; }
     internal Processes.ProcessIdentityLease? ExecutorIdentity => OperatingSystem.IsWindows() ? RuntimeLease?.ExecutorIdentity : null;
     internal BlobReferenceFacts ReferenceFacts { get; } = new();
+    internal ConfigurationCleanupInbox ConfigurationCleanup { get; } = new();
 
     private StateDatabase(string path, Guid instanceId, string runtimeRoot, bool readOnly = false)
     { DatabasePath = path; InstanceId = instanceId; RuntimeRoot = runtimeRoot; _readOnly = readOnly; }
@@ -185,6 +187,7 @@ public sealed class StateDatabase
         }
         if (changes.Domains != 0)
         {
+            ConfigurationCleanup.Record(changes.Rows);
             if (changes.ControlStatistics != 0)
                 _controlStatisticsVersion = _controlStatisticsVersion.Advance(changes.ControlStatistics);
             for (var index = 0; index < DatabaseLayout.Domains.Length; index++)

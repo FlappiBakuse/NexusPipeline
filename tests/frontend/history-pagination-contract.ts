@@ -8,6 +8,61 @@ import type { AttemptFacts } from '../../apps/web/src/control/records';
 import type { ActiveStep } from '../../apps/web/src/control/execution';
 import type { HistoryLog } from '../../apps/web/src/pages/attempt-resources';
 
+const fullMainLog = 'start\n' + 'middle line\n'.repeat(250) + 'x'.repeat(70000) + '\n你好\nend';
+const postHookLog = 'OE你\nXY好你G�S�';
+const encoder = new TextEncoder();
+type LogFixturePart = { bytes: Uint8Array; source: 'standardOutput' | 'standardError' | 'file';
+  fileSourceId?: number; fileOffset?: number };
+const interleavedParts: LogFixturePart[] = [
+  { bytes: Uint8Array.of(0x4f, 0xe4, 0xbd), source: 'standardOutput' },
+  { bytes: encoder.encode('E'), source: 'standardError' },
+  { bytes: Uint8Array.of(0xa0, 0x0a), source: 'standardOutput' },
+  { bytes: Uint8Array.of(0x58, 0xe5), source: 'file', fileSourceId: 0, fileOffset: 0 },
+  { bytes: Uint8Array.of(0x59, 0xe4, 0xbd), source: 'file', fileSourceId: 1, fileOffset: 0 },
+  { bytes: Uint8Array.of(0xa5, 0xbd), source: 'file', fileSourceId: 0, fileOffset: 2 },
+  { bytes: Uint8Array.of(0xa0), source: 'file', fileSourceId: 1, fileOffset: 3 },
+  { bytes: Uint8Array.of(0x47, 0xe4, 0xbd), source: 'file', fileSourceId: 0, fileOffset: 4 },
+  { bytes: encoder.encode('S'), source: 'standardError' },
+  { bytes: Uint8Array.of(0xa0), source: 'file', fileSourceId: 0, fileOffset: 10 }
+];
+
+function historyLogResponse(url: URL, key: Record<string, unknown>, digest: string, text: string | LogFixturePart[]): Response {
+  const discardedBytes = typeof text === 'string' ? 0 : 3;
+  const fixtures: LogFixturePart[] = [];
+  if (typeof text === 'string') {
+    const bytes = encoder.encode(text);
+    for (let offset = 0; offset < bytes.length; offset += 65536)
+      fixtures.push({ bytes: bytes.subarray(offset, offset + 65536), source: 'standardOutput' });
+  } else fixtures.push(...text);
+  let recordedBytes = 0;
+  const parts = fixtures.map(({ bytes, source, fileSourceId = null, fileOffset = null }, index) => {
+    const observedOffset = recordedBytes + (index === fixtures.length - 1 ? discardedBytes : 0);
+    recordedBytes += bytes.length;
+    return { index, observedOffset, source, fileSourceId, fileOffset, sizeBytes: bytes.length,
+      sha256: digest, contentAvailability: 'available' };
+  });
+  if (url.pathname.endsWith('/description')) return Response.json({ key, snapshotSha256: digest, recordedBytes, parts,
+    observedBytes: recordedBytes + discardedBytes, discardedBytes, isComplete: discardedBytes === 0,
+    contentAvailability: 'available' });
+  if (url.pathname.endsWith('/original') && url.searchParams.get('snapshotSha256') === digest) {
+    const bytes = new Uint8Array(recordedBytes);
+    let offset = 0;
+    for (const part of fixtures) {
+      bytes.set(part.bytes, offset);
+      offset += part.bytes.length;
+    }
+    return new Response(new ReadableStream({
+      start(controller) {
+        const split = typeof text === 'string' ? Math.max(0, bytes.length - 9) : 2;
+        controller.enqueue(bytes.slice(0, split));
+        controller.enqueue(bytes.slice(split));
+        controller.close();
+      }
+    }));
+  }
+  throw Error('unexpected_history_log_request:' + url.pathname);
+}
+
 export async function historyPaginationContract(fixture: HTMLElement, check: (value: unknown, name: string) => void): Promise<void> {
   const id = '10000000-0000-4000-8000-000000000001', digest = 'a'.repeat(64);
   const capture = (index: number) => `20000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
@@ -30,14 +85,7 @@ export async function historyPaginationContract(fixture: HTMLElement, check: (va
     const role = url.pathname.split('/').at(-2)!;
     const ordinal = url.searchParams.get('invocationOrdinal');
     const key = { runId: id, attemptId: id, stepId: 'wanted', role, invocationOrdinal: ordinal ? Number(ordinal) : null };
-    if (url.pathname.endsWith('/tail')) return Response.json({ description: { key },
-      slices: [{ bytes: btoa(role + ' tail') }], prefixOmitted: false });
-    if (url.pathname.endsWith('/description')) return Response.json({ key, snapshotSha256: digest,
-      parts: [{ index: 0, source: 'standardOutput', fileSourceId: null, fileOffset: null, sizeBytes: 3 },
-        { index: 1, source: 'standardOutput', fileSourceId: null, fileOffset: null, sizeBytes: 2 }] });
-    if (url.pathname.endsWith('/parts/0')) return new Response(new Uint8Array([0x42, 0xe4, 0xbd]));
-    if (url.pathname.endsWith('/parts/1')) return new Response(new Uint8Array([0xa0, 0x41]));
-    throw Error('unexpected_history_request:' + url.pathname);
+    return historyLogResponse(url, key, digest, role === 'main' ? fullMainLog : interleavedParts);
   });
   const owner = createStore(client), store = { ...owner, can: () => true };
   const facts: AttemptFacts = { runId: id, attemptId: id, ordinal: 1, engine: 'succeeded', business: 'succeeded',
@@ -45,10 +93,10 @@ export async function historyPaginationContract(fixture: HTMLElement, check: (va
   const mount = document.createElement('section'); fixture.prepend(mount); mount.scrollIntoView();
   const app = createApp({ render: () => h(AttemptDetail, { store, runId: id, attemptId: id, visible: true,
     facts, stepIds: ['wanted'] }) });
-  const wait = async (condition: () => boolean) => {
+  const wait = async (condition: () => boolean, name = 'history page reaches its requested result') => {
     const until = Date.now() + 5000;
     while (!condition() && Date.now() < until) await new Promise(resolve => setTimeout(resolve, 20));
-    check(condition(), 'history page reaches its requested result');
+    check(condition(), name);
   };
   const button = (label: string) => [...mount.querySelectorAll<HTMLButtonElement>('button')]
     .find(element => element.textContent?.trim() === label);
@@ -57,35 +105,35 @@ export async function historyPaginationContract(fixture: HTMLElement, check: (va
     await wait(() => !!button('加载更多日志') && !!button('加载更多截图') &&
       !!mount.querySelector('.history-log-toggle') && mount.querySelectorAll('.history-image-unavailable').length === 1);
     check(!requests.some(path => /\/(logs|images)\?/.test(path) && new URL(path, location.origin).searchParams.get('afterPosition') !== '-1') &&
-      !requests.some(path => path.includes('/tail?')), 'catalog pagination waits for user demand and collapsed logs do not read content');
+      !requests.some(path => /\/(tail|description|original)\b/.test(path)), 'catalog pagination waits for user demand and collapsed logs do not read content');
     check(mount.querySelectorAll('.history-image-unavailable').length === 1,
       'the first page retains only the selected account’s screenshots');
-    mount.querySelector<HTMLButtonElement>('.history-log-toggle')!.click();
-    await wait(() => mount.querySelector('.history-log-preview pre')?.textContent === 'main tail');
-    const tails = requests.filter(path => path.includes('/tail?')).length;
+    mount.querySelector<HTMLElement>('.history-log-toggle')!.click();
+    const output = () => mount.querySelector<HTMLElement>('.history-log-preview pre');
+    await wait(() => output()?.textContent === fullMainLog);
+    const viewport = output()!.parentElement!.shadowRoot!.querySelector<HTMLElement>('.viewport')!;
+    check(viewport.scrollWidth <= viewport.clientWidth + 1 && viewport.scrollHeight > viewport.clientHeight &&
+      getComputedStyle(output()!).overflowWrap === 'anywhere',
+      'the selected complete log wraps an unbroken line inside the card and scrolls vertically');
+    check(!button('查看完整日志') && !mount.querySelector('nexus-modal'),
+      'the complete log is available without opening a separate viewer');
+    const originals = requests.filter(path => path.includes('/original?')).length;
     button('加载更多日志')!.click();
     await wait(() => !button('加载更多日志'));
-    check(mount.querySelector('.history-log-preview pre')?.textContent === 'main tail' &&
-      requests.filter(path => path.includes('/tail?')).length === tails,
-      'loading another page preserves the selected log without reading new tails');
+    check(output()?.textContent === fullMainLog && requests.filter(path => path.includes('/original?')).length === originals,
+      'loading another catalog page preserves the already displayed complete log');
     const logButtons = [...mount.querySelectorAll<HTMLButtonElement>('.history-log-disclosure nav button')];
     check(logButtons.length === 2 && !logButtons.some(item => item.textContent?.includes('other')) &&
       logButtons[1]!.textContent?.includes('第 2 次尝试'),
       'the next page retains the invocation identity within the selected account scope');
     logButtons[1]!.click();
-    await wait(() => mount.querySelector('.history-log-preview pre')?.textContent === 'postHook tail');
-    check(requests.some(path => path.includes('/postHook/tail?') && path.includes('invocationOrdinal=2')),
+    await wait(() => output()?.textContent === postHookLog,
+      'UTF-8 continuity follows the log source and contiguous file epochs across transport reads');
+    check(requests.some(path => path.includes('/postHook/original?') && path.includes('invocationOrdinal=2')),
       'the selected paged log reads the correct invocation');
     button('加载更多截图')!.click();
     await wait(() => mount.querySelectorAll('.history-image-unavailable').length === 2);
     check(!button('加载更多截图'), 'the final screenshot page retains existing items and closes pagination');
-    button('查看完整日志')!.click(); await nextTick();
-    await wait(() => mount.querySelector('.log-window pre')?.textContent === 'B');
-    const next = [...mount.querySelectorAll<HTMLButtonElement>('.log-window + .toolbar button')]
-      .find(element => element.textContent?.trim() === '下一段');
-    check(!!next, 'the full viewer opens the selected log with segment controls');
-    next!.click();
-    await wait(() => mount.querySelector('.log-window pre')?.textContent === '你A');
   } finally { app.unmount(); mount.remove(); owner.dispose(); }
   await scopeChangeContract(fixture, check);
   await invocationContract(fixture, check);
@@ -107,12 +155,8 @@ async function scopeChangeContract(fixture: HTMLElement, check: (value: unknown,
         return Response.json({ items: [row(0, 'first', 'main'), row(1, 'second', 'main')], nextPosition: 1 });
       return new Promise<Response>(resolve => pending.push({ resolve, signal: init!.signal! }));
     }
-    if (url.pathname.endsWith('/tail')) {
-      const pieces = url.pathname.split('/'), stepId = pieces.at(-3)!, role = pieces.at(-2)!;
-      return Response.json({ description: { key: { runId: id, attemptId: id, stepId, role, invocationOrdinal: null } },
-        slices: [{ bytes: btoa(stepId) }], prefixOmitted: false });
-    }
-    throw Error('unexpected_scope_request:' + url.pathname);
+    const pieces = url.pathname.split('/'), stepId = pieces.at(-3)!, role = pieces.at(-2)!;
+    return historyLogResponse(url, { runId: id, attemptId: id, stepId, role, invocationOrdinal: null }, 'a'.repeat(64), stepId);
   });
   const owner = createStore(client), store = { ...owner, can: () => true };
   const facts: AttemptFacts = { runId: id, attemptId: id, ordinal: 1, engine: 'succeeded', business: 'succeeded',
@@ -130,7 +174,7 @@ async function scopeChangeContract(fixture: HTMLElement, check: (value: unknown,
     .find(element => element.textContent?.trim() === '加载更多日志');
   const select = async (step: string) => {
     await wait(() => !!mount.querySelector('.history-log-toggle') && !!more() && !more()!.disabled);
-    mount.querySelector<HTMLButtonElement>('.history-log-toggle')!.click();
+    mount.querySelector<HTMLElement>('.history-log-toggle')!.click();
     await wait(() => mount.querySelector('.history-log-preview pre')?.textContent === step);
   };
   app.mount(mount);
@@ -163,8 +207,8 @@ async function invocationContract(fixture: HTMLElement, check: (value: unknown, 
   const client = new ControlClient(location.origin, async input => {
     const url = new URL(String(input)); requests.push(url.pathname + url.search);
     const role = url.pathname.split('/').at(-2)!, ordinal = Number(url.searchParams.get('invocationOrdinal'));
-    return Response.json({ description: { key: { runId: id, attemptId: id, stepId: 'wanted', role,
-      invocationOrdinal: ordinal } }, slices: [{ bytes: btoa(role + ':' + ordinal) }], prefixOmitted: false });
+    return historyLogResponse(url, { runId: id, attemptId: id, stepId: 'wanted', role, invocationOrdinal: ordinal },
+      'a'.repeat(64), role + ':' + ordinal);
   });
   const owner = createStore(client), store = { ...owner, can: () => true };
   const logs = ref<HistoryLog[]>([{ key: { stepId: 'wanted', role: 'main', invocationOrdinal: 1 } },
@@ -186,8 +230,8 @@ async function invocationContract(fixture: HTMLElement, check: (value: unknown, 
   try {
     await nextTick();
     const cards = () => [...mount.querySelectorAll<HTMLElement>('.history-attempt-card')];
-    cards()[0]!.querySelector<HTMLButtonElement>('.history-log-toggle')!.click();
-    cards()[1]!.querySelector<HTMLButtonElement>('.history-log-toggle')!.click();
+    cards()[0]!.querySelector<HTMLElement>('.history-log-toggle')!.click();
+    cards()[1]!.querySelector<HTMLElement>('.history-log-toggle')!.click();
     await wait(() => cards()[0]!.querySelector('.history-log-preview pre')?.textContent === 'main:1' &&
       cards()[1]!.querySelector('.history-log-preview pre')?.textContent === 'preHook:2');
     logs.value = [...logs.value, { key: { stepId: 'wanted', role: 'main', invocationOrdinal: 2 } }];
@@ -200,7 +244,7 @@ async function invocationContract(fixture: HTMLElement, check: (value: unknown, 
       'additional invocation-specific entries preserve both selected logs and filter each invocation');
     second.find(button => button.textContent?.includes('main'))!.click();
     await wait(() => cards()[1]!.querySelector('.history-log-preview pre')?.textContent === 'main:2');
-    check(requests.some(path => path.includes('/main/tail?') && path.includes('invocationOrdinal=2')),
+    check(requests.some(path => path.includes('/main/original?') && path.includes('invocationOrdinal=2')),
       'aggregated log entries remain usable for each invocation and specific entries use their own ordinal');
   } finally { app.unmount(); mount.remove(); owner.dispose(); }
 }

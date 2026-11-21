@@ -6,6 +6,8 @@ import type { AutomationStore } from '../app/store-ports';
 import { arrayValue, ControlFailure, integerValue, objectValue, stringValue } from '../control/client';
 import type { AutomationBundle, ControlAutomationImport } from '../control/wire.generated';
 import { t } from '../app/locale';
+import { desktop } from '../app/desktop';
+import { providePathPicker } from './editor-path-picker';
 import './automation-messages';
 
 type Mapping = { id: string; name: string; path: string };
@@ -17,7 +19,7 @@ type Preview = {
   paths: Record<string, unknown>[];
   problems: Record<string, unknown>[];
 };
-const props = defineProps<{ store: AutomationStore; file?: File }>();
+const props = defineProps<{ store: AutomationStore; file?: File; visible: boolean }>();
 const emit = defineEmits<{ applied: [] }>();
 const bundle = ref<AutomationBundle | null>(null);
 const fileName = ref('');
@@ -29,6 +31,7 @@ const pendingApply = ref('');
 const busy = ref(false);
 const error = ref('');
 const notice = ref('');
+const choosePath = providePathPicker(() => props.visible, () => props.visible, reason => props.store.report(reason));
 const ready = computed(
   () =>
     bundle.value &&
@@ -41,6 +44,16 @@ function invalidate(): void {
   preview.value = null;
   operationId.value = '';
   notice.value = '';
+}
+function setMapping(item: Mapping, path: string): void {
+  if (pendingApply.value || busy.value) return;
+  item.path = path;
+  invalidate();
+}
+async function browse(item: Mapping, kind: 'file' | 'folder'): Promise<void> {
+  if (pendingApply.value || busy.value) return;
+  const path = await choosePath(kind);
+  if (path && (kind === 'folder' ? roots : attachments).value.includes(item)) setMapping(item, path);
 }
 async function chooseFile(file: File | undefined): Promise<void> {
   if (pendingApply.value || busy.value) return;
@@ -219,12 +232,15 @@ async function checkApply(): Promise<void> {
         <legend>{{ t('导入根目录') }}</legend>
         <label v-for="root in roots" :key="root.id">
           {{ root.name }}
-          <input
-            v-model="root.path"
-            :disabled="!!pendingApply || busy"
+          <nexus-path-picker
+            :value.prop="root.path"
+            :disabled.prop="!!pendingApply || busy"
             :aria-label="root.name + t('的 Host 路径')"
             :placeholder="t('例如 D:\\Scripts')"
-            @input="invalidate"
+            :kinds.prop="['folder']"
+            :browse-allowed.prop.camel="!!desktop"
+            @nexus-change="setMapping(root, $event.detail.value)"
+            @nexus-browse="browse(root, 'folder')"
           />
         </label>
       </fieldset>
@@ -232,11 +248,14 @@ async function checkApply(): Promise<void> {
         <legend>{{ t('附件原件路径') }}</legend>
         <label v-for="item in attachments" :key="item.id">
           {{ item.name }}
-          <input
-            v-model="item.path"
-            :disabled="!!pendingApply || busy"
+          <nexus-path-picker
+            :value.prop="item.path"
+            :disabled.prop="!!pendingApply || busy"
             :aria-label="item.name + t('的 Host 原件路径')"
-            @input="invalidate"
+            :kinds.prop="['file']"
+            :browse-allowed.prop.camel="!!desktop"
+            @nexus-change="setMapping(item, $event.detail.value)"
+            @nexus-browse="browse(item, 'file')"
           />
         </label>
       </fieldset>

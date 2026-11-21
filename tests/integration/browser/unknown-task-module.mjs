@@ -106,7 +106,7 @@ try {
     facts.push({ runId: run.runId, unknown: task, attempts, finalAttempt: record.finalAttempt });
     await page.goto(input.address + '#/history?run=' + run.runId);
     const row = page.locator('.history-tasks li').filter({ hasText: sample.unknownTitle });
-    await row.waitFor(); await row.getByText(sample.unknownEnabled ? '待核实' : '已停用', { exact: true }).waitFor();
+    await row.waitFor(); await row.getByText(sample.unknownEnabled ? '未安排核验' : '已停用', { exact: true }).waitFor();
     await page.screenshot({ path: path.join(input.output, 'unknown-' + sample.unknownEnabled + '-zh.png'), animations: 'disabled' });
     await closeHistory(); await page.locator('a[href="#/dispatch"]').first().click();
     checks.push('actual execution and safe retry retain unknown switch, nested original bytes and restored configuration: ' + sample.unknownEnabled);
@@ -121,7 +121,7 @@ try {
     await page.locator('.history-tasks li').getByText('Automatic login', { exact: true }).waitFor();
     await page.locator('.history-tasks li').getByText('Cleanup', { exact: true }).waitFor();
     const row = page.locator('.history-tasks li').filter({ hasText: sample.unknownTitle });
-    await row.getByText(sample.unknownEnabled ? 'Unverified' : 'Disabled', { exact: true }).waitFor();
+    await row.getByText(sample.unknownEnabled ? 'Not selected for verification' : 'Disabled', { exact: true }).waitFor();
     await page.screenshot({ path: path.join(input.output, 'unknown-' + sample.unknownEnabled + '-en.png'), animations: 'disabled' });
     await closeHistory();
     checks.push('uninstalled BAAH history retains frozen English known titles and original user unknown title: ' + sample.unknownEnabled);

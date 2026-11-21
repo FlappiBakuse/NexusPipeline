@@ -33,9 +33,10 @@ export class AutomationCommands {
     this.store.dirty.add('automation-pending/' + action.id);
     try {
       const isImport = body.format === 'nexus.control.automation-import';
+      const candidates = pending.candidates?.length ? [...pending.candidates] : undefined;
       await this.store.client.write(
-        isImport ? '/control/v1/automation/import/apply' : '/control/v1/automation/change',
-        body,
+        isImport ? '/control/v1/automation/import/apply' : candidates ? '/control/v1/automation/change-drafts' : '/control/v1/automation/change',
+        candidates ? { change: body, candidates } : body,
         (value) => {
           const result = objectValue(value);
           if (result.operationId !== body.operationId) throw new TypeError('automation_result_invalid');

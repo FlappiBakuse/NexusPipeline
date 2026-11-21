@@ -1,5 +1,6 @@
 import type { RecordRow } from '../control/models';
-import { locale, t } from '../app/locale';
+import type { ActiveStep, RunTask } from '../control/execution';
+import { locale, registerMessages, t } from '../app/locale';
 import { computed } from 'vue';
 
 // ICU formatters own native data; keep one set for the active UI locale across history views.
@@ -43,6 +44,9 @@ export function historyRow(row: Pick<RecordRow, 'finalAttempt'> & Partial<Record
   } else if (business === 'partial') {
     label = '部分完成';
     tone = 'warning';
+  } else if (row.finalAttempt.engine === 'failed') {
+    label = '✕ 失败';
+    tone = 'danger';
   }
   const date = new Date(String(row.endedAt));
   const two = (value: number) => String(value).padStart(2, '0');
@@ -64,6 +68,22 @@ const outcomeNames: Record<string, string> = {
   cancelled: '已取消'
 };
 export const outcomeName = (value: string): string => t(outcomeNames[value] || value);
+registerMessages({ 已停用: 'Disabled', 未安排核验: 'Not selected for verification', 未执行: 'Not executed',
+  结果未保存: 'Result not saved', 已满足: 'Already satisfied' });
+
+export function historyTaskStatus(task: RunTask, step: Pick<ActiveStep, 'phase' | 'reasonCode'>): { label: string; tone: string } {
+  if (!task.isEnabled) return { label: t('已停用'), tone: 'neutral' };
+  if (!task.isSelected) return { label: t('未安排核验'), tone: 'neutral' };
+  if (step.phase === 'skipped') return { label: t('已跳过'), tone: 'neutral' };
+  if (task.state === 'unknown' && step.reasonCode === 'execution_cancel_requested' && step.phase !== 'notExecuted')
+    return { label: t('已取消'), tone: 'neutral' };
+  if (step.phase === 'notExecuted' || task.completionKind === 'notExecuted') return { label: t('未执行'), tone: 'neutral' };
+  if (task.completionKind === 'inapplicable') return { label: t('不适用'), tone: 'neutral' };
+  if (task.completionKind === 'satisfied') return { label: t('已满足'), tone: 'neutral' };
+  if (task.state === 'unknown' && !task.reasonCode) return { label: t('结果未保存'), tone: 'neutral' };
+  const tone = task.state === 'succeeded' ? 'success' : task.state === 'failed' ? 'danger' : task.state === 'partial' ? 'warning' : 'neutral';
+  return { label: outcomeName(task.state), tone };
+}
 export const recordBusiness = (row: RecordRow): string =>
   outcomeName(row.finalAttempt.business);
 const lifecycleNames: Record<string, string> = {

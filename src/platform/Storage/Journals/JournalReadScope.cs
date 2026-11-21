@@ -16,7 +16,8 @@ internal sealed class JournalReadScope : IDisposable
     private bool _disposed;
     private JournalReadScope Owner => _owner ?? this;
 
-    private JournalReadScope(JournalStore store, Guid? journalId, Execution.AttemptReadRegistry? attempts = null)
+    private JournalReadScope(JournalStore store, Guid? journalId, Execution.AttemptReadRegistry? attempts = null,
+        bool requireFreshInventory = false)
     {
         _attempts = attempts ?? _previous?.Owner._attempts;
         _journalId = journalId ?? Guid.Empty; _parents = journalId is null;
@@ -30,12 +31,14 @@ internal sealed class JournalReadScope : IDisposable
         else
         {
             _store = store;
-            if (journalId is { } selected && store.ProtectedJournalId is null) _protection = store.ProtectReadHistory(selected);
+            if (journalId is { } selected && store.ProtectedJournalId is null)
+                _protection = store.ProtectReadHistory(selected, requireFreshInventory);
         }
         _current = this;
     }
 
-    internal static JournalReadScope Hold(JournalStore store, Guid journalId) => new(store, journalId);
+    internal static JournalReadScope Hold(JournalStore store, Guid journalId, bool requireFreshInventory = false) =>
+        new(store, journalId, requireFreshInventory: requireFreshInventory);
 
     internal static JournalReadScope HoldAttempt(RuntimeInstance instance, NexusPipeline.Platform.Serialization.ContractReader contracts,
         Sqlite.StateDatabase database, Guid journalId) => new(

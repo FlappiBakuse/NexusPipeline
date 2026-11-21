@@ -53,11 +53,11 @@ internal sealed class RunStopEvidence(RuntimeInstance instance, StateDatabase da
                     common.WasExecuted != closure.WasExecuted))
                 throw new IOException("configuration_run_stop_duration_unbound");
             common = closure;
-            if (session.EnteredRunning && closure.WasExecuted && physical.Root.GetProperty("participants").GetArrayLength() != 2)
+            if (session.EnteredRunning && closure.WasExecuted && !ConfigurationJournalBinding.HasSealedOutput(physical))
                 throw new IOException("configuration_run_output_not_sealed");
             if (!session.EnteredRunning && requireRestored) RequireSafeRestoration(physical, closure);
             if (!session.EnteredRunning && closure.WasExecuted) throw new IOException("configuration_run_unstarted_evidence_unbound");
-            _ = ConfigurationJournalBinding.Read(instance, physical, contracts, database);
+            _ = ConfigurationJournalBinding.ReadForRestoration(instance, physical, contracts, database);
         }
         return new(TimeSpan.FromTicks(checked(elapsed * TimeSpan.TicksPerMillisecond)), common?.WasExecuted == true, binding);
     }
@@ -141,10 +141,10 @@ internal sealed class RunStopEvidence(RuntimeInstance instance, StateDatabase da
                     !closure.Family.SequenceEqual(expected.Family)) throw new IOException("configuration_group_closure_unbound");
             }
             var hasEffect = actual.Any(job => parent[job.Name].WasExecuted);
-            if (hasEffect && (!session.EnteredRunning || physical.Root.GetProperty("participants").GetArrayLength() != 2))
+            if (hasEffect && (!session.EnteredRunning || !ConfigurationJournalBinding.HasSealedOutput(physical)))
                 throw new IOException("configuration_run_output_not_sealed");
             if (!hasEffect && requireRestored && !session.EnteredRunning) RequireNoEffect(physical);
-            _ = ConfigurationJournalBinding.Read(instance, physical, contracts, database);
+            _ = ConfigurationJournalBinding.ReadForRestoration(instance, physical, contracts, database);
         }
         foreach (var job in jobs.Where(job => job.Role != "judgement" && !childJobs.Contains(job.JobName)))
         {

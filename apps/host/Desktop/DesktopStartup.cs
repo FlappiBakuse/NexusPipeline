@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using NexusPipeline.Core.Extensions;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Host.Composition;
 using NexusPipeline.Platform.Storage;
@@ -10,7 +11,7 @@ internal static class DesktopStartup
     [SupportedOSPlatform("windows")]
     public static async Task<int> RunAsync(string runtimeRoot, int? requestedPort, int? nativeClientProcessId = null,
         InstanceLease? startupLease = null, NexusPipeline.Platform.Processes.MaintenanceStartupOrigin? maintenanceOrigin = null,
-        bool launchDesktop = false, UpdateWindowIntent? resumeWindow = null, string? installationBundle = null,
+        bool launchDesktop = false, UpdateWindowIntent? resumeWindow = null, (string Directory, ExtensionStoreChannel Channel)? installationBundle = null,
         bool showStartupProgress = false)
     {
         var instance = startupLease?.Instance ?? new InstanceRoot(new()).OpenOrCreate(runtimeRoot);

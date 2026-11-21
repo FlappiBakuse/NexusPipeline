@@ -307,7 +307,7 @@ internal sealed class ConfigurationWriterProcess : IDisposable
             _lease.VerifyHeld(_instance);
             _rootPublished = true;
             _persistenceObserver?.Reached(WriterPersistencePoint.RootPublished, process);
-        }, output, _commandLineSyntax, image);
+        }, output, _commandLineSyntax, image, newConsole: output is null && _scope is EditWriterScope && image.HasConsoleSubsystem());
     }
 
     internal Task<int?> AwaitRootAsync(TimeSpan timeout, CancellationToken cancellationToken = default)

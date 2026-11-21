@@ -4,16 +4,22 @@ using System.Text.Json.Serialization;
 namespace NexusPipeline.Core.Configuration;
 
 public enum ConfigurationEditPhase { Prepared, Editing, Saved, Cancelled }
+public sealed record DraftBindingIdentity(Guid UserId, Guid ScriptId, long ScriptRevision);
 public sealed record ConfigurationEditRequest(long ExpectedBindingRevision, ImmutableArray<ConfigurationTarget> Targets)
 {
     public ConfigurationEditorCommand? Editor { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? SourceRequestDigest { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DraftBindingIdentity? DraftBinding { get; init; }
 }
 public sealed record ConfigurationEditResource(ConfigurationAddress Address, long ExpectedRevision, ConfigurationContractStamp Contract,
     Guid JournalId, string PlanPath, string PlanDigest);
 public sealed record ConfigurationEditStatus(Guid SessionId, long Revision, ConfigurationEditPhase Phase, long ExpectedBindingRevision,
-    ImmutableArray<ConfigurationEditResource> Resources, Guid? CompletionOperationId, bool IsNew);
+    ImmutableArray<ConfigurationEditResource> Resources, Guid? CompletionOperationId, bool IsNew)
+{
+    public bool IsDraft { get; init; }
+}
 public sealed record ConfigurationEditCompletion(Guid SessionId, long ExpectedSessionRevision, ConfigurationRevisionBatch Batch);
 public sealed record ConfigurationEditCancel(Guid SessionId, long ExpectedSessionRevision);
 
@@ -25,8 +31,14 @@ public static class ConfigurationEditPolicy
             throw new ConfigurationException("configuration_edit_request_invalid");
         if (request.SourceRequestDigest is not null && !FileTreePolicy.Digest(request.SourceRequestDigest))
             throw new ConfigurationException("configuration_source_request_invalid");
-        return new(request.ExpectedBindingRevision, ConfigurationTargetPolicy.Freeze(request.Targets))
-            { Editor = request.Editor is null ? null : EditorCommandPolicy.Freeze(request.Editor), SourceRequestDigest = request.SourceRequestDigest };
+        var targets = ConfigurationTargetPolicy.Freeze(request.Targets);
+        if (request.DraftBinding is { } draft && (request.ExpectedBindingRevision != 1 || request.Editor is null ||
+            draft.UserId == Guid.Empty || draft.ScriptId == Guid.Empty || draft.ScriptRevision < 1 ||
+            targets.Any(target => target.ExpectedRevision != 0)))
+            throw new ConfigurationException("configuration_draft_binding_invalid");
+        return new(request.ExpectedBindingRevision, targets)
+            { Editor = request.Editor is null ? null : EditorCommandPolicy.Freeze(request.Editor),
+                SourceRequestDigest = request.SourceRequestDigest, DraftBinding = request.DraftBinding };
     }
 
     public static ConfigurationEditCompletion Freeze(ConfigurationEditCompletion completion)

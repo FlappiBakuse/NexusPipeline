@@ -15,6 +15,7 @@ import ScriptActions from './ScriptActions.vue';
 import ExtensionOutlet from '../extensions/ExtensionOutlet.vue';
 import { draftPresentation, draftDirective as vDraft } from '../app/draft-presentation';
 import { t, locale } from '../app/locale';
+import { providePathPicker } from './editor-path-picker';
 const props = defineProps<{
   store: AutomationStore;
   kind: EntityKind;
@@ -42,6 +43,8 @@ const {
   accountBindings,
   createLabel
 } = props.model;
+providePathPicker(() => [props.model.instance, activeKind.value, selected.value, userGlobal.value],
+  () => props.visible, error => props.store.report(error));
 const { saving, error, notice, pending } = toRefs(props.session);
 const presentation: ComputedRef<ReturnType<typeof draftPresentation>> = computed(() => draftPresentation(props.store.editors.target(
   props.store.state.capabilities?.instanceId || '', activeKind.value, selected.value).child('host-form'),
@@ -105,7 +108,6 @@ const specializedTitle = computed(() => props.scriptType && activeKind.value ===
           <AccountFields
             v-else-if="bundle && activeKind === 'users' && !userGlobal"
             :model-value="draft as AutomationBundle['users'][number]"
-            :existing="existing"
             :bundle="bundle"
             @update:model-value="draft = $event as AutomationDraft"
             :bindings="accountBindings"

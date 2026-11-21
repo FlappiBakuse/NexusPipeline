@@ -8,17 +8,17 @@ internal static class ExecutionTargetInputs
 {
     internal static WireTarget? Capture(NexusPipeline.Core.Automation.AutomationTarget? target, IReadOnlyDictionary<Guid, AutomationRoot> roots,
         ImmutableBlobStore blobs, Guid instanceId, PreparedMuMuDiscovery? discovery = null,
-        NexusPipeline.Platform.Serialization.Protocol.EmulatorTargetFrozen? emulator = null)
+        NexusPipeline.Platform.Serialization.Protocol.EmulatorTargetFrozen? emulator = null, PlanInputLease? inputs = null)
     {
         if (target is null) return null;
+        using var temporary = inputs is null ? new PlanInputLease() : null;
+        var lease = inputs ?? temporary!;
         AutomationTargetPolicy.Validate(target, roots.Keys.ToHashSet());
         string Resolve(AutomationPath path) => PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(roots[path.RootId].Path, path.RelativePath));
         if (target.Pc is { } pc)
         {
             var directory = Path.GetDirectoryName(Resolve(pc.LaunchExecutable))!;
-            var identity = PhysicalObjectIdentity.Read(directory);
-            var launch = ExecutionLaunchInputs.Capture(pc.LaunchExecutable, pc.Arguments, directory,
-                new() { VolumeSerial = identity.VolumeSerial, FileId = identity.FileId }, roots);
+            var launch = ExecutionLaunchInputs.Capture(pc.LaunchExecutable, pc.Arguments, directory, lease.HoldDirectory(directory), roots, lease);
             return new()
             {
                 Kind = "pc", LaunchByHost = target.LaunchByHost, WaitSeconds = target.WaitSeconds, ForceCloseAtEnd = target.ForceCloseAtEnd,
@@ -30,7 +30,7 @@ internal static class ExecutionTargetInputs
                         SourceArguments = launch.SourceArguments, Arguments = launch.Arguments,
                         WorkingDirectory = launch.WorkingDirectory, WorkingDirectoryIdentity = launch.WorkingDirectoryIdentity
                     },
-                    ReadyImage = ExecutionHookImages.Capture(Resolve(pc.ReadyExecutable), runtime: false),
+                    ReadyImage = ExecutionHookImages.Capture(Resolve(pc.ReadyExecutable), runtime: false, lease),
                     ReadinessMode = pc.ReadinessMode == AutomationPcReadiness.Process ? "process" : "visibleWindow"
                 }
             };
@@ -40,7 +40,7 @@ internal static class ExecutionTargetInputs
         var endpoint = ExecutionAndroidCommands.Endpoint(android.Endpoint);
         _ = ExecutionAndroidCommands.Generic(endpoint, target.LaunchByHost ? ExecutionAndroidAction.StartApplication :
             ExecutionAndroidAction.DeviceState, android.StartArguments, android.Package);
-        var manager = ExecutionHookImages.Capture(Resolve(android.Tool), runtime: true);
+        var manager = ExecutionHookImages.Capture(Resolve(android.Tool), runtime: true, lease);
         ExecutionTargetAndroidMapping? mapping = null;
         if (android.Driver == AutomationAndroidDriver.Mumu)
         {
@@ -68,7 +68,7 @@ internal static class ExecutionTargetInputs
                 Driver = android.Driver == AutomationAndroidDriver.Mumu ? "mumu" : "genericAdb", Tool = manager,
                 Endpoint = endpoint, Package = android.Package, StartArguments = android.StartArguments.ToArray(), Mapping = mapping, Emulator = emulator,
                 ScreenshotTool = android.ScreenshotTool is { } screenshot
-                    ? ExecutionHookImages.Capture(Resolve(screenshot), runtime: true) : null
+                    ? ExecutionHookImages.Capture(Resolve(screenshot), runtime: true, lease) : null
             }
         };
     }

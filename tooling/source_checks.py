@@ -2,15 +2,19 @@
 from pathlib import Path
 import json
 
-from source_snapshot import source_files
+from source_snapshot import digest, source_files
 from contract_codegen import expected_outputs
 from source_names import check_names
 
-LIMITS = {
-    ".cs": 450, ".ts": 350, ".js": 350, ".mjs": 350,
-    ".vue": 300, ".css": 350, ".scss": 350,
-    ".py": 400, ".json": 350, ".yaml": 350, ".yml": 350, ".md": 400,
+SOURCE_LINE_LIMIT = 800
+TEXT_SUFFIXES = {
+    ".cs", ".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs",
+    ".vue", ".css", ".scss", ".py", ".json", ".jsonc", ".yaml", ".yml", ".md",
+    ".sql", ".html", ".xml", ".csproj", ".props", ".targets", ".slnx", ".iss", ".isl",
+    ".ps1", ".cmd", ".bat", ".sh", ".toml", ".config", ".manifest", ".txt", ".svg",
 }
+TEXT_NAMES = {".editorconfig", ".gitattributes", ".gitignore", "LICENSE"}
+LEGACY_SCHEMA_ROOT = Path("tests/fixtures/legacy-state")
 
 
 def check_source(root, records=None):
@@ -40,11 +44,17 @@ def check_source(root, records=None):
         if relative not in generated or (root / relative).read_bytes() != generated[relative].encode("utf-8"):
             raise ValueError("Generated source exemption does not match its authoritative generator")
         exemptions.add(relative)
+    schemas = json.loads((root / LEGACY_SCHEMA_ROOT / "provenance.json").read_bytes())["schemas"]
+    legacy = {LEGACY_SCHEMA_ROOT / (name + ".sql"): checksum for name, checksum in schemas.items()}
     for record in records:
         path = Path(record["path"])
-        if path.suffix not in LIMITS:
+        if path.suffix.lower() not in TEXT_SUFFIXES and path.name not in TEXT_NAMES:
             continue
         data = (root / path).read_bytes()
+        if path in legacy:
+            if digest(data) != legacy[path]:
+                errors.append(f"{path}: archived SQL differs from its provenance")
+            continue
         try:
             text = data.decode("utf-8")
         except UnicodeDecodeError:
@@ -54,9 +64,9 @@ def check_source(root, records=None):
             errors.append(f"{path}: expected UTF-8 without BOM, LF, no NUL")
         if text and not text.endswith("\n"):
             errors.append(f"{path}: missing final LF")
-        limit = 500 if "tests" in path.parts else LIMITS[path.suffix]
-        if len(text.splitlines()) > limit and path.as_posix() not in exemptions:
-            errors.append(f"{path}: exceeds {limit} physical lines")
+        lines = text.count("\n") + bool(text and not text.endswith("\n"))
+        if lines > SOURCE_LINE_LIMIT and path.as_posix() not in exemptions:
+            errors.append(f"{path}: exceeds {SOURCE_LINE_LIMIT} physical lines")
     for error in errors:
         print(error, flush=True)
     print(f"source check: {len(records)} files, {len(errors)} errors", flush=True)

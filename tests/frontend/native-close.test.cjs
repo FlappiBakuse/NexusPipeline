@@ -7,8 +7,8 @@ const vm = require('node:vm');
 
 for (const scenario of [
   { name: 'a pending read-only maintenance poll allows the user to close the window', prepared: true },
-  { name: 'an accepted pending close waits and requests a fresh correlated permit', prepared: true, pending: true },
-  { name: 'a foreign close conflict is never retried', prepared: true, conflict: true },
+  { name: 'a pending close waits on a single correlated request', prepared: true, pending: true },
+  { name: 'a signed recovery conflict reports the reason without retrying', prepared: true, conflict: true },
   { name: 'a pending close has a bounded deadline', prepared: true, pending: true, expires: true },
   { name: 'a changed document cannot continue a pending close', prepared: true, pending: true, navigation: true },
   { name: 'an unprepared renderer prevents user close before requesting authorization', prepared: false },
@@ -23,9 +23,10 @@ for (const scenario of [
   let quit = false;
   let authorized = false;
   let enabled = true;
-  let clock = 0, navigating;
+  let navigating;
   const authorizationIds = [];
   const preparations = [];
+  const exitStates = [];
   const identity = { instanceId: 'instance', clientId: 'client', sessionId: 'session' };
   const window = {
     isDestroyed: () => false,
@@ -37,6 +38,7 @@ for (const scenario of [
       on(name, callback) { if (name === 'did-start-navigation') navigating = callback; },
       isCrashed: () => false,
       send(channel, token, reason) {
+        if (channel === 'desktop.exit-state') exitStates.push(token);
         if (channel !== 'desktop.prepare-exit') return;
         preparations.push(reason);
         queueMicrotask(() => handlers.get('desktop.prepared')(
@@ -45,12 +47,14 @@ for (const scenario of [
     }
   };
   const sandbox = {
-    module: { exports: {} }, URL, URLSearchParams, AbortController, AbortSignal, Date, performance: { now: () => clock },
-    setTimeout: (callback, delay) => {
-      if (delay === 100) { clock += delay; queueMicrotask(() => { if (scenario.navigation) navigating({}, page, false, true); callback(); }); }
-      else timers.set(++timerId, { callback, delay });
-      return timerId;
-    },
+    module: { exports: {} }, URL, URLSearchParams, AbortController, Date, performance,
+    AbortSignal: { any: AbortSignal.any, timeout: delay => {
+      const controller = new AbortController();
+      if (delay === 30000 && scenario.expires)
+        queueMicrotask(() => controller.abort(new DOMException('Deadline reached', 'TimeoutError')));
+      return controller.signal;
+    } },
+    setTimeout: (callback, delay) => { timers.set(++timerId, { callback, delay }); return timerId; },
     clearTimeout: id => timers.delete(id),
     require(name) {
       if (name === './native-frontend.cjs') return { installFrontendBridge: () => ({ invalidate() {}, dispose() {} }) };
@@ -60,7 +64,7 @@ for (const scenario of [
       };
       if (name === './proof-reader.cjs') return {
         readSession: () => identity,
-        readClosePending: async response => response.pending === true,
+        readCloseRejection: () => 'recovery_pending',
         responseText: async response => response.text(),
         readClosePermit: () => {
           if (scenario.invalidPermit) throw new Error('desktop_proof_invalid');
@@ -74,8 +78,12 @@ for (const scenario of [
       if (url.pathname.endsWith('/authorize')) {
         assert.equal(enabled, true);
         authorized = true; authorizationIds.push(JSON.parse(options.body).correlationId);
-        if (scenario.conflict) return { status: 409, pending: false };
-        if (scenario.pending && (authorizationIds.length === 1 || scenario.expires)) return { status: 409, pending: true };
+        if (scenario.conflict) return { status: 409, text: async () => '{}' };
+        if (scenario.pending) await new Promise((resolve, reject) => {
+          options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+          if (scenario.navigation) queueMicrotask(() => navigating({}, page, false, true));
+          if (!scenario.navigation && !scenario.expires) queueMicrotask(resolve);
+        });
       }
       return { text: async () => '{}' };
     }
@@ -90,8 +98,9 @@ for (const scenario of [
   if (scenario.maintenance) {
     finishPoll({ status: 200, text: async () => '{}' });
   } else {
-    if (scenario.conflict) await assert.rejects(bridge.requestClose(), /desktop_response_unconfirmed/);
-    else if (scenario.expires || scenario.navigation) await assert.rejects(bridge.requestClose(), /desktop_close_pending/);
+    if (scenario.conflict) await assert.rejects(bridge.requestClose(), /recovery_pending/);
+    else if (scenario.navigation) await assert.rejects(bridge.requestClose(), /desktop_document_changed/);
+    else if (scenario.expires) await assert.rejects(bridge.requestClose(), { name: 'TimeoutError' });
     else if (scenario.prepared) await bridge.requestClose();
     else await assert.rejects(bridge.requestClose(), /desktop_writes_pending/);
     finishPoll({ status: 204, body: { cancel: async () => {} } });
@@ -99,13 +108,11 @@ for (const scenario of [
   await poll;
   assert.equal(authorized, !scenario.maintenance && scenario.prepared);
   assert.equal(quit, scenario.prepared && !scenario.invalidPermit && !scenario.conflict && !scenario.expires && !scenario.navigation);
-  assert.equal(new Set(authorizationIds).size, authorizationIds.length);
+  assert.equal(authorizationIds.length, authorized ? 1 : 0);
   if (!quit) assert.equal(enabled, true);
-  if (scenario.conflict || scenario.navigation) assert.equal(authorizationIds.length, 1);
-  if (scenario.pending && !scenario.navigation) {
-    if (scenario.expires) { assert(clock >= 30000 && clock < 31000); assert(authorizationIds.length > 1); }
-    else assert.equal(authorizationIds.length, 2);
-  }
+  if (scenario.conflict) assert.equal(exitStates.at(-1).code, 'recovery_pending');
+  if (scenario.navigation) assert.equal(exitStates.at(-1).code, 'desktop_document_changed');
+  if (scenario.expires) assert.equal(exitStates.at(-1).code, 'desktop_close_pending');
   assert.deepEqual(preparations, scenario.invalidPermit ? [] : [scenario.maintenance ? 'maintenance' : 'close']);
   await bridge.dispose();
   assert.equal(handlers.size, 0);

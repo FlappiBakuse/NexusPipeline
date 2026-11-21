@@ -10,6 +10,7 @@ export type AutomationAction = {
   kind: 'scripts' | 'users' | 'queues';
   body: ControlAutomationChange | ControlAutomationImport;
   sourceSelection?: ControlProjectCommand;
+  candidates?: readonly string[];
   definitionCommitted?: boolean;
 };
 export type AutomationSession = {

@@ -124,7 +124,7 @@ public sealed class CompletionAdmissionTests
         using var accepted = fixture.Manager.TryCompleteSnapshots(permit, fixture.Claims).Lease; Assert.NotNull(accepted);
     }
 
-    [Theory(DisplayName = "Exit Draining Admits Only The Complete Mutation Range Held At Its Original Freeze")]
+    [Theory(DisplayName = "Maintenance Draining Admits Only The Complete Mutation Range Held At Its Original Freeze")]
     [InlineData("accepted")]
     [InlineData("late")]
     [InlineData("expanded")]
@@ -136,7 +136,8 @@ public sealed class CompletionAdmissionTests
         if (range == "expanded") fixture.SetOwnHolds(SnapshotCompletionFixture.SlotA);
         if (range == "reference") fixture.Index.UpdateResourceHolds(RecoveryHoldOwner.ConfigurationOperations,
             fixture.Index.Current.ResourceHolds.Select(item => item with { Mode = ResourceClaimMode.Reference }).ToArray());
-        Assert.Equal("recovery_pending", fixture.Lifecycle.RequestClose(Guid.NewGuid(), Guid.NewGuid()).ReasonCode);
+        using var drain = fixture.Lifecycle.BeginCompletionDrain(Guid.NewGuid());
+        Assert.NotNull(drain);
         fixture.SetOwnHolds();
         var admission = fixture.Manager.TryCompleteSnapshots(fixture.Permit(), fixture.Claims);
         using var accepted = admission.Lease;

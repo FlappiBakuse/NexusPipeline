@@ -3,6 +3,11 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 const { strictJson } = require('./strict-json.cjs');
 const { setLocale, text } = require('./native-text.cjs');
+const exitReasons = new Map([
+  ['recovery_pending', 'closeRecoveryPending'], ['recovery_unverified', 'closeRecoveryUnverified'],
+  ['completion_action_pending', 'closeMaintenancePending'], ['desktop_close_pending', 'closeWorkPending'],
+  ['close_in_progress', 'closeInProgress'], ['close_session_mismatch', 'closeInProgress']
+]);
 
 function createTrayLifecycle(config, bridge, windows, electron, startup) {
   let mode = config.mode;
@@ -26,7 +31,11 @@ function createTrayLifecycle(config, bridge, windows, electron, startup) {
     return strictJson(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)));
   }
   let ready = false;
-  function menu() { if (ready && !ended) tray?.setToolTip(exitState?.stage !== 'idle' && exitState ? text('closing') : 'NexusPipeline'); }
+  function menu() {
+    if (!ready || ended) return;
+    const reason = exitState?.stage === 'idle' ? exitReasons.get(exitState.code) : exitState && 'closing';
+    tray?.setToolTip(reason ? text(reason) : 'NexusPipeline');
+  }
   async function run(action, closing = false) {
     if (busy || ended) return;
     busy = true; menu();

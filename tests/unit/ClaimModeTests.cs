@@ -33,13 +33,14 @@ public sealed class ClaimModeTests
         Assert.NotNull(reference);
     }
 
-    [Fact(DisplayName = "Exit Draining Freezes The Accepted Claim Mode As Well As Its Identity And Resource Keys")]
+    [Fact(DisplayName = "Maintenance Draining Freezes The Accepted Claim Mode As Well As Its Identity And Resource Keys")]
     public void FreezesDrainClaims()
     {
         var index = new RecoveryIndex(); index.PublishVerified(0, 1, []); var operation = Guid.NewGuid();
         index.UpdateResourceHolds(RecoveryHoldOwner.ConfigurationOperations, [new(operation, "directory:a", "edit_pending") { Mode = ResourceClaimMode.Reference }]);
         var lifecycle = new HostLifecycle(index, TimeProvider.System); var manager = new ResourceLeaseManager(lifecycle);
-        lifecycle.RequestClose(Guid.NewGuid(), Guid.NewGuid());
+        using var drain = lifecycle.BeginCompletionDrain(Guid.NewGuid());
+        Assert.NotNull(drain);
         index.UpdateResourceHolds(RecoveryHoldOwner.ConfigurationOperations, [new(operation, "directory:a", "edit_pending") { Mode = ResourceClaimMode.Mutation }]);
         var proof = index.AuthorizeContinuation(RecoveryHoldOwner.ConfigurationOperations, operation, new HashSet<string> { "directory:a" })!;
         Assert.Equal(ResourceLeaseDenial.HostUnavailable, manager.TryContinue(proof, [new("directory:a", ResourceClaimMode.Mutation)]).Denial);

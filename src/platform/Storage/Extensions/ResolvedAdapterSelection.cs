@@ -31,6 +31,8 @@ internal sealed class ResolvedAdapterSelection : IDisposable
     private readonly ResourceLeaseManager _manager;
     private readonly IDisposable _rootOwnership;
     private readonly Action _requireCaller;
+    private readonly ProjectBindingDraft? _draft;
+    internal bool IsDraft => _draft is not null;
     internal ExtensionInstalledMetadata Installed => _installed;
     internal IReadOnlyList<ConfigurationRevision> Configurations { get; }
     internal AdapterSelection Selection { get; }
@@ -65,13 +67,16 @@ internal sealed class ResolvedAdapterSelection : IDisposable
 
     internal ResolvedAdapterSelection(RuntimeInstance instance, StateDatabase database, InstanceLease lease,
         ResourceLeaseManager resources, ContractReader contracts, PayloadApplyRoots roots, AdapterSelection selection,
-        ResourceOperationLease? actualRoot = null, Action? requireCaller = null)
+        ResourceOperationLease? actualRoot = null, Action? requireCaller = null, ProjectBindingDraft? draft = null)
     {
         _manager = resources;
+        _draft = draft;
         Selection = AdapterSelectionPolicy.Freeze(selection);
         _instance = instance; _database = database; _lease = lease; _contracts = contracts; _roots = roots;
         _requireCaller = requireCaller ?? (() => { }); _requireCaller();
         lease.VerifyHeld(instance);
+        if (draft is null && resources.ReadConfigurationRecovery(Selection.BindingId) is { } recoveryIssue)
+            throw new IOException(recoveryIssue);
         var claims = new List<ResourceClaim>
         {
             new("automation:definitions", ResourceClaimMode.Reference), new("blobs:content", ResourceClaimMode.Reference),
@@ -98,6 +103,7 @@ internal sealed class ResolvedAdapterSelection : IDisposable
             var installed = new ExtensionInstalledEvidence(instance, database, contracts, roots).ReadCurrent(selection.ExtensionId)
                 ?? throw Invalid();
             if (!installed.Metadata.IsInstalled || installed.Metadata.Revision != selection.ExpectedInstalledRevision ||
+                IsDraft && installed.Metadata.Package.Kind != ExtensionPackageKind.DataSpecialized ||
                 installed.Metadata.Package.Kind is not (ExtensionPackageKind.DataSpecialized or ExtensionPackageKind.ManagedCode)) throw Invalid();
             Automation.SpecializedScriptPolicy.Require(script, ExtensionDetailsReader.ReadListing(installed, contracts));
             _installed = installed.Metadata;
@@ -153,7 +159,7 @@ internal sealed class ResolvedAdapterSelection : IDisposable
     {
         if (!executor.ReadsSources) return null;
         _source ??= new(_instance, _database, _lease, _manager, Selection.BindingId, Selection.ExpectedBindingRevision,
-            Selection.ExtensionId, RequireLive, Root);
+            Selection.ExtensionId, RequireLive, Root, _draft?.Owner);
         if (!_held.Contains(_source)) _held.Add(_source);
         return relative =>
         {
@@ -190,17 +196,26 @@ internal sealed class ResolvedAdapterSelection : IDisposable
     private (AutomationBinding Binding, AutomationScript Script) ReadDefinitions()
     {
         var catalog = new AutomationDefinitionStore(_database).Read();
-        var binding = catalog.Bindings.SingleOrDefault(item => item.Id == Selection.BindingId) ?? throw Invalid();
+        var binding = _draft is { } draft ? DraftBindingOwner.Resolve(catalog, Selection.BindingId, draft.Owner) :
+            catalog.Bindings.SingleOrDefault(item => item.Id == Selection.BindingId) ?? throw Invalid();
         var script = catalog.Scripts.SingleOrDefault(item => item.Id == binding.ScriptId) ?? throw Invalid();
         if (binding.Revision != Selection.ExpectedBindingRevision || script.Kind != AutomationKind.Specialized ||
-            script.ExtensionId != Selection.ExtensionId || !catalog.Users.Any(user => user.Id == binding.UserId)) throw Invalid();
+            script.ExtensionId != Selection.ExtensionId || !IsDraft && !catalog.Users.Any(user => user.Id == binding.UserId)) throw Invalid();
+        if (_draft?.Batch is { } batch)
+        {
+            var source = batch.Changes.Single(change => change.Address.ResourceId == BindingConfigurationSource.ResourceId);
+            binding = BindingConfigurationSource.Apply(new(_instance, _contracts), _contracts, binding, script, source.Tree);
+        }
         return (binding, BindingScriptSource.Resolve(script, binding));
     }
 
     private ConfigurationRevision ReadResource(AdapterResourceSelection resource, AutomationBinding binding, AutomationScript script)
     {
         var declaration = script.AdapterResources.SingleOrDefault(item => item.ResourceId == resource.ResourceId && item.RelativePath == resource.RelativePath) ?? throw Invalid();
-        var source = AdapterConfigurationPolicy.RequireSaved(binding, script, declaration, new(_instance, _database, _contracts));
+        var source = _draft?.Batch is { } batch ? ConfigurationRevisionPolicy.Next(null,
+            batch.Changes.Single(item => item.Address == new ConfigurationAddress(binding.Id, declaration.ResourceId)), binding.UserId, script.Id) :
+            AdapterConfigurationPolicy.RequireSaved(binding, script, declaration, new(_instance, _database, _contracts));
+        ConfigurationRevisionPolicy.RequireCurrentContract(source, AdapterConfigurationPolicy.Contract(script, declaration));
         if (source.Revision != resource.ExpectedRevision || source.ScriptId != script.Id || source.UserId != binding.UserId) throw Invalid();
         return source;
     }

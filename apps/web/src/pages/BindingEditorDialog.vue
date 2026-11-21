@@ -23,12 +23,21 @@ registerMessages({
   '请保留一个配置后再保存。': 'Keep one configuration before saving.',
   '请先在脚本程序中创建一套配置，再重新打开编辑。': 'Create a configuration in the script program and open the editor again.',
   '请检查脚本目录与上游程序是否完整。': 'Check the script directory and installed program.',
-  '请在 Host 本机打开脚本程序。': 'Open the script program on the Host machine.'
+  '请在 Host 本机打开脚本程序。': 'Open the script program on the Host machine.',
+  '脚本实例配置丢失。请在脚本程序中重新创建配置，或导入可用的备份。':
+    'This script instance lost its configuration. Recreate it in the script program or import an available backup.',
+  '此脚本实例的配置还在恢复。请在设置中的诊断查看原因。':
+    'This script instance still has configuration recovery pending. See diagnostics in Settings.',
+  '保留到草稿': 'Keep in draft',
+  '已保留到草稿，请保存账号。': 'Kept in the draft. Save the account to apply it.',
+  '在脚本程序中修改配置，再回到这里保留到草稿。保存账号后配置才会生效。':
+    'Edit the configuration in the script program, then keep it in the draft. Save the account to apply it.'
 });
 
 const props = defineProps<{ store: AutomationStore; bindingId: string; bindingRevision: number; scriptRevision: number;
-  extensionId: string | undefined; visible: boolean }>();
-const emit = defineEmits<{ close: []; changed: [] }>();
+  extensionId: string | undefined; visible: boolean;
+  draftBinding?: { userId: string; scriptId: string; scriptRevision: number; candidateId?: string } }>();
+const emit = defineEmits<{ close: []; changed: []; draftCandidate: [id: string] }>();
 const base = '/control/v1/configuration/editor/';
 type Session = ReturnType<typeof readSession>;
 type Option = { id: string; title: string };
@@ -44,6 +53,7 @@ const state = scope.retain('session', () => {
   return value;
 });
 const awaitingResult = computed(() => !!state.pending && !state.busy);
+const recovering = computed(() => ['configuration_original_lost', 'configuration_recovery_pending'].includes(state.issue));
 const feedback = computed(() => awaitingResult.value ? t('操作结果待确认；请查询状态，勿重复提交。') :
   state.issue && state.issue !== 'configuration_editor_confirm_replacement' ? message(state.issue) : '');
 
@@ -67,7 +77,9 @@ function message(code: string): string {
     configuration_editor_profile_required: '请保留一个配置后再保存。',
     configuration_editor_existing_profile_required: '请先在脚本程序中创建一套配置，再重新打开编辑。',
     configuration_editor_program_required: '请检查脚本目录与上游程序是否完整。',
-    configuration_editor_local_required: '请在 Host 本机打开脚本程序。'
+    configuration_editor_local_required: '请在 Host 本机打开脚本程序。',
+    configuration_original_lost: '脚本实例配置丢失。请在脚本程序中重新创建配置，或导入可用的备份。',
+    configuration_recovery_pending: '此脚本实例的配置还在恢复。请在设置中的诊断查看原因。'
   };
   return t(messages[code] || code);
 }
@@ -88,7 +100,9 @@ async function send(operation: Pending): Promise<void> {
     if (operation.action === 'open') {
       const response = await props.store.client.write(base + 'open-binding', {
         sessionId: operation.id, bindingId: props.bindingId, expectedBindingRevision: props.bindingRevision,
-        expectedScriptRevision: props.scriptRevision, candidateId: operation.candidate
+        expectedScriptRevision: props.scriptRevision, candidateId: operation.candidate,
+        draft: props.draftBinding ? { userId: props.draftBinding.userId, scriptId: props.draftBinding.scriptId } : undefined,
+        draftCandidateId: props.draftBinding?.candidateId
       }, objectValue, operation.id);
       state.session = response.session == null ? null : readSession(response.session);
       state.canResume = response.canResume === true;
@@ -103,6 +117,7 @@ async function send(operation: Pending): Promise<void> {
           ...revision, operationId: operation.id, candidateId: operation.candidate
         }, objectValue, operation.id);
         state.session = readSession(response.session);
+        if (typeof response.draftCandidate === 'string') emit('draftCandidate', response.draftCandidate);
         state.canResume = response.canResume === true;
         if (response.inspection != null) {
           const inspection = objectValue(response.inspection);
@@ -123,11 +138,17 @@ async function send(operation: Pending): Promise<void> {
     if (state.session && ['saved', 'cancelled'].includes(state.session.phase)) {
       const saved = state.session.phase === 'saved';
       state.session = null; state.canResume = false; state.options = [];
-      if (saved) emit('changed');
+      if (saved) {
+        if (!props.draftBinding) configurationDrafts(props.store, props.bindingId).changed();
+        emit('changed');
+      }
       emit('close');
     }
   } catch (error) {
     if (!(error instanceof ControlFailure && error.uncertain)) state.pending = null;
+    if (operation.action === 'save' && error instanceof ControlFailure && error.code === 'configuration_draft_missing') {
+      state.session = null; state.canResume = false; state.options = [];
+    }
     state.issue = error instanceof Error ? error.message : '操作失败，请重试。';
   } finally { state.busy = false; }
 }
@@ -145,10 +166,12 @@ watch(() => [props.visible, managed.value] as const, ([visible]) => {
   <nexus-modal :open.prop="visible" :locked.prop="state.busy" :title="t('编辑配置')" :size="managed ? 'wide' : 'normal'"
     @nexus-close="emit('close')">
     <ExtensionOutlet v-if="managed" target="automation.binding.editor" :store="store" :visible="visible"
-      :entity-id="bindingId" :extension-ids="extensionId ? [extensionId] : []" />
+      :entity-id="bindingId" :extension-ids="extensionId ? [extensionId] : []" :draft-binding="draftBinding"
+      @draft-candidate="emit('draftCandidate', $event)" />
     <template v-else>
       <nexus-spinner v-if="state.busy && !state.session" :label="t('正在打开脚本程序…')" />
-      <nexus-toast v-if="visible && feedback" :tone="awaitingResult ? 'warning' : 'danger'" :message.prop="feedback" />
+      <p v-if="visible && recovering" role="alert">{{ feedback }}</p>
+      <nexus-toast v-else-if="visible && feedback" :tone="awaitingResult ? 'warning' : 'danger'" :message.prop="feedback" />
       <fieldset v-if="!state.session && state.options.length && !state.pending" data-surface="raised">
         <legend>{{ t('请选择要绑定的配置。') }}</legend>
         <div v-for="option in state.options" :key="option.id">
@@ -159,7 +182,8 @@ watch(() => [props.visible, managed.value] as const, ([visible]) => {
       <template v-if="state.session">
         <p v-if="state.issue === 'configuration_editor_confirm_replacement'">{{ message(state.issue) }}</p>
         <p v-else-if="state.canResume">{{ t('点击「继续编辑」重新打开脚本程序，或取消本次修改。') }}</p>
-        <p v-else>{{ t('主程序已启动。请在脚本程序中完成修改，回到这里保存为快照。取消将恢复原配置。') }}</p>
+        <p v-else>{{ t(draftBinding ? '在脚本程序中修改配置，再回到这里保留到草稿。保存账号后配置才会生效。' :
+          '主程序已启动。请在脚本程序中完成修改，回到这里保存为快照。取消将恢复原配置。') }}</p>
         <ul v-if="state.options.length"><li v-for="option in state.options" :key="option.id">{{ option.title }}</li></ul>
       </template>
     </template>
@@ -169,9 +193,9 @@ watch(() => [props.visible, managed.value] as const, ([visible]) => {
         <button slot="footer" type="button" :disabled="state.busy" @click="finish('cancel')">{{ t('取消') }}</button>
         <button v-if="state.canResume" slot="footer" type="button" :disabled="state.busy" @click="finish('resume')">{{ t('继续编辑') }}</button>
         <button v-if="state.issue === 'configuration_editor_confirm_replacement'" slot="footer" type="button" class="primary" :disabled="state.busy"
-          @click="finish('save', state.options[0]?.id)">{{ t('保存并绑定此配置') }}</button>
+          @click="finish('save', state.options[0]?.id)">{{ t(draftBinding ? '保留到草稿' : '保存并绑定此配置') }}</button>
         <button v-else-if="!state.canResume" slot="footer" type="button" class="primary" :disabled="state.busy"
-          @click="finish('save')">{{ t('保存') }}</button>
+          @click="finish('save')">{{ t(draftBinding ? '保留到草稿' : '保存') }}</button>
       </template>
       <button v-else-if="state.options.length" slot="footer" type="button" class="primary" :disabled="state.busy || !state.candidate"
         @click="open(state.candidate)">{{ t('打开编辑器') }}</button>

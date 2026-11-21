@@ -11,6 +11,8 @@ namespace NexusPipeline.Platform.Storage.Configuration;
 public sealed class ConfigurationSessionFactory(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
     InstanceLease lease, RecoveryIndex recovery)
 {
+    internal IConfigurationPersistenceObserver? RestorationObserver { get; init; }
+
     internal void Begin(Guid sessionId, string subject, Guid parentJournalId, string stepId, PreparedConfigurationRun prepared)
     {
         var runs = new ConfigurationRunStore(instance, database, contracts);
@@ -23,15 +25,17 @@ public sealed class ConfigurationSessionFactory(RuntimeInstance instance, StateD
     internal ConfigurationRunController Control(Guid sessionId, string subject, PreparedConfigurationRun prepared,
         IConfigurationWriterScope writer, PayloadApplyRoots payloadRoots) =>
         new(instance, database, contracts, lease, recovery, sessionId, subject, prepared, writer,
-            deferRegistration: true, payloadRoots: payloadRoots);
+            deferRegistration: true, payloadRoots: payloadRoots, restorationObserver: RestorationObserver);
 
-    internal void Restore(Guid sessionId, string subject)
+    internal async Task RestoreAsync(Guid sessionId, string subject, bool cancellationAccepted)
     {
         var session = new ConfigurationRunStore(instance, database, contracts).Read(sessionId, subject)
             ?? throw new IOException("configuration_run_missing");
         var exchange = new ConfigurationEditExchange(instance, database, contracts);
         foreach (var resource in session.Resources)
-            if (exchange.Restore(resource.JournalId) == ConfigurationRecoveryResult.Quarantined)
+            if (cancellationAccepted)
+                await exchange.RestoreCancelledRunAsync(session, resource.JournalId, RestorationObserver).ConfigureAwait(false);
+            else if (exchange.Restore(resource.JournalId) == ConfigurationRecoveryResult.Quarantined)
                 throw new IOException("execution_configuration_restoration_unverified");
     }
 }

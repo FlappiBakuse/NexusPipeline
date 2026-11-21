@@ -2,6 +2,7 @@ using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Extensibility.Protocol;
+using NexusPipeline.Platform.Storage.Configuration;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
 
@@ -37,14 +38,20 @@ internal static class InitialLogLease
                     var physical = new JournalStore(instance, contracts).Read(child.JournalId);
                     if (registered.Phase == JournalPhase.Quarantined || physical.Phase == JournalPhase.Quarantined ||
                         registered.PlanDigest != item.Plan.Sha256 || registered.OperationId != child.OperationId) throw Invalid();
-                    var bound = ConfigurationJournalBinding.Read(instance, physical, contracts, database);
+                    var bound = ConfigurationJournalBinding.ReadForRestoration(instance, physical, contracts, database);
                     if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
                     var observed = new JournalWriterStore(database).ObserveForCurrentExecutor(child.JournalId);
                     if (!observed.IsComplete || observed.State != WriterState.Stopped) throw Invalid();
                     if (bound.Prepared is { } prepared)
                     {
-                        if (!swap.CanRestore(prepared, new(instance.InstanceId, child.JournalId, true, WriterState.Stopped))) throw Invalid();
-                        held.Items.Add(StableDirectoryLease.Acquire(prepared.WorkPath));
+                        var writers = new ConfigurationWriterObservation(instance.InstanceId, child.JournalId, true, WriterState.Stopped);
+                        if (ConfigurationWorkspaceCleanup.IsRetired(instance, bound))
+                            held.Items.Add(swap.HoldRestored(prepared, writers, workspaceCleaned: true));
+                        else
+                        {
+                            if (!swap.CanRestore(prepared, writers)) throw Invalid();
+                            held.Items.Add(StableDirectoryLease.Acquire(prepared.WorkPath));
+                        }
                     }
                     else
                     {

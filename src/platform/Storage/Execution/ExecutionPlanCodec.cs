@@ -11,7 +11,7 @@ public sealed class ExecutionPlanCodec(RuntimeInstance instance, ContractReader 
     public FrozenExecutionPlan Inspect(ExecutionPlan wire, ReadOnlyMemory<byte> definitionBytes) => Inspect(wire, definitionBytes, null);
 
     internal FrozenExecutionPlan Inspect(ExecutionPlan wire, ReadOnlyMemory<byte> definitionBytes,
-        IReadOnlyDictionary<string, byte[]>? providerManifests)
+        IReadOnlyDictionary<string, byte[]>? providerManifests, PlanInputLease? inputs = null)
     {
         var bytes = JsonSerializer.SerializeToUtf8Bytes(wire);
         var definitions = definitionBytes.ToArray();
@@ -20,26 +20,28 @@ public sealed class ExecutionPlanCodec(RuntimeInstance instance, ContractReader 
         {
             var plan = Decode(bytes, held, definitions, providerManifests);
             var snapshot = plan.ReadWire();
-            PlanInputLease.Acquire(snapshot, held);
+            if (inputs is null) PlanInputLease.Acquire(snapshot, held);
+            else inputs.Require(snapshot);
             ExecutionPlanResources.RequireCurrent(snapshot);
             return plan;
         }
         finally { Release(held); }
     }
 
-    public PreparedExecutionPlan Freeze(ExecutionPlan wire)
+    public PreparedExecutionPlan Freeze(ExecutionPlan wire) => Freeze(wire, new PlanInputLease());
+
+    internal PreparedExecutionPlan Freeze(ExecutionPlan wire, PlanInputLease inputs)
     {
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(wire);
-        var held = new List<IDisposable>();
+        var held = new List<IDisposable> { inputs };
         try
         {
-            var plan = Decode(bytes, held);
+            var plan = Decode(JsonSerializer.SerializeToUtf8Bytes(wire), held);
             var snapshot = plan.ReadWire();
-            PlanInputLease.Acquire(snapshot, held);
+            inputs.Require(snapshot);
             ExecutionPlanResources.RequireCurrent(snapshot);
             var reference = blobs.PersistPlan(plan.Export());
             held.Add(blobs.OpenVerified(reference));
-            return new(plan, reference, held);
+            return new(plan, reference, held, inputs);
         }
         catch { Release(held); throw; }
     }

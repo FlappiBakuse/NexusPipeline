@@ -44,7 +44,8 @@ internal sealed class AttemptReadSession : IDisposable
     internal Guid JournalId { get; }
     internal JournalStore Journals => _journals;
 
-    internal AttemptReadSession(RuntimeInstance instance, StateDatabase database, ContractReader contracts, Guid journal, Action released)
+    internal AttemptReadSession(RuntimeInstance instance, StateDatabase database, ContractReader contracts, Guid journal, Action released,
+        bool requireFreshInventory)
     {
         _instance = instance; _database = database; _contracts = contracts; JournalId = journal; _released = released;
         _blobs = new(instance, contracts); _journals = new(instance, contracts);
@@ -58,7 +59,7 @@ internal sealed class AttemptReadSession : IDisposable
             _paths = DirectoryAttributeProtection.Acquire(instance);
             try
             {
-                _history = _journals.ProtectReadHistory(journal);
+                _history = _journals.ProtectReadHistory(journal, requireFreshInventory);
                 try
                 {
                     _cancellationSql = new(database, "attempt.cancel.validate", DatabaseDomain.Runtime);

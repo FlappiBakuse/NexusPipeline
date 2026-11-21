@@ -1,7 +1,8 @@
 'use strict';
-const { ipcMain, dialog, shell } = require('electron');
+const { app, ipcMain, dialog, shell } = require('electron');
 const crypto = require('node:crypto');
-const { readProof, readSession, readClosePermit, readClosePending, readMode, responseText } = require('./proof-reader.cjs');
+const path = require('node:path/win32');
+const { readProof, readSession, readClosePermit, readCloseRejection, readMode, responseText } = require('./proof-reader.cjs');
 const { installFrontendBridge } = require('./native-frontend.cjs');
 const { installLoginBridge } = require('./native-login.cjs');
 
@@ -11,12 +12,14 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
   let generation = 0;
   let preparing;
   let closing;
+  let closeAuthorization;
   let busy = false;
   let timer;
   let ended = false;
   let connecting;
   let frontend;
   let login;
+  const pickers = new Map();
   const stopping = new AbortController();
   function publishExit(stage, code) {
     if (ended) return;
@@ -31,8 +34,10 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
   function invalidate() {
     frontend?.invalidate();
     login?.invalidate();
+    pickers.clear();
     generation++; session = undefined;
     preparing?.reject(new Error('desktop_document_changed'));
+    closeAuthorization?.abort(new Error('desktop_document_changed'));
   }
   const publishWindowState = () => {
     if (window && !window.isDestroyed()) window.webContents.send('desktop.window-state', { maximized: window.isMaximized() });
@@ -125,25 +130,19 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
       publishExit('authorizing');
       await connect();
       if (current !== generation) throw new Error('desktop_document_changed');
-      const until = performance.now() + 30000;
-      while (!ended && current === generation && performance.now() < until) {
-        const request = { ...requestIdentity(crypto.randomUUID()), type: 'close.request' };
-        const response = await fetch(new URL('control/v1/desktop/authorize', host), {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request),
-          signal: AbortSignal.timeout(Math.max(1, Math.min(5000, Math.ceil(until - performance.now())))) });
-        if (response.status === 409) {
-          if (!await readClosePending(response)) throw new Error('desktop_response_unconfirmed');
-          await new Promise(resolve => setTimeout(resolve, 100));
-          continue;
-        }
-        await consumePermit(await responseText(response), request, current);
-        return;
-      }
-      throw new Error('desktop_close_pending');
+      closeAuthorization = new AbortController();
+      const request = { ...requestIdentity(crypto.randomUUID()), type: 'close.request' };
+      const response = await fetch(new URL('control/v1/desktop/authorize', host), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request),
+        signal: AbortSignal.any([stopping.signal, closeAuthorization.signal, AbortSignal.timeout(30000)]) });
+      if (response.status === 409)
+        throw new Error(readCloseRejection(await responseText(response, true), config.verificationKey, request));
+      await consumePermit(await responseText(response), request, current);
     } catch (error) {
-      failure = error.message;
+      failure = error.name === 'TimeoutError' ? 'desktop_close_pending' : error.message;
       throw error;
     } finally {
+      closeAuthorization = undefined;
       busy = false;
       publishExit('idle', failure);
     }
@@ -193,9 +192,12 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
   });
   ipcMain.handle('desktop.action', async (event, input) => {
     validateSender(event);
-    if (!session || !input || Object.keys(input).some(key => !['type', 'url', 'sessionId'].includes(key)) ||
-        input.sessionId !== session.sessionId || input.url !== undefined && input.type !== 'external.open')
+    const pickerAction = ['file.select', 'folder.select', 'picker.release'].includes(input?.type);
+    if (!session || !input || Object.keys(input).some(key => !['type', 'url', 'sessionId', 'pickerId'].includes(key)) ||
+        input.sessionId !== session.sessionId || input.url !== undefined && input.type !== 'external.open' ||
+        (pickerAction ? typeof input.pickerId !== 'string' || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(input.pickerId) : input.pickerId !== undefined))
       throw new Error('desktop_request_rejected');
+    if (input.type === 'picker.release') { pickers.delete(input.pickerId); return; }
     if (input.type === 'window.state') return { maximized: window.isMaximized() };
     if (input.type === 'window.minimize') { window.minimize(); return; }
     if (input.type === 'window.maximize') {
@@ -210,6 +212,8 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
     busy = true;
     const current = generation;
     try {
+      const picker = pickerAction ? pickers.get(input.pickerId) || {} : undefined;
+      if (picker) pickers.set(input.pickerId, picker);
       const request = { ...requestIdentity(crypto.randomUUID()), type: input.type, ...(input.url === undefined ? {} : { url: input.url }) };
       const response = await fetch(new URL('control/v1/desktop/authorize', host), { method: 'POST',
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request), signal: AbortSignal.timeout(5000) });
@@ -223,7 +227,14 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
         await shell.openExternal(url.href);
         return { opened: true };
       }
-      const result = await dialog.showOpenDialog(window, { properties: [input.type === 'file.select' ? 'openFile' : 'openDirectory'] });
+      if (pickers.get(input.pickerId) !== picker) return { canceled: true, paths: [] };
+      const file = input.type === 'file.select';
+      const result = await dialog.showOpenDialog(window, {
+        properties: [file ? 'openFile' : 'openDirectory'], defaultPath: picker.directory || app.getPath('documents')
+      });
+      if (current !== generation || pickers.get(input.pickerId) !== picker) return { canceled: true, paths: [] };
+      validateSender(event);
+      if (!result.canceled && result.filePaths.length) picker.directory = file ? path.dirname(result.filePaths[0]) : result.filePaths[0];
       return { canceled: result.canceled, paths: result.canceled ? [] : result.filePaths };
     } finally { busy = false; }
   });

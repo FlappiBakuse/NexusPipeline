@@ -1,10 +1,12 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Journals;
+using NexusPipeline.Platform.Storage.Records;
 using NexusPipeline.Platform.Storage.Sqlite;
 
 namespace NexusPipeline.Platform.Storage.Configuration;
@@ -12,6 +14,7 @@ namespace NexusPipeline.Platform.Storage.Configuration;
 public enum EditFileBoundary { WorkspaceCreated, WorkspaceRecorded, PreserveStarted, OriginalPreserved,
     PreserveRecorded, InstallStarted, CandidateInstalled, InstallRecorded }
 public interface IEditFileObserver { void Reached(EditFileBoundary boundary, Guid journalId); }
+internal sealed class ConfigurationRestorationFailure(Exception error) : IOException("configuration_restore_failed", error) { }
 
 public sealed class ConfigurationEditExchange
 {
@@ -81,14 +84,67 @@ public sealed class ConfigurationEditExchange
         Reached(EditFileBoundary.InstallRecorded, journalId);
     }
 
-    public ConfigurationRecoveryResult Restore(Guid journalId)
+    public ConfigurationRecoveryResult Restore(Guid journalId) => Restore(journalId, null);
+
+    internal ConfigurationRecoveryResult Restore(Guid journalId, IConfigurationPersistenceObserver? observer, Action<string>? phase = null)
     {
         var registered = MaterializeRegistered(journalId);
         using var history = registered.Phase is JournalPhase.Committed or JournalPhase.Quarantined
             ? null : _journals.ProtectReadHistory(journalId);
         return new ConfigurationRecovery(new ConfigurationRecoverySession(_instance, journalId, _contracts, _database,
-            () => Observation(journalId), null, _journals)).Recover();
+            () => Observation(journalId), observer, _journals, phase)).Recover();
     }
+
+    internal async Task RestoreCancelledRunAsync(ConfigurationRunStatus session, Guid journalId, IConfigurationPersistenceObserver? observer)
+    {
+        var phase = "configuration-read";
+        Exception initial;
+        try { RestoreCurrent(); return; }
+        catch (Exception error) when (IsRetryableRestoreError(error))
+        {
+            initial = error;
+            RecordFailure("configuration_restore_retry", error);
+        }
+        catch (Exception error)
+        {
+            RecordFailure("configuration_restore_failed", error);
+            throw new ConfigurationRestorationFailure(error);
+        }
+        await Task.Delay(TimeSpan.FromMilliseconds(100)).ConfigureAwait(false);
+        phase = "configuration-read";
+        try { RestoreCurrent(); }
+        catch (Exception error)
+        {
+            RecordFailure("configuration_restore_failed", error);
+            throw new ConfigurationRestorationFailure(new AggregateException(initial, error));
+        }
+
+        void RestoreCurrent()
+        {
+            if (Restore(journalId, observer, next => phase = next) == ConfigurationRecoveryResult.Quarantined)
+                throw new IOException("configuration_run_restoration_unverified");
+        }
+
+        void RecordFailure(string reason, Exception error)
+        {
+            try { new RunDiagnosticStore(_instance, _database).Record(session.ParentJournalId, session.StepId, null, phase, reason, error, journalId); }
+            catch (Exception diagnostic) when (diagnostic is IOException or UnauthorizedAccessException or JsonException or SqliteException)
+            {
+                Console.Error.WriteLine(JsonSerializer.Serialize(new { kind = "execution.configuration.restore", session.ParentJournalId,
+                    journalId, phase, reason, exceptionType = error.GetType().Name, diagnosticExceptionType = diagnostic.GetType().Name }));
+            }
+        }
+    }
+
+    private static bool IsRetryableRestoreError(Exception error) => error switch
+    {
+        SqliteException { SqliteErrorCode: 5 or 6 } => true,
+        IOException { HResult: unchecked((int)0x80070020) or unchecked((int)0x80070021) } => true,
+        IOException { Message: "journal_publication_busy" or "journal_revision_conflict" or "journal_protected_history_changed" } => true,
+        System.ComponentModel.Win32Exception { NativeErrorCode: 32 or 33 } => true,
+        IOException { InnerException: { } cause } => IsRetryableRestoreError(cause),
+        _ => false
+    };
 
     private ConfigurationWriterObservation Observation(Guid journalId)
     {

@@ -92,7 +92,7 @@ internal sealed class ExecutionAdmissionPort : IExecutionAdmissionPort
             _lease.RunBudgets.PreparedAt(_database, _scheduledOrigin.RunId) ?? TimeProvider.System.GetUtcNow());
         if (_scheduledOrigin is not null || _retryOrigin is not null) createdAt = firstPreparedAt;
         var draft = _retryOrigin is not null ? _builder.PrepareRetry(_retryOrigin) : _scheduledOrigin is not null ? _builder.PrepareScheduled(request, createdAt, _scheduledOrigin, _discoveries) :
-            _discoveries is null ? _builder.Prepare(request, createdAt) :
+            _discoveries is null ? _builder.PrepareForAdmission(request, createdAt) :
             _builder.PrepareWithDiscoveries(request, createdAt, _discoveries);
         try
         {

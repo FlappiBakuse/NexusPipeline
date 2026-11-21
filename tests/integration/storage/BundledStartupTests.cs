@@ -88,34 +88,47 @@ public sealed class BundledStartupTests
     }
 
     [Fact]
-    public async Task RefreshesExplicitBundle()
+    public Task RefreshesExplicitBundle() => RefreshBundleAsync(develop: false);
+
+    [Fact(DisplayName = "The Test Host Imports A Signed Local Develop Bundle At The Same Version And Retains Settings")]
+    public Task RefreshesDevelopBundle() => RefreshBundleAsync(develop: true);
+
+    private static async Task RefreshBundleAsync(bool develop)
     {
-        using var emulator = new BuiltExtensionInputs("emulator-support", "NEXUS_FORMAL_EMULATOR_PACKAGE_RECEIPT");
-        using var screenshot = new BuiltExtensionInputs("live-screenshot", "NEXUS_PACKAGED_SCREENSHOT_RECEIPT");
+        using var emulator = develop ? null : new BuiltExtensionInputs("emulator-support", "NEXUS_FORMAL_EMULATOR_PACKAGE_RECEIPT");
+        using var screenshot = develop ? null : new BuiltExtensionInputs("live-screenshot", "NEXUS_PACKAGED_SCREENSHOT_RECEIPT");
         await using var host = new FrontendHostFixture();
-        await host.StartAsync(emulator, additional: [screenshot], defaultBundle: true);
+        await host.StartAsync(emulator, additional: screenshot is null ? [] : [screenshot], defaultBundle: !develop, bundleInstall: develop,
+            controlledPackage: develop ? owner => new("data-specialized", catalog: owner) : null);
+        var extensionId = develop ? "fixture-plugin" : "emulator-support";
         using var client = Client(host);
         using var before = JsonDocument.Parse(await client.GetStringAsync("/control/v1/extensions"));
-        var revision = Revision(before);
-        var originalDates = Dates(before, "emulator-support");
+        var revision = Revision(before, extensionId);
+        var originalDates = develop ? default : Dates(before, extensionId);
+        var settings = await client.GetStringAsync("/control/v1/settings");
+        var channel = develop ? "develop" : "stable";
+        var version = develop ? "0.5.0" : "0.5.1";
         var bundle = Path.Combine(host.Root, "installation-bundle");
         var catalog = JsonNode.Parse(File.ReadAllBytes(Path.Combine(bundle, "catalog.json")))!;
-        var entry = catalog["entries"]!.AsArray().Single(item => item!["extensionId"]!.GetValue<string>() == "emulator-support")!;
+        var entry = catalog["entries"]!.AsArray().Single(item => item!["extensionId"]!.GetValue<string>() == extensionId)!;
         var archive = Path.Combine(bundle, entry["artifactName"]!.GetValue<string>() + "-" + entry["packageVersion"]!.GetValue<string>() + ".zip");
+        var refreshedMember = develop ? "adapter/main.js" : "fixture-refresh.txt";
+        var refreshedContent = develop ? "return { refreshed: true };" : "Controlled refresh payload";
         byte[] manifestBytes;
         using (var zip = ZipFile.Open(archive, ZipArchiveMode.Update))
         {
             var manifestEntry = zip.GetEntry("manifest.json")!;
             JsonNode manifest;
             using (var stream = manifestEntry.Open()) manifest = JsonNode.Parse(stream)!;
-            manifest["packageVersion"] = "0.5.1"; manifestBytes = JsonSerializer.SerializeToUtf8Bytes(manifest);
+            manifest["packageVersion"] = version; manifestBytes = JsonSerializer.SerializeToUtf8Bytes(manifest);
             manifestEntry.Delete();
             using (var stream = zip.CreateEntry("manifest.json").Open()) stream.Write(manifestBytes);
-            using var writer = new StreamWriter(zip.CreateEntry("fixture-refresh.txt").Open()); writer.Write("Controlled refresh payload");
+            zip.GetEntry(refreshedMember)?.Delete();
+            using var writer = new StreamWriter(zip.CreateEntry(refreshedMember).Open()); writer.Write(refreshedContent);
         }
-        entry["packageVersion"] = "0.5.1";
-        var updatedArchive = Path.Combine(bundle, entry["artifactName"]!.GetValue<string>() + "-0.5.1.zip");
-        File.Move(archive, updatedArchive);
+        entry["packageVersion"] = version;
+        var updatedArchive = Path.Combine(bundle, entry["artifactName"]!.GetValue<string>() + "-" + version + ".zip");
+        if (archive != updatedArchive) File.Move(archive, updatedArchive);
         archive = updatedArchive;
         entry["artifact"]!["url"] = new Uri(ExtensionCatalogFixture.Artifacts,
             entry["artifactName"]!.GetValue<string>() + "/" + Path.GetFileName(archive)).AbsoluteUri;
@@ -123,34 +136,39 @@ public sealed class BundledStartupTests
         entry["artifact"]!["sha256"] = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(archive)));
         entry["artifact"]!["sizeBytes"] = new FileInfo(archive).Length;
         using var signer = new ExtensionCatalogFixture(useHostTestTrust: true);
-        var signed = signer.Signed(2, edit: value => value["entries"] = catalog["entries"]!.DeepClone());
+        var signed = signer.Signed(2, channel, edit: value => value["entries"] = catalog["entries"]!.DeepClone());
         File.WriteAllBytes(Path.Combine(bundle, "index.json"), signed.Pointer);
         File.WriteAllBytes(Path.Combine(bundle, "catalog.json"), signed.Catalog);
         File.WriteAllBytes(Path.Combine(bundle, "catalog.sig.json"), signed.Signature);
-        await host.ReinstallBundleAsync();
+        if (develop) await Assert.ThrowsAsync<IOException>(() => host.ReinstallBundleAsync());
+        await host.ReinstallBundleAsync(develop);
         using var updatedClient = Client(host);
         using var updated = JsonDocument.Parse(await updatedClient.GetStringAsync("/control/v1/extensions"));
-        Assert.Equal(revision + 1, Revision(updated));
-        var updatedDates = Dates(updated, "emulator-support");
-        Assert.Equal(originalDates.Created, updatedDates.Created);
-        Assert.True(updatedDates.Updated > originalDates.Updated);
-        Assert.Equal("Controlled refresh payload", File.ReadAllText(Path.Combine(host.Root, "runtime", "extensions", "emulator-support", "fixture-refresh.txt")));
-        await host.ReinstallBundleAsync();
+        Assert.Equal(revision + 1, Revision(updated, extensionId));
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(settings)!["saved"], JsonNode.Parse(await updatedClient.GetStringAsync("/control/v1/settings"))!["saved"]));
+        if (!develop)
+        {
+            var updatedDates = Dates(updated, extensionId);
+            Assert.Equal(originalDates.Created, updatedDates.Created);
+            Assert.True(updatedDates.Updated > originalDates.Updated);
+        }
+        Assert.Equal(refreshedContent, File.ReadAllText(Path.Combine(host.Root, "runtime", "extensions", extensionId, refreshedMember)));
+        await host.ReinstallBundleAsync(develop);
         using var replayClient = Client(host);
         using var replay = JsonDocument.Parse(await replayClient.GetStringAsync("/control/v1/extensions"));
-        Assert.Equal(Revision(updated), Revision(replay));
-        var catalogOnly = signer.Signed(3, edit: value => value["entries"] = catalog["entries"]!.DeepClone());
+        Assert.Equal(Revision(updated, extensionId), Revision(replay, extensionId));
+        var catalogOnly = signer.Signed(3, channel, edit: value => value["entries"] = catalog["entries"]!.DeepClone());
         File.WriteAllBytes(Path.Combine(bundle, "index.json"), catalogOnly.Pointer);
         File.WriteAllBytes(Path.Combine(bundle, "catalog.json"), catalogOnly.Catalog);
         File.WriteAllBytes(Path.Combine(bundle, "catalog.sig.json"), catalogOnly.Signature);
-        await host.ReinstallBundleAsync();
+        await host.ReinstallBundleAsync(develop);
         using var catalogClient = Client(host);
-        using var refreshedCatalog = JsonDocument.Parse(await catalogClient.GetStringAsync("/control/v1/extensions/catalog/stable"));
+        using var refreshedCatalog = JsonDocument.Parse(await catalogClient.GetStringAsync("/control/v1/extensions/catalog/" + channel));
         Assert.Equal(3, refreshedCatalog.RootElement.GetProperty("identity").GetProperty("sequence").GetInt64());
         using var retained = JsonDocument.Parse(await catalogClient.GetStringAsync("/control/v1/extensions"));
-        Assert.Equal(Revision(updated), Revision(retained));
-        Assert.Equal(updatedDates, Dates(retained, "emulator-support"));
-        emulator.VerifyUnchanged(); screenshot.VerifyUnchanged();
+        Assert.Equal(Revision(updated, extensionId), Revision(retained, extensionId));
+        if (!develop) Assert.Equal(Dates(updated, extensionId), Dates(retained, extensionId));
+        emulator?.VerifyUnchanged(); screenshot?.VerifyUnchanged();
     }
 
     [Fact]
@@ -286,8 +304,8 @@ public sealed class BundledStartupTests
         Assert.True(complete.RootElement.GetProperty("complete").GetBoolean());
     }
 
-    private static long Revision(JsonDocument state) => state.RootElement.GetProperty("items").EnumerateArray()
-        .Single(item => item.GetProperty("extensionId").GetString() == "emulator-support").GetProperty("installedRevision").GetInt64();
+    private static long Revision(JsonDocument state, string extensionId) => state.RootElement.GetProperty("items").EnumerateArray()
+        .Single(item => item.GetProperty("extensionId").GetString() == extensionId).GetProperty("installedRevision").GetInt64();
 
     private static (DateTimeOffset Created, DateTimeOffset Updated) Dates(JsonDocument state, string extensionId)
     {

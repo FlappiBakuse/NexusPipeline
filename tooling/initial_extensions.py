@@ -32,7 +32,7 @@ def collect_initial(directory, profile):
         raise ValueError('Initial catalog profile does not match the product')
     bundle = verify_store(directory, stored)
     catalog = json.loads((bundle / 'catalog.json').read_bytes())
-    if hash_file(bundle / 'catalog.json') != stored['pointer']['catalogSha256']:
+    if catalog['channel'] != 'stable' or hash_file(bundle / 'catalog.json') != stored['pointer']['catalogSha256']:
         raise ValueError('Signed initial catalog changed')
     ids = stored['bundledExtensions']
     selected = [item for item in catalog['entries'] if item['extensionId'] in ids]

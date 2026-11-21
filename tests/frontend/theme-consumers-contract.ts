@@ -23,16 +23,18 @@ export async function themeConsumersContract(parent: HTMLElement, check: (value:
   } });
   app.mount(holder);
   try {
-    holder.querySelector<HTMLButtonElement>('.history-log-toggle')!.click(); await nextTick();
+    const toggle = holder.querySelector<HTMLElement>('.history-log-toggle')!;
+    const expanded = new Promise(resolve => toggle.parentElement!.addEventListener('toggle', resolve, { once: true }));
+    toggle.click(); await expanded; await nextTick();
     for (const mode of ['dark', 'light', 'system'] as const) {
       store.state.interface = { ...store.state.interface!, revision: store.state.interface!.revision + 1,
         values: { ...values, theme: mode } }; await nextTick();
       const light = document.body.dataset.theme === 'light';
       const log = getComputedStyle(holder.querySelector('.history-log-preview')!);
       check(log.backgroundColor === (light ? 'rgb(241, 241, 239)' : 'rgb(10, 18, 32)'),
-        mode + ' history preview uses its paired theme background');
+        mode + ' script log uses its paired theme background');
       check(log.color === (light ? 'rgb(63, 61, 57)' : 'rgb(185, 213, 244)'),
-        mode + ' history preview retains readable foreground');
+        mode + ' script log retains readable foreground');
       check(getComputedStyle(holder.querySelector('.warning')!).borderLeftColor === (light ? 'rgb(166, 106, 11)' : 'rgb(246, 191, 97)'),
         mode + ' settings warning uses the active warning palette');
     }

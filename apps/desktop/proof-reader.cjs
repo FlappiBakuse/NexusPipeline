@@ -52,12 +52,16 @@ async function responseText(response, allowConflict = false) {
   }
   return decoder.decode(Buffer.concat(chunks));
 }
-async function readClosePending(response) {
-  if (response.status !== 409) return false;
-  const value = strictJson(await responseText(response, true));
-  return exactFields(value, ['format', 'version', 'code', 'message', 'correlationId']) &&
-    value.format === 'nexus.control.error' && value.version === 1 && value.code === 'accepted_writes_pending' &&
-    typeof value.message === 'string' && value.message.length <= 512 && uuid.test(value.correlationId);
+function readCloseRejection(text, trustedKey, request) {
+  const value = verifiedPayload(text, trustedKey);
+  const names = ['format', 'version', 'instanceId', 'clientId', 'sessionId', 'correlationId', 'type', 'isApproved', 'code'];
+  if (!exactFields(value, names) || value.format !== 'nexus.desktop.channel' || value.version !== 1 ||
+      value.type !== 'close.rejected' || value.isApproved !== false ||
+      !['completion_action_pending', 'close_in_progress', 'close_session_mismatch', 'recovery_unverified', 'recovery_pending',
+        'desktop_close_pending'].includes(value.code) ||
+      ['instanceId', 'clientId', 'sessionId', 'correlationId'].some(key => value[key] !== request[key]))
+    throw new Error('desktop_close_rejection_invalid');
+  return value.code;
 }
 function readFrontend(text, trustedKey, request, clientId) {
   const value = verifiedPayload(text, trustedKey);
@@ -114,4 +118,4 @@ function readMode(text, trustedKey, request) {
     throw new Error('desktop_mode_reply_invalid');
   return value;
 }
-module.exports = { readProof, readSession, readClosePermit, readClosePending, readFrontend, readLogin, readMode, responseText };
+module.exports = { readProof, readSession, readClosePermit, readCloseRejection, readFrontend, readLogin, readMode, responseText };

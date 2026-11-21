@@ -37,6 +37,7 @@
         "hide",
         "close.request",
         "close.permit",
+        "close.rejected",
         "file.select",
         "folder.select",
         "external.open",
@@ -59,12 +60,21 @@
     "expiresAt": {
       "type": "string",
       "format": "date-time"
+    },
+    "code": {
+      "enum": ["completion_action_pending", "close_in_progress", "close_session_mismatch",
+        "recovery_unverified", "recovery_pending", "desktop_close_pending"]
     }
   },
   "allOf": [
     {
       "if": {"properties": {"type": {"const": "close.permit"}}},
       "then": {"required": ["isApproved", "permitId", "expiresAt"], "properties": {"isApproved": {"const": true}}}
+    },
+    {
+      "if": {"properties": {"type": {"const": "close.rejected"}}},
+      "then": {"required": ["isApproved", "code"], "properties": {"isApproved": {"const": false}, "permitId": false, "expiresAt": false}},
+      "else": {"properties": {"code": false}}
     }
   ]
 }

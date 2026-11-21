@@ -1,3 +1,4 @@
+using System.Text.Json;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage;
@@ -7,6 +8,43 @@ namespace NexusPipeline.StorageTests;
 
 public sealed class TreeArchiveTests
 {
+    [Fact(DisplayName = "Protected Archives Read Each Source Once And Copy Only Content Missing From The Blob Store")]
+    public void BoundsProtectedReads()
+    {
+        var (root, archive) = Create();
+        var source = Path.Combine(root, "source");
+        Directory.CreateDirectory(Path.Combine(source, "empty"));
+        var firstFile = Path.Combine(source, "first.bin");
+        File.WriteAllBytes(firstFile, [1, 7, 3]);
+        File.WriteAllBytes(Path.Combine(source, "second.bin"), [8, 2]);
+        var parent = PhysicalObjectIdentity.Read(root);
+        var stderr = Console.Error;
+        using var captured = new StringWriter();
+        try
+        {
+            Console.SetError(captured);
+            using var profile = StartupProfile.Begin("protected-configuration-archive");
+            using (var scene = archive.CaptureProtected(source, parent, default, out var cold))
+            {
+                Assert.Equal(new[] { "", "empty", "first.bin", "second.bin" }, cold.Snapshot.Entries.Select(entry => entry.RelativePath));
+                Assert.Equal(new long[] { 3, 2 }, cold.Contents.Select(content => content.SizeBytes));
+                Assert.Throws<IOException>(() => File.Open(firstFile, FileMode.Open, FileAccess.Write, FileShare.Read));
+                var unlisted = Path.Combine(source, "empty", "unlisted");
+                File.WriteAllText(unlisted, "external");
+                Assert.Throws<IOException>(() => scene.RequireNamespace());
+                File.Delete(unlisted);
+            }
+            using var hit = archive.CaptureProtected(source, parent, default, out var archived);
+            Assert.Equal(2, archived.Contents.Count);
+        }
+        finally { Console.SetError(stderr); }
+        using var report = JsonDocument.Parse(captured.ToString());
+        var steps = report.RootElement.GetProperty("steps").EnumerateArray().ToDictionary(
+            step => step.GetProperty("name").GetString()!, step => step.GetProperty("count").GetInt64());
+        Assert.Equal(4, steps["configuration.capture.hash"]);
+        Assert.Equal(2, steps["configuration.capture.copy"]);
+    }
+
     [Theory(DisplayName = "Archived Configuration Reconstructs Exact Shape And Bytes At An Exclusive New Path")]
     [InlineData("missing")]
     [InlineData("file")]

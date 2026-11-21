@@ -1,4 +1,6 @@
 using NexusPipeline.Core.Configuration;
+using NexusPipeline.Core.Execution;
+using NexusPipeline.Core.Extensions;
 using NexusPipeline.Core.Records;
 using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Serialization;
@@ -19,31 +21,36 @@ public sealed class ExecutionLogReader(RuntimeInstance instance, StateDatabase d
         using var saved = Context(runId, attemptId);
         var blobs = new ImmutableBlobStore(instance, contracts);
         var main = saved.Main;
+        var lifecycle = StepResultCodec.Coverage(saved.Journal.Root, saved.Total).ToDictionary(item => item.StepId);
+        var skipped = BindingSkipCodec.Read(saved.Journal.Root, saved.Total).Select(item => item.StepId).ToHashSet(StringComparer.Ordinal);
         var steps = saved.Total.Steps.Select(step =>
         {
             main.TryGetValue(step.StepId, out var result);
-            ExecutionAdapterObservation? observed = null;
+            IReadOnlyList<AdapterTaskObservation> observations = [];
             if (result is not null)
             {
                 var reader = new StepEvidenceReader(instance, database, contracts);
                 var context = reader.ContextFromValidatedRead(result.Binding, saved.Registered, saved.Attempt, saved.Total, saved.Journal);
                 _ = reader.ReadValidatedReferences(result.Binding, result.Latest.Artifact, context, saved.Terminal);
                 var document = StepEvidenceCodec.Read(blobs, result.Binding, result.Latest.Artifact);
-                if (document.TaskAdapter is { } reference)
-                    observed = AdapterObservationCodec.Read(blobs, result.Binding, document.RawOutput ?? throw Invalid(), step, reference);
+                observations = DailyAdapterEvidence.Project(blobs, step, document);
             }
             var tasks = step.Tasks.Select(task =>
             {
-                var value = observed?.Observations.FirstOrDefault(item => item.TaskId == task.TaskId);
+                var value = observations.FirstOrDefault(item => item.TaskId == task.TaskId);
                 return new ExecutionTaskView(task.TaskId, task.Title, task.IsSelected, task.IsEnabled,
                     Array.AsReadOnly(task.Dependencies.ToArray()), value?.State.ToString().ToLowerInvariant() ?? "unknown", value?.ReasonCode)
                     { WorkflowRole = task.WorkflowRole ?? "business", TitleLocales = task.TitleLocales?.ToDictionary(pair => pair.Key, pair => pair.Value.GetString()!),
                         CompletionKind = value is null ? null : NexusPipeline.Platform.Extensions.TaskAdapterProtocol.WriteObservation(value).CompletionKind };
             }).ToArray();
             return new ExecutionStepView(step.StepId, step.ScriptId, step.UserId, step.BindingId,
-                Array.AsReadOnly(step.DependsOn.ToArray()), result?.IsCollected == true ? "collected" : "notExecuted", Array.AsReadOnly(tasks))
+                Array.AsReadOnly(step.DependsOn.ToArray()), skipped.Contains(step.StepId) ? "skipped" :
+                    result is { IsCollected: true, Latest.Engine: not EngineOutcome.NotStarted } ? "collected" : "notExecuted", Array.AsReadOnly(tasks))
             {
-                Engine = result?.Latest.Engine.ToString(), Business = result?.Latest.Business.ToString(), ReasonCode = result?.Latest.ReasonCode,
+                Engine = result?.Latest.Engine.ToString(), Business = result?.Latest.Business.ToString(),
+                ReasonCode = lifecycle[step.StepId].NotDispatchedReason ??
+                    (result?.Latest.Business == BusinessOutcome.Unverified && saved.Receipt.Facts.Lifecycle == LifecycleOutcome.Cancelled
+                        ? DispatchIntentCodec.Reason : result?.Latest.ReasonCode),
                 MaximumInvocations = checked((int)(step.MaximumAttempts ?? 1)),
                 Invocations = ExecutionInvocationCodec.Views(saved.Journal.Root).SelectMany(view => StepResultCodec.Read(view, saved.Total))
                     .Where(item => item.Binding.StepId == step.StepId && item.IsCollected)

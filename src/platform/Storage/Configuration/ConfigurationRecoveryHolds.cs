@@ -14,59 +14,63 @@ public static class ConfigurationRecoveryHolds
         {
             for (var attempt = 0; attempt < 8; attempt++)
             {
-                var revision = index.Current.Revision;
-                if (index.TryUpdateHolds(RecoveryHoldOwner.ConfigurationOperations, revision, Read(database, payloadRoots))) return;
+                var projection = index.Current;
+                if (index.TryUpdateHolds(RecoveryHoldOwner.ConfigurationOperations, projection.Revision,
+                        Read(database, payloadRoots, projection))) return;
             }
             throw new IOException("configuration_holds_publication_conflict");
         }
         catch { index.BlockUnknown("configuration_holds_reconciliation_required"); throw; }
     }
 
-    private static IReadOnlyList<RecoveryResourceHold> Read(StateDatabase database, PayloadApplyRoots? payloadRoots)
+    private static IReadOnlyList<RecoveryResourceHold> Read(StateDatabase database, PayloadApplyRoots? payloadRoots,
+        RecoveryProjection projection)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Extensions | DatabaseDomain.System);
         using var transaction = DatabaseConnections.BeginRead(connection);
-        var groups = new List<(Guid Session, Guid Owner, bool Run)>();
+        var groups = new List<(Guid Session, Guid Owner, Guid? Parent)>();
         using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
-            command.CommandText = "SELECT session_id,session_id,0 FROM configuration.configuration_edit_sessions WHERE phase IN (0,1) " +
-                "UNION ALL SELECT session_id,owner_operation_id,1 FROM configuration.configuration_run_sessions WHERE phase IN (0,1) LIMIT 4097;";
+            command.CommandText = "SELECT session_id,session_id,NULL FROM configuration.configuration_edit_sessions WHERE phase IN (0,1) " +
+                "UNION ALL SELECT session_id,owner_operation_id,parent_journal_id FROM configuration.configuration_run_sessions WHERE phase IN (0,1) LIMIT 4097;";
             using var rows = command.ExecuteReader();
-            while (rows.Read()) groups.Add((Guid.Parse(rows.GetString(0)), Guid.Parse(rows.GetString(1)), rows.GetBoolean(2)));
+            while (rows.Read()) groups.Add((rows.GetGuid(0), rows.GetGuid(1), rows.IsDBNull(2) ? null : rows.GetGuid(2)));
         }
         if (groups.Count > 4096) throw new IOException("configuration_hold_inventory_limit");
         var holds = new Dictionary<(Guid Owner, string Key), RecoveryResourceHold>();
         var registered = new List<RegisteredJournal>();
+        var claimsByJournal = new Dictionary<Guid, Dictionary<string, ResourceClaimMode>>();
+        var scoped = projection.Isolations.Where(item => item.CanOrdinaryExit)
+            .ToLookup(item => item.JournalId, item => item.ResourceKey);
         foreach (var group in groups)
         {
-            var journals = Members(connection, transaction, group.Session, group.Run);
-            foreach (var journal in journals)
+            var run = group.Parent is not null;
+            var journals = Members(connection, transaction, group.Session, run);
+            var narrowed = group.Parent is { } parent && scoped.Contains(parent);
+            var keys = narrowed ? scoped[group.Parent!.Value].ToHashSet(StringComparer.Ordinal) : null;
+            foreach (var journalId in journals)
             {
-                registered.Add(RecoveryJournalRegistry.ReadInside(connection, transaction, journal));
-                using var command = connection.CreateCommand(); command.Transaction = transaction;
-                command.CommandText = "SELECT r.resource_key,c.mode FROM main.journal_resources r LEFT JOIN main.journal_resource_claims c " +
-                    "ON c.journal_id=r.journal_id AND c.resource_key=r.resource_key WHERE r.journal_id=$journal ORDER BY r.resource_key LIMIT 4097;";
-                command.Parameters.AddWithValue("$journal", journal.ToString("D"));
-                var claims = new List<(string Key, ResourceClaimMode? Mode)>();
-                using (var rows = command.ExecuteReader())
-                    while (rows.Read()) claims.Add((rows.GetString(0), rows.IsDBNull(1) ? null : (ResourceClaimMode)rows.GetInt32(1)));
-                if (claims.Count is < 1 or > 4096 || claims.Any(item => item.Mode.HasValue && !Enum.IsDefined(item.Mode.Value)) ||
-                    (group.Run || claims.Any(item => item.Mode.HasValue)) && claims.Any(item => !item.Mode.HasValue))
+                var (journal, claims) = RecoveryJournalRegistry.ReadWithClaimsInside(connection, transaction, journalId);
+                registered.Add(journal);
+                claimsByJournal[journalId] = claims;
+                if ((run || claims.Count > 0) && claims.Count != journal.ResourceKeys.Count)
                     throw new IOException("configuration_hold_claims_unbound");
-                foreach (var claim in claims)
+                foreach (var resource in journal.ResourceKeys)
                 {
-                    var mode = claim.Mode ?? ResourceClaimMode.Mutation;
-                    var key = (group.Owner, claim.Key);
+                    if (keys is not null && !keys.Contains(resource)) continue;
+                    var mode = claims.GetValueOrDefault(resource, ResourceClaimMode.Mutation);
+                    var key = (group.Owner, resource);
                     if (holds.TryGetValue(key, out var prior) && prior.Mode >= mode) continue;
-                    holds[key] = new(group.Owner, claim.Key, "configuration_operation_pending") { Mode = mode };
+                    holds[key] = new(group.Owner, resource, "configuration_operation_pending")
+                        { Mode = mode, CanOrdinaryExit = narrowed };
                 }
             }
         }
         if (registered.Count > 0)
         {
             var instance = new InstanceRoot(new()).OpenExisting(database.RuntimeRoot);
-            JournalResourceClaims.VerifyScope(instance, database, new(), registered.DistinctBy(item => item.JournalId), payloadRoots);
+            JournalResourceClaims.VerifyScope(instance, database, new(), registered.DistinctBy(item => item.JournalId), payloadRoots, claimsByJournal);
         }
         return holds.Values.ToArray();
     }

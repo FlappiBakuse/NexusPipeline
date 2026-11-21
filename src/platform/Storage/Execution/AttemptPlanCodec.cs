@@ -11,13 +11,16 @@ internal sealed record AttemptMetadataPlan(RunAttemptPlan Plan, ExecutionPlan To
 
 public sealed class AttemptPlanCodec(RuntimeInstance instance, ContractReader contracts, ImmutableBlobStore blobs)
 {
-    public PreparedAttemptPlan Freeze(RunAttemptPlan wire)
+    public PreparedAttemptPlan Freeze(RunAttemptPlan wire) => Freeze(wire, null);
+
+    internal PreparedAttemptPlan Freeze(RunAttemptPlan wire, PreparedExecutionPlan? preparedTotal)
     {
         var held = new List<IDisposable>();
         try
         {
             var frozen = Decode(JsonSerializer.SerializeToUtf8Bytes(wire), held, out var total);
-            PlanInputLease.Acquire(total, held);
+            if (preparedTotal is null) PlanInputLease.Acquire(total, held);
+            else preparedTotal.RequireInputs(Reference(wire.ExecutionPlan), total);
             ExecutionPlanResources.RequireCurrent(total);
             var reference = blobs.PersistPlan(frozen.Export());
             held.Add(blobs.OpenVerified(reference));
@@ -49,23 +52,25 @@ public sealed class AttemptPlanCodec(RuntimeInstance instance, ContractReader co
         var held = new List<IDisposable>();
         try
         {
-            var plan = ReadHeld(reference, held, out var total).ReadWire();
+            var plan = ReadHeld(reference, held, out var total, bindAcceptedConfiguration: true).ReadWire();
             return new(plan, total, held);
         }
         catch { Release(held); throw; }
     }
 
-    private FrozenAttemptPlan ReadHeld(BlobReference reference, List<IDisposable> held, out ExecutionPlan total, bool metadataOnly = false)
+    private FrozenAttemptPlan ReadHeld(BlobReference reference, List<IDisposable> held, out ExecutionPlan total, bool metadataOnly = false,
+        bool bindAcceptedConfiguration = false)
     {
         if (reference.SizeBytes is < 1 or > StrictJson.MaximumBytes || reference.RelativePath != $"blobs/plans/{reference.Sha256}.json")
             throw new IOException("run_attempt_reference_invalid");
         var input = blobs.OpenVerified(reference); held.Add(input);
         var bytes = new byte[checked((int)input.Length)];
         input.ReadExactly(bytes);
-        return Decode(bytes, held, out total, metadataOnly);
+        return Decode(bytes, held, out total, metadataOnly, bindAcceptedConfiguration);
     }
 
-    private FrozenAttemptPlan Decode(byte[] bytes, List<IDisposable> held, out ExecutionPlan total, bool metadataOnly = false)
+    private FrozenAttemptPlan Decode(byte[] bytes, List<IDisposable> held, out ExecutionPlan total, bool metadataOnly = false,
+        bool bindAcceptedConfiguration = false)
     {
         var plan = contracts.Read<RunAttemptPlan>(bytes, "run-attempt-plan.schema.json");
         foreach (var id in new[] { plan.RunId, plan.AttemptId, plan.OperationId, plan.JournalId }) ExecutionPlanSources.RequireCanonicalId(id);
@@ -92,7 +97,7 @@ public sealed class AttemptPlanCodec(RuntimeInstance instance, ContractReader co
             throw new IOException("run_attempt_total_plan_unbound");
         if (plan.AttemptOrdinal > 1 && (total.RetryPolicy.Safety != "safe" || !total.RetryPolicy.HostApproved))
             throw new IOException("execution_retry_not_authorized");
-        ValidateConfigurations(plan, total, held, metadataOnly);
+        ValidateConfigurations(plan, total, held, metadataOnly || bindAcceptedConfiguration);
         ValidateLogs(plan, total, held, metadataOnly);
         return new(bytes);
     }

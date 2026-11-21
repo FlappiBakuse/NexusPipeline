@@ -50,6 +50,7 @@ internal static class JournalResourceClaims
         command.CommandText = "SELECT journal_id,resource_key,mode FROM main.journal_resource_claims WHERE journal_id IN (" +
             string.Join(',', parameters) + ") ORDER BY journal_id,resource_key;";
         var result = journals.ToDictionary(id => id, _ => new Dictionary<string, ResourceClaimMode>(StringComparer.Ordinal));
+        using var timing = StartupProfile.Measure("journal.claims-query");
         using var row = command.ExecuteReader();
         while (row.Read())
         {
@@ -69,13 +70,15 @@ internal static class JournalResourceClaims
     }
 
     internal static void VerifyScope(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
-        IEnumerable<RegisteredJournal> registered, PayloadApplyRoots? payloadRoots = null)
+        IEnumerable<RegisteredJournal> registered, PayloadApplyRoots? payloadRoots = null,
+        IReadOnlyDictionary<Guid, Dictionary<string, ResourceClaimMode>>? capturedClaims = null)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System);
-        using var transaction = DatabaseConnections.BeginRead(connection);
+        using var connection = capturedClaims is null ? DatabaseConnections.Open(database.DatabasePath, readOnly: true,
+            domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System) : null;
+        using var transaction = connection is null ? null : DatabaseConnections.BeginRead(connection);
         foreach (var batch in registered.Chunk(128))
         {
-            var claims = ReadBatch(connection, transaction, batch.Select(item => item.JournalId).ToArray());
+            var claims = capturedClaims ?? ReadBatch(connection!, transaction!, batch.Select(item => item.JournalId).ToArray());
             VerifyBatch(instance, database, contracts, batch, journal => Verify(journal, claims[journal.JournalId]));
         }
 

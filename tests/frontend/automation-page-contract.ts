@@ -7,7 +7,7 @@ import AutomationPage from '../../apps/web/src/pages/AutomationPage.vue';
 import BindingEditorDialog from '../../apps/web/src/pages/BindingEditorDialog.vue';
 import { FrontendRegistry } from '../../apps/web/src/extensions/frontend-registry';
 import { registryKey } from '../../apps/web/src/extensions/registry-context';
-import { settle } from './configuration-draft-fixture';
+import { draftFixture, settle } from './configuration-draft-fixture';
 
 type Check = (value: unknown, name: string) => void;
 type Store = ReturnType<typeof createStore>;
@@ -53,14 +53,20 @@ async function accountSave(parent: HTMLElement, check: Check) {
     actions.querySelector('button')!.click();
     await settle();
     const modal = holder.querySelector('nexus-modal')!;
+    const notes = modal.querySelector('nexus-text-area');
+    check(notes?.getClientRects().length && modal.querySelector('.add-binding')?.getClientRects().length,
+      'a new account exposes notes and binding controls before its first save');
     modal.querySelector('nexus-text-input')!.dispatchEvent(new CustomEvent('nexus-change', { detail: { value: 'New account' } }));
+    await settle();
+    notes?.dispatchEvent(new CustomEvent('nexus-change', { detail: { value: 'Initial account note' } }));
     await settle();
     modal.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
     await Promise.race([refreshed.promise, new Promise((_, reject) => setTimeout(() => reject(Error('Account save did not refresh')), 1500))]);
     await settle();
     check(dialogTitle(modal) === '添加用户' && modal.shadowRoot?.querySelector('dialog')?.dataset.size === 'normal' &&
-      !modal.querySelector('.bindings-section'),
-      'the creation modal keeps its original title and fields when the new user reaches the catalog');
+      modal.querySelector('.bindings-section')?.getClientRects().length,
+      'the creation modal keeps its title and binding controls when the new user reaches the catalog');
+    check(command?.users[0]?.value.notes === 'Initial account note', 'saving a new account includes its notes');
     finish.resolve();
     await settle();
     await new Promise(resolve => setTimeout(resolve, 230));
@@ -72,8 +78,10 @@ async function accountSave(parent: HTMLElement, check: Check) {
     check(name.localName === 'h2' && !holder.querySelector('nexus-modal'), 'the account title is display-only');
     holder.querySelector('.entity-card-actions nexus-icon-button')!.shadowRoot!.querySelector('button')!.click();
     await settle();
-    check(dialogTitle(holder.querySelector('nexus-modal')) === '用户管理' && holder.querySelector('.bindings-section'),
-      'an explicit edit after creation still opens user management');
+    const editor = holder.querySelector('nexus-modal');
+    check(dialogTitle(editor) === '用户管理' && editor?.querySelector('nexus-text-area')?.getClientRects().length &&
+      editor.querySelector('.bindings-section')?.getClientRects().length,
+      'user management exposes both notes and the binding list when editing an existing account');
   } finally { finish.resolve(); dispose(); }
 }
 
@@ -208,6 +216,92 @@ async function bindingEditorFailure(parent: HTMLElement, check: Check) {
   } finally { app.unmount(); store.dispose(); holder.remove(); }
 }
 
+async function activeBindingRemoval(parent: HTMLElement, check: Check) {
+  const { store, writes } = draftFixture(route => {
+    if (route.endsWith('/session/cancel')) return Response.json({ sessionId: 'session', revision: 2, phase: 'cancelled' });
+    if (route.endsWith('/session/save-binding')) return Response.json({
+      session: { sessionId: 'session', revision: 2, phase: 'saved' }, draftCandidate: 'prepared-configuration'
+    });
+    if (route.endsWith('/prepared-configuration/discard')) return Response.json({});
+  });
+  store.state.capabilities!.capabilities.push('automation.write');
+  const script = { id: 'script', name: 'Native fixture', kind: 'specialized', extensionId: 'fixture' } as Script;
+  store.state.automation = {
+    ...store.state.automation!,
+    revisions: [{ kind: 'script', id: script.id, revision: 1 }],
+    bundle: { ...emptyBundle, scripts: [script] }
+  };
+  const { holder, actions, dispose } = mountPage(parent, store, 'users');
+  const press = (root: Element, text: string) => {
+    [...root.querySelectorAll('button')].find(button => button.textContent?.trim() === text)!.click();
+  };
+  try {
+    actions.querySelector('button')!.click();
+    await settle();
+    const account = holder.querySelector('nexus-modal')!;
+    account.querySelector<HTMLButtonElement>('.add-binding')!.click();
+    await settle();
+    press(account, 'Native fixture');
+    await settle();
+    press(account, '确定');
+    await settle();
+    const toggle = account.querySelector<HTMLButtonElement>('.binding-toggle')!;
+    toggle.click();
+    await settle();
+    account.querySelector<HTMLButtonElement>('.edit-configuration')!.click();
+    await settle();
+    const editor = [...holder.querySelectorAll('nexus-modal')].find(modal => modal !== account)!;
+    press(editor, '关闭');
+    await settle();
+    toggle.click();
+    await settle();
+    press(account, '编辑绑定');
+    await settle();
+    press(account, '移除绑定');
+    await settle();
+    const retained = account.contains(toggle);
+    check(retained, 'removing an unsaved binding keeps its active native configuration session reachable');
+    if (!retained) return;
+    press(account, '完成编辑');
+    await settle();
+    toggle.click();
+    await settle();
+    account.querySelector<HTMLButtonElement>('.edit-configuration')!.click();
+    await settle();
+    const resumed = [...holder.querySelectorAll('nexus-modal')].find(modal => modal !== account)!;
+    press(resumed, '取消');
+    await settle();
+    check(writes.filter(route => route.endsWith('/editor/open-binding')).length === 1 &&
+      writes.some(route => route.endsWith('/session/cancel')), 'reopening the retained binding can cancel the original session');
+    account.querySelector<HTMLButtonElement>('.edit-configuration')!.click();
+    await settle();
+    const staged = [...holder.querySelectorAll('nexus-modal')].find(modal => modal !== account)!;
+    press(staged, '保留到草稿');
+    await settle();
+    const bindingId = toggle.closest<HTMLElement>('[data-item-id]')!.dataset.itemId!;
+    const managed = store.editors.target(store.state.capabilities!.instanceId, 'bindings', bindingId)
+      .child('extension/maa-framework').child('automation.binding.editor');
+    const release = managed.guardCancel(() => false);
+    press(account, '放弃配置草稿');
+    await settle();
+    check(!managed.signal.aborted && !writes.some(route => route.endsWith('/prepared-configuration/discard')),
+      'discarding a staged draft waits for the managed editor to settle');
+    release();
+    press(account, '放弃配置草稿');
+    await settle();
+    check(account.contains(toggle) && managed.signal.aborted &&
+      writes.some(route => route.endsWith('/prepared-configuration/discard')),
+      'discarding a staged configuration keeps the binding and releases its candidate and managed editor state');
+    toggle.click();
+    await settle();
+    press(account, '编辑绑定');
+    await settle();
+    press(account, '移除绑定');
+    await settle();
+    check(!account.contains(toggle), 'removing the binding succeeds after the configuration session is cancelled');
+  } finally { dispose(); }
+}
+
 export async function automationPageContract(parent: HTMLElement, check: Check): Promise<void> {
   const failures: string[] = [];
   const record: Check = (value, name) => { if (value) check(value, name); else failures.push(name); };
@@ -216,5 +310,6 @@ export async function automationPageContract(parent: HTMLElement, check: Check):
   await accountFailure(parent, record);
   await accountDelete(parent, record);
   await bindingEditorFailure(parent, record);
+  await activeBindingRemoval(parent, record);
   if (failures.length) throw new Error(failures.join('\n'));
 }

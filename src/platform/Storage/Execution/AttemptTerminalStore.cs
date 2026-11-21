@@ -30,14 +30,14 @@ internal sealed class AttemptTerminalStore(RuntimeInstance instance, StateDataba
         { Record(Read(parentJournalId), proof.Binding, evidence, "observed"); return true; }));
     }
 
-    internal void RecordCollected(Guid parentJournalId, PreparedStepResult proof)
+    internal ExecutionStepEvidence RecordCollected(Guid parentJournalId, PreparedStepResult proof)
     {
         lease.RequirePublicationEntry();
-        proof.Use(proof.Binding, evidence => lease.PublishExecution(() =>
-        { Record(Read(parentJournalId), proof.Binding, evidence, "collected"); return true; }));
+        return proof.Use(proof.Binding, evidence => lease.PublishExecution(() =>
+            Record(Read(parentJournalId), proof.Binding, evidence, "collected")));
     }
 
-    private void Record(AttemptWriterState state, StepEvidenceBinding binding, ExecutionStepEvidence evidence, string stage)
+    private ExecutionStepEvidence Record(AttemptWriterState state, StepEvidenceBinding binding, ExecutionStepEvidence evidence, string stage)
     {
         var job = state.Steps.SingleOrDefault(item => item.StepId == binding.StepId) ?? throw new IOException("execution_step_evidence_unbound");
         if (StepResultCodec.Binding(state.Latest.Root, job) != binding) throw new IOException("execution_step_evidence_unbound");
@@ -49,12 +49,12 @@ internal sealed class AttemptTerminalStore(RuntimeInstance instance, StateDataba
         var prior = StepResultCodec.Read(state.Latest.Root, state.Total).SingleOrDefault(item => item.Binding.StepId == binding.StepId);
         var intended = new StepResultIntent(StepResultCodec.Format, 1, binding, stage, evidence.Artifact,
             evidence.Engine, evidence.Business, evidence.Generation, evidence.ReasonCode);
-        if (prior?.Latest == intended) return;
+        if (prior?.Latest == intended) return evidence;
         if (stage == "collected" && StepResultAdmission.SuppressesLocalStop(state.Cancellation))
         {
             evidence = new StepEvidenceFactory(instance, database, contracts, lease).NormalizeUnpublishedAfterClose(binding, evidence, prior);
             intended = intended with { Artifact = evidence.Artifact, Business = evidence.Business, ReasonCode = evidence.ReasonCode };
-            if (prior?.Latest == intended) return;
+            if (prior?.Latest == intended) return evidence;
         }
         if (state.IsDispatchClosed && (stage == "observed" || state.Cancellation?.ReasonCode != DispatchIntentCodec.CompletionReason) &&
             evidence.Business != (prior?.Latest.Business ?? BusinessOutcome.Unverified))
@@ -63,6 +63,7 @@ internal sealed class AttemptTerminalStore(RuntimeInstance instance, StateDataba
         Append(state, state.Latest.Phase, document => document["participants"]!.AsArray().Add(
             StepResultCodec.Participant(intended, state.Total.Steps.Single(item => item.StepId == binding.StepId).ScriptId)));
         Synchronize(state.Journal.JournalId);
+        return evidence;
     }
 
     internal void FreezeDispatch(Guid parentJournalId, bool interrupted)

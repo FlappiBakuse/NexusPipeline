@@ -16,6 +16,10 @@ public sealed record ControlProjectSurface
     /// <summary>Schema field <c>input</c>; constraints are owned by control-project-surface.schema.json.</summary>
     [JsonPropertyName("input")]
     public required IReadOnlyDictionary<string, JsonElement> Input { get; init; }
+    /// <summary>Schema field <c>draftBinding</c>; constraints are owned by control-project-surface.schema.json.</summary>
+    [JsonPropertyName("draftBinding")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ControlProjectSurfaceDraftBinding? DraftBinding { get; init; }
     /// <summary>Schema field <c>operationId</c>; constraints are owned by control-project-surface.schema.json.</summary>
     [JsonPropertyName("operationId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

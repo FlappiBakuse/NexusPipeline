@@ -9,13 +9,13 @@ internal static class ExecutionHookInputs
     internal const int MaximumJournalEventBytes = 16384;
 
     internal static IReadOnlyList<ExecutionPlanHook>? Read(AutomationBinding binding, string workingDirectory,
-        FileTreePhysicalIdentity workingDirectoryIdentity, IReadOnlyDictionary<Guid, AutomationRoot> roots)
+        FileTreePhysicalIdentity workingDirectoryIdentity, IReadOnlyDictionary<Guid, AutomationRoot> roots, PlanInputLease? inputs = null)
     {
         var hooks = new List<ExecutionPlanHook>();
         void Add(AutomationHook? definition, string role, bool once, bool final)
         {
             if (definition is null) return;
-            var launch = ExecutionLaunchInputs.Capture(definition.Executable, definition.Arguments, workingDirectory, workingDirectoryIdentity, roots);
+            var launch = ExecutionLaunchInputs.Capture(definition.Executable, definition.Arguments, workingDirectory, workingDirectoryIdentity, roots, inputs);
             hooks.Add(new()
             {
                 Role = role, LaunchKind = launch.LaunchKind, Source = launch.Source, Command = launch.Command,

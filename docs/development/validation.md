@@ -51,6 +51,8 @@ python -B tooling/nexus.py check --scope source
 python -B tooling/nexus.py check --scope contracts
 ```
 
+源码检查对手写文本统一执行每文件 800 个物理行的上限。PR 优先复用原生构建中的源码检查，其余范围独立检查一次。已登记的生成物由原生产者校验。历史 SQL 夹具按其来源登记核对原始字节，新手写 SQL 适用常规检查。
+
 按改动选择，契约完全未变不为了凑四项而重复跑契约生成检查。schema 或生成权威确实变更时，代码阶段使用 canonical generator 更新必要源文件，再在统一阶段检查一致性。不能通过修改生成物或旧指纹让验证阶段悄悄改变源码。
 
 现役 AST/程序集边界与生成检查需要的工具可复用一次编译。现役 build 中组合执行的职责分别报告，保留实际依赖和边界检查。

@@ -79,13 +79,13 @@ public sealed class ExtensionPackageService : IExtensionPackages, IAsyncDisposab
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
     }
 
-    internal async Task InstallLocalAsync(string directory)
+    internal async Task InstallLocalAsync(string directory, ExtensionStoreChannel channel)
     {
         RequireAvailable();
         await _refresh.WaitAsync(_stopping.Token).ConfigureAwait(false);
         try
         {
-            await _local.InstallAllAsync(directory, _stopping.Token).ConfigureAwait(false);
+            await _local.InstallAllAsync(directory, channel, _stopping.Token).ConfigureAwait(false);
         }
         finally { _refresh.Release(); }
     }

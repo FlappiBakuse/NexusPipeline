@@ -18,6 +18,7 @@ public sealed class ConfigurationRunController : IDisposable
     private readonly InstanceLease _lease;
     private readonly RecoveryIndex _index;
     private readonly PayloadApplyRoots? _payloadRoots;
+    private readonly IConfigurationPersistenceObserver? _restorationObserver;
     private readonly PreparedConfigurationRun _prepared;
     private readonly ConfigurationRunStore _runs;
     private RunWriterProcess _writer;
@@ -45,10 +46,11 @@ public sealed class ConfigurationRunController : IDisposable
 
     internal ConfigurationRunController(RuntimeInstance instance, StateDatabase database, ContractReader contracts, InstanceLease lease,
         RecoveryIndex index, Guid sessionId, string subject, PreparedConfigurationRun prepared, IConfigurationWriterScope? parentScope,
-        bool deferRegistration = false, PayloadApplyRoots? payloadRoots = null)
+        bool deferRegistration = false, PayloadApplyRoots? payloadRoots = null, IConfigurationPersistenceObserver? restorationObserver = null)
     {
         lease.VerifyHeld(instance);
-        _payloadRoots = payloadRoots; _instance = instance; _database = database; _contracts = contracts; _lease = lease; _index = index;
+        _payloadRoots = payloadRoots; _restorationObserver = restorationObserver;
+        _instance = instance; _database = database; _contracts = contracts; _lease = lease; _index = index;
         _sessionId = sessionId; _subject = subject; _prepared = prepared; _runs = new(instance, database, contracts); _progress = new(instance, database, contracts);
         var session = Required(); ConfigurationRunStore.RequirePrepared(session, 1);
         prepared.Use(resources =>
@@ -257,7 +259,9 @@ public sealed class ConfigurationRunController : IDisposable
         finally { _gate.Release(); }
     }
 
-    public async Task<RunSyncResult> FinishAsync(Guid operationId, bool interrupted)
+    public Task<RunSyncResult> FinishAsync(Guid operationId, bool interrupted) => FinishAsync(operationId, interrupted, cancellationAccepted: false);
+
+    internal async Task<RunSyncResult> FinishAsync(Guid operationId, bool interrupted, bool cancellationAccepted)
     {
         if (operationId == Guid.Empty) throw new ArgumentException("configuration_run_progress_identity_invalid");
         _closing = true; _timerCancellation.Cancel();
@@ -297,10 +301,15 @@ public sealed class ConfigurationRunController : IDisposable
             {
                 try
                 {
-                    if (exchange.Restore(resource.JournalId) == ConfigurationRecoveryResult.Quarantined)
+                    if (cancellationAccepted)
+                        await exchange.RestoreCancelledRunAsync(session, resource.JournalId, _restorationObserver).ConfigureAwait(false);
+                    else if (exchange.Restore(resource.JournalId, _restorationObserver) == ConfigurationRecoveryResult.Quarantined)
                         failure ??= new IOException("configuration_run_restoration_unverified");
                 }
-                catch (Exception error) when (error is IOException or ConfigurationException) { failure ??= error; }
+                catch (Exception error) when (cancellationAccepted || error is IOException or ConfigurationException)
+                {
+                    failure = failure is null ? error : cancellationAccepted ? new AggregateException(failure, error) : failure;
+                }
             }
             ConfigurationRecoveryHolds.Publish(_database, _index, _payloadRoots);
             if (failure is not null) throw failure;
@@ -314,7 +323,12 @@ public sealed class ConfigurationRunController : IDisposable
             });
             Release(); return result;
         }
-        catch { ConfigurationRecoveryHolds.Publish(_database, _index, _payloadRoots); throw; }
+        catch (Exception error)
+        {
+            try { ConfigurationRecoveryHolds.Publish(_database, _index, _payloadRoots); }
+            catch (Exception publicationError) { throw new AggregateException("configuration_recovery_publication_failed", error, publicationError); }
+            throw;
+        }
         finally { _gate.Release(); }
     }
 
@@ -344,6 +358,20 @@ public sealed class ConfigurationRunController : IDisposable
 
     private ConfigurationRunStatus Required() => _runs.Read(_sessionId, _subject) ?? throw new ConfigurationException("configuration_run_missing");
     private void Verify() { ObjectDisposedException.ThrowIf(_disposed, this); _lease.VerifyHeld(_instance); }
+    internal void ReleaseStoppedRecovery()
+    {
+        _gate.Wait();
+        try
+        {
+            if (_completed) return;
+            Verify();
+            if (!Required().IsWriterAdmissionClosed || !_closing || !_monitor.IsCompleted)
+                throw new IOException("configuration_writer_stop_unconfirmed");
+            _writer.Dispose(); _prepared.Dispose(); _completed = true;
+        }
+        finally { _gate.Release(); }
+    }
+
     private void Release()
     {
         ConfigurationRecoveryHolds.Publish(_database, _index, _payloadRoots);

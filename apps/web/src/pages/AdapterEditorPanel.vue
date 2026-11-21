@@ -1,292 +1,203 @@
 <script setup lang="ts">
-import { fieldHelp as vHelp } from '../components/field-help';
-import { draftPresentation, draftDirective as vDraft } from '../app/draft-presentation';
-import { createIdentity } from '../control/identity';
-import { computed, onBeforeUnmount, reactive, ref, toRefs, watch } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref, shallowRef, watch } from 'vue';
+import { t } from '../app/locale';
 import type { ConfigurationStore } from '../app/store-ports';
+import FormSelect from '../components/FormSelect';
 import { ControlFailure, objectValue } from '../control/client';
-import { t, locale } from '../app/locale';
-import AdapterCoverage from './AdapterCoverage.vue';
-import { taskTitle } from '../control/extension-metadata';
-import { configurationOverview, type ConfigurationOverview } from './configuration-types';
-import './configuration-messages';
-import { useAdapterAvailability } from './adapter-availability';
+import type { ExtensionDetails } from '../control/extensions';
+import { createIdentity } from '../control/identity';
+import AdapterDiagnostics from './AdapterDiagnostics.vue';
+import { adapterCommand, adapterResult, adapterSelection, type AdapterResult, type AdapterSource } from './adapter-results';
 import { configurationDrafts } from './configuration-drafts';
-import {
-  adapterResult,
-  createAdapterDraft,
-  resetAdapterProposal
-} from './adapter-results';
-const props = defineProps<{ store: ConfigurationStore; overview: ConfigurationOverview; visible: boolean }>();
-const emit = defineEmits<{ changed: [] }>();
-const instance = props.store.state.capabilities?.instanceId;
-const currentInstance = () => instance === props.store.state.capabilities?.instanceId;
-const key = 'configuration/adapter/' + instance + '/' + props.overview.bindingId;
-const scope = configurationDrafts(props.store, props.overview.bindingId).child('adapter');
-const store = props.store;
-const presentation = draftPresentation(scope.child('host-form'), true);
-const state = scope.retain('state', () => {
-  const state = reactive(createAdapterDraft());
+import './configuration-messages';
+
+const props = defineProps<{ store: ConfigurationStore; bindingId: string; source?: AdapterSource;
+  details?: ExtensionDetails; visible: boolean; checking?: boolean }>();
+const { store, bindingId } = props;
+const instance = store.state.capabilities?.instanceId;
+const key = 'configuration/adapter/' + instance + '/' + bindingId;
+const bindingScope = configurationDrafts(store, bindingId);
+const scope = bindingScope.child('adapter');
+const write = scope.retain('state', () => {
+  const state = reactive({ pending: '', busy: false, note: '', error: '' });
   scope.guardCancel(() => !state.pending);
   scope.onSettled(() => store.dirty.delete(key));
   return state;
 });
-watch(
-  () => !!state.pending && state.pendingAction === 'applyRepair',
-  (changed) => {
-    if (changed) props.store.dirty.add(key);
-    else props.store.dirty.delete(key);
-  },
-  { immediate: true, flush: 'sync' }
-);
-const { busy, note, error } = toRefs(state);
-const availabilityError = ref('');
-let alive = true;
-const { extension, details, loadingExtension, available } = useAdapterAvailability(
-  props.store,
-  () => props.overview.extensionId,
-  () => props.visible,
-  (reason) => {
-    availabilityError.value = reason instanceof Error ? reason.message : '扩展未安装或未启用，专项配置不可用。';
-  }
-);
-const selected = computed(() =>
-  props.overview.resources.filter((item) => state.resourceIds.includes(item.resourceId) && item.isSaved)
-);
-const candidate = computed(() => state.candidates.find((item) => item.index === state.candidateIndex));
-function toggle(id: string): void {
-  state.resourceIds = state.resourceIds.includes(id)
-    ? state.resourceIds.filter((item) => item !== id)
-    : [...state.resourceIds, id];
-  resetAdapterProposal(state);
-  error.value = '';
-}
-function selection(id: string): Record<string, unknown> {
-  return {
-    operationId: id,
-    bindingId: props.overview.bindingId,
-    expectedBindingRevision: props.overview.bindingRevision,
-    extensionId: props.overview.extensionId,
-    expectedInstalledRevision: Number(extension.value?.installedRevision),
-    resources: selected.value.map((item) => ({
-      resourceId: item.resourceId,
-      expectedRevision: item.revision,
-      relativePath: item.relativePath
-    }))
-  };
-}
-async function execute(action: 'discover' | 'propose' | 'previewRepair' | 'applyRepair'): Promise<void> {
-  if (
-    !currentInstance() ||
-    busy.value ||
-    state.pending ||
-    !available.value ||
-    !props.store.can(
-      action === 'previewRepair' || action === 'applyRepair' ? 'configuration.repair' : 'configuration.read'
-    )
-  )
-    return;
-  if (!selected.value.length) {
-    note.value = '请先选择资源。';
-    return;
-  }
-  if (
-    (action === 'previewRepair' || action === 'applyRepair') &&
-    (!candidate.value || !state.proposalDigest)
-  ) {
-    note.value = '请先查找并选择修复候选。';
-    return;
-  }
-  if (action === 'applyRepair' && !state.previewed) {
-    note.value = '需要先预览更改。';
-    return;
-  }
-  if (action === 'discover' || action === 'propose') resetAdapterProposal(state);
-  if (!state.operationId) state.operationId = createIdentity();
-  const operationId = state.operationId;
-  if (!state.request) state.request = selection(operationId);
-  const body = {
-    format: 'nexus.control.adapter-command',
-    version: 1,
-    action,
-    selection: state.request,
-    ...(action === 'previewRepair' || action === 'applyRepair'
-      ? { candidateIndex: state.candidateIndex, proposalDigest: state.proposalDigest }
-      : {})
-  };
-  busy.value = true;
-  note.value = '';
-  error.value = '';
-  state.pending = operationId;
-  state.pendingAction = action;
-  try {
-    const result = await props.store.client.write(
-      '/control/v1/adapters/' + action,
-      body,
-      (value) => adapterResult(value, action, state.request!, candidate.value, state.proposalDigest),
-      operationId
-    );
-    if (!currentInstance()) return;
-    state.pending = '';
-    state.pendingAction = '';
-    if (action === 'discover') {
-      state.coverage = result.coverage;
-      state.gamePathCheck = result.gamePathCheck;
-      state.tasks = result.tasks;
-      state.diagnostics = result.diagnostics;
-    } else if (action === 'propose') {
-      state.proposalDigest = result.proposalDigest;
-      state.candidates = result.candidates;
-      state.diagnostics = result.diagnostics;
-      state.candidateIndex = state.candidates[0]?.index ?? -1;
-      state.previewed = false;
-      if (!state.candidates.length) note.value = '无候选修复。';
-    } else if (action === 'previewRepair') {
-      state.previewed = true;
-      note.value = result.hasChanges === false ? '无实际更改。' : '修复预览已完成。';
-    } else {
-      state.pending = '';
-      resetAdapterProposal(state);
-      note.value = '修复已应用。';
-      presentation.saved();
-      props.store.dirty.delete(key);
-      if (alive) emit('changed');
-    }
-  } catch (error) {
-    if (!(error instanceof ControlFailure && error.uncertain)) {
-      state.pending = '';
-      state.pendingAction = '';
-      state.error = error instanceof Error ? error.message : '操作失败，请重试。';
-    }
-  } finally {
-    busy.value = false;
-  }
-}
-async function checkPending(): Promise<void> {
-  if (!state.pending || busy.value || !currentInstance()) return;
-  busy.value = true;
+const readAllowed = computed(() => store.can('configuration.read'));
+const repairAllowed = computed(() => store.can('configuration.repair'));
+const ready = computed(() => props.visible && readAllowed.value && !!props.source && !props.checking && !write.pending && !write.busy);
+const proposal = shallowRef<{
+  selection: ReturnType<typeof adapterSelection>;
+  source: AdapterSource;
+  result: AdapterResult;
+}>();
+const candidateIndex = ref(-1);
+const candidate = computed(() => proposal.value?.result.candidates.find(item => item.index === candidateIndex.value));
+const previewed = ref(false);
+const reading = ref('');
+const note = ref('');
+const error = ref('');
+let owner: AbortController | undefined;
+
+watch(() => write.pending, pending => {
+  if (pending) store.dirty.add(key);
+  else store.dirty.delete(key);
+}, { immediate: true, flush: 'sync' });
+watch([() => props.visible, () => props.source, readAllowed, repairAllowed], invalidate);
+watch(candidateIndex, () => { previewed.value = false; note.value = ''; error.value = ''; }, { flush: 'sync' });
+
+function invalidate(): void {
+  owner?.abort();
+  owner = undefined;
+  reading.value = '';
+  proposal.value = undefined;
+  candidateIndex.value = -1;
+  previewed.value = false;
   note.value = error.value = '';
+}
+
+async function inspect(action: 'propose' | 'previewRepair'): Promise<void> {
+  const source = props.source;
+  if (!source || !ready.value || reading.value) return;
+  const chosen = candidate.value, previous = proposal.value;
+  if (action === 'previewRepair' && (!repairAllowed.value || !previous || !chosen)) return;
+  if (action === 'propose') invalidate();
+  previewed.value = false;
+  note.value = error.value = write.note = write.error = '';
+  const current = new AbortController();
+  owner = current;
+  reading.value = action;
+  const selection = action === 'propose' ? adapterSelection(source, createIdentity()) : previous!.selection;
+  const digest = previous?.result.proposalDigest || '';
+  const isCurrent = () => owner === current && !current.signal.aborted && props.source === source &&
+    props.visible && readAllowed.value && (action === 'propose' || repairAllowed.value && candidate.value === chosen);
   try {
-    if (state.pendingAction !== 'applyRepair') {
-      await props.store.client.read(
-        '/control/v1/configuration/bindings/' + props.overview.bindingId + '/resources',
-        configurationOverview
-      );
-      state.pending = '';
-      state.pendingAction = '';
-      resetAdapterProposal(state);
-      if (alive) emit('changed');
-      return;
+    const result = await store.client.query('/control/v1/adapters/' + action,
+      adapterCommand(action, selection, action === 'previewRepair' ? chosen : undefined, digest),
+      row => adapterResult(row, action, selection, chosen, digest, source.overview.scriptRevision), current.signal);
+    if (!isCurrent()) return;
+    if (action === 'propose') {
+      proposal.value = { source, selection, result };
+      candidateIndex.value = result.candidates[0]?.index ?? -1;
+      if (!result.candidates.length) note.value = '无候选修复。';
+    } else {
+      previewed.value = result.hasChanges === true;
+      note.value = previewed.value ? '修复预览已完成。' : '无实际更改。';
     }
-    const result = await props.store.client.read('/control/v1/operations/' + state.pending, objectValue);
-    if (
-      result.operationId === state.pending &&
-      result.kind === 'configuration.save' &&
-      result.status === 'completed'
-    ) {
-      state.pending = '';
-      state.pendingAction = '';
-      resetAdapterProposal(state);
-      note.value = '修复已应用。';
-      if (alive) emit('changed');
-    } else note.value = '操作仍在处理中。';
-  } catch (error) {
-    state.error = error instanceof Error ? error.message : '操作失败，请重试。';
+  } catch (reason) {
+    if (isCurrent()) error.value = repairIssue(reason);
   } finally {
-    busy.value = false;
+    if (owner === current) reading.value = '';
   }
+}
+
+function repairIssue(reason: unknown): string {
+  if (reason instanceof ControlFailure && reason.status === 403) return '当前权限或宿主设置不允许执行此操作。';
+  if (reason instanceof ControlFailure && reason.status === 409) return '配置或候选已变化，请重新探测并查找修复候选。';
+  return '操作失败，请重试。';
+}
+
+function complete(changed: boolean): void {
+  write.pending = '';
+  invalidate();
+  write.note = changed ? '修复已应用。' : '无实际更改。';
+  if (!scope.signal.aborted) bindingScope.changed();
+}
+
+async function apply(): Promise<void> {
+  const current = proposal.value, chosen = candidate.value;
+  if (!ready.value || reading.value || !repairAllowed.value || !previewed.value ||
+    !current || current.source !== props.source || !chosen) return;
+  const { selection, result, source } = current;
+  const digest = result.proposalDigest;
+  write.busy = true;
+  write.pending = selection.operationId;
+  write.note = write.error = '';
+  try {
+    const saved = await store.client.write('/control/v1/adapters/applyRepair', adapterCommand('applyRepair', selection, chosen, digest),
+      row => adapterResult(row, 'applyRepair', selection, chosen, digest, source.overview.scriptRevision), selection.operationId);
+    complete(saved.hasChanges === true);
+  } catch (reason) {
+    if (!(reason instanceof ControlFailure && reason.uncertain)) {
+      write.pending = '';
+      previewed.value = false;
+      write.error = repairIssue(reason);
+    }
+  } finally {
+    write.busy = false;
+  }
+}
+
+async function checkPending(): Promise<void> {
+  const id = write.pending;
+  if (!id || write.busy || !store.can('operations.read') || instance !== store.state.capabilities?.instanceId) return;
+  write.busy = true;
+  write.note = write.error = '';
+  try {
+    const result = await store.client.read('/control/v1/operations/' + id, objectValue);
+    if (result.operationId === id && result.kind === 'configuration.save' && result.status === 'completed')
+      complete(true);
+    else write.note = '操作仍在处理中。';
+  } catch (reason) {
+    write.error = repairIssue(reason);
+  } finally {
+    write.busy = false;
+  }
+}
+
+function candidateLabel(resourceId: string, editCount: number): string {
+  const name = props.source?.overview.resources.find(resource => resource.resourceId === resourceId)?.label || resourceId;
+  return name + ' · ' + t('{count} 项修改').replace('{count}', String(editCount));
 }
 onBeforeUnmount(() => {
-  alive = false;
-  if (!presentation.modified && !state.pending && !state.busy) scope.settle('disposed');
+  invalidate();
+  if (!write.pending && !write.busy) scope.settle('disposed');
 });
 </script>
-<template>
-  <AdapterCoverage :coverage="state.coverage" :game-path-check="state.gamePathCheck" />
-  <div v-draft="presentation" class="config-fields">
-    <nexus-spinner v-if="loadingExtension" :label="t('正在读取配置资源…')" />
-    <fieldset :disabled="busy || !!state.pending || !available">
-      <legend>{{ t('选择要检查的资源') }}</legend>
-      <label v-for="item in overview.resources" :key="item.resourceId" class="choice-row"
-        v-help="item.isSaved ? '' : t('配置资源尚未保存，无法编辑字段。')">
-        <input
-        data-draft-field="AdapterEditorPanel/state.resourceIds.includes(item.resourceId)"
-          type="checkbox"
-          :checked="state.resourceIds.includes(item.resourceId)"
-          :disabled="!item.isSaved"
-          @change="toggle(item.resourceId)"
-        />
-        {{ item.label }}
-      </label>
-    </fieldset>
-    <div class="row">
-      <button type="button"
-        :disabled="busy || !!state.pending || !available || !selected.length"
-        @click="execute('discover')"
-      >
-        {{ t('探测配置') }}
-      </button>
-      <button type="button"
-        :disabled="busy || !!state.pending || !available || !selected.length"
-        @click="execute('propose')"
-      >
-        {{ t('查找修复候选') }}
-      </button>
-    </div>
-    <section v-if="state.tasks.length">
-      <h3>{{ t('探测配置') }}</h3>
-      <ul>
-        <li v-for="item in state.tasks" :key="item.taskId">
-          {{ taskTitle(item, locale) }} · {{ item.isEnabled ? '✓' : '—' }}
-        </li>
-      </ul>
-    </section>
-    <section v-if="state.diagnostics.length">
-      <h3>{{ t('只读详情') }}</h3>
-      <ul>
-        <li v-for="(item, index) in state.diagnostics" :key="index">{{ item.severity }}: {{ details?.diagnosticLocales[locale]?.[item.code] || details?.diagnosticLocales[details.metadata?.defaultLocale || 'zh-CN']?.[item.code] || item.code }}</li>
-      </ul>
-    </section>
-    <label v-if="state.candidates.length" class="form-field">
-      {{ t('选择修复候选') }}
-      <FormSelect
-        data-draft-field="AdapterEditorPanel/state.candidateIndex"
-        v-model.number="state.candidateIndex"
-        :disabled="busy || !!state.pending"
-        @change="state.previewed = false"
-      >
-        <option v-for="item in state.candidates" :key="item.index" :value="item.index">
-          {{
-            overview.resources.find((resource) => resource.resourceId === item.resourceId)?.label ||
-            item.resourceId
-          }}
-          · {{ item.editCount }}
-        </option>
-      </FormSelect>
-    </label>
-    <div v-if="candidate || state.pending" class="row">
-      <button v-if="candidate" type="button" :disabled="busy || !!state.pending || !available" @click="execute('previewRepair')">
-        {{ t('预览修复') }}
-      </button>
-      <button v-if="candidate" type="button"
-        :disabled="busy || !!state.pending || !state.previewed || !store.can('configuration.repair')"
-        @click="execute('applyRepair')"
-      >
-        {{ t('应用修复') }}
-      </button>
 
-      <button v-if="state.pending" type="button" @click="checkPending">
-        {{ t(state.pendingAction === 'applyRepair' ? '查询操作状态' : '读取资源重新开始') }}
-      </button>
+<template>
+  <section class="configuration-repair">
+    <header>
+      <h4>{{ t('配置修复') }}</h4>
+      <button type="button" :disabled="!ready || !!reading" @click="inspect('propose')">{{ t('查找修复候选') }}</button>
+    </header>
+    <div v-if="proposal?.result.candidates.length" class="repair-result">
+      <label>
+        {{ t('选择修复候选') }}
+        <FormSelect v-model.number="candidateIndex" :disabled="!ready || !!reading">
+          <option v-for="item in proposal.result.candidates" :key="item.index" :value="item.index">
+            {{ candidateLabel(item.resourceId, item.editCount) }}
+          </option>
+        </FormSelect>
+      </label>
+      <div class="repair-actions">
+        <button type="button" :disabled="!ready || !!reading || !candidate || !repairAllowed" @click="inspect('previewRepair')">{{ t('预览修复') }}</button>
+        <button type="button" class="primary" :disabled="!ready || !!reading || !previewed || !repairAllowed" @click="apply">{{ t('应用修复') }}</button>
+      </div>
     </div>
-    <template v-if="visible && !busy">
-      <nexus-toast v-if="error" :tone="state.pending ? 'warning' : 'danger'" :message.prop="t(error)" />
-      <nexus-toast v-else-if="note" tone="info" :message.prop="t(note)" />
-      <nexus-toast v-else-if="state.pending" tone="warning" :message.prop="t(state.pendingAction === 'applyRepair'
-        ? '修复操作待确认，请先查询操作状态。' : '读取结果未知，请重新读取资源。')" />
-      <nexus-toast v-else-if="!loadingExtension && !available" tone="warning"
-        :message.prop="t(availabilityError || '扩展未安装或未启用，专项配置不可用。')" />
+    <AdapterDiagnostics :items="proposal?.result.diagnostics" :details="details" />
+    <div v-if="write.pending" class="repair-actions">
+      <button type="button" :disabled="write.busy || !store.can('operations.read')" @click="checkPending">{{ t('查询操作状态') }}</button>
+    </div>
+    <p v-if="reading || note || error" role="status">
+      <template v-if="previewed && candidate">{{ candidateLabel(candidate.resourceId, candidate.editCount) }} · </template>
+      {{ t(reading === 'propose' ? '正在查找修复候选…' : reading ? '正在预览修复…' : error || note) }}
+    </p>
+    <template v-if="visible && !write.busy">
+      <nexus-toast v-if="write.error" :tone="write.pending ? 'warning' : 'danger'" :message.prop="t(write.error)" />
+      <nexus-toast v-else-if="write.note" tone="info" :message.prop="t(write.note)" />
+      <nexus-toast v-else-if="write.pending" tone="warning" :message.prop="t('修复操作待确认，请先查询操作状态。')" />
     </template>
-  </div>
+  </section>
 </template>
-<style scoped src="./configuration.css"></style>
+
+<style scoped>
+.configuration-repair { display: grid; gap: 8px; min-width: 0; padding-block-start: 10px; border-block-start: 1px solid var(--border); }
+header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+h4 { margin: 0; font-size: 13px; }
+.repair-result { display: grid; gap: 9px; padding: 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--content-card-soft); }
+label { display: grid; gap: 5px; min-width: 0; color: var(--muted); font-size: 12px; }
+.repair-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 7px; }
+p { margin: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+</style>

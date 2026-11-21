@@ -122,20 +122,15 @@ class CiPlanTests(GitFixture):
                         owner.ci_plan.verify_plan(self.repo, altered)
 
 
-    def test_keeps_empty(self):
+    def test_checks_documentation(self):
+        self.write("tooling/nexus.py", b'import sys\nassert sys.argv[1:] == ["check", "--scope", "source"]\n')
+        base = self.commit()
         self.write("docs/a.md", b"documentation\n")
         head = self.commit()
         for index, root in enumerate((HOST,)):
             with self.subTest(repository=root.name), production_tools(root) as owner:
-                plan = owner.ci_plan.make_plan(self.repo, "host", self.base_commit, head, head)
-                real_run = owner.ci_build.subprocess.run
-
-                def git_only(command, *arguments, **keywords):
-                    self.assertEqual("git", command[0])
-                    return real_run(command, *arguments, **keywords)
-
-                with patch.object(owner.ci_build.subprocess, "run", side_effect=git_only):
-                    report = owner.ci_build.run_check(self.repo, "host", plan, None, self.scope / str(index))
+                plan = owner.ci_plan.make_plan(self.repo, "host", base, head, head)
+                report = owner.ci_build.run_check(self.repo, "host", plan, None, self.scope / str(index))
                 self.assertEqual("PASS", report["status"])
-                self.assertEqual([], report["commands"])
+                self.assertEqual(["source-check"], [command["label"] for command in report["commands"]])
                 self.assertFalse(report["publishable"])

@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Execution.Judgement;
 
@@ -6,20 +5,18 @@ namespace NexusPipeline.Platform.Storage.Execution;
 
 internal static class ExecutionHookImages
 {
-    internal static ExecutionPlanInterpreterImage Capture(string path, bool runtime)
+    internal static ExecutionPlanInterpreterImage Capture(string path, bool runtime, PlanInputLease? inputs = null)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
-        if (!runtime) return Plain(path);
-        var inspected = JudgementInterpreterLease.Inspect(path);
-        var files = inspected.RuntimeFiles.Select(file => new ExecutionPlanRuntimeFile
-        {
-            RelativePath = file.RelativePath, SizeBytes = file.SizeBytes, Sha256 = file.Sha256,
-            Identity = Wire(file.Identity), ParentIdentity = Wire(file.ParentIdentity)
-        }).ToDictionary(file => file.RelativePath, StringComparer.OrdinalIgnoreCase);
+        using var temporary = inputs is null ? new PlanInputLease() : null;
+        var lease = inputs ?? temporary!;
+        path = PhysicalPathPolicy.NormalizeWithoutLinks(path);
+        var image = lease.ReadImage(path, runtime ? "judgement_interpreter_size_invalid" : "execution_hook_source_size_invalid");
+        if (!runtime) return image;
+        var files = RuntimeFiles(image.Path, lease).ToDictionary(file => file.RelativePath, StringComparer.OrdinalIgnoreCase);
         if (string.Equals(Path.GetFileName(path), "powershell.exe", StringComparison.OrdinalIgnoreCase))
         {
             var parent = Path.GetDirectoryName(path)!;
-            using var held = StableDirectoryLease.Acquire(parent);
             var entries = Directory.EnumerateFiles(parent).Take(4097).ToArray();
             if (entries.Length > 4096) throw new IOException("execution_hook_runtime_directory_limit");
             var assets = entries.Where(file =>
@@ -28,36 +25,23 @@ internal static class ExecutionHookImages
             if (assets.Length > 256) throw new IOException("execution_hook_runtime_assets_limit");
             foreach (var asset in assets)
             {
-                var file = Plain(asset);
-                files[Path.GetFileName(asset)] = new()
-                {
-                    RelativePath = Path.GetFileName(asset), SizeBytes = file.SizeBytes, Sha256 = file.Sha256,
-                    Identity = file.Identity, ParentIdentity = file.ParentIdentity
-                };
+                var relative = Path.GetFileName(asset);
+                files[relative] = RuntimeFile(relative, lease.ReadImage(asset, "execution_hook_source_size_invalid"));
             }
         }
         if (files.Count > JudgementRuntimeAssets.MaximumFiles) throw new IOException("execution_hook_runtime_assets_limit");
-        return new()
-        {
-            Path = inspected.Path, SizeBytes = inspected.SizeBytes, Sha256 = inspected.Sha256,
-            Identity = Wire(inspected.Identity), ParentIdentity = Wire(inspected.ParentIdentity),
-            RuntimeFiles = files.Values.OrderBy(file => file.RelativePath, StringComparer.Ordinal).ToArray()
-        };
+        return image with { RuntimeFiles = files.Values.OrderBy(file => file.RelativePath, StringComparer.Ordinal).ToArray() };
     }
 
-    private static ExecutionPlanInterpreterImage Plain(string requested)
+    internal static IEnumerable<ExecutionPlanRuntimeFile> RuntimeFiles(string path, PlanInputLease inputs)
     {
-        var path = PhysicalPathPolicy.NormalizeWithoutLinks(requested);
         var parent = Path.GetDirectoryName(path)!;
-        using var directory = StableDirectoryLease.Acquire(parent);
-        using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        if (input.Length is < 1 or > 1073741824) throw new IOException("execution_hook_source_size_invalid");
-        return new()
-        {
-            Path = path, SizeBytes = input.Length, Sha256 = Convert.ToHexStringLower(SHA256.HashData(input)),
-            Identity = Wire(PhysicalObjectIdentity.Read(input.SafeFileHandle)), ParentIdentity = Wire(PhysicalObjectIdentity.Read(parent)), RuntimeFiles = []
-        };
+        return JudgementRuntimeAssets.Paths(path).Select(relative => RuntimeFile(relative,
+            inputs.ReadImage(Path.GetFullPath(Path.Combine(parent, relative)), "judgement_runtime_asset_size_invalid")));
     }
+
+    private static ExecutionPlanRuntimeFile RuntimeFile(string relative, ExecutionPlanInterpreterImage image) => new()
+    { RelativePath = relative, SizeBytes = image.SizeBytes, Sha256 = image.Sha256, Identity = image.Identity, ParentIdentity = image.ParentIdentity };
 
     internal static IEnumerable<(string Path, long Size, string Sha256, FileTreePhysicalIdentity Identity, FileTreePhysicalIdentity Parent)> Files(ExecutionPlanStep step)
     {
@@ -71,5 +55,4 @@ internal static class ExecutionHookImages
             }
     }
 
-    private static FileTreePhysicalIdentity Wire(PhysicalObjectIdentity identity) => new() { VolumeSerial = identity.VolumeSerial, FileId = identity.FileId };
 }

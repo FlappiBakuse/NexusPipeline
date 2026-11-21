@@ -13,11 +13,12 @@ using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace NexusPipeline.StorageTests;
 
 [SupportedOSPlatform("windows")]
-public sealed class TerminalRecoveryTests
+public sealed class TerminalRecoveryTests(ITestOutputHelper output)
 {
     [Theory(DisplayName = "A Stopped Real Writer Retains Its Known Engine And Raw Evidence Across Owner Kill And Terminal Reconciliation")]
     [InlineData("stopped-observed")]
@@ -58,11 +59,25 @@ public sealed class TerminalRecoveryTests
 
         var instance = new InstanceRoot(new()).OpenExisting(source.Instance.RuntimeRoot);
         using var lease = InstanceLease.Acquire(instance, new());
-        var database = StateDatabase.OpenExisting(instance, Path.Combine(source.Root, "restart-diagnostics"), new JournalStartupAdmission(instance, new()));
-        var index = new StartupJournalRecovery(instance, new(), database,
-            new(Path.Combine(source.Root, "host"), Path.Combine(instance.RuntimeRoot, "extensions"))).Recover(lease);
-        var resources = new ResourceLeaseManager(new HostLifecycle(index, TimeProvider.System));
-        new RecoveryCompletionService(instance, database, new(), lease, resources, index).ReconcilePending();
+        var database = StateDatabase.OpenExisting(instance, Path.Combine(source.Root, "restart-diagnostics"),
+            new JournalStartupAdmission(instance, new()), lease);
+        var previousOutput = Console.Error;
+        using var captured = new StringWriter();
+        RecoveryIndex index;
+        try
+        {
+            Console.SetError(captured);
+            index = new StartupJournalRecovery(instance, new(), database,
+                new(Path.Combine(source.Root, "host"), Path.Combine(instance.RuntimeRoot, "extensions"))).Recover(lease);
+            var resources = new ResourceLeaseManager(new HostLifecycle(index, TimeProvider.System));
+            using var profile = StartupProfile.Begin("execution.reconcile");
+            new RecoveryCompletionService(instance, database, new(), lease, resources, index).ReconcilePending();
+        }
+        finally
+        {
+            Console.SetError(previousOutput);
+            output.WriteLine(captured.ToString());
+        }
         var state = AttemptWriterState.Read(instance, database, new(), journalId);
         Assert.Equal(JournalPhase.Committed, state.Journal.Phase); Assert.Equal(state.Journal.Revision, state.Latest.Revision);
         Assert.Equal(EffectGateState.Entered, state.Gate.State);
@@ -111,5 +126,11 @@ public sealed class TerminalRecoveryTests
         using var acquired = reopenedResources.TryAcquire(Guid.NewGuid(),
             state.Attempt.ResourceKeys.Select(key => new ResourceClaim(key, ResourceClaimMode.Mutation)).ToArray()).Lease;
         Assert.NotNull(acquired);
+        using var operations = Profile(captured, "operations.recovery");
+        Assert.DoesNotContain(operations.RootElement.GetProperty("steps").EnumerateArray(),
+            step => step.GetProperty("name").GetString() == "history.bindings");
     }
+
+    private static JsonDocument Profile(StringWriter captured, string phase) => JsonDocument.Parse(
+        captured.ToString().Split('\n').Single(line => line.Contains($"\"phase\":\"{phase}\"", StringComparison.Ordinal)));
 }

@@ -72,8 +72,10 @@ internal static class ControlExceptionBoundary
                 ConfigurationException { Message: "configuration_resource_conflict" } => (409, "resource_conflict"),
                 ConfigurationException { Message: "configuration_host_unavailable" } => (409, "host_unavailable"),
                 ConfigurationException { Message: "configuration_editor_resume_unavailable" } => (409, "configuration_editor_resume_unavailable"),
+                ConfigurationException { Message: "configuration_draft_missing" or "project_selection_contract_changed" } => (409, error.Message),
                 ConfigurationException => (400, "configuration_invalid"),
                 IOException { Message: "upstream_program_already_running" or "upstream_program_stop_unconfirmed" } => (409, error.Message),
+                IOException { Message: ConfigurationRecoveryCodes.Pending or ConfigurationRecoveryCodes.Lost } => (409, error.Message),
                 IOException => (409, "resource_unavailable"),
                 _ => (500, "control_failed")
             };

@@ -11,9 +11,9 @@ internal sealed record RetryConfigurationInput(FileTreeSnapshot Tree, BlobRefere
         RunResourceStatus resource, FrozenRunState source)
     {
         var physical = new JournalStore(instance, contracts).Read(resource.JournalId);
-        if (physical.Root.GetProperty("participants").GetArrayLength() != 2)
+        if (!ConfigurationJournalBinding.HasSealedOutput(physical))
             throw new IOException("configuration_retry_output_missing");
-        var bound = ConfigurationJournalBinding.Read(instance, physical, contracts, database);
+        var bound = ConfigurationJournalBinding.ReadForRestoration(instance, physical, contracts, database, verifyOutputContent: true);
         var output = bound.Prepared ?? throw new IOException("configuration_retry_output_missing");
         var blobs = new ImmutableBlobStore(instance, contracts);
         ConfigurationOutputEvidence.Require(output, output.Plan.Candidate);

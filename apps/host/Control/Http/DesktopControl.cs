@@ -207,7 +207,7 @@ internal sealed class DesktopControl : IAsyncDisposable
             var url = message.TryGetProperty("url", out var value) ? value.GetString() : null;
             var authorization = _session.Authorize(new(identity, correlationId, action.Value, url));
             if (!authorization.IsApproved) return Results.StatusCode(409);
-            if (action == DesktopAction.RequestClose) return PermitClose(context, identity, correlationId);
+            if (action == DesktopAction.RequestClose) return await PermitCloseAsync(context, identity, correlationId);
             return Signed(new
             {
                 format = "nexus.desktop.channel", version = 1, instanceId = identity.InstanceId,
@@ -218,18 +218,48 @@ internal sealed class DesktopControl : IAsyncDisposable
         catch (JsonException) { return Results.StatusCode(400); }
     }
 
-    private IResult PermitClose(HttpContext context, DesktopSessionIdentity identity, Guid correlationId)
+    private async Task<IResult> PermitCloseAsync(HttpContext context, DesktopSessionIdentity identity, Guid correlationId)
     {
-        var decision = _lifecycle.RequestClose(identity.SessionId, correlationId);
-        if (decision.Permit is not { } permit) return ControlErrors.Result(409, decision.ReasonCode);
-        context.Response.OnCompleted(() => { _exit.Begin(identity.SessionId); return Task.CompletedTask; });
-        return Signed(new
+        using var drain = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, _nativeEnding.Token);
+        drain.CancelAfter(TimeSpan.FromSeconds(25));
+        var granted = false;
+        try
         {
-            format = "nexus.desktop.channel", version = 1, instanceId = identity.InstanceId, clientId = identity.ClientId,
-            sessionId = identity.SessionId, correlationId, type = "close.permit", isApproved = true,
-            permitId = permit.PermitId, expiresAt = permit.ExpiresAt
-        });
+            drain.Token.ThrowIfCancellationRequested();
+            var decision = _lifecycle.RequestClose(identity.SessionId, correlationId);
+            while (decision.ReasonCode == "accepted_writes_pending")
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(100), drain.Token);
+                decision = _lifecycle.ContinueClose(identity.SessionId, correlationId);
+            }
+            if (decision.Permit is not { } permit) return CloseRejected(identity, correlationId, decision.ReasonCode);
+            var reply = Signed(new
+            {
+                format = "nexus.desktop.channel", version = 1, instanceId = identity.InstanceId, clientId = identity.ClientId,
+                sessionId = identity.SessionId, correlationId, type = "close.permit", isApproved = true,
+                permitId = permit.PermitId, expiresAt = permit.ExpiresAt
+            });
+            drain.Token.ThrowIfCancellationRequested();
+            _exit.Begin(permit);
+            granted = true;
+            return reply;
+        }
+        catch (OperationCanceledException) when (drain.IsCancellationRequested)
+        {
+            if (context.RequestAborted.IsCancellationRequested || _nativeEnding.IsCancellationRequested) return Results.NoContent();
+            return CloseRejected(identity, correlationId, "desktop_close_pending");
+        }
+        finally
+        {
+            if (!granted) _lifecycle.AbandonClose(identity.SessionId, correlationId);
+        }
     }
+
+    private IResult CloseRejected(DesktopSessionIdentity identity, Guid correlationId, string code) => Signed(new
+    {
+        format = "nexus.desktop.channel", version = 1, instanceId = identity.InstanceId, clientId = identity.ClientId,
+        sessionId = identity.SessionId, correlationId, type = "close.rejected", isApproved = false, code
+    }, StatusCodes.Status409Conflict);
 
     private bool IsNative(HttpContext context)
     {
@@ -239,7 +269,8 @@ internal sealed class DesktopControl : IAsyncDisposable
             _binding.Matches(new IPEndPoint(remote, connection.RemotePort), new IPEndPoint(local, connection.LocalPort));
     }
 
-    private IResult Signed(object payload) => Results.Json(_signer.Sign(JsonSerializer.SerializeToUtf8Bytes(payload)));
+    private IResult Signed(object payload, int statusCode = StatusCodes.Status200OK) =>
+        Results.Json(_signer.Sign(JsonSerializer.SerializeToUtf8Bytes(payload)), statusCode: statusCode);
     public async ValueTask DisposeAsync()
     {
         try

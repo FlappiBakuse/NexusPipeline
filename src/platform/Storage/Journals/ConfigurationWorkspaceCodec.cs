@@ -24,6 +24,9 @@ public sealed class ConfigurationWorkspaceCodec(ContractReader contracts)
     }
 
     public PreparedConfigurationExchange Decode(JsonElement identity, FrozenConfigurationExchange plan, string expectedPlanDigest)
+        => Decode(identity, plan, expectedPlanDigest, requireLivePath: true);
+
+    internal PreparedConfigurationExchange Decode(JsonElement identity, FrozenConfigurationExchange plan, string expectedPlanDigest, bool requireLivePath)
     {
         var wire = contracts.Read<ConfigurationWorkspace>(JsonSerializer.SerializeToUtf8Bytes(identity), "configuration-workspace.schema.json");
         var expectedPath = Path.Combine(Path.GetDirectoryName(plan.TargetPath)!, ".nexus-" + plan.JournalId.ToString("D"));
@@ -39,7 +42,7 @@ public sealed class ConfigurationWorkspaceCodec(ContractReader contracts)
             !objects.Select(item => item.RelativePath).Order(StringComparer.Ordinal).SequenceEqual(
                 plan.Candidate.Snapshot.Entries.Select(item => item.RelativePath).Order(StringComparer.Ordinal)))
             throw new IOException("configuration_workspace_inventory_incomplete");
-        PhysicalPathPolicy.NormalizeWithoutLinks(wire.WorkPath);
+        if (requireLivePath) PhysicalPathPolicy.NormalizeWithoutLinks(wire.WorkPath);
         return new(plan, wire.WorkPath, FromWire(wire.WorkIdentity), Array.AsReadOnly(objects));
     }
 

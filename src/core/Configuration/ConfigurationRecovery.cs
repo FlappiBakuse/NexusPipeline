@@ -5,7 +5,10 @@ namespace NexusPipeline.Core.Configuration;
 public enum ConfigurationRecoveryResult { NotExecuted, Restored, Quarantined, AlreadyCompleted }
 
 public sealed record ConfigurationRecoveryInspection(JournalPhase Phase, bool DatabaseAgrees, bool IsWriterObservationComplete,
-    WriterState Writers, bool CanProveNoEffects, bool CanRestore, bool IsOriginalRestored, bool CanReconcileRecordedCommit);
+    WriterState Writers, bool CanProveNoEffects, bool CanRestore, bool IsOriginalRestored, bool CanReconcileRecordedCommit)
+{
+    public string? RestorationFailureCode { get; init; }
+}
 
 public interface IConfigurationRecoverySession
 {
@@ -44,7 +47,7 @@ public sealed class ConfigurationRecovery(IConfigurationRecoverySession session)
             return ConfigurationRecoveryResult.NotExecuted;
         }
         if (!inspection.CanRestore)
-            return Quarantine("configuration_state_unverified");
+            return Quarantine(inspection.RestorationFailureCode ?? "configuration_state_unverified");
         if (inspection.Phase != JournalPhase.Reverted)
         {
             session.BeginRestoration();

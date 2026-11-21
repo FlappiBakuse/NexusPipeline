@@ -83,7 +83,8 @@ public sealed class ExecutionRetryService(RuntimeInstance instance, StateDatabas
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
         while (!stopping.IsCancellationRequested)
         {
-            Tick(TimeProvider.System.GetUtcNow());
+            try { Tick(TimeProvider.System.GetUtcNow()); }
+            catch (Microsoft.Data.Sqlite.SqliteException error) when (error.SqliteErrorCode is 5 or 6) { }
             try { if (!await timer.WaitForNextTickAsync(stopping).ConfigureAwait(false)) return; }
             catch (OperationCanceledException) when (stopping.IsCancellationRequested) { return; }
         }

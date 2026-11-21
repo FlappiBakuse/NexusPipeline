@@ -48,11 +48,11 @@ internal sealed class ProjectPreviewService : IAsyncDisposable
 
     internal ValueTask<ProjectPreview> PrepareAsync(ProjectCompilationService compilation, string subject, Guid bindingId, long bindingRevision,
         string extensionId, Action requireCaller, CancellationToken cancellation, CancellationToken ownerLifetime = default,
-        JsonElement? selection = null)
+        JsonElement? selection = null, ProjectBindingDraft? draft = null)
     {
         RequireSubject(subject); requireCaller();
         return compilation.PreviewAsync(bindingId, bindingRevision, extensionId, selection, requireCaller,
-            (source, current) => ValueTask.FromResult(Publish(subject, source, current, ownerLifetime)), cancellation);
+            (source, current) => ValueTask.FromResult(Publish(subject, source, current, ownerLifetime)), cancellation, draft);
     }
 
     internal ValueTask<ProjectPreview> PrepareScriptAsync(ScriptProjectService compilation, string subject, Guid scriptId,
@@ -136,7 +136,8 @@ internal sealed class ProjectPreviewService : IAsyncDisposable
             if (_disposed || !entry.Root.IsActive || entry.OwnerLifetime.IsCancellationRequested || entry.Expires <= _clock.GetUtcNow() ||
                 !_entries.TryGetValue(entry.Id, out var active) || !ReferenceEquals(entry, active)) throw Unavailable();
         var value = entry.Source; var definitions = new AutomationDefinitionStore(_database).Read();
-        var binding = value.IsScript ? null : definitions.Bindings.SingleOrDefault(item => item.Id == value.OwnerId);
+        var binding = value.Draft is not null ? DraftBindingOwner.Resolve(definitions, value.OwnerId, value.Draft) :
+            value.IsScript ? null : definitions.Bindings.SingleOrDefault(item => item.Id == value.OwnerId);
         var script = definitions.Scripts.SingleOrDefault(item => item.Id == (value.IsScript ? value.OwnerId : binding?.ScriptId));
         var root = definitions.Roots.SingleOrDefault(item => item.Id == script?.RootId);
         if ((value.IsScript ? script?.Revision : binding?.Revision) != value.OwnerRevision || script?.Revision != value.ScriptRevision ||
@@ -145,6 +146,7 @@ internal sealed class ProjectPreviewService : IAsyncDisposable
         if (_installed.ReadCurrent(value.Consumer.ExtensionId)?.Metadata != value.Consumer ||
             _installed.ReadCurrent(value.Provider.ExtensionId)?.Metadata != value.Provider) throw Unavailable();
         _ = _activator.RequirePublishedRuntime(value.Consumer.ExtensionId); _ = _activator.RequirePublishedRuntime(value.Provider.ExtensionId);
+        if (value.Draft is not null) return;
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = DatabaseConnections.BeginRead(connection);
         new ConfigurationRevisionStore(_instance, _database, _contracts).RequireReadSet(connection, transaction, value.ReadSet);

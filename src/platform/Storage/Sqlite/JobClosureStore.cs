@@ -40,7 +40,7 @@ internal sealed class JobClosureStore(RuntimeInstance instance, StateDatabase da
                     "AND j.operation_kind='configExchange' AND j.phase='applied' AND s.session_id=$operation AND s.phase=1 AND s.writer_gate=0 AND o.operation_kind='configuration.run.begin') " :
                     "EXISTS(SELECT 1 FROM main.operation_journals j JOIN configuration.configuration_edit_sessions s ON s.session_id=j.operation_id JOIN main.operations o ON o.operation_id=s.session_id " +
                     "WHERE j.journal_id=$journal AND j.operation_id=$operation AND j.operation_kind='configEdit' AND j.phase='applied' AND s.phase=1 AND s.writer_gate=0 " +
-                    "AND o.operation_kind='configuration.edit.begin') ";
+                    "AND o.operation_kind IN ('configuration.edit.begin','configuration.edit.begin-draft')) ";
                 command.CommandText = "INSERT INTO main.journal_writer_job_roots SELECT $journal,$writer,$job,$pid,$created,$path,$hash,$sid,$elevated WHERE " + owner +
                     "AND NOT EXISTS(SELECT 1 FROM main.journal_writer_job_closures WHERE journal_id=$journal AND writer_id=$writer AND job_name=$job);";
                 command.Parameters.AddWithValue("$operation", operationId.ToString("D"));
@@ -241,7 +241,7 @@ internal sealed class JobClosureStore(RuntimeInstance instance, StateDatabase da
                 attempt ?? throw new IOException("execution_writer_closure_unbound"));
             return;
         }
-        var run = kind switch { "configuration.edit.begin" => false, "configuration.run.begin" => true,
+        var run = kind switch { "configuration.edit.begin" or "configuration.edit.begin-draft" => false, "configuration.run.begin" => true,
             _ => throw new IOException("writer_job_closure_gate_unbound") };
         if (run != value.RunElapsedMilliseconds.HasValue) throw new IOException("writer_job_closure_elapsed_unbound");
         if (run) command.Parameters.AddWithValue("$elapsed", value.RunElapsedMilliseconds!.Value);

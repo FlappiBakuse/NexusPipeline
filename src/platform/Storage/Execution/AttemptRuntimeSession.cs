@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Runtime.ExceptionServices;
 using System.Runtime.Versioning;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
@@ -40,8 +41,10 @@ internal sealed class AttemptRuntimeSession : IExecutionAttemptSession, IDisposa
     private readonly Dictionary<Guid, Guid> _configurationCompletions = [];
     private readonly Dictionary<string, TimeSpan> _bindingStarts = new(StringComparer.Ordinal);
     private ExecutionStopReason? _stop;
+    private bool _closedCancellationRestoreFailed;
     private bool _prepared, _disposed;
     internal bool IsTerminal { get; private set; }
+    internal bool IsDurablyIsolated { get; private set; }
     internal AttemptReceipt? CommittedReceipt { get; private set; }
     public IReadOnlyList<string> StepIds { get; }
     public bool HasEnteredEffect => new JournalEffectGate(_database).Read(_parent.JournalId).State == EffectGateState.Entered;
@@ -159,7 +162,8 @@ internal sealed class AttemptRuntimeSession : IExecutionAttemptSession, IDisposa
     public async Task RestoreStepAsync(string stepId)
     {
         Verify(); _progress?.Step(stepId, "restoring");
-        await Required(stepId).RestoreAsync(interrupted: false).ConfigureAwait(false);
+        var cancelled = ReadClose()?.ReasonCode == DispatchIntentCodec.Reason;
+        await RestoreOwnedStepAsync(Required(stepId), interrupted: cancelled, cancelled: cancelled).ConfigureAwait(false);
         _progress?.Step(stepId, "restored");
     }
 
@@ -198,20 +202,36 @@ internal sealed class AttemptRuntimeSession : IExecutionAttemptSession, IDisposa
 
     public async Task RestoreRemainingAsync(ExecutionStopReason reason)
     {
-        Verify(); var interrupted = (_stop ?? reason) != ExecutionStopReason.Completed;
-        foreach (var stepId in StepIds)
-            if (_steps.TryGetValue(stepId, out var step)) await step.RestoreAsync(interrupted).ConfigureAwait(false);
-        var pending = _configurationSessions.Where(item => !_steps.TryGetValue(item.Key, out var step) || step.RequiresUnregisteredConfigurationCompletion).ToArray();
-        foreach (var item in pending)
-            _configurationFactory.Restore(item.Value, _accepted.Identity.SubjectId);
-        PublishVerified();
-        foreach (var item in pending)
+        Verify(); _progress?.Phase("restoring");
+        var stop = _stop ?? reason;
+        var cancelled = stop == ExecutionStopReason.Cancelled;
+        try
         {
-            new RunCompletionService(_instance, _database, _contracts, _lease, _resources, _index, _accepted.Prepared.PayloadRoots)
-                .CompleteOwnedInterrupted(CompletionOperation(item.Value), _accepted.Identity.SubjectId, item.Value, _currentConfigurations[item.Key]);
-            if (_steps.TryGetValue(item.Key, out var step)) step.CompleteUnregisteredConfiguration();
+            foreach (var stepId in StepIds)
+                if (_steps.TryGetValue(stepId, out var step))
+                    await RestoreOwnedStepAsync(step, stop != ExecutionStopReason.Completed, cancelled).ConfigureAwait(false);
+            var pending = _configurationSessions.Where(item => !_steps.TryGetValue(item.Key, out var step) || step.RequiresUnregisteredConfigurationCompletion).ToArray();
+            foreach (var item in pending)
+                await _configurationFactory.RestoreAsync(item.Value, _accepted.Identity.SubjectId, cancelled).ConfigureAwait(false);
+            PublishVerified();
+            foreach (var item in pending)
+            {
+                new RunCompletionService(_instance, _database, _contracts, _lease, _resources, _index, _accepted.Prepared.PayloadRoots)
+                    .CompleteOwnedInterrupted(CompletionOperation(item.Value), _accepted.Identity.SubjectId, item.Value, _currentConfigurations[item.Key]);
+                if (_steps.TryGetValue(item.Key, out var step)) step.CompleteUnregisteredConfiguration();
+            }
         }
+        catch (Exception error) when (cancelled && IsConfigurationRestorationFailure(error)) { _closedCancellationRestoreFailed = true; throw; }
     }
+
+    private async Task RestoreOwnedStepAsync(ExecutionRuntimeStep step, bool interrupted, bool cancelled)
+    {
+        try { await step.RestoreAsync(interrupted, cancelled).ConfigureAwait(false); }
+        catch (Exception error) when (cancelled && IsConfigurationRestorationFailure(error)) { _closedCancellationRestoreFailed = true; throw; }
+    }
+
+    private static bool IsConfigurationRestorationFailure(Exception error) => error is ConfigurationRestorationFailure ||
+        error is AggregateException aggregate && aggregate.Flatten().InnerExceptions.Any(item => item is ConfigurationRestorationFailure);
 
     public AttemptReceipt Commit(ExecutionStopReason reason)
     {
@@ -240,27 +260,49 @@ internal sealed class AttemptRuntimeSession : IExecutionAttemptSession, IDisposa
         if (IsTerminal) return;
         _index.BlockUnknown("execution_runtime_reconciliation_required");
         var failure = "attempt_writer_stop_unconfirmed";
+        Exception? recoveryError = null;
         try
         {
             FreezeDispatch(ExecutionStopReason.Interrupted); await CollectRemainingAsync().ConfigureAwait(false);
             failure = "attempt_workers_uncollected"; CloseUndispatched();
             if (HasEnteredEffect) MarkApplied();
             failure = "attempt_configuration_not_restored";
-            await RestoreRemainingAsync(_stop!.Value).ConfigureAwait(false); _ = Commit(_stop.Value);
-        }
-        catch
-        {
-            try
+            if (!_closedCancellationRestoreFailed)
             {
-                var state = _terminal.Read(_parent.JournalId);
-                if (state.Gate.State == EffectGateState.Sealed && state.Latest.Phase == JournalPhase.Prepared)
-                {
-                    _index.BlockUnknown("execution_runtime_reconciliation_required"); return;
-                }
-                _terminal.Quarantine(_parent.JournalId, failure); PublishVerified();
+                await RestoreRemainingAsync(_stop!.Value).ConfigureAwait(false); _ = Commit(_stop.Value);
+                return;
             }
-            catch { _index.BlockUnknown("execution_runtime_reconciliation_required"); }
         }
+        catch (Exception error) { recoveryError = error; }
+        try
+        {
+            var state = _terminal.Read(_parent.JournalId);
+            if (state.Gate.State != EffectGateState.Sealed || state.Latest.Phase != JournalPhase.Prepared)
+            {
+                _terminal.Quarantine(_parent.JournalId, failure);
+                PublishVerified();
+                if (_index.Current.Isolations.Any(item => item.JournalId == _parent.JournalId && item.CanOrdinaryExit))
+                    ReleaseStoppedRecovery();
+            }
+        }
+        catch (Exception isolationError)
+        {
+            _index.BlockUnknown("execution_runtime_reconciliation_required");
+            if (recoveryError is null) throw;
+            throw new AggregateException("execution_isolation_failed", recoveryError, isolationError);
+        }
+        if (recoveryError is not null) ExceptionDispatchInfo.Throw(recoveryError);
+    }
+
+    private void ReleaseStoppedRecovery()
+    {
+        foreach (var step in _steps.Values) step.ReleaseStoppedRecovery();
+        foreach (var configuration in _retryConfigurations) configuration.Dispose();
+        _readSession?.Dispose();
+        _lease.RunBudgets.ReleaseStoppedIsolation(_database, _accepted);
+        _accepted.Dispose();
+        _disposed = true;
+        IsDurablyIsolated = true;
     }
 
     private ExecutionCancellationIntent? ReadClose()

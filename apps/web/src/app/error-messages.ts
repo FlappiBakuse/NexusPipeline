@@ -184,6 +184,7 @@ export const errorMessages: Readonly<Record<string, readonly [string, string]>> 
   project_secret_state_unbound: ["脚本项目状态已变化或校验失败，请重新读取项目。（project_secret_state_unbound）", "Script project state changed or failed validation. Reload the project. (project_secret_state_unbound)"],
   project_selection_changed: ["脚本项目状态已变化或校验失败，请重新读取项目。（project_selection_changed）", "Script project state changed or failed validation. Reload the project. (project_selection_changed)"],
   project_selection_contract_changed: ["脚本项目状态已变化或校验失败，请重新读取项目。（project_selection_contract_changed）", "Script project state changed or failed validation. Reload the project. (project_selection_contract_changed)"],
+  configuration_draft_missing: ["配置草稿已失效。请放弃该绑定的配置草稿，再重新编辑。", "The configuration draft has expired. Discard the configuration draft for this binding, then edit it again."],
   project_selection_invalid: ["项目配置选择无效，请重新选择。", "The project configuration selection is invalid. Select it again."],
   project_selection_owner_changed: ["脚本项目状态已变化或校验失败，请重新读取项目。（project_selection_owner_changed）", "Script project state changed or failed validation. Reload the project. (project_selection_owner_changed)"],
   project_selection_request_invalid: ["脚本项目状态已变化或校验失败，请重新读取项目。（project_selection_request_invalid）", "Script project state changed or failed validation. Reload the project. (project_selection_request_invalid)"],

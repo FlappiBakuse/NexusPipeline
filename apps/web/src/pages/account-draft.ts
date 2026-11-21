@@ -2,6 +2,7 @@ import type { AutomationStore } from '../app/store-ports';
 import type { AutomationBundle, ControlAutomationChange } from '../control/wire.generated';
 import { copyDraft } from '../app/draft-copy';
 import { prepareHooks, hookPathKey } from './hook-paths';
+import { objectValue } from '../control/client';
 
 type Binding = AutomationBundle['bindings'][number];
 export type AccountDraft = {
@@ -9,6 +10,7 @@ export type AccountDraft = {
   baseline: Binding[];
   catalogRevision: number;
   revisions: Record<string, number>;
+  candidates: Record<string, string>;
 };
 export const accountKey = (store: AutomationStore, id: string): string =>
   'account-bindings/' + store.state.capabilities?.instanceId + '/' + id;
@@ -25,6 +27,7 @@ export function accountDraft(store: AutomationStore, id: string): AccountDraft {
     items,
     baseline: copyDraft(items),
     catalogRevision: catalog.catalogRevision,
+    candidates: {},
     revisions: Object.fromEntries(
       items.map((item) => [
         item.id,
@@ -69,10 +72,46 @@ export function clearAccountDraft(store: AutomationStore, id: string, reason: 'c
   const state = store.drafts.get(accountKey(store, id)) as AccountDraft | undefined;
   for (const binding of [...(state?.items || []), ...(state?.baseline || [])]) {
     store.drafts.delete(hookPathKey(store, binding.id));
-    if (reason === 'saved') store.editors.saved(store.state.capabilities?.instanceId || '', 'bindings', binding.id);
+    if (reason === 'saved' && !state?.candidates[binding.id])
+      store.editors.saved(store.state.capabilities?.instanceId || '', 'bindings', binding.id);
     else store.editors.settle(store.state.capabilities?.instanceId || '', 'bindings', binding.id, reason);
   }
+  if (reason === 'cancel') for (const candidate of Object.values(state?.candidates || {})) discardCandidate(store, candidate);
   store.drafts.delete(accountKey(store, id));
+}
+
+function discardCandidate(store: AutomationStore, id: string): void {
+  void store.client.write('/control/v1/configuration/editor/drafts/' + encodeURIComponent(id) + '/discard', {},
+    objectValue, id).catch(() => undefined);
+}
+
+export function retainBindingCandidate(store: AutomationStore, userId: string, bindingId: string, id: string): void {
+  const state = accountDraft(store, userId);
+  const previous = state.candidates[bindingId];
+  if (previous && previous !== id) discardCandidate(store, previous);
+  state.candidates[bindingId] = id;
+}
+
+export function discardBindingCandidate(store: AutomationStore, userId: string, bindingId: string): void {
+  const candidates = accountDraft(store, userId).candidates;
+  const candidate = candidates[bindingId];
+  if (!candidate) return;
+  discardCandidate(store, candidate);
+  delete candidates[bindingId];
+}
+
+export function replaceAccountBindings(store: AutomationStore, userId: string, items: Binding[]): boolean {
+  const state = accountDraft(store, userId);
+  const removed = state.items.filter(binding => !items.some(item => item.id === binding.id));
+  const instance = store.state.capabilities?.instanceId || '';
+  if (removed.some(binding => !store.editors.target(instance, 'bindings', binding.id).canCancel())) return false;
+  for (const binding of removed) {
+    store.editors.settle(instance, 'bindings', binding.id, 'cancel');
+    store.drafts.delete(hookPathKey(store, binding.id));
+    discardBindingCandidate(store, userId, binding.id);
+  }
+  state.items = items;
+  return true;
 }
 
 export function canCancelAccount(store: AutomationStore, id: string): boolean {

@@ -11,7 +11,7 @@ Core 负责纯规则。SQL、文件、恢复记录与外部副作用仍由明确
 | ExecutionUseCases | ExecutionControlService、ExecutionAdmissionService、ExecutionPlanBuilder | ExecutionSelectionPolicy、准入规则 | 来源行、冻结计划、runAttempt journal | 接受后计划冻结，资源租约约束副作用 |
 | ExecutionRuntimeConsumer | AttemptRuntimeSession、ExecutionRuntimeStep | RetryDecision、执行与判定规则 | ExecutionAttemptProjection、writer / result rows | 实际 Job 停止并收集输出后恢复配置 |
 | CompletionActionService | CompletionIntentSource、ExecutionRunFinality | 完成操作政策 | 完成 intent / receipt | 本地授权、drain、原生调用与宿主退出分别验证 |
-| ValueUseCases | ValueService、NativeEditorService、RunCompletionService | 配置补丁、同步和恢复规则 | 配置修订、交换计划 | 验证 writer 停止及物理身份；业务成功不代替恢复证明 |
+| ConfigurationValueUseCases | ValueService、NativeEditorService、RunCompletionService | 配置补丁、同步和恢复规则 | 配置修订、交换计划 | 验证 writer 停止及物理身份；业务成功不代替恢复证明 |
 | Host 日程生命周期 | ScheduleRuntimeService、PersistentScheduleService | ScheduleMinutePolicy、StartupQueuePolicy | occurrence、watermark、已接受来源 | 未接受等待项可重验证；已接受计划冻结 |
 | RecordUseCases | ContentRetirementService | 留存及 owned cleanup 规则 | RunRecordStore、引用与清理计划 | 退役和删除分离；删除前核对当前引用及精确对象 |
 | NotificationUseCases | NotificationCatalogService、NotificationDeliveryService | NotificationRoutingPolicy | 任务、投递 intent / receipt | 网络结果未知时不自动重放 |

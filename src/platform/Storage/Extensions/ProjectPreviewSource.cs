@@ -13,6 +13,7 @@ internal sealed record ProjectPreviewSource(Guid OwnerId, bool IsScript, long Ow
     ExtensionInstalledMetadata Provider, ImmutableArray<ConfigurationReadStamp> ReadSet,
     ImmutableArray<CompiledProjectAsset> Assets, string Fingerprint, bool CanExecute, string? PreviewIndex)
 {
+    internal DraftBindingIdentity? Draft { get; init; }
     internal ImmutableDictionary<string, byte[]> Contents { get; init; } = ImmutableDictionary<string, byte[]>.Empty;
     internal long SizeBytes => Contents.Values.Sum(item => item.LongLength);
 
@@ -44,7 +45,7 @@ internal sealed record ProjectPreviewSource(Guid OwnerId, bool IsScript, long Ow
             source.IsScriptAuthority ? source.Script.Revision : source.Binding.Revision, source.Script.Revision,
             source.Root.Id, source.Root.Revision, source.RootIdentity, consumer.Metadata, provider.Metadata, readSet,
             assets, fingerprint, canExecute, graph.PreviewIndex)
-            { Contents = graph.Assets.Where(item => names.Contains(item.Name)).ToImmutableDictionary(item => item.Name,
+            { Draft = source.Draft, Contents = graph.Assets.Where(item => names.Contains(item.Name)).ToImmutableDictionary(item => item.Name,
                 item => item.Content.ToArray(), StringComparer.Ordinal) };
     }
 }

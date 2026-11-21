@@ -146,7 +146,6 @@ internal sealed class ExecutionRuntimeStep : IDisposable
             observeAdapter = async raw =>
             {
                 var value = await adapter.ObserveOwnedAsync(_accepted, binding, raw, RequireActualStep).ConfigureAwait(false);
-                TaskObservations = value is { } observed ? observed.Observations : [];
                 return value?.Reference;
             };
         }
@@ -349,7 +348,15 @@ internal sealed class ExecutionRuntimeStep : IDisposable
         {
             var proof = await _collector.CollectAsync(stopped, _drainTimeout).ConfigureAwait(false);
             _providerInterrupted = _providerControl is not null && !_providerControl.HasTerminal;
-            if (state.Gate.State == EffectGateState.Entered) _terminal.RecordCollected(_parentJournalId, proof);
+            if (state.Gate.State == EffectGateState.Entered)
+            {
+                var evidence = _terminal.RecordCollected(_parentJournalId, proof);
+                if (_input.Adapter is not null)
+                {
+                    var blobs = new ImmutableBlobStore(_instance, _contracts);
+                    TaskObservations = DailyAdapterEvidence.Project(blobs, _input, StepEvidenceCodec.Read(blobs, proof.Binding, evidence.Artifact));
+                }
+            }
             _collector.Dispose(); _collector = null; _judgementWorker?.Dispose(); _judgementWorker = null;
             _providerControl?.Dispose(); _providerControl = null;
         }
@@ -415,13 +422,13 @@ internal sealed class ExecutionRuntimeStep : IDisposable
         await CollectCurrentAsync().ConfigureAwait(false); _collected = true;
     }
 
-    internal async Task RestoreAsync(bool interrupted)
+    internal async Task RestoreAsync(bool interrupted, bool cancellationAccepted = false)
     {
         if (_restored) return;
         if (!_collected) throw new IOException("execution_step_collection_pending");
         if (RequiresUnregisteredConfigurationCompletion) return;
         _restoreInterrupted ??= interrupted;
-        if (_controller is not null) await _controller.FinishAsync(_completionOperation, _restoreInterrupted.Value).ConfigureAwait(false);
+        if (_controller is not null) await _controller.FinishAsync(_completionOperation, _restoreInterrupted.Value, cancellationAccepted).ConfigureAwait(false);
         _restored = true;
     }
 
@@ -446,5 +453,16 @@ internal sealed class ExecutionRuntimeStep : IDisposable
         if (_disposed) return;
         if (!_collected || !_restored) throw new IOException("execution_step_completion_pending");
         _windowCapture?.Dispose(); _android?.Dispose(); _target?.Dispose(); _providerLauncher?.Dispose(); _providerControl?.Dispose(); _judgementWorker?.Dispose(); _controller?.Dispose(); _writer?.Dispose(); _disposed = true;
+    }
+
+    internal void ReleaseStoppedRecovery()
+    {
+        if (!_collected) throw new IOException("execution_step_collection_pending");
+        if (!_restored)
+        {
+            _controller?.ReleaseStoppedRecovery();
+            _restored = true;
+        }
+        Dispose();
     }
 }

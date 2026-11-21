@@ -124,8 +124,8 @@ public sealed class OwnedWorkerJob : IDisposable
 
     internal OwnedWorkerIdentity StartFrozen(string executable, IReadOnlyList<string> arguments, string workingDirectory,
         Guid instanceId, Guid attemptId, Action<OwnedWorkerIdentity> persistBeforeExecution, OwnedProcessOutput? output, CommandLineSyntax syntax,
-        ProcessIdentityLease? imageProtection = null)
-        => StartCore(executable, arguments, workingDirectory, instanceId, attemptId, persistBeforeExecution, output, syntax, imageProtection);
+        ProcessIdentityLease? imageProtection = null, bool newConsole = false)
+        => StartCore(executable, arguments, workingDirectory, instanceId, attemptId, persistBeforeExecution, output, syntax, imageProtection, newConsole);
 
     internal OwnedWorkerIdentity StartNested(OwnedWorkerJob actualParent, string executable, IReadOnlyList<string> arguments,
         string workingDirectory, Guid instanceId, Guid attemptId, Action<OwnedWorkerIdentity> persistBeforeExecution,
@@ -145,14 +145,14 @@ public sealed class OwnedWorkerJob : IDisposable
 
     private OwnedWorkerIdentity StartCore(string executable, IReadOnlyList<string> arguments, string workingDirectory,
         Guid instanceId, Guid attemptId, Action<OwnedWorkerIdentity> persistBeforeExecution, OwnedProcessOutput? output, CommandLineSyntax syntax,
-        ProcessIdentityLease? imageProtection = null)
+        ProcessIdentityLease? imageProtection = null, bool newConsole = false)
         => _targetLifetime.UseOwned(() => StartOwnedCore(executable, arguments, workingDirectory,
-            instanceId, attemptId, persistBeforeExecution, output, syntax, imageProtection: imageProtection));
+            instanceId, attemptId, persistBeforeExecution, output, syntax, imageProtection: imageProtection, newConsole: newConsole));
 
     private OwnedWorkerIdentity StartOwnedCore(string executable, IReadOnlyList<string> arguments, string workingDirectory,
         Guid instanceId, Guid attemptId, Action<OwnedWorkerIdentity> persistBeforeExecution, OwnedProcessOutput? output,
         CommandLineSyntax syntax, OwnedWorkerJob? actualParent = null, OwnedPreviewJob? actualPreview = null,
-        MaintenanceStartupEnvironment? frozenEnvironment = null, ProcessIdentityLease? imageProtection = null)
+        MaintenanceStartupEnvironment? frozenEnvironment = null, ProcessIdentityLease? imageProtection = null, bool newConsole = false)
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);
         ArgumentNullException.ThrowIfNull(persistBeforeExecution);
@@ -172,7 +172,9 @@ public sealed class OwnedWorkerJob : IDisposable
         // Windows PowerShell's CLR bootstrap rejects an extended image spelling even for a short path.
         var nativeImage = image.Length < 260 ? image : PhysicalPathPolicy.NativePath(image);
         JobNative.ProcessInformation created;
-        if (!(output is null ? JobNative.CreateProcessW(nativeImage, commandLine, IntPtr.Zero, IntPtr.Zero, false, 0x08000004u | (frozenEnvironment is null ? 0u : 0x400u),
+        const uint createSuspended = 0x4, createNewConsole = 0x10, createNoWindow = 0x08000000, createUnicodeEnvironment = 0x400;
+        var flags = createSuspended | (newConsole ? createNewConsole : createNoWindow) | (frozenEnvironment is null ? 0u : createUnicodeEnvironment);
+        if (!(output is null ? JobNative.CreateProcessW(nativeImage, commandLine, IntPtr.Zero, IntPtr.Zero, false, flags,
                 frozenEnvironment?.Pointer ?? IntPtr.Zero, directory, ref startup, out created) : output.Create(nativeImage, commandLine, directory, out created)))
             throw NativeFailure();
         using var thread = new SafeKernelHandle(created.Thread);

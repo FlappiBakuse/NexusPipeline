@@ -17,12 +17,25 @@ public sealed class RecoveryCompletionService(RuntimeInstance instance, StateDat
     public void ReconcilePending()
     {
         lease.VerifyHeld(instance);
+        var reads = ReferenceEquals(lease.Database, database) ? lease.BindAttemptReads(database) : null;
         try
         {
             foreach (var (journalId, subject) in Pending())
             {
+                using var history = new HistoryReadScope(instance, database, contracts, observeExternalCommits: true);
+                using var attempt = reads?.HoldTerminal(instance, database, contracts, journalId, requireFreshInventory: true);
+                using var parents = attempt is null ? null : JournalReadScope.HoldParents(instance, contracts, reads);
+                if (attempt is not null) JournalReadScope.SelectParent(instance, contracts, journalId);
                 var terminal = new AttemptTerminalStore(instance, database, contracts, lease);
                 var state = terminal.Read(journalId);
+                var scoped = index.Current.Isolations.Any(item => item.JournalId == journalId && item.CanOrdinaryExit);
+                if (state.Latest.Phase == JournalPhase.Quarantined)
+                {
+                    if (!scoped || !TryPrepareRestoredAttempt(terminal, state)) continue;
+                    PublishRecovery();
+                    state = terminal.Read(journalId);
+                }
+                else if (scoped && !TryPrepareRestoredAttempt(terminal, state)) continue;
                 if (state.Gate.State == EffectGateState.Sealed && state.Cancellation?.ReasonCode is not
                     (DispatchIntentCodec.Reason or DispatchIntentCodec.InterruptionReason or DispatchIntentCodec.BudgetReason or DispatchIntentCodec.TargetReason)) continue;
                 if (state.Gate.State == EffectGateState.Unentered) continue;
@@ -50,8 +63,7 @@ public sealed class RecoveryCompletionService(RuntimeInstance instance, StateDat
                 var committed = new AttemptReceiptStore(database).Read(Guid.Parse(state.Attempt.AttemptId))
                     ?? throw new IOException("record_recovery_receipt_missing");
                 new ExecutionRecordProjection(instance, database, contracts, lease, new(instance, database, contracts)).ReconcileStopped(committed);
-                new RecoveryCoordinator(new RecoveryJournalRegistry(database), new SnapshotCompletionEvidence(instance, database, contracts), index).VerifyAndPublish();
-                ConfigurationRecoveryHolds.Publish(database, index);
+                PublishRecovery();
             }
             var records = new ExecutionRecordProjection(instance, database, contracts, lease, new(instance, database, contracts));
             Guid? cursor = null;
@@ -60,12 +72,41 @@ public sealed class RecoveryCompletionService(RuntimeInstance instance, StateDat
         catch { index.BlockUnknown("execution_attempt_completion_reconciliation_required"); throw; }
     }
 
+    private bool TryPrepareRestoredAttempt(AttemptTerminalStore terminal, AttemptWriterState state)
+    {
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true,
+                   domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
+        {
+            var restored = AttemptTerminalEvidence.IsRestoredInside(connection, transaction, state, requireCompletedGroups: false);
+            transaction.Commit();
+            if (!restored) return false;
+        }
+        IDisposable scene;
+        try
+        {
+            scene = RunBindingEvidence.HoldRestored(instance, database, contracts, state, state.Total.Steps.Select(step => step.StepId));
+        }
+        catch (Exception error) when (ScopedConfigurationRecovery.CanDeferScene(error))
+        { return false; }
+        using (scene)
+            if (state.Latest.Phase == JournalPhase.Quarantined) terminal.MarkApplied(state.Journal.JournalId);
+        return true;
+    }
+
+    private void PublishRecovery()
+    {
+        new RecoveryCoordinator(new RecoveryJournalRegistry(database), new SnapshotCompletionEvidence(instance, database, contracts), index)
+            .VerifyAndPublish();
+        ConfigurationRecoveryHolds.Publish(database, index);
+    }
+
     private IReadOnlyList<(Guid JournalId, string Subject)> Pending()
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT j.journal_id,o.subject_id FROM main.operation_journals j JOIN main.operations o ON o.operation_id=j.operation_id " +
-            "WHERE j.operation_kind='runAttempt' AND j.phase IN ('prepared','applied') AND o.operation_kind='execution.start' LIMIT 10001;";
+            "WHERE j.operation_kind='runAttempt' AND j.phase IN ('prepared','applied','quarantined') AND o.operation_kind='execution.start' LIMIT 10001;";
         using var rows = command.ExecuteReader(); var result = new List<(Guid, string)>();
         while (rows.Read())
         {

@@ -2,7 +2,9 @@ using System.Diagnostics;
 using System.Runtime.Versioning;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Automation;
+using NexusPipeline.Platform.Storage.Configuration;
 using NexusPipeline.Platform.Storage.Execution;
+using NexusPipeline.Platform.Storage.Journals;
 using Xunit;
 
 namespace NexusPipeline.StorageTests;
@@ -20,13 +22,17 @@ internal sealed class ExecutionRuntimeFixture : IDisposable
 
     internal ExecutionRuntimeFixture(bool configuration = false, string mode = "tail", bool expired = false,
         AutomationJudgement? judgement = null, AutomationLimits? limits = null, bool independentSuccessors = false, bool successDependency = false,
-        bool captureFiles = true, Action<ExecutionAdmissionFixture>? configure = null, IAttemptTerminalObserver? terminalObserver = null)
+        bool captureFiles = true, Action<ExecutionAdmissionFixture>? configure = null, IAttemptTerminalObserver? terminalObserver = null,
+        IConfigurationPersistenceObserver? restorationObserver = null)
     {
         _source = new(configuration, mode, accept: false, judgement, limits, independentSuccessors, successDependency, captureFiles);
         try
         {
             configure?.Invoke(Base);
-            Consumer = new(Source.Instance, Source.Database, new(), Source.Lease, Base.Resources, Base.Index, Base.Inbox, terminalObserver);
+            var factory = new ConfigurationSessionFactory(Source.Instance, Source.Database, new(), Source.Lease, Base.Index)
+                { RestorationObserver = restorationObserver };
+            Consumer = new(Source.Instance, Source.Database, new(), Source.Lease, Base.Resources, Base.Index, Base.Inbox, terminalObserver,
+                configurationFactory: factory);
             Accepted = Base.Service.Start(Guid.NewGuid(), ExecutionSequentialFixture.Subject, Source.Request(new QueueTarget(Source.QueueId)),
                 expired ? DateTimeOffset.UtcNow.AddMinutes(-10) : DateTimeOffset.UtcNow);
         }

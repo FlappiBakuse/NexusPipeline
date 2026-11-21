@@ -7,6 +7,7 @@ public sealed record EnteredAttemptInspection(JournalPhase Phase, bool DatabaseA
     bool CanReconcileRecordedCommit, AttemptFacts Facts)
 {
     public bool CanDeferConfigurationCompletion { get; init; }
+    public bool CancellationAccepted { get; init; }
 }
 
 public interface IEnteredConfigurationCompletion
@@ -22,7 +23,7 @@ public interface IEnteredRecoverySession
     void CollectWorkers();
     void MarkApplied();
     void RestoreConfiguration();
-    void CommitInterrupted(AttemptFacts facts);
+    void CommitStopped(AttemptFacts facts);
     void Quarantine(AttemptFacts facts);
     void ReconcileRecordedCommit();
 }
@@ -76,8 +77,8 @@ public sealed class EnteredAttemptRecovery(IEnteredRecoverySession session)
         if (!current.IsConfigurationRestored) { session.RestoreConfiguration(); current = Read(current); }
         if (!Stopped(current) || !current.AreWorkersCollected || !current.IsConfigurationRestored)
             return Quarantine(current, "attempt_configuration_not_restored");
-        var facts = current.Facts.AfterInterruption(WriterState.Stopped, true);
-        session.CommitInterrupted(facts);
+        var facts = RecoveredFacts(current.Facts, current.CancellationAccepted);
+        session.CommitStopped(facts);
         var committed = Read(current);
         if (committed.Phase != JournalPhase.Committed || !committed.DatabaseAgrees || committed.Facts != facts ||
             !Stopped(committed) || !committed.AreWorkersCollected || !committed.IsConfigurationRestored)
@@ -89,7 +90,7 @@ public sealed class EnteredAttemptRecovery(IEnteredRecoverySession session)
     {
         var current = session.Inspect(); Validate(current);
         if (current.Facts.RunId != previous.Facts.RunId || current.Facts.AttemptId != previous.Facts.AttemptId ||
-            current.Facts.Ordinal != previous.Facts.Ordinal ||
+            current.Facts.Ordinal != previous.Facts.Ordinal || previous.CancellationAccepted && !current.CancellationAccepted ||
             previous.Facts.Engine is not (EngineOutcome.Running or EngineOutcome.Unknown) && current.Facts.Engine != previous.Facts.Engine ||
             previous.Facts.Business != BusinessOutcome.Unverified && current.Facts.Business != previous.Facts.Business)
             throw new InvalidOperationException("attempt_recovery_known_facts_changed");
@@ -113,4 +114,10 @@ public sealed class EnteredAttemptRecovery(IEnteredRecoverySession session)
     }
 
     private static bool Stopped(EnteredAttemptInspection value) => value.IsWriterObservationComplete && value.Writers == WriterState.Stopped;
+
+    public static AttemptFacts RecoveredFacts(AttemptFacts active, bool cancellationAccepted)
+    {
+        var stopped = active.AfterInterruption(WriterState.Stopped, true);
+        return cancellationAccepted ? stopped with { Lifecycle = LifecycleOutcome.Cancelled, ReasonCode = "execution_cancel_requested" } : stopped;
+    }
 }

@@ -6,6 +6,7 @@ import { ControlClient } from '../../apps/web/src/control/client';
 import type { ActiveRun } from '../../apps/web/src/control/execution';
 
 export async function executionLayoutContract(fixture: HTMLElement, check: (value: unknown, name: string) => void): Promise<void> {
+  await executionSubmissionContract(fixture, check);
   let items: ActiveRun[] = [];
   const client = new ControlClient(location.origin, async () => Response.json({ items }));
   const store = createStore(client);
@@ -28,7 +29,7 @@ export async function executionLayoutContract(fixture: HTMLElement, check: (valu
         invocationOrdinal: 1, maximumInvocations: 3, tasks: Array.from({ length: 10 }, (_, index) => ({
           taskId: 'task-' + index, title: 'Task ' + index, isSelected: true, isEnabled: true, dependencies: [], state: 'unknown'
         })) }] }];
-    store.state.revision++;
+    store.state.events = { executionRevision: 1 };
     await settle();
     check(mount.querySelectorAll('.task-step').length === 10 || mount.querySelectorAll('.task-list li').length === 10 ||
       mount.querySelectorAll('.live-task-steps li').length === 10, 'running layout renders ten actual task cards');
@@ -43,7 +44,7 @@ export async function executionLayoutContract(fixture: HTMLElement, check: (valu
     check(inside(), 'running cards remain inside the desktop page');
     for (const ordinal of [2, 3]) {
       items[0]!.steps[0]!.invocationOrdinal = ordinal;
-      store.state.revision++;
+      store.state.events = { executionRevision: ordinal };
       await settle();
       check(mount.querySelector('.current-step')?.textContent?.includes(`${ordinal}/3`),
         `the live subtitle includes invocation ${ordinal} within attempt one`);
@@ -53,5 +54,84 @@ export async function executionLayoutContract(fixture: HTMLElement, check: (valu
     const scroll = mount.querySelector('nexus-scroll-area') as HTMLElement;
     const viewport = scroll?.shadowRoot?.querySelector('.viewport');
     check(viewport && viewport.scrollWidth > viewport.clientWidth, 'task overflow belongs to its horizontal scroll area');
+    items[0]!.phase = 'reconciliationRequired';
+    store.state.events = { executionRevision: 4 };
+    await settle();
+    check(mount.querySelector('.running-heading')?.textContent?.includes('(0)') &&
+      mount.querySelectorAll('.dispatch-review .running-item').length === 1,
+      'a quarantined run stays visible outside the running count');
+    check(!mount.querySelector('.dispatch-review .running-item button.danger'), 'a quarantined run does not offer cancellation');
+  } finally { app.unmount(); mount.remove(); store.dispose(); }
+}
+
+async function executionSubmissionContract(fixture: HTMLElement, check: (value: unknown, name: string) => void): Promise<void> {
+  let items: ActiveRun[] = [];
+  const requests: { id: string; resolve: (response: Response) => void }[] = [];
+  const store = createStore(new ControlClient(location.origin, async input => {
+    const path = new URL(String(input)).pathname;
+    if (path.endsWith('/execution/active')) return Response.json({ items });
+    if (path.includes('/execution/start/'))
+      return new Promise<Response>(resolve => requests.push({ id: path.split('/').at(-1)!, resolve }));
+    if (path.startsWith('/control/v1/records/')) return Response.json({ code: 'record_not_found' }, { status: 404 });
+    throw Error('unexpected_execution_request:' + path);
+  }));
+  store.state.capabilities = { instanceId: crypto.randomUUID(), hostVersion: '0.18.0',
+    capabilities: ['execution.start', 'execution.read', 'records.read'] };
+  const queueId = crypto.randomUUID();
+  store.state.automation = { catalogRevision: 1, roots: [], revisions: [],
+    bundle: { format: 'nexus.automation.bundle', version: 1, exportKind: 'definitions', bundleId: crypto.randomUUID(),
+      createdAt: new Date().toISOString(), roots: [], scripts: [], users: [], bindings: [], schedules: [], attachments: [],
+      queues: [{ id: queueId, name: 'Queue', scriptIds: [], order: 0, completionAction: 'none',
+        notifyEnabled: false, notificationTaskIds: [] }] } };
+  const mount = document.createElement('section'); fixture.append(mount);
+  const app = createApp({ render: () => h(DispatchPage, { store, visible: true }) });
+  app.component('FormSelect', FormSelect).mount(mount);
+  const settle = async () => { await nextTick(); await new Promise(resolve => setTimeout(resolve, 40)); await nextTick(); };
+  const card = () => mount.querySelector('nexus-empty-state.running-empty');
+  const title = () => card()?.shadowRoot?.querySelector('h3');
+  const active = () => mount.querySelectorAll('.dispatch-running .running-item').length;
+  const accept = (index: number, run: ActiveRun) => requests[index]!.resolve(Response.json({
+    acceptance: { operationId: run.operationId, status: 'accepted' }, runId: run.runId, attemptId: run.attemptId
+  }));
+  const run = (index: number): ActiveRun => ({ operationId: requests[index]!.id, runId: crypto.randomUUID(),
+    attemptId: crypto.randomUUID(), ordinal: 1, phase: 'running', canCancel: false, cancellationRequested: false, steps: [] });
+  const select = (index: number) => mount.querySelectorAll('nexus-select')[index]!.dispatchEvent(
+    new CustomEvent('nexus-change', { detail: { value: '1' } }));
+  const submit = async () => {
+    mount.querySelectorAll<HTMLElement>('.target-controls nexus-button')[1]!.click();
+    await settle();
+  };
+  try {
+    await settle(); select(0); await settle(); select(1); await settle();
+    const idle = card();
+    await submit();
+    check(requests.length === 1 && card() === idle && title()?.textContent === '正在提交运行请求…' &&
+      getComputedStyle(title()!).textAlign === 'center' && active() === 0,
+      'the same centered empty card shows the outstanding start request');
+
+    requests[0]!.resolve(Response.json({ code: 'fixture_rejected' }, { status: 409 }));
+    await settle();
+    check(card() === idle && title()?.textContent === '当前没有正在运行的任务' &&
+      mount.querySelector('nexus-toast')?.shadowRoot?.textContent?.includes('fixture_rejected'),
+      'a rejected start restores the original empty card and exposes the failure');
+
+    await submit();
+    const first = run(1);
+    accept(1, first); await settle();
+    check(card() === idle && title()?.textContent?.includes('运行请求已受理') && active() === 0,
+      'the accepted request remains in the same card while waiting for the Host');
+    items = [first]; store.state.events = { executionRevision: 1 };
+    await settle();
+    check(!card() && active() === 1, 'the active result replaces the empty state');
+
+    await submit();
+    check(active() === 1, 'the previous run stays visible during another submission');
+    const second = run(2);
+    items = [first, second]; store.state.events = { executionRevision: 2 };
+    await settle();
+    check(active() === 2 && !mount.querySelector('.dispatch-running')?.textContent?.includes('正在提交运行请求'),
+      'the matching active result arriving first replaces the submission feedback');
+    accept(2, second); await settle();
+    check(active() === 2 && !card(), 'the later response leaves both active runs visible');
   } finally { app.unmount(); mount.remove(); store.dispose(); }
 }

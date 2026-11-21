@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { locale, t } from '../../apps/web/src/app/locale';
-import { historyRow, historyDate, outcomeName } from '../../apps/web/src/pages/history-row';
+import * as history from '../../apps/web/src/pages/history-row';
 import '../../apps/web/src/pages/history-messages';
 import { historyDuration, historyTime, historyReason, startedInvocations } from '../../apps/web/src/pages/history-detail';
 import { runAttempt, invocationAttempt } from '../../apps/web/src/pages/execution-text';
-import type { ActiveRun } from '../../apps/web/src/control/execution';
+import type { ActiveRun, RunTask } from '../../apps/web/src/control/execution';
+
+const { historyRow, historyDate, outcomeName } = history;
 
 const record = {
   finalAttempt: { runId: '', attemptId: '', ordinal: 1, engine: 'succeeded', business: 'succeeded', lifecycle: 'completed', recovery: 'restored', reasonCode: 'execution_completed' },
@@ -48,6 +50,19 @@ export function run(): string[] {
     cases.push('History locale and duration precision remain exact in ' + language);
   }
   locale.value = 'zh-CN';
+  const task: RunTask = { taskId: 'mail', title: '邮件', isEnabled: true, isSelected: true, dependencies: [], state: 'unknown' };
+  assert.equal(history.historyTaskStatus(task, { phase: 'collected' }).label, '结果未保存');
+  assert.equal(history.historyTaskStatus({ ...task, reasonCode: 'opaque_task' }, { phase: 'collected' }).label, '待核实');
+  assert.equal(history.historyTaskStatus({ ...task, isSelected: false }, { phase: 'collected' }).label, '未安排核验');
+  assert.equal(history.historyTaskStatus(task, { phase: 'notExecuted' }).label, '未执行');
+  assert.equal(history.historyTaskStatus(task, { phase: 'skipped' }).label, '已跳过');
+  assert.equal(history.historyTaskStatus(task, { phase: 'collected', reasonCode: 'execution_cancel_requested' }).label, '已取消');
+  assert.equal(history.historyTaskStatus({ ...task, state: 'succeeded', completionKind: 'inapplicable' }, { phase: 'collected' }).label, '不适用');
+  assert.equal(history.historyTaskStatus({ ...task, state: 'succeeded', completionKind: 'satisfied' }, { phase: 'collected' }).label, '已满足');
+  assert.equal(history.historyTaskStatus({ ...task, completionKind: 'notExecuted' }, { phase: 'collected' }).label, '未执行');
+  const processFailed = { ...record, finalAttempt: { ...record.finalAttempt, engine: 'failed', business: 'unverified' } } as const;
+  assert.equal(historyRow(processFailed).label, '✕ 失败');
+  cases.push('History labels distinguish frozen selection, explicit completion and absent results');
   const active = { ordinal: 1, display: { maximumAttempts: 3 }, steps: [
     { phase: 'running', maximumInvocations: 3, invocationOrdinal: 2 }
   ] } as ActiveRun;

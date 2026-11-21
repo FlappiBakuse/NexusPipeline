@@ -17,12 +17,16 @@ public sealed class StartupJournalRecovery(RuntimeInstance instance, ContractRea
     {
         using var profile = StartupProfile.Begin("operations.recovery");
         lease.VerifyHeld(instance);
-        using var reads = DatabaseReadScope.Hold(database.DatabasePath);
+        using var reads = new HistoryReadScope(instance, database, contracts, observeExternalCommits: true);
         var registry = new RecoveryJournalRegistry(database);
         var before = registry.ReadActiveSnapshot();
         Console.Error.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { kind = "startup.active-journals", count = before.Journals.Count }));
-        InspectBindings(before, completeActiveInventory: false);
-        ReleaseStoppedMaintenance(lease, before);
+        if (before.Journals.Any(item => item.Kind == JournalKind.UpdateApply && item.Phase == JournalPhase.Committed))
+        {
+            // Releasing a maintenance reservation writes before the coordinator runs its own preflight.
+            InspectBindings(before, completeActiveInventory: false);
+            ReleaseStoppedMaintenance(lease, before);
+        }
         var evidence = new JournalRecoveryEvidence(instance, new(instance, contracts), database);
         IRecoveryEvidence completionEvidence = OperatingSystem.IsWindows()
             ? new SnapshotCompletionEvidence(instance, database, contracts) : evidence;

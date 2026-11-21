@@ -58,6 +58,9 @@ public sealed class ExecutionPlanBuilder
 
     public ExecutionPlanDraft Prepare(ExecutionSelectionRequest request, DateTimeOffset createdAt) => PrepareCore(request, createdAt, null);
 
+    internal ExecutionPlanDraft PrepareForAdmission(ExecutionSelectionRequest request, DateTimeOffset createdAt) =>
+        PrepareCore(request, createdAt, null, retainInputs: true);
+
     [SupportedOSPlatform("windows")]
     internal ExecutionPlanDraft PrepareWithDiscoveries(ExecutionSelectionRequest request, DateTimeOffset createdAt,
         IReadOnlyDictionary<Guid, PreparedMuMuDiscovery> discoveries)
@@ -65,18 +68,35 @@ public sealed class ExecutionPlanBuilder
         ArgumentNullException.ThrowIfNull(discoveries);
         var frozen = discoveries.ToDictionary(item => item.Key, item => item.Value);
         if (frozen.Any(item => item.Key == Guid.Empty || item.Value is null)) throw new ArgumentException("execution_mumu_discovery_input_invalid");
-        return PrepareCore(request, createdAt, frozen);
+        return PrepareCore(request, createdAt, frozen, retainInputs: true);
     }
 
     internal ExecutionPlanDraft PrepareScheduled(ExecutionSelectionRequest request, DateTimeOffset createdAt,
         PreparedExecutionOrigin origin, IReadOnlyDictionary<Guid, PreparedMuMuDiscovery>? discoveries)
     {
         origin.RequireRequest(request);
-        return PrepareCore(request, createdAt, discoveries, origin);
+        return PrepareCore(request, createdAt, discoveries, origin, retainInputs: true);
     }
 
     private ExecutionPlanDraft PrepareCore(ExecutionSelectionRequest request, DateTimeOffset createdAt,
-        IReadOnlyDictionary<Guid, PreparedMuMuDiscovery>? discoveries, PreparedExecutionOrigin? origin = null)
+        IReadOnlyDictionary<Guid, PreparedMuMuDiscovery>? discoveries, PreparedExecutionOrigin? origin = null, bool retainInputs = false)
+    {
+        PlanInputLease? lease = new();
+        try
+        {
+            var draft = BuildDraft(request, createdAt, discoveries, origin, lease);
+            if (retainInputs && draft.PlanDigest is not null)
+            {
+                draft.RetainInputs(lease);
+                lease = null;
+            }
+            return draft;
+        }
+        finally { lease?.Dispose(); }
+    }
+
+    private ExecutionPlanDraft BuildDraft(ExecutionSelectionRequest request, DateTimeOffset createdAt,
+        IReadOnlyDictionary<Guid, PreparedMuMuDiscovery>? discoveries, PreparedExecutionOrigin? origin, PlanInputLease lease)
     {
         _instanceLease.VerifyHeld(_instance);
         var catalog = new AutomationDefinitionStore(_database).Read();
@@ -134,7 +154,7 @@ public sealed class ExecutionPlanBuilder
                     var captured = (_emulators ?? throw new IOException("emulator_service_unavailable")).Capture(item.Script, item.Roots);
                     emulators.Add(item.Ordinal, captured); emulator = captured.Target;
                 }
-                var input = ExecutionStepInputs.Read(item, configurations, new(_instance, _contracts), _judgementRuntime, discovery, emulator, initialize);
+                var input = ExecutionStepInputs.Read(item, configurations, new(_instance, _contracts), lease, _judgementRuntime, discovery, emulator, initialize);
                 if (adapter is not null)
                 {
                     input = input with { Step = input.Step with { ExtensionId = item.Script.ExtensionId, Adapter = adapter.Descriptor, ExclusiveProgram = adapter.ExclusiveProgram ? true : null,
@@ -155,7 +175,7 @@ public sealed class ExecutionPlanBuilder
                 readiness.Add(new(item, true, ExecutionSelectionPolicy.InputsVerified));
             }
             catch (IOException error) when (error.Message is "execution_mumu_discovery_required" or "execution_provider_configuration_unavailable" or
-                "execution_extension_provider_unavailable")
+                "execution_extension_provider_unavailable" or ConfigurationRecoveryCodes.Pending or ConfigurationRecoveryCodes.Lost)
                 { readiness.Add(new(item, false, error.Message)); }
             catch (ConfigurationException error)
                 { readiness.Add(new(item, false, error.Message)); }
@@ -166,8 +186,16 @@ public sealed class ExecutionPlanBuilder
         if (!explanation.HasRunnable || explanation.HasBlockedItems) return new(_owner, explanation, null, null);
         var runnable = explanation.Items.Where(item => item.Disposition == ExecutionExplanationDisposition.Runnable).Select(item => item.Source.Ordinal).ToHashSet();
         inputs = inputs.Where(item => runnable.Contains(item.Key)).ToDictionary();
+        ExecutionPlanCaptureRuntime? captureRuntime;
+        try { captureRuntime = ExecutionCaptureInputs.Capture(inputs.Values.Select(input => input.Step).ToArray(), _judgementRuntime, lease); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or System.Text.Json.JsonException)
+        {
+            var blocked = readiness.Select(item => inputs.TryGetValue(item.Item.Ordinal, out var input) && ExecutionCaptureInputs.IsSupported(input.Step)
+                ? item with { IsReady = false, ReasonCode = ExecutionCaptureInputs.Unbound } : item).ToImmutableArray();
+            return new(_owner, ExecutionSelectionPolicy.Explain(selection, blocked, blockAll: true), null, null);
+        }
         var definitions = new AutomationBundleCodec(_contracts).Encode(Subset(catalog, selection), createdAt);
-        var plan = Build(selection, explanation, inputs, definitions, createdAt, settings.Values, origin) with
+        var plan = Build(selection, explanation, inputs, definitions, createdAt, settings.Values, origin, captureRuntime) with
         { ExtensionLocks = providerInputs.Locks.Concat(adapted.Where(item => runnable.Contains(item.Key)).SelectMany(item => item.Value.CompilerLocks.Prepend(item.Value.Lock)))
             .Concat(emulators.Where(item => runnable.Contains(item.Key)).Select(item => item.Value.Lock))
             .Where(item => inputs.Values.Any(input => input.Step.ExtensionId == item.ExtensionId || input.Step.Provider?.ExtensionId == item.ExtensionId || input.Step.Adapter?.CompiledProvider == item.ExtensionId || input.Step.Target?.Android?.Emulator?.ExtensionId == item.ExtensionId))
@@ -179,7 +207,7 @@ public sealed class ExecutionPlanBuilder
             var blocked = readiness.Select(item => item.IsReady ? item with { IsReady = false, ReasonCode = JournalCapacityPolicy.Reason } : item).ToImmutableArray();
             return new(_owner, ExecutionSelectionPolicy.Explain(selection, blocked, blockAll: true), null, null);
         }
-        var frozen = new ExecutionPlanCodec(_instance, _contracts, new(_instance, _contracts)).Inspect(plan, definitions, extensionInputs);
+        var frozen = new ExecutionPlanCodec(_instance, _contracts, new(_instance, _contracts)).Inspect(plan, definitions, extensionInputs, lease);
         return new(_owner, explanation, frozen, definitions, extensionInputs);
     }
 
@@ -224,7 +252,7 @@ public sealed class ExecutionPlanBuilder
             var request = draft.Explanation.Selection.Request;
             var wire = plan.ReadWire();
             ProjectInitializationPlan.RequireRequest(wire, request);
-            if (new AutomationDefinitionStore(_database).Read().Revision != request.ExpectedCatalogRevision)
+            if (new AutomationDefinitionStore(_database).ReadRevision() != request.ExpectedCatalogRevision)
                 throw new ExecutionSelectionException("execution_catalog_revision_conflict");
             if (new HostSettingsStore(_database).Read().Revision != request.ExpectedSettingsRevision)
                 throw new ExecutionSelectionException("execution_settings_revision_conflict");
@@ -268,10 +296,19 @@ public sealed class ExecutionPlanBuilder
                     if (saved.Revision != slot.ExpectedRevision) throw new ConfigurationException("configuration_revision_conflict");
                 }
             }
-            var blobs = new ImmutableBlobStore(_instance, _contracts);
-            var codec = new ExecutionPlanCodec(_instance, _contracts, blobs);
+            return PersistPlan(wire, definitions, draft.ProviderManifests, providers, draft.TakeInputs() ?? new());
+        });
+    }
+
+    private PreparedExecutionPlan PersistPlan(ExecutionPlan wire, byte[] definitions, IReadOnlyDictionary<string, byte[]> manifests,
+        ExecutionProviderPreparation providers, PlanInputLease inputs)
+    {
+        var blobs = new ImmutableBlobStore(_instance, _contracts);
+        var codec = new ExecutionPlanCodec(_instance, _contracts, blobs);
+        try
+        {
             JournalCapacityPolicy.Require(wire);
-            _ = codec.Inspect(wire, definitions, draft.ProviderManifests);
+            _ = codec.Inspect(wire, definitions, manifests, inputs);
             if (wire.Steps.Any(step => step.Provider is not null))
             {
                 if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
@@ -280,7 +317,7 @@ public sealed class ExecutionPlanBuilder
             }
             foreach (var reference in wire.Steps.Where(step => step.Adapter is not null).SelectMany(step => new[] { step.Adapter!.Manifest, step.Adapter.Script }).Distinct())
             {
-                var bytes = draft.ProviderManifests[reference.Sha256];
+                var bytes = manifests[reference.Sha256];
                 var persisted = blobs.PersistContent(bytes, default);
                 if (persisted.RelativePath != reference.RelativePath || persisted.SizeBytes != reference.SizeBytes || persisted.Sha256 != reference.Sha256)
                     throw new IOException("execution_adapter_reference_invalid");
@@ -289,13 +326,14 @@ public sealed class ExecutionPlanBuilder
             var expected = wire.DefinitionBundle;
             if (content.RelativePath != expected.RelativePath || content.SizeBytes != expected.SizeBytes || content.Sha256 != expected.Sha256)
                 throw new IOException("execution_definition_reference_invalid");
-            return codec.Freeze(wire);
-        });
+            return codec.Freeze(wire, inputs);
+        }
+        catch { inputs.Dispose(); throw; }
     }
 
     private ExecutionPlan Build(ExecutionSelection selection, ExecutionPlanExplanation explanation,
         Dictionary<int, ExecutionStepInput> inputs, byte[] definitions, DateTimeOffset createdAt, NexusPipeline.Core.Settings.HostSettings settings,
-        PreparedExecutionOrigin? origin)
+        PreparedExecutionOrigin? origin, ExecutionPlanCaptureRuntime? captureRuntime)
     {
         var steps = new List<ExecutionPlanStep>();
         foreach (var item in explanation.Items.Where(item => item.Disposition == ExecutionExplanationDisposition.Runnable))
@@ -328,7 +366,7 @@ public sealed class ExecutionPlanBuilder
                 Disposition = item.Disposition.ToString().ToLowerInvariant(), ReasonCode = item.ReasonCode }).ToArray(),
             ConfigurationSlots = explanation.Items.Where(item => item.Disposition == ExecutionExplanationDisposition.Runnable)
                 .SelectMany(item => inputs[item.Source.Ordinal].ConfigurationSlots).ToArray(),
-            CaptureRuntime = ExecutionCaptureInputs.Capture(steps, _judgementRuntime),
+            CaptureRuntime = captureRuntime,
             Steps = steps, PhysicalClaims = [], ResourceKeys = [], ExtensionLocks = [], CompletionAction = selection.CompletionAction == AutomationCompletionAction.Exit
                 ? "exitHost" : selection.CompletionAction.ToString().ToLowerInvariant(),
             Budget = new() { TotalTimeoutSeconds = timeout, StopTimeoutSeconds = _limits.StopTimeoutSeconds,

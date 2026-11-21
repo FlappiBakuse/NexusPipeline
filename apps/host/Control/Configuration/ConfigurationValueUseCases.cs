@@ -9,7 +9,7 @@ using NexusPipeline.Platform.Storage.Configuration;
 namespace NexusPipeline.Host.Control.Configuration;
 
 [SupportedOSPlatform("windows")]
-internal sealed class ValueUseCases(ValueService values)
+internal sealed class ConfigurationValueUseCases(ValueService values)
 {
     internal object Read(AuthenticatedControlRequest request, Guid bindingId)
     { request.Require(ControlCapability.ConfigurationRead); return new { bindingId, resources = values.Read(bindingId) }; }

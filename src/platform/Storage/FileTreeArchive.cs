@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.ComponentModel;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Platform.Storage.Journals;
 
@@ -12,11 +13,40 @@ public sealed record ArchivedFileTree(FileTreeSnapshot Snapshot, IReadOnlyList<P
 
 public sealed class FileTreeArchive(FileTreeScanner scanner, ImmutableBlobStore blobs)
 {
+    internal string? InspectRestorationSource(ArchivedFileTree archive)
+    {
+        var missing = false;
+        foreach (var content in archive.Contents)
+        {
+            try { blobs.Verify(content); }
+            catch (IOException error) when (error is FileNotFoundException or DirectoryNotFoundException ||
+                error.InnerException is Win32Exception { NativeErrorCode: 2 or 3 }) { missing = true; }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            { return "configuration_backup_unverified"; }
+        }
+        return missing ? "configuration_original_lost" : null;
+    }
+
     internal void MaterializePackage(FrozenPayloadApply plan, string destination, CancellationToken cancellation) =>
         Extensions.ExtensionPackageMaterializer.Materialize(blobs, plan, destination, cancellation);
 
     public ArchivedFileTree Capture(string requestedSource, CancellationToken cancellationToken)
         => CaptureCore(requestedSource, cancellationToken, scanner.CaptureArchive);
+
+    internal TreeReadLease CaptureProtected(string source, PhysicalObjectIdentity parentIdentity,
+        CancellationToken cancellationToken, out ArchivedFileTree archive)
+    {
+        var lease = TreeReadLease.Capture(source, parentIdentity, scanner, cancellationToken, "configuration.capture.hash", out var captured);
+        try
+        {
+            var contents = captured.Snapshot.Entries.Where(entry => entry.Kind == FileObjectKind.File)
+                .Select(entry => blobs.PersistCapturedContent(captured.Files[entry.RelativePath], entry, cancellationToken)).Distinct().ToArray();
+            lease.RequireNamespace(cancellationToken);
+            archive = new(captured.Snapshot, captured.Objects, Array.AsReadOnly(contents));
+            return lease;
+        }
+        catch { lease.Dispose(); throw; }
+    }
 
     internal ArchivedFileTree Inspect(string requestedSource, CancellationToken cancellation)
     {

@@ -13,6 +13,8 @@ public sealed class AutomationDefinitionStore(StateDatabase database) : IAutomat
 {
     public static OperationIdentity Identity(Guid operationId, string subjectId, AutomationChanges changes) =>
         new(operationId, subjectId, Digest(changes), "automation.change");
+    internal static OperationIdentity DraftIdentity(Guid operationId, string subject, AutomationChanges changes, IReadOnlyList<Guid> drafts) =>
+        new(operationId, subject, Convert.ToHexStringLower(SHA256.HashData(BoundedJson.Serialize(new { changes, drafts }))), "automation.change");
 
     public AutomationCatalog Read()
     {
@@ -39,9 +41,18 @@ public sealed class AutomationDefinitionStore(StateDatabase database) : IAutomat
         return CommitChanges(operation, changes, acceptedAt);
     }
 
-    internal AutomationChangeResult? Lookup(OperationIdentity operation, AutomationChanges changes)
+    internal AutomationChangeResult CommitDrafts(OperationIdentity operation, AutomationChanges changes, DateTimeOffset acceptedAt,
+        IReadOnlyList<Guid> ids, Configuration.BindingDrafts drafts)
     {
-        if (operation.Kind != "automation.change" || operation.RequestDigest != Digest(changes)) throw new OperationConflictException();
+        if (operation != DraftIdentity(operation.OperationId, operation.SubjectId, changes, ids)) throw new OperationConflictException();
+        return drafts.Commit(operation, changes, ids, acceptedAt, publish => CommitChanges(operation, changes, acceptedAt, publish));
+    }
+
+    internal AutomationChangeResult? Lookup(OperationIdentity operation, AutomationChanges changes, IReadOnlyList<Guid>? drafts = null)
+    {
+        var expected = drafts is null ? Identity(operation.OperationId, operation.SubjectId, changes)
+            : DraftIdentity(operation.OperationId, operation.SubjectId, changes, drafts);
+        if (operation != expected) throw new OperationConflictException();
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation);
         using var transaction = DatabaseConnections.BeginRead(connection);
         return OperationRows.ReadExisting(connection, transaction, operation) is null ? null : ReadResult(connection, transaction, operation.OperationId);
@@ -53,7 +64,8 @@ public sealed class AutomationDefinitionStore(StateDatabase database) : IAutomat
         return CommitChanges(operation, changes, acceptedAt);
     }
 
-    private AutomationChangeResult CommitChanges(OperationIdentity operation, AutomationChanges changes, DateTimeOffset acceptedAt)
+    private AutomationChangeResult CommitChanges(OperationIdentity operation, AutomationChanges changes, DateTimeOffset acceptedAt,
+        Action<SqliteConnection, SqliteTransaction, AutomationCatalog>? publish = null)
     {
         VerifySavedRoots(changes);
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Notifications | DatabaseDomain.Content))
@@ -88,6 +100,7 @@ public sealed class AutomationDefinitionStore(StateDatabase database) : IAutomat
             _ = BoundedJson.Serialize(next);
             retirement?.RetireOwners(connection, transaction);
             AutomationRowWriter.Write(connection, transaction, before, next);
+            publish?.Invoke(connection, transaction, before);
             AutomationRowWriter.Row(connection, transaction, "INSERT INTO automation.automation_mutations VALUES($0,$1);", operation.OperationId, next.Revision);
             AutomationRowWriter.Row(connection, transaction, "UPDATE main.operations SET status='completed' WHERE operation_id=$0;", operation.OperationId);
             return ReadResult(connection, transaction, operation.OperationId) with { IsNew = true };
