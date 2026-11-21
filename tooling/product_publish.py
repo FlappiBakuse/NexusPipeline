@@ -14,6 +14,7 @@ from application_manifest import create_manifest
 from source_snapshot import digest, source_files, write_json, external_directory
 from dotnet_sdk import resolve_sdk, sdk_environment, sdk_key
 from sdk_locks import lock_arguments
+from verify_manifests import pe_subsystem, verify_execution_level
 
 
 def inventory(root):
@@ -36,7 +37,16 @@ def clear_publish_slot(directory, receipt):
         write_json(receipt, inventory(directory))
 
 
-def publish_product(root, build_root, output, runtime_archive, profile):
+def desktop_execution_level(profile, acceptance):
+    if profile not in ('test', 'production') or type(acceptance) is not bool:
+        raise ValueError('Invalid product privilege configuration')
+    if acceptance and profile != 'test':
+        raise ValueError('Acceptance requires the test profile')
+    return 'requireAdministrator' if profile == 'production' or acceptance else 'asInvoker'
+
+
+def publish_product(root, build_root, output, runtime_archive, profile, *, acceptance=False):
+    execution_level = desktop_execution_level(profile, acceptance)
     root = Path(root).resolve(strict=True)
     build_root, output = external_directory(root, build_root), external_directory(root, output)
     for path in (build_root, output):
@@ -65,7 +75,8 @@ def publish_product(root, build_root, output, runtime_archive, profile):
     run = output / 'runs' / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S') + '-' + uuid.uuid4().hex[:8])
     run.mkdir(parents=True)
     sdk = build['componentInputs']['context']['dotnet']
-    report = dict(status='RUNNING', profile=profile, source=source, dotnet=sdk,
+    report = dict(status='RUNNING', profile=profile, acceptance=acceptance, executionLevel=execution_level,
+                  source=source, dotnet=sdk,
                   buildReceipt=str(build_root / 'runs' / build['runId'] / 'build-receipt.json'), commands=[])
     write_json(run / 'publish-receipt.json', report)
     env = build_environment(build_root)
@@ -115,11 +126,13 @@ def publish_component(root, build_root, output, profile, build, source, frozen, 
     binding = {'Maintenance': ('NexusHostSha256', 'Host'), 'Uninstaller': ('NexusInstallerSha256', 'Installer')}.get(project)
     image_hash = published[binding[1]][0]['sha256'] if binding else None
     ready = project in ('Host', 'Launcher')
+    execution_level = 'asInvoker' if project in ('Installer', 'Uninstaller') else report['executionLevel']
     locks = build['restoreLocks']
     restore_args = lock_arguments(locks)
     lock_files = {name: sha for name, sha in locks['files'].items()
                   if name.removesuffix('.packages.lock.json') in component['projectNames']} if locks else None
-    publish_inputs = dict(component=component, profile=profile, runtime='win-x64', selfContained=False,
+    publish_inputs = dict(component=component, profile=profile, executionLevel=execution_level,
+                          runtime='win-x64', selfContained=False,
                           singleFile=True, nativeExtraction=True, readyToRun=ready, restoreLocks=lock_files,
                           sdkSha256=hash_file(sdk) if sdk else None, boundImageSha256=image_hash,
                           tools={name: hash_file(root / 'tooling' / name) for name in ('product_publish.py', 'dotnet_bundle.py', 'verify_manifests.py')})
@@ -132,7 +145,8 @@ def publish_component(root, build_root, output, profile, build, source, frozen, 
             original = Path(proof['receipt'])
             original_proof = json.loads(original.read_bytes())
             if (hash_file(original) != proof['receiptSha256'] or original_proof.get('status') != 'PASS' or
-                    original_proof.get('inputs') != signature or original_proof.get('files') != proof['files']):
+                    original_proof.get('inputs') != signature or original_proof.get('files') != proof['files'] or
+                    original_proof['bundle']['executionLevel'] != execution_level):
                 raise ValueError('Original publish proof changed')
             published[project] = proof['files']
             report['commands'].append(dict(project=project, reusedReceipt=str(original), receiptSha256=proof['receiptSha256']))
@@ -142,9 +156,11 @@ def publish_component(root, build_root, output, profile, build, source, frozen, 
     command = [dotnet['path'], 'publish', str(frozen / 'apps' / project.lower() / ('NexusPipeline.' + project + '.csproj')),
                '--configuration', 'Release', '--runtime', 'win-x64', '--self-contained', 'false', '--nologo',
                '--disable-build-servers', '-m:1', '--output', str(destination),
-               f'-p:NexusArtifactsRoot={output / "work"}', f'-p:NexusPackagesRoot={build_root.parent / "cache/nuget"}',
+               f'-p:NexusArtifactsRoot={output / "work" / execution_level}',
+               f'-p:NexusPackagesRoot={build_root.parent / "cache/nuget"}',
                f'-p:NexusSdkKey={sdk_key(dotnet)}',
                f'-p:NexusTestHost={str(profile == "test").lower()}',
+               f'-p:NexusRequireAdministrator={str(execution_level == "requireAdministrator").lower()}',
                f'-p:NexusWebRoot={build_root / "web-workspace/apps/web/dist"}', '-p:RestoreLockedMode=true',
                '-p:IncludeNativeLibrariesForSelfExtract=true',
                '-p:IncludeAllContentForSelfExtract=false', '-p:EnableCompressionInSingleFile=false',
@@ -170,17 +186,11 @@ def publish_component(root, build_root, output, profile, build, source, frozen, 
         raise ValueError('Framework-dependent single-file publish failed: ' + str(log))
     entry = destination / ('NexusPipeline.' + project + '.exe')
     bundle = verify_publish(entry, project, sdk.read_bytes() if sdk else None)
-    from verify_manifests import embedded_manifest, pe_subsystem
-    import xml.etree.ElementTree as ET
-    levels = [element.attrib['level'] for element in ET.fromstring(embedded_manifest(entry)).iter()
-              if element.tag.endswith('requestedExecutionLevel')]
-    expected_level = 'asInvoker' if project in ('Installer', 'Uninstaller') or profile == 'test' else 'requireAdministrator'
-    if levels != [expected_level]:
-        raise ValueError('Published executable privilege differs from its role')
+    verify_execution_level(entry, execution_level)
     expected_subsystem = 3 if project == 'Installer' else 2
     if pe_subsystem(entry) != expected_subsystem:
         raise ValueError('Published executable subsystem differs from its GUI or console role')
-    bundle['executionLevel'] = levels[0]
+    bundle['executionLevel'] = execution_level
     bundle['subsystem'] = expected_subsystem
     if inventory(destination) != [dict(path=entry.name, sizeBytes=entry.stat().st_size, sha256=hash_file(entry))]:
         raise ValueError('Single-file publication contains additional runtime or debug files')

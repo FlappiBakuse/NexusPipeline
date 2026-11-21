@@ -6,7 +6,7 @@
     <ApplicationIcon>../desktop/nexuspipeline.ico</ApplicationIcon>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>false</SelfContained>
-    <ApplicationManifest Condition="'$(NexusTestHost)' != 'true'">app.manifest</ApplicationManifest>
-    <ApplicationManifest Condition="'$(NexusTestHost)' == 'true'">test.manifest</ApplicationManifest>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationManifest Condition="'$(NexusTestHost)' == 'true' and '$(NexusRequireAdministrator)' != 'true'">test.manifest</ApplicationManifest>
   </PropertyGroup>
 </Project>

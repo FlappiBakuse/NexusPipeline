@@ -10,7 +10,7 @@ import zipfile
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tooling'))
 from binary_inputs import hash_file
 from product_assembly import assemble_product, copy_initial
-from product_publish import inventory
+from product_publish import desktop_execution_level, inventory, publish_product
 from product_assets import build_assets, prepare_output, write_archive
 from artifact_lock import artifact_lock
 from source_snapshot import write_json
@@ -41,6 +41,7 @@ class ProductAssemblyTests(unittest.TestCase):
         manifest.write_bytes(b'{}')
         self.receipt = self.workspace / 'publish.json'
         write_json(self.receipt, dict(status='PASS_PUBLISHED_NOT_ASSEMBLED', profile='test',
+            acceptance=False, executionLevel='asInvoker',
             source=dict(sourceManifestPath=str(source_manifest), sourceSnapshotHash=hash_file(source_manifest), exportRoot=str(source)),
             applicationManifest=dict(path=str(manifest), sha256=hash_file(manifest)),
             published=components, desktopReceiptSha256=hash_file(desktop / 'desktop-bundle.json')))
@@ -48,6 +49,30 @@ class ProductAssemblyTests(unittest.TestCase):
 
     def tearDown(self):
         self.scope.cleanup()
+
+    def test_elevation_modes(self):
+        self.assertEqual('asInvoker', desktop_execution_level('test', False))
+        self.assertEqual('requireAdministrator', desktop_execution_level('test', True))
+        self.assertEqual('requireAdministrator', desktop_execution_level('production', False))
+        with self.assertRaisesRegex(ValueError, 'Acceptance requires the test profile'):
+            publish_product(self.root, self.root/'build', self.output, self.root/'electron.zip', 'production', acceptance=True)
+        self.assertFalse(self.output.exists())
+
+    def test_assembly_binds_elevation(self):
+        receipt = json.loads(self.receipt.read_bytes())
+        receipt['acceptance'] = True
+        write_json(self.receipt, receipt)
+        write_json(self.workspace/'publish-current.json', dict(receipt=str(self.receipt), sha256=hash_file(self.receipt)))
+        with self.assertRaisesRegex(ValueError, 'Publication execution level differs'):
+            assemble_product(self.workspace, self.output)
+        self.assertFalse(self.output.exists())
+        receipt['executionLevel'] = 'requireAdministrator'
+        write_json(self.receipt, receipt)
+        write_json(self.workspace/'publish-current.json', dict(receipt=str(self.receipt), sha256=hash_file(self.receipt)))
+        assemble_product(self.workspace, self.output)
+        record = json.loads((self.output/'assembly.json').read_bytes())
+        self.assertEqual(('test', True, 'requireAdministrator'),
+                         (record['profile'], record['acceptance'], record['executionLevel']))
 
     def test_excludes_producers(self):
         args = SimpleNamespace(output=self.output, assembly_root=self.root / 'unprepared')

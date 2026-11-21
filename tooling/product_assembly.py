@@ -5,7 +5,7 @@ import shutil
 
 from binary_inputs import hash_file
 from desktop_bundle import require_no_links, safe_name
-from product_publish import inventory
+from product_publish import desktop_execution_level, inventory
 from source_snapshot import write_json, external_directory, ordinary_path
 from initial_extensions import collect_initial
 
@@ -25,6 +25,9 @@ def assemble_product(workspace, output, bundle_root=None, replace_application=Fa
     published = json.loads(receipt.read_bytes())
     if published['status'] != 'PASS_PUBLISHED_NOT_ASSEMBLED':
         raise ValueError('Publication did not complete')
+    execution_level = desktop_execution_level(published['profile'], published['acceptance'])
+    if published['executionLevel'] != execution_level:
+        raise ValueError('Publication execution level differs from its profile and purpose')
     sources = collect_inputs(workspace, published)
     initial, initial_receipt = collect_initial(bundle_root, published['profile']) if bundle_root is not None else ({}, None)
     expected = [dict(path=name, sizeBytes=path.stat().st_size, sha256=hash_file(path))
@@ -44,7 +47,8 @@ def assemble_product(workspace, output, bundle_root=None, replace_application=Fa
                 raise ValueError('Preserve existing acceptance data before replacing the application')
     application.mkdir(parents=True, exist_ok=True)
     record = dict(format='nexus.product.assembly', version=1, status='ASSEMBLY_INCOMPLETE',
-        profile=published['profile'], source=published['source'], publicationWorkspace=str(workspace),
+        profile=published['profile'], acceptance=published['acceptance'], executionLevel=execution_level,
+        source=published['source'], publicationWorkspace=str(workspace),
         publishReceipt=pointer, initialExtensions=initial_receipt, toolSha256=hash_file(Path(__file__)),
         scope='Host, GUI launcher, maintenance runtime, desktop shell and declared default bundle. Runtime acceptance is separate.')
     known_files = expected + previous['files']

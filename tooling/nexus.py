@@ -59,6 +59,7 @@ def main():
     product.add_argument("--output", type=Path, required=True)
     product.add_argument("--runtime-archive", type=Path, required=True)
     product.add_argument("--profile", choices=["production", "test"], required=True)
+    product.add_argument("--acceptance", action="store_true", help="Require administrator privileges in a complete local test publication")
     assembly = commands.add_parser("product-assemble", help="Assemble verified publications into the normal application layout")
     assembly.add_argument("--publication-root", type=Path, required=True)
     assembly.add_argument("--output", type=Path, required=True)
@@ -71,7 +72,9 @@ def main():
             print(json.dumps(assemble_product(args.publication_root, args.output, args.bundle_root, args.replace_application), ensure_ascii=False, indent=2))
             return 0
         if args.command == "product-publish":
-            print(json.dumps(publish_product(root, args.build_root, args.output, args.runtime_archive, args.profile), ensure_ascii=False, indent=2))
+            result = publish_product(root, args.build_root, args.output, args.runtime_archive, args.profile,
+                                     acceptance=args.acceptance)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
         if args.command == "sdk-packages":
             print(json.dumps(build_sdk(root, args.build_root, args.consumer_root, args.output, args.cache, args.compile_only), ensure_ascii=False, indent=2))

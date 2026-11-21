@@ -95,7 +95,7 @@ uploaded、size、digest 并下载回读，全组复核后才公开 Release。wr
 ## 单文件发布
 
 `product-publish` 生成 win-x64 框架依赖单文件。Host 与 Launcher 使用 ReadyToRun，更新窗口、安装 worker 与卸载入口使用普通 IL。各角色关闭裁剪，原生依赖由 .NET 单文件提取机制加载。
-生产版 Host、Launcher 与更新窗口使用 `requireAdministrator`。安装 worker、卸载入口和 Test 产物使用 `asInvoker`。
+正式版 Host、Launcher 与更新窗口使用 `requireAdministrator`。本机完整验收使用 `product-publish --profile test --acceptance`，这三个入口同样请求管理员权限，并使用 Test Host 的本机签名信任。发布与装配回执记录验收用途和实际权限级别。普通 Test 发布、安装 worker 与卸载入口使用 `asInvoker`。
 Host 需要 .NET 10 Core 与 ASP.NET Core x64 共享框架，更新窗口需要 .NET 10 Core x64。
 
 发布者核对实际 bundle 的框架声明、适用的 SDK 原字节与独立入口成员，再记录单文件输出。

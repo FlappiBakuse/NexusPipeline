@@ -7,7 +7,8 @@ import uuid
 from binary_inputs import hash_file
 from build_product import build_environment
 from desktop_bundle import require_no_links
-from product_publish import inventory, publish_component
+from dotnet_sdk import sdk_environment
+from product_publish import desktop_execution_level, inventory, publish_component
 from source_snapshot import write_json
 
 
@@ -27,14 +28,17 @@ def prepare_bundles(source, build_root, run_root, methods):
         raise ValueError('Native bundle workspace has unknown ownership')
     write_json(marker, owner)
     build = json.loads((build_root / 'build-receipt.json').read_bytes())
-    report = dict(status='RUNNING', profile='test', source=build['source'], commands=[])
+    sdk = build['componentInputs']['context']['dotnet']
+    env = sdk_environment(build_environment(build_root), sdk)
+    report = dict(status='RUNNING', profile='test', executionLevel=desktop_execution_level('test', False),
+                  source=build['source'], dotnet=sdk, commands=[])
     run = output / 'runs' / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S') + '-' + uuid.uuid4().hex[:8])
     run.mkdir(parents=True)
     published = {}
     try:
         for project in ('Host', 'Maintenance'):
             publish_component(source, build_root, output, 'test', build, build['source'], source, run,
-                              build_environment(build_root), report, published, project)
+                              env, report, published, project)
         report.update(status='PASS', published=published)
     except Exception as error:
         report.update(status='FAIL', error=str(error))

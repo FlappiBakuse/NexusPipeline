@@ -57,16 +57,20 @@ def embedded_manifest(path):
     return data[offset(rva):offset(rva) + size]
 
 
+def verify_execution_level(path, expected):
+    root = ET.fromstring(embedded_manifest(path))
+    settings = [(element.get('level'), element.get('uiAccess')) for element in root.iter()
+                if element.tag.endswith('requestedExecutionLevel')]
+    if settings != [(expected, 'false')]:
+        raise ValueError(f'{Path(path).name}: expected execution level {expected} and uiAccess=false, found {settings}')
+
+
 def verify_manifests(build_bin, expected):
     results = []
     for assembly in ("NexusPipeline.Host", "NexusPipeline.Launcher", "NexusPipeline.Maintenance"):
         path = Path(build_bin) / assembly / "release" / (assembly + ".exe")
-        root = ET.fromstring(embedded_manifest(path))
-        levels = [element.attrib["level"] for element in root.iter()
-                  if element.tag.endswith("requestedExecutionLevel")]
-        if levels != [expected]:
-            raise ValueError(f"{assembly}: expected {expected}, found {levels}")
-        results.append({"assembly": assembly, "level": levels[0]})
+        verify_execution_level(path, expected)
+        results.append({"assembly": assembly, "level": expected})
     return results
 
 

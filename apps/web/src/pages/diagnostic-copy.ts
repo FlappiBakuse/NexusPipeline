@@ -24,7 +24,8 @@ const copy: Record<string, [string, string]> = {
   'dependency.adb': ['Android 工具依赖', 'Android tool dependency'],
   'logs.recent': ['安全日志尾', 'Safe log tail'],
   'host.current': ['当前 Host 0.18.0 / SDK 0.1.0', 'Current Host 0.18.0 / SDK 0.1.0'],
-  'host.admin': ['生产 Host 需要管理员权限；测试 Host 可使用普通权限。', 'Production Host requires administrator privileges; Test Host can run without elevation.'],
+  'host.admin': ['正式版和验收版需要管理员权限。普通测试构建使用调用方的权限。',
+    'Release and acceptance builds require administrator privileges. Standard test builds use the caller’s privileges.'],
   'install.permission': ['检查安装目录的创建、写入和删除权限；失败时检查目录权限及占用。', 'Checks create, write and delete access in the installation directory; inspect access and locks on failure.'],
   'listener.bound': ['当前已绑定端口', 'Currently bound port'],
   'listener.disabled': ['当前未启用', 'Currently disabled'],
@@ -50,8 +51,8 @@ export function diagnosticCopy(key: string): string {
 
 const findings: Record<string, { observation: Localized; action: Localized }> = {
   'host.admin-integrity': { observation: ['Host 当前使用普通权限', 'The Host is running without elevation'],
-    action: ['使用生产版时，以管理员身份重新启动 NexusPipeline，再刷新诊断。验收版可使用普通权限。',
-      'For a production build, restart NexusPipeline as administrator and refresh. Acceptance builds can use ordinary privileges.'] },
+    action: ['使用正式版或验收版时，从资源管理器启动 NexusPipeline 并同意 Windows 权限请求，再刷新诊断。普通测试构建可使用普通权限。',
+      'For a release or acceptance build, start NexusPipeline from File Explorer, approve the Windows prompt, then refresh. Standard test builds can run without elevation.'] },
   'host.install-write': { observation: ['安装目录写入检查失败', 'The installation directory write check failed'],
     action: ['检查安装目录的写入权限和文件占用，处理后刷新诊断。', 'Check write access and files in use in the installation directory, then refresh.'] },
   'recovery.state': { observation: ['当前恢复未就绪', 'Recovery is not ready'],

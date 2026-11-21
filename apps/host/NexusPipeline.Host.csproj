@@ -8,8 +8,8 @@
     <SelfContained>false</SelfContained>
     <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
     <ServerGarbageCollection>false</ServerGarbageCollection>
-    <ApplicationManifest Condition="'$(NexusTestHost)' != 'true'">app.manifest</ApplicationManifest>
-    <ApplicationManifest Condition="'$(NexusTestHost)' == 'true'">test.manifest</ApplicationManifest>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationManifest Condition="'$(NexusTestHost)' == 'true' and '$(NexusRequireAdministrator)' != 'true'">test.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="$(NexusWebRoot)/**/*" Condition="'$(NexusWebRoot)' != ''">

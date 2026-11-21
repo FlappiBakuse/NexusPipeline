@@ -74,7 +74,7 @@ host-automation 通过实际编辑器连续保存同一队列两次；既有插�
 
 账号摘要成品方法为 `NexusPipeline.StorageTests.AccountBrowserTests.OpensWorstHistory`，
 使用 `python tooling/nexus.py test --group storage --method <方法> --build-root <构建槽> --output <报告根>`。
-`NEXUS_ACCEPTANCE_APPLICATION` 指定当前完整 Test 软件的应用目录；
+`NEXUS_ACCEPTANCE_APPLICATION` 指定普通权限的完整 Test 装配目录，通过 `product-publish --profile test` 构建；
 `NEXUS_ACCOUNT_SUMMARY_BROWSER_SCRIPT` 指向本仓 `tests/integration/browser/account-summary-module.mjs`。
 原包输入使用 `NEXUS_PACKAGED_EXTENSION_ROOT` 与 `NEXUS_FORMAL_EMULATOR_PACKAGE_RECEIPT`；
 Node 和模块分别由 `NEXUS_BROWSER_NODE`、`NEXUS_BROWSER_MODULES` 指定。

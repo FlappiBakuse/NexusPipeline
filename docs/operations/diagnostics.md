@@ -7,7 +7,7 @@
 | 检查 | 当前事实 owner 与结果 |
 |---|---|
 | `host.version` | 当前 Host 0.18.0、SDK 0.1.0；环境材料记录实际框架、OS 与架构 |
-| `host.admin-integrity` | 当前 Windows token；普通权限标记关注，保留 Test Host 的 asInvoker 用途 |
+| `host.admin-integrity` | 当前 Windows 令牌的管理员状态。正式版和完整验收版需要管理员权限，普通测试构建可在普通权限下运行 |
 | `host.install-write` | 当前实际载荷根；独占创建一个随机命名探针，写入、flush、删除，失败不声称可更新 |
 | `web.listener` / `mcp.listener` | 已启动 Host 绑定的监听端口；MCP 未启用为 `notRequired` |
 | `recovery.state` | 现役 RecoveryIndex 的准入、修订、隔离与持有计数，不导出资源名或原因原文 |
