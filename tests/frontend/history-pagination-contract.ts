@@ -128,6 +128,11 @@ export async function historyPaginationContract(fixture: HTMLElement, check: (va
     await wait(() => output()?.textContent === fullMainLog);
     check(!trigger.isConnected && document.activeElement === output()?.closest('.history-log-content'),
       'the completed read removes the disclosure button and moves its focus to the displayed log');
+    await new Promise(requestAnimationFrame);
+    await new Promise(requestAnimationFrame);
+    check(mount.querySelector('.history-log-disclosure')!.getAnimations({ subtree: true }).some(animation =>
+      animation instanceof CSSTransition && animation.transitionProperty === 'grid-template-rows' &&
+      animation.effect?.getTiming().duration === 220), 'the loaded log expands with the existing card animation');
     const viewport = output()!.parentElement!.shadowRoot!.querySelector<HTMLElement>('.viewport')!;
     check(viewport.scrollWidth <= viewport.clientWidth + 1 && viewport.scrollHeight > viewport.clientHeight &&
       getComputedStyle(output()!).overflowWrap === 'anywhere',

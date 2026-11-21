@@ -12,7 +12,7 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class MaaBrowserTests
 {
-    [Fact(DisplayName = "The Installed Maa Editor Saves An Initialization Choice And The Actual Dispatch Confirmation Controls Its Single Execution")]
+    [Fact(DisplayName = "The Installed Maa Editor Saves An Initialization Choice And Dispatch Offers Only Scripts And Queues")]
     public async Task InitializesInstalledProject()
     {
         using var driver = new BuiltExtensionInputs("maa-framework", "NEXUS_PACKAGED_MAA_RECEIPT");

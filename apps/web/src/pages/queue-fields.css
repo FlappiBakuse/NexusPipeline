@@ -50,6 +50,18 @@ small {
 .schedule-item {
   padding: 8px 0 14px;
   border-radius: var(--radius-md);
+  transition: background-color var(--nx-motion-duration-fast, 160ms) ease;
+}
+@media (hover: hover) {
+  .schedule-item:hover {
+    background-color: var(--content-control-hover);
+  }
+}
+.schedule-item:has(.schedule-heading > button:focus-visible) {
+  background-color: var(--content-control-hover);
+}
+@media (prefers-reduced-motion: reduce) {
+  .schedule-item { transition: none; }
 }
 .schedule-heading {
   display: flex;
@@ -67,14 +79,16 @@ small {
   text-align: left;
   border: 0;
   background: transparent;
-  padding: 8px 0;
+  padding: 8px 8px 8px 0;
 }
 .schedule-heading span {
   color: var(--muted);
 }
 .schedule-heading > button:hover { background: transparent; }
-.chevron {
-  margin-left: auto;
+.schedule-toggle-hint {
+  flex: none;
+  margin-inline-start: auto;
+  font-size: 12px;
 }
 .schedule-content {
   padding: 14px 0 0 34px;

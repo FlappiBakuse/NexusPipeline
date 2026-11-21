@@ -1,4 +1,5 @@
 import { createApp, h } from 'vue';
+import type { UiElement } from '@nexuspipeline/extension-sdk';
 import { createStore } from '../../apps/web/src/app/store';
 import PageActions from '../../apps/web/src/components/PageActions.vue';
 import { ControlClient } from '../../apps/web/src/control/client';
@@ -7,6 +8,7 @@ import AutomationPage from '../../apps/web/src/pages/AutomationPage.vue';
 import BindingEditorDialog from '../../apps/web/src/pages/BindingEditorDialog.vue';
 import { FrontendRegistry } from '../../apps/web/src/extensions/frontend-registry';
 import { registryKey } from '../../apps/web/src/extensions/registry-context';
+import { clearExtensionIcons, extensionIcon, prepareExtensionIcons } from '../../apps/web/src/control/extension-icons';
 import { draftFixture, settle } from './configuration-draft-fixture';
 
 type Check = (value: unknown, name: string) => void;
@@ -16,7 +18,7 @@ const emptyBundle: AutomationBundle = { format: 'nexus.automation.bundle', versi
   bundleId: crypto.randomUUID(), createdAt: new Date().toISOString(), roots: [], scripts: [], users: [], bindings: [],
   queues: [], schedules: [], attachments: [] };
 
-function mountPage(parent: HTMLElement, store: Store, kind: 'users' | 'scripts') {
+function mountPage(parent: HTMLElement, store: Store, kind: 'users' | 'scripts' | 'queues') {
   const holder = document.createElement('section');
   const actions = document.createElement('div');
   actions.id = 'page-actions';
@@ -145,6 +147,32 @@ async function accountFailure(parent: HTMLElement, check: Check) {
       [...modal.querySelectorAll('button')].some(button => button.textContent?.includes('查询操作状态')),
       'a lost account response yields one warning and keeps its original operation available for inspection');
   } finally { dispose(); }
+}
+
+async function queueAvatar(parent: HTMLElement, check: Check) {
+  const pixel = await new Promise<Blob>(resolve => document.createElement('canvas').toBlob(blob => resolve(blob!)));
+  const client = new ControlClient(location.origin, async () => new Response(pixel));
+  const store = createStore(client);
+  const firstId = 'script-first', secondId = 'script-second';
+  const scripts = [{ id: firstId, name: 'First', extensionId: 'baah' },
+    { id: secondId, name: 'Second', extensionId: 'bettergi' }] as AutomationBundle['scripts'];
+  const queue: AutomationBundle['queues'][number] = { id: 'queue', name: 'Queue', scriptIds: [firstId, secondId],
+    order: 0, completionAction: 'none', notifyEnabled: false, notificationTaskIds: [] };
+  const publish = (scriptIds: string[]) => {
+    store.state.automation = { catalogRevision: 1, bundle: { ...emptyBundle, scripts, queues: [{ ...queue, scriptIds }] }, roots: [], revisions: [] };
+  };
+  publish([firstId, secondId]);
+  const { holder, dispose } = mountPage(parent, store, 'queues');
+  try {
+    await prepareExtensionIcons(client, ['baah', 'bettergi'], new AbortController().signal); await settle();
+    const avatar = () => holder.querySelector<HTMLImageElement>('.automation-row .script-avatar img');
+    check(avatar()?.getAttribute('src') === extensionIcon('baah'), 'a queue shows the icon of its first script instance');
+    publish([secondId, firstId]); await settle();
+    check(avatar()?.getAttribute('src') === extensionIcon('bettergi'), 'reordering the queue changes its icon to its new first script');
+    publish([]); await settle();
+    check(!avatar() && holder.querySelector<UiElement<'nexus-icon'>>('.script-avatar nexus-icon')?.name === 'queues',
+      'an empty queue retains its queue icon');
+  } finally { dispose(); clearExtensionIcons(); }
 }
 
 async function accountDelete(parent: HTMLElement, check: Check) {
@@ -303,6 +331,7 @@ async function activeBindingRemoval(parent: HTMLElement, check: Check) {
 }
 
 export async function automationPageContract(parent: HTMLElement, check: Check): Promise<void> {
+  await queueAvatar(parent, check);
   const failures: string[] = [];
   const record: Check = (value, name) => { if (value) check(value, name); else failures.push(name); };
   await accountSave(parent, record);

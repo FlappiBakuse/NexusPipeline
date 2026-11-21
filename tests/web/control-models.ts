@@ -13,8 +13,10 @@ export async function run(): Promise<string[]> {
     'discover', selection, undefined, '', 3);
   assert.equal(discovery.tasks[0]?.title, '任务');
   const cases = ['adapter discovery accepts an empty optional locale map and preserves the task title'];
-  const preview = { hasRunnable: true, canPrepareInitialConfiguration: false, hasBlockedItems: false, reasonCode: null, completionAction: 'hibernate',
-    groups: [{ scriptId: 'script' }], items: [{ scriptId: 'script', userId: 'user', disposition: 'runnable', reasonCode: 'execution_inputs_verified' }] };
+  const preview = { hasRunnable: true, hasBlockedItems: false, reasonCode: null, completionAction: 'hibernate',
+    groups: [{ scriptId: 'script', reasonCode: 'execution_inputs_verified' }], items: [
+      { ordinal: 0, bindingId: 'binding', scriptId: 'script', userId: 'user', disposition: 'runnable', reasonCode: 'execution_inputs_verified' }
+    ] };
   const parsedPreview = executionPreview(preview);
   assert.equal(parsedPreview.completionAction, 'hibernate');
   assert.equal(parsedPreview.hasBlockedItems, false);

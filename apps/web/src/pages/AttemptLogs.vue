@@ -42,6 +42,9 @@ function expand(): void {
   if (selected.value) disclosure.value = 'opening';
   else showLog();
 }
+function conceal(panel: Element): void {
+  (panel as HTMLElement).inert = true;
+}
 async function load(): Promise<void> {
   owner?.abort();
   owner = undefined;
@@ -84,26 +87,33 @@ onBeforeUnmount(() => owner?.abort());
         <span>{{ t('点击展开') }}</span>
       </template>
     </button>
-    <div v-else-if="visible" ref="content" class="history-log-content" role="region" :aria-label="title" :aria-busy="busy" tabindex="-1">
-      <nav v-if="logs.length > 1" :aria-label="t('脚本日志')">
-        <HistoryCatalogWindow :items="logs" :item-key="historyLogId" :label="t('脚本日志')" :visible="visible">
-          <template #default="{ item: log }">
-            <button :aria-pressed="selected && historyLogId(selected) === historyLogId(log)" @click="selectedId = historyLogId(log)">
-              {{ log.key.stepId }} · {{ t(log.key.role) }}<template v-if="log.key.invocationOrdinal">
-                · {{ attemptTitle(log.key.invocationOrdinal) }}</template>
-            </button>
-          </template>
-        </HistoryCatalogWindow>
-      </nav>
-      <nexus-spinner v-if="busy" :label="t('正在读取脚本日志…')" />
-      <template v-else-if="error">
-        <nexus-toast tone="danger" :message.prop="t(error)" />
-        <button type="button" @click="load">{{ t('重试') }}</button>
-      </template>
-      <nexus-scroll-area v-else class="history-log-preview" direction="vertical" :label="t('运行日志')">
-        <pre>{{ text || t('没有可用的日志') }}</pre>
-      </nexus-scroll-area>
-    </div>
+    <Transition :key="runId + '/' + attemptId" name="disclosure" @before-leave="conceal">
+      <div v-if="visible && disclosure === 'open'" class="disclosure-reveal">
+        <div class="disclosure-clip">
+          <div ref="content" class="history-log-content" role="region" :aria-label="title" :aria-busy="busy" tabindex="-1">
+            <nav v-if="logs.length > 1" :aria-label="t('脚本日志')">
+              <HistoryCatalogWindow :items="logs" :item-key="historyLogId" :label="t('脚本日志')" :visible="visible">
+                <template #default="{ item: log }">
+                  <button type="button" :aria-pressed="selected && historyLogId(selected) === historyLogId(log)"
+                    @click="selectedId = historyLogId(log)">
+                    {{ log.key.stepId }} · {{ t(log.key.role) }}<template v-if="log.key.invocationOrdinal">
+                      · {{ attemptTitle(log.key.invocationOrdinal) }}</template>
+                  </button>
+                </template>
+              </HistoryCatalogWindow>
+            </nav>
+            <nexus-spinner v-if="busy" :label="t('正在读取脚本日志…')" />
+            <template v-else-if="error">
+              <nexus-toast tone="danger" :message.prop="t(error)" />
+              <button type="button" @click="load">{{ t('重试') }}</button>
+            </template>
+            <nexus-scroll-area v-else class="history-log-preview" direction="vertical" :label="t('运行日志')">
+              <pre>{{ text || t('没有可用的日志') }}</pre>
+            </nexus-scroll-area>
+          </div>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 <style scoped>

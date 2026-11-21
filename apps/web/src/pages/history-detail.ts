@@ -23,7 +23,6 @@ registerMessages({
   时间: 'Time',
   原因: 'Reason',
   脚本日志: 'Script log',
-  点击展开: 'Click to expand',
   '正在读取脚本日志…': 'Reading the script log…',
   没有可用的日志: 'No log is available',
   运行已完成: 'Run completed',

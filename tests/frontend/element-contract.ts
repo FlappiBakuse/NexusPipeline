@@ -27,8 +27,10 @@ import { pageLoadingContract } from './page-loading-contract.js';
 import { executionLayoutContract } from './execution-layout-contract.js';
 import { logPanelContract } from './log-panel-contract.js';
 import { configurationDraftContract } from './configuration-draft-contract.js';
+import { planDiagnosticsContract } from './plan-diagnostics-contract.js';
 import { draftLifecycleContract } from './draft-lifecycle-contract.js';
 import { themeConsumersContract } from './theme-consumers-contract';
+import '../../apps/web/src/styles/disclosure.css';
 
 const checks: string[] = [];
 const create = <N extends UiElementName>(name: N): UiElement<N> => document.createElement(name) as UiElement<N>;
@@ -71,6 +73,7 @@ async function structural(): Promise<string[]> {
   await recordWindowContract(assert);
   await adapterFormContract(fixture, assert);
   await configurationDraftContract(fixture, assert);
+  await planDiagnosticsContract(fixture, assert);
   await draftLifecycleContract(fixture, assert);
   await automationPageContract(fixture, assert);
   await historyLinkContract(assert);

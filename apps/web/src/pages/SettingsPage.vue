@@ -116,9 +116,9 @@ async function restart(): Promise<void> {
           <strong>{{ t(item.label) }}</strong>
           <small>{{ t(item.description) }}</small>
         </span>
-        <nexus-icon aria-hidden="true" :name="categoryOwner.isExpanded(item.id) ? 'chevronDown' : 'chevronRight'" />
+        <nexus-icon class="disclosure-chevron" aria-hidden="true" :name="categoryOwner.isExpanded(item.id) ? 'chevronDown' : 'chevronRight'" />
       </button>
-      <div class="panel-reveal" :data-expanded="categoryOwner.isExpanded(item.id)" :inert="!categoryOwner.isExpanded(item.id)"><div class="panel-clip"><div class="panel-body">
+      <div class="disclosure-reveal" :data-expanded="categoryOwner.isExpanded(item.id)" :inert="!categoryOwner.isExpanded(item.id)"><div class="disclosure-clip"><div class="panel-body">
         <SettingsDiagnostics
           v-if="item.id === 'diagnostics'"
           :store="store"

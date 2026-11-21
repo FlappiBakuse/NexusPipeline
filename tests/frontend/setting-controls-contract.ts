@@ -19,8 +19,19 @@ export function settingContract(fixture: HTMLElement, check: Check): void {
   }
   const setting = create('nexus-switch-setting');
   setting.title = 'Enabled';
-  fixture.append(setting);
+  setting.style.setProperty('--content-control', '#131f33');
+  const standalone = create('nexus-switch');
+  standalone.style.setProperty('--content-control', '#131f33');
+  fixture.append(setting, standalone);
   const toggle = setting.shadowRoot!.querySelector<UiElement<'nexus-switch'>>('nexus-switch')!;
+  const button = (element: HTMLElement) => element.shadowRoot!.querySelector<HTMLButtonElement>('button')!;
+  const track = (element: HTMLElement) => element.shadowRoot!.querySelector<HTMLElement>('.track')!;
+  const size = (element: HTMLElement) => element.offsetWidth + '×' + element.offsetHeight;
+  check([toggle, standalone].every(element => getComputedStyle(button(element)).backgroundColor === 'rgba(0, 0, 0, 0)'),
+    'every switch paints only its track and leaves the surrounding hit area transparent');
+  check(size(button(toggle)) === size(button(standalone)) && size(track(toggle)) === size(track(standalone)) &&
+    getComputedStyle(track(toggle)).overflow === 'hidden', 'standalone and setting switches share a single clipped track and hit area');
+  standalone.remove();
   let changes = 0;
   setting.addEventListener('nexus-change', () => changes++);
   toggle.shadowRoot!.querySelector<HTMLButtonElement>('button')!.click();

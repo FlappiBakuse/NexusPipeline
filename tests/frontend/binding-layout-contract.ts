@@ -3,6 +3,7 @@ import AccountFields from '../../apps/web/src/pages/AccountFields.vue';
 import { ControlClient } from '../../apps/web/src/control/client';
 import { createStore } from '../../apps/web/src/app/store';
 import type { AutomationBundle } from '../../apps/web/src/control/wire.generated';
+import type { UiElement } from '@nexuspipeline/extension-sdk';
 
 export async function bindingLayoutContract(fixture: HTMLElement, check: (value: unknown, name: string) => void): Promise<void> {
   const store = createStore(new ControlClient(location.origin));
@@ -22,13 +23,16 @@ export async function bindingLayoutContract(fixture: HTMLElement, check: (value:
   try {
     await nextTick();
     const heading = () => mount.querySelector<HTMLElement>('[data-item-id="binding"] .binding-heading')!;
+    const arrow = () => heading().querySelector<UiElement<'nexus-icon'>>('.binding-toggle nexus-icon')?.name;
     const title = heading().querySelector<HTMLElement>('strong')!;
     check(!mount.querySelector('.edit-configuration') && title.textContent === 'Bound script',
       'collapsed binding exposes its name and status without the configuration action covering them');
+    check(arrow() === 'chevronRight', 'the binding starts with the shared collapsed chevron');
     const box = heading().getBoundingClientRect(), text = title.getBoundingClientRect();
     check(text.width > 0 && text.left >= box.left && text.right <= box.right && box.height < 100,
       'collapsed binding title stays inside its compact heading');
     heading().querySelector<HTMLButtonElement>('.binding-toggle')!.click(); await nextTick();
+    check(arrow() === 'chevronDown', 'the binding uses the same expanded chevron as settings');
     await new Promise(resolve => setTimeout(resolve, 220));
     const selected = () => heading().closest<HTMLElement>('.binding')!;
     check(selected().getBoundingClientRect().top < mount.querySelector<HTMLElement>('[data-item-id="other"]')!.getBoundingClientRect().top,

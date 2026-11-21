@@ -188,11 +188,14 @@ onBeforeUnmount(() => owner?.abort());
         <TaskSummary :tasks="cards" :label="t('计划状态汇总')" />
         <TaskCards :tasks="cards" :label="t('任务计划')" />
       </template>
-      <details v-if="resources.length || result?.coverage || result?.diagnostics.length">
+      <details v-if="resources.length || result?.coverage || result?.diagnostics.length" class="animated-disclosure">
         <summary>
           <span>{{ t('配置来源与诊断') }}</span>
-          <span v-if="result?.coverage" class="diagnostics-summary">
-            {{ t('已启用业务任务') }} {{ result.coverage.selected }} · {{ t('可安全重试') }} {{ result.coverage.retrySafe }}
+          <span class="diagnostics-summary">
+            <span v-if="result?.coverage">
+              {{ t('已启用业务任务') }} {{ result.coverage.selected }} · {{ t('可安全重试') }} {{ result.coverage.retrySafe }}
+            </span>
+            <nexus-icon class="disclosure-chevron" name="chevronRight" aria-hidden="true" />
           </span>
         </summary>
         <div class="diagnostics-body">
@@ -241,17 +244,15 @@ summary {
   cursor: pointer;
 }
 summary::-webkit-details-marker { display: none; }
-summary::before {
-  content: '';
-  inline-size: 6px;
-  block-size: 6px;
-  flex: none;
-  border-block-start: 1px solid var(--muted);
-  border-inline-end: 1px solid var(--muted);
-  transform: rotate(45deg);
+.diagnostics-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-inline-size: 0;
+  margin-inline-start: auto;
+  color: var(--muted);
+  overflow-wrap: anywhere;
 }
-details[open] summary::before { transform: rotate(135deg); }
-.diagnostics-summary { margin-inline-start: auto; color: var(--muted); overflow-wrap: anywhere; }
 .diagnostics-body { display: grid; gap: 10px; padding: 10px 12px; border-block-start: 1px solid var(--border); }
 .diagnostics-body > p { margin: 0; }
 .source-paths { display: grid; gap: 4px; padding-inline-start: 18px; }

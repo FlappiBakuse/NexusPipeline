@@ -86,7 +86,7 @@ export class CollapsibleCard extends NexusElement {
         cardStyle +
         `:host{padding:0;overflow:hidden}button{width:100%;min-height:72px;display:flex;align-items:center;justify-content:space-between;text-align:left;border:0;border-radius:0;background:transparent;padding:16px 24px}
       button:hover{background:transparent}.heading{display:grid;gap:4px}.title{font-size:15px;line-height:1.45}.description{font-size:12px;color:var(--nx-color-muted);line-height:1.5}.description:empty{display:none}
-      nexus-icon{color:var(--nx-color-accent)}.reveal{display:grid;grid-template-rows:0fr;opacity:0;visibility:hidden;transition:grid-template-rows .22s ease,opacity .22s ease,visibility 0s .22s}
+      nexus-icon{color:var(--nx-color-accent)}.reveal{display:grid;grid-template-rows:0fr;opacity:0;visibility:hidden;transition:grid-template-rows var(--nx-motion-duration-page,220ms) ease,opacity var(--nx-motion-duration-page,220ms) ease,visibility 0s var(--nx-motion-duration-page,220ms)}
       .reveal[data-expanded=true]{grid-template-rows:1fr;opacity:1;visibility:visible;transition-delay:0s}.clip{min-height:0;overflow:hidden}.body{margin:0;border-top:1px solid var(--nx-color-border);padding:24px}
       @media(prefers-reduced-motion:reduce){.reveal{transition:none}}`,
       '<button type="button"><span class="heading"><strong class="title"></strong><span class="description"></span></span><nexus-icon aria-hidden="true"></nexus-icon></button><slot name="actions"></slot><div class="reveal"><div class="clip"><div class="body"><slot></slot></div></div></div>'
@@ -164,9 +164,9 @@ export class ScheduleCard extends NexusElement {
     super(
       'nexus-schedule-card',
       controlStyles +
-        `:host{display:block;min-width:0;background:var(--_nexus-card-fill)}.head{display:flex;align-items:center;gap:8px;padding:13px 8px}.head>button{flex:1;display:flex;align-items:center;justify-content:space-between;min-width:0;padding:0;border:0;border-radius:0;background:transparent;text-align:left}.head>button:hover{background:transparent}.arrow{width:24px;text-align:center;color:var(--nx-color-muted)}
+        `:host{display:block;min-width:0;background:var(--_nexus-card-fill)}.head{display:flex;align-items:center;gap:8px;padding:13px 8px}.head>button{flex:1;display:flex;align-items:center;justify-content:space-between;min-width:0;padding:0;border:0;border-radius:0;background:transparent;text-align:left}.head>button:hover{background:transparent}nexus-icon{flex:none;color:var(--nx-color-accent)}
         .body{display:grid;grid-template-columns:minmax(0,3fr) minmax(150px,1fr);gap:16px;padding:0 0 14px 34px}.body[hidden]{display:none}slot[name=actions]{grid-column:1/-1}@media(max-width:820px){.body{grid-template-columns:1fr}}@media(max-width:480px){.body{padding-left:0}}`,
-      '<div class="head"><nexus-drag-handle></nexus-drag-handle><button type="button"><span class="summary"></span><span class="arrow" aria-hidden="true"></span></button></div><div class="body"><slot name="days"></slot><slot name="time"></slot><slot name="actions"></slot></div>'
+      '<div class="head"><nexus-drag-handle></nexus-drag-handle><button type="button"><span class="summary"></span><nexus-icon aria-hidden="true"></nexus-icon></button></div><div class="body"><slot name="days"></slot><slot name="time"></slot><slot name="actions"></slot></div>'
     );
   }
   protected connect(signal: AbortSignal): void {
@@ -187,7 +187,7 @@ export class ScheduleCard extends NexusElement {
     this.dataset.itemId = String(this.values.itemId);
     const button = this.root.querySelector('button')!;
     button.querySelector('.summary')!.textContent = String(this.values.summary);
-    button.querySelector('.arrow')!.textContent = this.values.expanded ? '⌄' : '›';
+    button.querySelector('nexus-icon')!.setAttribute('name', this.values.expanded ? 'chevronDown' : 'chevronRight');
     const handle = this.root.querySelector('nexus-drag-handle')! as HTMLElement & { itemId: string };
     handle.itemId = String(this.values.itemId);
     button.setAttribute('aria-expanded', String(this.values.expanded));
@@ -224,7 +224,7 @@ export class SwitchSetting extends NexusElement {
     .copy{flex:1;min-width:0;line-height:1.5}.title{font-size:13px;font-weight:600}
     .description{margin-top:4px;color:var(--nx-color-muted,#9eacc1);font-size:12px;font-weight:400;white-space:pre-line;overflow-wrap:break-word}
     .description:empty{display:none}
-    nexus-switch{flex:none;--nx-switch-width:56px;--nx-switch-height:40px;--nx-switch-track-width:52px;--nx-switch-track-height:30px}`,
+    nexus-switch{flex:none}`,
       '<div class="copy"><div class="title"></div><div class="description" id="description"></div></div><nexus-switch></nexus-switch>'
     );
     this.control = this.root.querySelector<HTMLElement & { value: boolean; disabled: boolean }>(

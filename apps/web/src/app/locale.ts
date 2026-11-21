@@ -57,6 +57,8 @@ const english: Record<string, string> = {
   隐藏: 'Hide',
   退出: 'Quit',
   关闭提示: 'Dismiss notice',
+  点击展开: 'Click to expand',
+  点击收回: 'Click to collapse',
   浅色主题: 'Light theme',
   深色主题: 'Dark theme',
   服务已连接: 'Connected',

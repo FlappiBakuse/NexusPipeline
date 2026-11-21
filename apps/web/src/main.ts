@@ -11,6 +11,7 @@ import './styles/workspace.css';
 import './styles/app-shell.css';
 import './styles/entity-card.css';
 import './styles/painted-controls.css';
+import './styles/disclosure.css';
 registerElements();
 createApp(App)
   .component('FormSelect', FormSelect)

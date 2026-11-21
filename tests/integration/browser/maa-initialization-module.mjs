@@ -13,20 +13,9 @@ const executable = input.browser;
 if (!path.isAbsolute(executable || '') || !fs.statSync(executable).isFile()) throw new Error('explicit_browser_required');
 const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const sources = { script: hash(process.argv[1]), browser: hash(executable) };
-const checks = [], errors = [], starts = [];
+const checks = [], errors = [];
+let starts = 0;
 let browser, page;
-async function choose(label, option) {
-  const control = page.locator('nexus-select[aria-label=' + JSON.stringify(label) + ']');
-  await control.locator('input[role=combobox]').click();
-  await control.getByRole('option', { name: option, exact: true }).click();
-}
-async function until(check) {
-  const deadline = Date.now() + 90000;
-  while (!await check()) {
-    if (Date.now() >= deadline) throw new Error('initialization_evidence_timeout');
-    await new Promise(resolve => setTimeout(resolve, 100));
-  }
-}
 try {
   browser = await chromium.launch({ executablePath: executable, headless: true, args: ['--no-sandbox'] });
   page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
@@ -34,7 +23,7 @@ try {
   page.on('pageerror', error => errors.push(String(error)));
   page.on('request', request => {
     if (request.method() === 'POST' && new URL(request.url()).pathname.startsWith('/control/v1/execution/start/'))
-      starts.push({ operationId: new URL(request.url()).pathname.split('/').at(-1), body: request.postDataJSON() });
+      starts++;
   });
   await page.goto(input.address);
   await page.locator('.authentication input[type=password]').fill(token);
@@ -58,38 +47,13 @@ try {
 
   await page.locator('nexus-modal[open]').getByRole('button', { name: '关闭', exact: true }).click();
   await page.locator('a[href="#/dispatch"]').first().click();
-  await choose('目标类型', '项目初始化');
-  const target = page.locator('nexus-select[aria-label="脚本实例"]');
-  await target.locator('input[role=combobox]').click();
-  await target.getByRole('option').filter({ hasText: input.context.userName }).click();
-  const start = page.locator('.dispatch-targets').getByRole('button', { name: '执行初始化', exact: true });
-  const planned = page.waitForResponse(response => new URL(response.url()).pathname === '/control/v1/execution/preview');
-  await start.click();
-  const plan = await (await planned).json();
-  assert.equal(plan.hasRunnable, true, JSON.stringify(plan));
-  const dialog = page.locator('nexus-confirm-dialog').filter({ hasText: '初始化可能修改脚本环境' });
-  await dialog.locator('[data-action=cancel]').click();
+  const targets = await page.locator('nexus-select[aria-label="目标类型"]').evaluate(control => control.options.map(option => option.label));
+  assert.deepEqual(targets, ['脚本实例', '调度队列']);
   assert.equal(fs.existsSync(input.context.marker), false);
-  assert.equal(starts.length, 0);
-  checks.push('cancelling the real initialization confirmation sends no start request and causes no pretask side effect');
-
-  await start.click();
-  await dialog.locator('[data-action=confirm]').click();
-  await until(() => fs.existsSync(input.context.marker));
-  await page.locator('.dispatch-running').getByText('运行中', { exact: false }).first().waitFor();
-  await until(async () => {
-    assert.equal(starts.length, 1);
-    const response = await page.request.get(input.address + 'control/v1/operations/' + starts[0].operationId,
-      { headers: { Authorization: 'Bearer ' + token } });
-    assert.equal(response.ok(), true);
-    return (await response.json()).status === 'completed';
-  });
-  await page.waitForFunction(() => document.querySelector('.running-heading strong')?.textContent?.includes('(0)'));
-  assert.deepEqual(fs.readFileSync(input.context.marker, 'utf8').trim().split('\n'), ['initialized']);
-  assert.equal(starts.length, 1);
+  assert.equal(starts, 0);
   assert.deepEqual(errors, []);
-  checks.push('explicit confirmation admits one initialization and the Host finishes its owned pretask');
-  await page.screenshot({ path: path.join(input.output, 'initialization-completed.png'), fullPage: true });
+  checks.push('the run center offers only scripts and queues after saving the project selection');
+  await page.screenshot({ path: path.join(input.output, 'dispatch-targets.png'), fullPage: true });
   assert.equal(hash(process.argv[1]), sources.script); assert.equal(hash(executable), sources.browser);
   fs.writeFileSync(path.join(input.output, 'result.json'), JSON.stringify({ status: 'PASS', checks, sources,
     qualification: 'Actual authenticated Host and installed Maa/MaaS with controlled pretask; no game execution' }, null, 2) + '\n');

@@ -129,23 +129,26 @@ export function executionStep(value: unknown): ActiveStep {
 
 export interface ExecutionPreview {
   hasRunnable: boolean;
-  canPrepareInitialConfiguration?: boolean;
   hasBlockedItems: boolean;
   reasonCode: string | null;
   completionAction: AutomationBundle['queues'][number]['completionAction'];
-  groups: { scriptId: string }[];
-  items: { scriptId: string; userId: string; disposition: 'runnable' | 'skipped' | 'blocked'; reasonCode: string;
+  groups: { scriptId: string; reasonCode: string }[];
+  items: { ordinal: number; bindingId: string; scriptId: string; userId: string; disposition: 'runnable' | 'skipped' | 'blocked'; reasonCode: string;
     successfulRunsToday?: number; maximumSuccessfulRunsPerDay?: number }[];
 }
 export function executionPreview(value: unknown): ExecutionPreview {
   const row = objectValue(value);
-  return { hasRunnable: booleanValue(row.hasRunnable), canPrepareInitialConfiguration: booleanValue(row.canPrepareInitialConfiguration), hasBlockedItems: booleanValue(row.hasBlockedItems),
+  return { hasRunnable: booleanValue(row.hasRunnable), hasBlockedItems: booleanValue(row.hasBlockedItems),
     reasonCode: row.reasonCode === null ? null : stringValue(row.reasonCode),
     completionAction: row.completionAction === 'exitHost' ? 'exit' : enumValue(row.completionAction, ['none', 'shutdown', 'hibernate', 'restart', 'exit']),
-    groups: arrayValue(row.groups, value => ({ scriptId: stringValue(objectValue(value).scriptId) })),
+    groups: arrayValue(row.groups, value => {
+      const group = objectValue(value);
+      return { scriptId: stringValue(group.scriptId), reasonCode: stringValue(group.reasonCode) };
+    }),
     items: arrayValue(row.items, value => {
       const item = objectValue(value);
-      return { scriptId: stringValue(item.scriptId), userId: stringValue(item.userId),
+      return { ordinal: integerValue(item.ordinal), bindingId: stringValue(item.bindingId),
+        scriptId: stringValue(item.scriptId), userId: stringValue(item.userId),
         disposition: enumValue(item.disposition, ['runnable', 'skipped', 'blocked']), reasonCode: stringValue(item.reasonCode),
         ...(item.successfulRunsToday == null ? {} : { successfulRunsToday: integerValue(item.successfulRunsToday) }),
         ...(item.maximumSuccessfulRunsPerDay == null ? {} : { maximumSuccessfulRunsPerDay: boundedInteger(item.maximumSuccessfulRunsPerDay, -1, 9999) }) };

@@ -186,14 +186,14 @@ function setTime(id: string, value: string): void {
           v-for="(item, index) in schedules"
           :key="item.id"
           :data-item-id="item.id" :data-draft-item="item.id"
-          class="schedule-item" data-surface="collapsible"
+          class="schedule-item"
         >
           <div class="schedule-heading">
             <nexus-drag-handle :item-id="item.id" :label="t('调整定时顺序')" />
             <button type="button" :aria-expanded="expanded.has(item.id)" @click="toggle(item.id)">
               <strong>{{ t('定时') }} {{ index + 1 }}</strong>
               <span>{{ time(item.localMinute) }} · {{ item.weekdays.length }} {{ t('天') }}</span>
-              <span class="chevron">⌄</span>
+              <span class="schedule-toggle-hint" aria-hidden="true">{{ t(expanded.has(item.id) ? '点击收回' : '点击展开') }}</span>
             </button>
           </div>
           <div v-if="expanded.has(item.id)" class="schedule-content">

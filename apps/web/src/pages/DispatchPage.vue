@@ -9,8 +9,9 @@ import RunningExecution from './RunningExecution.vue';
 import { executionPreview, executionRun, type ExecutionPreview, type ActiveRun } from '../control/execution';
 import { ExecutionCommands } from './execution-commands';
 import ExecutionPlan from './ExecutionPlan.vue';
+import type { PlanTargetKind } from './execution-plan';
 const props = defineProps<{ store: AppStore; visible: boolean }>();
-const targetKind = ref<'queue' | 'script' | 'binding' | 'projectInitialization'>('script');
+const targetKind = ref<PlanTargetKind>('script');
 const targetId = ref('');
 const preview = ref<ExecutionPreview>();
 const planOpen = ref(false);
@@ -20,7 +21,6 @@ let planOwner: AbortController | undefined;
 const commands = new ExecutionCommands(props.store);
 const pending = computed(() => commands.state.pending);
 const confirmation = ref<ActiveRun>();
-const initializationConfirmation = ref('');
 const active = ref<ActiveRun[]>([]);
 const running = computed(() => active.value.filter(run => run.phase !== 'reconciliationRequired'));
 const review = computed(() => active.value.filter(run => run.phase === 'reconciliationRequired'));
@@ -37,10 +37,6 @@ const targetHint = ref('');
 const readError = ref('');
 const actionError = computed(() => commands.state.error || targetHint.value);
 registerMessages({
-  项目初始化: 'Project initialization',
-  执行初始化: 'Run initialization',
-  '仅执行此绑定已保存的初始化任务，不运行游戏任务。初始化可能修改脚本环境，确定执行吗？':
-    'Run only the saved initialization tasks for this binding. This may modify the script environment. Continue?',
   请选择脚本实例: 'Choose a script instance',
   请选择调度队列: 'Choose a dispatch queue',
   运行目标: 'Run target',
@@ -78,7 +74,6 @@ registerMessages({
 });
 watch(targetKind, () => {
   targetId.value = '';
-  initializationConfirmation.value = '';
 });
 watch(
   [
@@ -90,20 +85,11 @@ watch(
   () => {
     closePlan();
     preview.value = undefined;
-    initializationConfirmation.value = '';
   }
 );
 const options = computed(() => {
   const bundle = props.store.state.automation?.bundle;
   if (!bundle) return [];
-  if (targetKind.value === 'binding' || targetKind.value === 'projectInitialization')
-    return bundle.bindings.map((binding) => ({
-      id: binding.id,
-      name:
-        (bundle.users.find((user) => user.id === binding.userId)?.name || '') +
-        ' · ' +
-        (bundle.scripts.find((script) => script.id === binding.scriptId)?.name || '')
-    }));
   return bundle[targetKind.value === 'queue' ? 'queues' : 'scripts'];
 });
 function selection(): Record<string, unknown> {
@@ -112,7 +98,7 @@ function selection(): Record<string, unknown> {
     version: 1,
     expectedCatalogRevision: props.store.state.automation?.catalogRevision,
     expectedSettingsRevision: props.store.state.settings?.saved.revision,
-    target: { kind: targetKind.value, [targetKind.value === 'projectInitialization' ? 'bindingId' : targetKind.value + 'Id']: targetId.value }
+    target: { kind: targetKind.value, [targetKind.value + 'Id']: targetId.value }
   };
 }
 function hasTarget(): boolean {
@@ -149,21 +135,11 @@ function closePlan(): void {
   busy.value = false;
   planOpen.value = false;
 }
-async function runSelected(confirmedInitialization = false): Promise<void> {
+async function runSelected(): Promise<void> {
   if (busy.value || pending.value || !props.visible || !hasTarget()) return;
   const selected = selection();
-  if (confirmedInitialization && (targetKind.value !== 'projectInitialization' || initializationConfirmation.value !== JSON.stringify(selected))) return;
-  if (targetKind.value === 'projectInitialization' && !confirmedInitialization) {
-    const identity = JSON.stringify(selected);
-    if (!preview.value) await explain();
-    if (!props.visible || identity !== JSON.stringify(selection()) || !preview.value?.hasRunnable) return;
-    planOpen.value = false;
-    initializationConfirmation.value = identity;
-    return;
-  }
   targetHint.value = '';
   planOpen.value = false;
-  initializationConfirmation.value = '';
   if (await commands.start(selected)) {
     if (!props.store.can('records.read')) props.store.state.notice = t('运行请求已受理，正在等待宿主结果。');
     refreshActive();
@@ -258,7 +234,6 @@ onBeforeUnmount(() => {
         <FormSelect v-model="targetKind" :aria-label="t('目标类型')">
           <option value="script">{{ t('脚本实例') }}</option>
           <option value="queue">{{ t('调度队列') }}</option>
-          <option value="projectInitialization">{{ t('项目初始化') }}</option>
         </FormSelect>
       </label>
       <label>
@@ -274,10 +249,10 @@ onBeforeUnmount(() => {
         @click="explain"
       />
       <nexus-button
-        :label="t(targetKind === 'projectInitialization' ? '执行初始化' : targetKind === 'queue' ? '执行队列' : '执行脚本')"
+        :label="t(targetKind === 'queue' ? '执行队列' : '执行脚本')"
         tone="info"
         :disabled.prop="busy || !!pending || !store.can('execution.start')"
-        @click="runSelected()"
+        @click="runSelected"
       />
       <button v-if="pending && !commands.state.sending" @click="checkOperation">{{ t('查询操作状态') }}</button>
     </div>
@@ -307,16 +282,6 @@ onBeforeUnmount(() => {
     />
   </nexus-modal>
   <ExtensionOutlet :store="store" target="execution.cards" :visible="visible" />
-  <nexus-confirm-dialog
-    :open.prop="visible && !!initializationConfirmation"
-    :title="t('项目初始化')"
-    :message="t('仅执行此绑定已保存的初始化任务，不运行游戏任务。初始化可能修改脚本环境，确定执行吗？')"
-    :confirm-label="t('执行初始化')"
-    :busy.prop="commands.state.sending"
-    @nexus-confirm="runSelected(true)"
-    @nexus-cancel="initializationConfirmation = ''"
-    @nexus-close="initializationConfirmation = ''"
-  />
   <section class="dispatch-running">
     <div class="running-heading">
       <strong>{{ t('运行中') }} ({{ running.length }})</strong>

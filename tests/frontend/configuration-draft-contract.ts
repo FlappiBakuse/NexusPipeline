@@ -7,6 +7,7 @@ import theme from '../../apps/web/src/styles/theme.css?inline';
 import uiTheme from '../../apps/web/src/ui/theme.css?inline';
 import { prepareAppExit } from '../../apps/web/src/app/exit-preparation';
 import { bindingEditorFixture, draftFixture, exitDecision, settle } from './configuration-draft-fixture';
+import { showsDetailsMotion } from './disclosure-motion';
 
 type Check = (value: unknown, name: string) => void;
 export async function configurationDraftContract(parent: HTMLElement, check: Check): Promise<void> {
@@ -103,12 +104,14 @@ async function taskPlan(parent: HTMLElement, check: Check): Promise<void> {
     const diagnostics = holder.querySelector<HTMLDetailsElement>('.binding-task-plan details')!;
     check(!diagnostics.open && !holder.innerText.includes('main.json'), 'the task plan keeps full paths out of its initial view');
     const summary = diagnostics.querySelector('summary')!;
-    summary.click();
+    check(summary.querySelector('nexus-icon'), 'the task-plan diagnostics use a shared disclosure chevron');
+    check(await showsDetailsMotion([diagnostics], () => summary.click()), 'task-plan details expand with the standard panel duration');
     check(diagnostics.open && ['main.json', 'progress.json', 'software.json'].every(path => holder.innerText.includes(path)),
       'opening task diagnostics exposes every complete resource path');
     check(summary.innerText.includes('已启用业务任务 1 · 可安全重试 1') && !holder.innerText.includes('完整覆盖') &&
       !diagnostics.querySelector<HTMLElement>('.diagnostics-body')?.innerText.includes('可安全重试'),
       'diagnostics show task and retry counts once, in the disclosure summary');
+    check(await showsDetailsMotion([diagnostics], () => summary.click()), 'task-plan details also animate closed');
     check(!holder.querySelector('input[type=checkbox]') &&
       [...holder.querySelectorAll('ol li')].map(card => card.querySelector('.task-number')?.textContent?.trim()).join(',') === '1,2,3',
       'the read-only source and every task keep their positions in the full saved plan');

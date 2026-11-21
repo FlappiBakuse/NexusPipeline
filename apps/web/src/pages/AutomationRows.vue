@@ -39,7 +39,13 @@ const bindingCounts = computed(() => {
 });
 const revisions = computed(() => new Map((props.store.state.automation?.revisions || []).filter(item => item.kind === 'user').map(item => [item.id, item.revision])));
 const isUser = (row: Row): row is UserDraft => !('judgement' in row) && !('scriptIds' in row);
-const extensionId = (row: Row): string | undefined => 'extensionId' in row ? row.extensionId : undefined;
+const avatars = computed(() => {
+  const scripts = new Map(props.bundle.scripts.map(script => [script.id, script]));
+  return new Map(props.rows.map(row => {
+    const script = 'scriptIds' in row ? scripts.get(row.scriptIds[0] ?? '') : 'judgement' in row ? row : undefined;
+    return [row.id, script && scriptIcon(script.extensionId)];
+  }));
+});
 const scriptExtensions = computed(() => new Map(props.scriptCatalog?.map(item => [item.extensionId, item])));
 function scriptTypeBadge(script: ScriptDraft): Badge {
   if (script.kind === 'generic') return { label: t('通用脚本'), tone: 'neutral' };
@@ -137,7 +143,10 @@ async function openSummary(row: Row): Promise<void> {
         @change="(user, revision, catalogRevision) => emit('avatar', user, revision, catalogRevision)"
         @error="emit('error', $event)"
       />
-      <span v-else class="script-avatar"><img v-if="kind === 'scripts'" :src="scriptIcon(extensionId(row))" alt="" /><nexus-icon v-else aria-hidden="true" name="queues" /></span>
+      <span v-else class="script-avatar">
+        <img v-if="avatars.get(row.id)" :src="avatars.get(row.id)" alt="" />
+        <nexus-icon v-else aria-hidden="true" name="queues" />
+      </span>
       <div class="row-main">
         <h2 class="entity-card-name">{{ row.name }}</h2>
         <div class="row-meta">

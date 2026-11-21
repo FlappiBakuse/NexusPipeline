@@ -197,7 +197,8 @@ function discardConfiguration(binding: Binding): void {
                   />
                 </span>
               </span>
-              <span v-if="!removing" class="chevron">{{ expanded === binding.id ? '⌄' : '›' }}</span>
+              <nexus-icon v-if="!removing" class="disclosure-chevron" aria-hidden="true"
+                :name="expanded === binding.id ? 'chevronDown' : 'chevronRight'" />
             </button>
             <button
               v-if="removing"
@@ -213,8 +214,8 @@ function discardConfiguration(binding: Binding): void {
               {{ t('移除绑定') }}
             </button>
           </div>
-          <div class="binding-reveal" :class="{ open: expanded === binding.id }" :inert="expanded !== binding.id">
-          <div class="binding-clip"><div v-if="visited.has(binding.id)" class="binding-content">
+          <div class="binding-reveal disclosure-reveal" :data-expanded="expanded === binding.id" :inert="expanded !== binding.id">
+          <div class="disclosure-clip"><div v-if="visited.has(binding.id)" class="binding-content">
             <button
               class="edit-configuration"
               type="button"
@@ -342,7 +343,6 @@ small {
   overflow-wrap: anywhere;
 }
 .binding-toggle:hover { background: transparent; }
-.binding-toggle nexus-icon,
 .choice-grid nexus-icon {
   display: grid;
   place-content: center;
@@ -356,10 +356,8 @@ small {
   flex-wrap: wrap;
   gap: 6px;
 }
-.chevron {
-  color: var(--accent);
-  font-size: 20px;
-  padding: 0 8px;
+.binding-toggle .disclosure-chevron {
+  margin-inline-end: 8px;
 }
 .binding-content {
   display: grid;
@@ -412,9 +410,5 @@ small {
 
 .binding-icon { width: 28px; height: 28px; flex: none; object-fit: contain; }
 
-.binding-reveal { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--nx-motion-duration-normal,180ms) ease; }
-.binding-reveal.open { grid-template-rows: 1fr; }
-.binding-clip { min-height: 0; overflow: hidden; }
 .binding.expanded { border-color: var(--content-control-border); }
-@media (prefers-reduced-motion: reduce) { .binding-reveal { transition: none; } }
 </style>

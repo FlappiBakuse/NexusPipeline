@@ -142,19 +142,6 @@ summary {
 summary::-webkit-details-marker {
   display: none;
 }
-summary::before {
-  content: '';
-  width: 6px;
-  height: 6px;
-  border: solid currentColor;
-  border-width: 0 1.5px 1.5px 0;
-  transform: rotate(-45deg);
-  margin: 3px 4px 3px 0;
-  transition: transform 0.16s;
-}
-details[open] > summary::before {
-  transform: rotate(45deg);
-}
 .form-select,
 .form-date,
 .form-number {

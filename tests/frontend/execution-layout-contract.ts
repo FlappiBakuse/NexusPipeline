@@ -4,6 +4,7 @@ import FormSelect from '../../apps/web/src/components/FormSelect';
 import { createStore } from '../../apps/web/src/app/store';
 import { ControlClient } from '../../apps/web/src/control/client';
 import type { ActiveRun } from '../../apps/web/src/control/execution';
+import type { UiElement } from '@nexuspipeline/extension-sdk';
 
 export async function executionLayoutContract(fixture: HTMLElement, check: (value: unknown, name: string) => void): Promise<void> {
   await executionSubmissionContract(fixture, check);
@@ -20,6 +21,8 @@ export async function executionLayoutContract(fixture: HTMLElement, check: (valu
   const settle = async () => { await nextTick(); await new Promise(resolve => setTimeout(resolve, 40)); await nextTick(); };
   try {
     await settle();
+    const kinds = mount.querySelector<UiElement<'nexus-select'>>('.target-controls label:first-child nexus-select')?.options;
+    check(kinds?.map(item => item.label).join(',') === '脚本实例,调度队列', 'the run center only offers script and queue targets');
     const widths = () => [...mount.querySelectorAll('.dispatch-targets,.dispatch-running')].map(card => card.getBoundingClientRect().width);
     const idle = widths();
     const id = () => crypto.randomUUID();
