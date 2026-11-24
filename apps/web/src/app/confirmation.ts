@@ -1,5 +1,5 @@
 import { t } from './locale';
-import { leaveModal } from '../ui/modal-transition';
+import { leaveModal } from '../ui/modal-surface';
 
 let pending: Promise<boolean> | undefined;
 export function confirmAction(message: string, signal?: AbortSignal): Promise<boolean> {

@@ -61,7 +61,7 @@ export class NexusTooltipElement extends FloatingElement {
       event.preventDefault();
       event.stopPropagation();
       if (this.values.open) this.close('button');
-      else if (this.visibleAnchor()) this.setProperty('open', true);
+      else if (this.visibleAnchorRect()) this.setProperty('open', true);
     }, { signal });
     const stopLayer = ModalSurface.watchLayer(() => { if (NexusTooltipElement.active === this) this.close('owner'); });
     this.panel.addEventListener('pointerenter', () => { this.reading = true; this.cancelLeave(); }, { signal });
@@ -116,9 +116,9 @@ export class NexusTooltipElement extends FloatingElement {
 
   protected override keepOpenOnAnchor(): boolean { return !this.field; }
 
-  protected override place(): void {
+  protected override place(anchorRect?: DOMRect): void {
     if (!this.values.open || this.panel.hidden || !this.anchorNode) return;
-    const rect = (this.field ? this.trigger : this.anchorNode).getBoundingClientRect();
+    const rect = anchorRect ?? (this.field ? this.trigger : this.anchorNode).getBoundingClientRect();
     const field = this.field?.getBoundingClientRect();
     const top = Math.min(rect.top, field?.top ?? rect.top);
     const bottom = Math.max(rect.bottom, field?.bottom ?? rect.bottom);
@@ -126,8 +126,9 @@ export class NexusTooltipElement extends FloatingElement {
     const height = this.text.scrollHeight + 2;
     const above = (field && height <= spaceAbove) || (height > spaceBelow && spaceAbove > spaceBelow);
     const center = rect.left + rect.width / 2;
-    const left = Math.max(8, Math.min(center - this.panel.offsetWidth / 2, innerWidth - this.panel.offsetWidth - 8));
-    const pointer = Math.max(9, Math.min(center - left, this.panel.offsetWidth - 9));
+    const width = this.panel.offsetWidth;
+    const left = Math.max(8, Math.min(center - width / 2, innerWidth - width - 8));
+    const pointer = Math.max(9, Math.min(center - left, width - 9));
     this.panel.dataset.side = above ? 'above' : 'below';
     this.panel.style.setProperty('--help-height', Math.max(0, above ? spaceAbove : spaceBelow) + 'px');
     this.panel.style.setProperty('--pointer', pointer + 'px');
@@ -222,7 +223,7 @@ export class NexusTooltipElement extends FloatingElement {
     if (this.values.open || this.timer !== undefined || !this.values.content || this.hasExpandedSelect()) return;
     this.timer = window.setTimeout(() => {
       this.timer = undefined;
-      if (this.isConnected && !this.hidden && this.visibleAnchor()) this.setProperty('open', true);
+      if (this.isConnected && !this.hidden && this.visibleAnchorRect()) this.setProperty('open', true);
     }, Math.max(0, Number(this.values.delay)));
   }
 
@@ -234,26 +235,30 @@ export class NexusTooltipElement extends FloatingElement {
     this.leaveTimer = window.setTimeout(() => this.close('owner'), 100);
   }
 
-  private visibleAnchor(): boolean {
+  private visibleAnchorRect(): DOMRect | undefined {
     const anchor = this.field ? this.trigger : this.anchorNode;
-    if (!anchor?.isConnected || !anchor.getClientRects().length || anchor.closest('[inert]') || this.hasExpandedSelect()) return false;
+    if (!anchor?.isConnected || !anchor.getClientRects().length || anchor.closest('[inert]') || this.hasExpandedSelect()) return;
     const rect = anchor.getBoundingClientRect();
     let left = Math.max(0, rect.left), right = Math.min(innerWidth, rect.right);
     let top = Math.max(0, rect.top), bottom = Math.min(innerHeight, rect.bottom);
     let parent: HTMLElement | null = anchor;
     while (parent) {
       const style = getComputedStyle(parent);
-      if (parent.inert || style.visibility === 'hidden') return false;
+      if (parent.inert || style.visibility === 'hidden') return;
       if (parent !== anchor && style.display !== 'contents') {
-        const clip = parent.getBoundingClientRect();
-        if (/(hidden|clip|auto|scroll)/.test(style.overflowX)) { left = Math.max(left, clip.left); right = Math.min(right, clip.right); }
-        if (/(hidden|clip|auto|scroll)/.test(style.overflowY)) { top = Math.max(top, clip.top); bottom = Math.min(bottom, clip.bottom); }
+        const clipsX = /(hidden|clip|auto|scroll)/.test(style.overflowX);
+        const clipsY = /(hidden|clip|auto|scroll)/.test(style.overflowY);
+        if (clipsX || clipsY) {
+          const clip = parent.getBoundingClientRect();
+          if (clipsX) { left = Math.max(left, clip.left); right = Math.min(right, clip.right); }
+          if (clipsY) { top = Math.max(top, clip.top); bottom = Math.min(bottom, clip.bottom); }
+        }
       }
       if (parent.matches('dialog[open],:popover-open')) break;
       const tree = parent.getRootNode();
       parent = parent.assignedSlot ?? parent.parentElement ?? (tree instanceof ShadowRoot ? tree.host as HTMLElement : null);
     }
-    return right > left && bottom > top;
+    if (right > left && bottom > top) return rect;
   }
 
   private hasExpandedSelect(): boolean {
@@ -267,8 +272,9 @@ export class NexusTooltipElement extends FloatingElement {
     if (this.frame !== undefined) return;
     this.frame = requestAnimationFrame(() => {
       this.frame = undefined;
-      if (!this.visibleAnchor()) { this.close('owner'); return; }
-      this.place();
+      const anchorRect = this.visibleAnchorRect();
+      if (!anchorRect) { this.close('owner'); return; }
+      this.place(anchorRect);
       this.watchAnchor();
     });
   }

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch, onBeforeUnmount, nextTick } from 'vue';
 import type { LiveLogs, LogIdentity, LogWindow } from '../control/live-logs';
+import { LiveLogTail } from '../control/live-log-tail';
 import { t, registerMessages } from '../app/locale';
 
 const props = defineProps<{
@@ -25,13 +26,14 @@ function renderWindow(epoch: number): void {
   renderTimer = undefined;
   if (epoch !== generation || !props.visible || !inView.value) return;
   const ordered = roles.value.map((key) => windows.get(key));
-  const text = ordered.map((item) => item?.text || '').join('');
-  const lines = text.split('\n');
+  const tail = new LiveLogTail();
+  for (const item of ordered) if (item) tail.append(item.text);
   value.value = {
-    text: lines.slice(-500).join('\n').slice(-256 * 1024),
+    text: tail.text,
     sequence: Math.max(0, ...ordered.map((item) => item?.sequence || 0)),
-    omitted: lines.length > 500 || text.length > 256 * 1024 || ordered.some((item) => item?.omitted),
-    connected: ordered.some((item) => item?.connected)
+    omitted: tail.omitted || ordered.some((item) => item?.omitted),
+    connected: ordered.some((item) => item?.connected),
+    error: ordered.find((item) => item?.error)?.error
   };
   if (follow) void nextTick(() => {
     if (epoch !== generation || !props.visible || !inView.value) return;
@@ -43,7 +45,8 @@ registerMessages({
   运行日志: 'Run log',
   暂无日志输出: 'No log output',
   调整日志高度: 'Adjust log height',
-  较早日志已折叠: 'Earlier log output is folded'
+  较早日志已折叠: 'Earlier log output is folded',
+  日志读取失败: 'Unable to read the log'
 });
 
 watch(root, (element) => {
@@ -72,8 +75,11 @@ watch(
     const subscriptions = roles.value.map((role) =>
       props.subscribe({ ...props.identity!, role }, (next) => {
         if (epoch !== generation) return;
-        if (!next.connected && !next.text && windows.has(role)) return;
-        windows.set(role, next);
+        const previous = windows.get(role);
+        if (!next.connected && !next.text && !next.error && previous) {
+          if (!previous.error) return;
+          windows.set(role, { ...previous, error: undefined });
+        } else windows.set(role, next);
         renderTimer ??= setTimeout(() => renderWindow(epoch), 200);
       })
     );
@@ -125,6 +131,7 @@ onBeforeUnmount(() => {
 <template>
   <div ref="root" class="run-log-resizable" :style="{ height: height + 'px' }">
     <nexus-scroll-area ref="windowElement" class="run-log" :label="t('运行日志')" @scroll="scroll">
+      <div v-if="value.error" role="status">{{ t('日志读取失败') }} · {{ value.error }}</div>
       <pre><span v-if="value.omitted" class="omitted">{{ t('较早日志已折叠') }}</span>{{ value.text || '(' + t('暂无日志输出') + ')' }}</pre>
     </nexus-scroll-area>
     <div

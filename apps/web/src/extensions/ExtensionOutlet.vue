@@ -1,7 +1,7 @@
 <script lang="ts">
 import { computed as computedAvailability, inject as injectRegistry, onBeforeUnmount, ref } from 'vue';
 import type { SurfaceId as AvailableSurface } from '@nexuspipeline/extension-sdk';
-import { registryKey as availabilityRegistryKey } from './registry-context';
+import { registryKey as availabilityRegistryKey } from './frontend-registry';
 
 export function useSurfaceAvailability(target: AvailableSurface, extensionId: () => string | undefined) {
   const registry = injectRegistry(availabilityRegistryKey);
@@ -18,7 +18,7 @@ export function useSurfaceAvailability(target: AvailableSurface, extensionId: ()
 import { computed, inject, watch } from 'vue';
 import type { SurfaceId, SurfaceContext } from '@nexuspipeline/extension-sdk';
 import type { SurfaceStore } from '../app/store-ports';
-import { registryKey } from './registry-context';
+import { registryKey } from './frontend-registry';
 import SurfaceOutlet from './SurfaceOutlet.vue';
 import { registerProjectDraft, type ProjectDraftBinding } from './project-draft';
 const props = defineProps<{

@@ -4,9 +4,7 @@ import { createIdentity } from '../control/identity';
 import { computed, onBeforeUnmount, reactive, ref, toRefs, watch } from 'vue';
 import { draftPresentation, draftDirective as vDraft } from '../app/draft-presentation';
 import NotificationFields from './NotificationFields.vue';
-import { NotificationCredentials } from './notification-credentials';
-import { NotificationCommands, type NotificationSession } from './notification-commands';
-import type { NotificationEditorPort } from './notification-editor-port';
+import { NotificationCredentials, NotificationCommands, type NotificationSession, type NotificationEditorPort } from './notification-commands';
 import { validateForm } from '../components/form-validation';
 import { t } from '../app/locale';
 import { copyDraft } from '../app/draft-copy';
@@ -203,4 +201,31 @@ function cancel(): void {
   </nexus-modal>
 </template>
 
-<style scoped src="./notification-editor.css"></style>
+<style scoped>
+.editor {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.editor p {
+  margin: 0;
+  color: var(--muted);
+}
+.error {
+  color: var(--nx-color-danger) !important;
+}
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.actions button {
+  min-width: 80px;
+}
+.actions button.primary {
+  background: var(--accent-strong);
+  color: white;
+  border-color: var(--accent-strong);
+}
+</style>

@@ -89,22 +89,39 @@ export function planGroups(preview: ExecutionPreview, bundle: AutomationBundle |
   const queue = targetKind === 'queue' ? bundle?.queues.find(item => item.id === targetId) : undefined;
   const declared = targetKind === 'queue' ? preview.groups : preview.reasonCode === 'execution_script_missing'
     ? [] : [{ scriptId: targetId, reasonCode: preview.reasonCode }];
-  const accounts = planAccounts(preview);
+  const accounts = new Map<string, PlanAccount[]>();
+  for (const account of planAccounts(preview)) {
+    const matching = accounts.get(account.scriptId);
+    if (matching) matching.push(account);
+    else accounts.set(account.scriptId, [account]);
+  }
+  const repetitions = new Map<string, number>();
+  for (const { scriptId } of declared) repetitions.set(scriptId, (repetitions.get(scriptId) ?? 0) + 1);
+  const prerequisites = new Map<string, ReadonlySet<string>>();
+  for (const item of queue?.successDependencies ?? [])
+    if (!prerequisites.has(item.scriptId)) prerequisites.set(item.scriptId, new Set(item.requiredScriptIds));
   const names = new Map(bundle?.scripts.map(item => [item.id, item.name]));
   const groups: PlanGroup[] = [];
+  const priorGroups = new Map<string, PlanGroup[]>();
   for (const descriptor of declared) {
     const id = descriptor.scriptId;
-    const instances = declared.filter(item => item.scriptId === id).length;
-    const prior = groups.filter(group => group.scriptId === id).length;
-    const matching = accounts.filter(account => account.scriptId === id);
+    const instances = repetitions.get(id)!;
+    const previous = priorGroups.get(id) ?? [];
+    const prior = previous.length;
+    const matching = accounts.get(id) ?? [];
     const size = matching.length / instances;
     const members = matching.slice(prior * size, (prior + 1) * size);
-    const required = queue?.successDependencies?.find(item => item.scriptId === id)?.requiredScriptIds;
-    const dependencies = groups.filter(group => required?.includes(group.scriptId)).map(({ order, name }) => ({ order, name }));
-    groups.push({ order: groups.length + 1, scriptId: id, name: names.get(id) ?? id,
+    const dependencies: PlanGroup['dependencies'] = [];
+    for (const required of prerequisites.get(id) ?? [])
+      for (const { order, name } of priorGroups.get(required) ?? []) dependencies.push({ order, name });
+    dependencies.sort((left, right) => left.order - right.order);
+    const group = { order: groups.length + 1, scriptId: id, name: names.get(id) ?? id,
       ...(instances > 1 ? { round: prior + 1 } : {}), members, dependencies, state: planState(members),
       dependencySkipped: members.length > 0 && members.every(item => item.reasonCode === 'execution_queue_dependency_not_successful'),
-      reasonCode: descriptor.reasonCode });
+      reasonCode: descriptor.reasonCode };
+    previous.push(group);
+    priorGroups.set(id, previous);
+    groups.push(group);
   }
   return groups;
 }

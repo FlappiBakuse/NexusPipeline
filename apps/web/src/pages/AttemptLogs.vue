@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 import type { RecordsStore } from '../app/store-ports';
-import { attemptTitle } from './history-detail';
+import { attemptTitle } from './history-format';
 import { readHistoryLog } from './history-log';
-import HistoryCatalogWindow from '../components/HistoryCatalogWindow.vue';
+import VirtualHistoryList from '../components/VirtualHistoryList.vue';
 import { t } from '../app/locale';
 import { historyLogId, type HistoryLog } from './attempt-resources';
 const props = withDefaults(
@@ -20,7 +20,7 @@ const props = withDefaults(
 const disclosure = ref<'closed' | 'opening' | 'open'>('closed');
 const trigger = ref<HTMLButtonElement>();
 const content = ref<HTMLElement>();
-const text = ref('');
+const text = shallowRef<readonly string[]>([]);
 const error = ref('');
 const busy = ref(false);
 const selectedId = ref('');
@@ -48,7 +48,8 @@ function conceal(panel: Element): void {
 async function load(): Promise<void> {
   owner?.abort();
   owner = undefined;
-  text.value = error.value = '';
+  text.value = [];
+  error.value = '';
   const log = selected.value;
   const fingerprint = request.value;
   busy.value = !!fingerprint;
@@ -92,7 +93,7 @@ onBeforeUnmount(() => owner?.abort());
         <div class="disclosure-clip">
           <div ref="content" class="history-log-content" role="region" :aria-label="title" :aria-busy="busy" tabindex="-1">
             <nav v-if="logs.length > 1" :aria-label="t('脚本日志')">
-              <HistoryCatalogWindow :items="logs" :item-key="historyLogId" :label="t('脚本日志')" :visible="visible">
+              <VirtualHistoryList :items="logs" :item-key="historyLogId" :label="t('脚本日志')" :visible="visible">
                 <template #default="{ item: log }">
                   <button type="button" :aria-pressed="selected && historyLogId(selected) === historyLogId(log)"
                     @click="selectedId = historyLogId(log)">
@@ -100,7 +101,7 @@ onBeforeUnmount(() => owner?.abort());
                       · {{ attemptTitle(log.key.invocationOrdinal) }}</template>
                   </button>
                 </template>
-              </HistoryCatalogWindow>
+              </VirtualHistoryList>
             </nav>
             <nexus-spinner v-if="busy" :label="t('正在读取脚本日志…')" />
             <template v-else-if="error">
@@ -108,7 +109,7 @@ onBeforeUnmount(() => owner?.abort());
               <button type="button" @click="load">{{ t('重试') }}</button>
             </template>
             <nexus-scroll-area v-else class="history-log-preview" direction="vertical" :label="t('运行日志')">
-              <pre>{{ text || t('没有可用的日志') }}</pre>
+              <pre><template v-if="text.length"><template v-for="(segment, index) in text" :key="index">{{ segment }}</template></template><template v-else>{{ t('没有可用的日志') }}</template></pre>
             </nexus-scroll-area>
           </div>
         </div>

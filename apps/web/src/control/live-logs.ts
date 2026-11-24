@@ -1,4 +1,7 @@
-import { ControlClient, ControlFailure, objectValue, arrayValue, stringValue, integerValue } from './client';
+import { ControlClient, ControlFailure, objectValue, arrayValue, stringValue, integerValue,
+  readTransport, closeResponseReader } from './client';
+import { transientReadFailure } from './read-retry';
+import { LiveLogTail } from './live-log-tail';
 export interface LogIdentity {
   runId: string;
   attemptId: string;
@@ -10,6 +13,7 @@ export interface LogWindow {
   sequence: number;
   omitted: boolean;
   connected: boolean;
+  error?: string;
 }
 interface LogOwner {
   key: LogIdentity;
@@ -19,7 +23,15 @@ interface LogOwner {
   timer: ReturnType<typeof setTimeout> | undefined;
   rotation: ReturnType<typeof setTimeout> | undefined;
   completed: boolean;
+  resyncs: number;
 }
+
+class LogResume extends Error {}
+
+function unavailableLog(error: unknown): boolean {
+  return error instanceof ControlFailure && error.status === 409 && error.code === 'resource_unavailable';
+}
+
 export class LiveLogs {
   private readonly owners = new Map<string, LogOwner>();
   private readonly active = new Set<LogOwner>();
@@ -35,7 +47,8 @@ export class LiveLogs {
         controller: new AbortController(),
         timer: undefined,
         rotation: undefined,
-        completed: false
+        completed: false,
+        resyncs: 0
       };
       this.owners.set(id, owner);
     }
@@ -51,7 +64,7 @@ export class LiveLogs {
       owner!.controller.abort();
       clearTimeout(owner!.timer);
       clearTimeout(owner!.rotation);
-      owner!.value.text = '';
+      owner!.value = { ...owner!.value, text: '' };
       this.owners.delete(id);
       this.active.delete(owner!);
       this.startWaiting();
@@ -73,17 +86,25 @@ export class LiveLogs {
     void this.read(owner, controller.signal)
       .catch(async (error) => {
         if (controller.signal.aborted) return;
-        if ((error instanceof ControlFailure && error.code === 'resource_unavailable') ||
-            (error instanceof Error && error.message === 'log_stream_ended')) {
+        const ended = error instanceof LogResume && error.message === 'log_stream_ended';
+        const resync = error instanceof LogResume && !ended;
+        let reconnect = transientReadFailure(error) || unavailableLog(error) || ended || resync && ++owner.resyncs <= 3;
+        if (unavailableLog(error) || error instanceof LogResume) {
           try {
             if (await this.durableTail(owner, controller.signal)) { owner.completed = true; return; }
-          } catch {
-            /* A hook may not have started or committed evidence yet. */
+          } catch (tailError) {
+            if (!unavailableLog(tailError) && !transientReadFailure(tailError)) {
+              reconnect = false;
+              error = tailError;
+            }
           }
         }
         if (controller.signal.aborted) return;
-        owner.value = { ...owner.value, connected: false };
+        if (!reconnect) owner.completed = true;
+        owner.value = { ...owner.value, connected: false,
+          ...(reconnect ? {} : { error: error instanceof Error ? error.message : 'log_event_invalid' }) };
         this.publish(owner);
+        if (!reconnect || controller.signal.aborted) return;
         owner.timer = setTimeout(() => {
           owner.timer = undefined;
           this.startWaiting();
@@ -124,46 +145,65 @@ export class LiveLogs {
     const response = await this.client.response(path, signal);
     const reader = response.body?.getReader();
     if (!reader) throw new Error('log_stream_missing');
-    const utf8 = new TextDecoder();
+    const utf8 = new TextDecoder('utf-8', { fatal: true });
     const logDecoder = new TextDecoder();
+    const tail = new LiveLogTail();
     let pending = '';
+    let started = false;
+    let failure: unknown;
     try {
       while (!signal.aborted) {
-        const chunk = await reader.read();
-        if (chunk.done) throw new Error('log_stream_ended');
+        const chunk = await readTransport(() => reader.read(), signal);
+        if (chunk.done) {
+          if (pending || utf8.decode()) throw new Error('log_event_invalid');
+          throw new LogResume('log_stream_ended');
+        }
+        signal.throwIfAborted();
         pending += utf8.decode(chunk.value, { stream: true });
-        if (pending.length > 1024 * 1024) throw new Error('log_gap');
         let position: number;
         let count = 0;
         while ((position = pending.indexOf('\n\n')) >= 0) {
-          if (++count > 256) throw new Error('log_gap');
+          if (position > 1024 * 1024) throw new Error('log_frame_limit');
+          if (count === 256) {
+            await new Promise(resolve => setTimeout(resolve, 0));
+            signal.throwIfAborted();
+            count = 0;
+          }
+          count++;
           const frame = pending.slice(0, position);
           pending = pending.slice(position + 2);
           const line = frame.split('\n').find((value) => value.startsWith('data:'));
           if (!line) continue;
-          const event = objectValue(JSON.parse(line.slice(5)));
+          let payload: unknown;
+          try { payload = JSON.parse(line.slice(5)); }
+          catch { throw new Error('log_event_invalid'); }
+          const event = objectValue(payload);
           const identity = objectValue(event.key);
-          if (
-            Object.entries(key).some(([field, value]) => identity[field] !== value) ||
-            event.kind === 'resync'
-          )
-            throw new Error('log_gap');
+          if (Object.entries(key).some(([field, value]) => identity[field] !== value))
+            throw new Error('log_identity_invalid');
           const data = objectValue(event.data);
-          if (event.kind === 'tail') {
-            owner.value = { text: '', sequence: 0, omitted: data.prefixOmitted === true, connected: true };
-            logDecoder.decode();
+          if (event.kind === 'resync') throw new LogResume(stringValue(data.reasonCode));
+          if (!started && event.kind === 'tail') {
+            let value: LogWindow = { text: '', sequence: 0, omitted: data.prefixOmitted === true, connected: true };
             for (const item of arrayValue(data.frames, objectValue))
-              this.append(owner, item, logDecoder, false);
-            owner.value.sequence = integerValue(data.lastSequence);
-          } else if (event.kind === 'frame') this.append(owner, data, logDecoder, true);
-          else throw new Error('log_event_invalid');
+              value = this.append(value, item, logDecoder, tail);
+            owner.value = { ...value, sequence: integerValue(data.lastSequence) };
+            started = true;
+          } else if (started && event.kind === 'frame') {
+            const sequence = integerValue(data.sequence);
+            if (data.gapBefore === true && sequence > owner.value.sequence) throw new LogResume('log_gap');
+            if (sequence !== owner.value.sequence + 1) throw new Error('log_gap');
+            owner.value = this.append(owner.value, data, logDecoder, tail);
+            owner.resyncs = 0;
+          } else throw new Error('log_event_invalid');
           this.publish(owner);
         }
+        if (pending.length > 1024 * 1024) throw new Error('log_frame_limit');
       }
-    } finally {
-      await reader.cancel();
-      reader.releaseLock();
-    }
+    } catch (error) {
+      failure = error;
+      throw error;
+    } finally { await closeResponseReader(reader, failure, signal); }
   }
   private hasWaiting(): boolean {
     for (const owner of this.owners.values())
@@ -189,37 +229,32 @@ export class LiveLogs {
     if (Object.entries(key).some(([field, value]) => identity[field] !== value))
       throw new Error('log_identity_invalid');
     const decoder = new TextDecoder();
-    owner.value = { text: '', sequence: 0, omitted: result.prefixOmitted === true, connected: false };
+    const tail = new LiveLogTail();
+    let value: LogWindow = { text: '', sequence: 0, omitted: result.prefixOmitted === true, connected: false };
     for (const [index, slice] of arrayValue(result.slices, objectValue).entries())
-      this.append(owner, { ...slice, sequence: index + 1 }, decoder, false);
-    owner.value = { ...owner.value, connected: false };
+      value = this.append(value, { ...slice, sequence: index + 1 }, decoder, tail);
+    const complete = description.isComplete === true;
+    const remaining = complete ? decoder.decode() : '';
+    if (remaining) value = this.appendText(value, tail, remaining);
+    owner.value = value;
     this.publish(owner);
-    return description.isComplete === true;
+    return complete;
   }
   private append(
-    owner: LogOwner,
+    previous: LogWindow,
     value: Record<string, unknown>,
     decoder: TextDecoder,
-    requireNext: boolean
-  ): void {
+    tail: LiveLogTail
+  ): LogWindow {
     const sequence = integerValue(value.sequence);
-    if (requireNext && (sequence !== owner.value.sequence + 1 || value.gapBefore === true))
-      throw new Error('log_gap');
     const encoded = stringValue(value.bytes);
     if (encoded.length > 16384) throw new Error('log_frame_limit');
     const bytes = Uint8Array.from(atob(encoded), (letter) => letter.charCodeAt(0));
-    let text = owner.value.text + decoder.decode(bytes, { stream: true });
-    const lines = text.split('\n');
-    let omitted = owner.value.omitted;
-    if (lines.length > 500) {
-      text = lines.slice(-500).join('\n');
-      omitted = true;
-    }
-    if (text.length > 256 * 1024) {
-      text = text.slice(-256 * 1024);
-      omitted = true;
-    }
-    owner.value = { text, sequence, omitted, connected: true };
+    return this.appendText(previous, tail, decoder.decode(bytes, { stream: true }), sequence);
+  }
+  private appendText(previous: LogWindow, tail: LiveLogTail, chunk: string, sequence = previous.sequence): LogWindow {
+    tail.append(chunk);
+    return { ...previous, text: tail.text, sequence, omitted: previous.omitted || tail.omitted };
   }
   private publish(owner: LogOwner): void {
     for (const listener of owner.listeners) listener(owner.value);

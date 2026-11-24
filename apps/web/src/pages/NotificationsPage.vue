@@ -5,8 +5,7 @@ import type { AppStore } from '../app/store';
 import { ControlFailure, objectValue } from '../control/client';
 import type { ControlNotificationCommand } from '../control/wire.generated';
 import NotificationEditor from './NotificationEditor.vue';
-import { notificationEditorPort } from './notification-editor-port';
-import NotificationChannelChooser from './NotificationChannelChooser.vue';
+import { notificationEditorPort } from './notification-commands';
 import ModalTransition from '../components/ModalTransition.vue';
 import { copyDraft } from '../app/draft-copy';
 import { t } from '../app/locale';
@@ -209,12 +208,20 @@ async function reorder(ids: string[]): Promise<void> {
       </button>
         <button v-if="session.pending" :disabled="session.busy || !store.can('operations.read')" @click="checkPending">{{ t('查询操作状态') }}</button>
   </PageActions>
-    <NotificationChannelChooser
-      v-if="choosing"
-      :visible="visible"
-      @select="openNew"
-      @close="choosing = false"
-    />
+    <ModalTransition v-if="choosing">
+      <nexus-modal :open.prop="visible" :title="t('添加通知任务')" @nexus-close="choosing = false">
+        <div class="channel-choices">
+          <button aria-label="SMTP" @click="openNew('smtp')">
+            <strong>SMTP</strong>
+            <span>{{ t('通过邮件服务器发送通知。') }}</span>
+          </button>
+          <button aria-label="Webhook" @click="openNew('feishu')">
+            <strong>Webhook</strong>
+            <span>{{ t('发送到飞书、企业微信、Slack、Discord 或自定义 Webhook。') }}</span>
+          </button>
+        </div>
+      </nexus-modal>
+    </ModalTransition>
     <template v-if="visible && !editor">
       <nexus-toast v-if="session.error" :tone="session.pending ? 'warning' : 'danger'" :message.prop="t(session.error)" />
       <nexus-toast v-else-if="session.notice" :message.prop="t(session.notice)" @nexus-close="session.notice = ''" />
@@ -336,5 +343,37 @@ async function reorder(ids: string[]): Promise<void> {
 }
 @media (max-width: 600px) {
   .task { gap: 6px; padding-inline: 8px; }
+}
+
+.channel-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.channel-choices > button {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-height: 88px;
+  padding: 16px;
+  text-align: left;
+  background: transparent;
+}
+.channel-choices > button:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.channel-choices strong {
+  font-size: 15px;
+}
+.channel-choices span {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 400;
+}
+@media (max-width: 600px) {
+  .channel-choices {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>

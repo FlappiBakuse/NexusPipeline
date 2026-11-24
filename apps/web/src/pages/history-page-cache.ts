@@ -2,6 +2,8 @@ import type { RecordPage } from '../control/models';
 
 type Cursor = NonNullable<RecordPage['next']>;
 type ReadPage = (cursor: Cursor | undefined) => Promise<RecordPage>;
+type CachedPage = { data: RecordPage; serializedLength: number };
+const maximumPageLength = 131072;
 
 function validateCursor(next: Cursor | undefined, previous: Cursor | undefined): void {
   if (
@@ -15,9 +17,9 @@ function validateCursor(next: Cursor | undefined, previous: Cursor | undefined):
     throw new TypeError('history_cursor_invalid');
 }
 
-export class RecordWindow {
+export class HistoryPageCache {
   private starts = new Map<number, Cursor | undefined>([[1, undefined]]);
-  private pages = new Map<number, RecordPage>();
+  private pages = new Map<number, CachedPage>();
   private scope = '';
 
   async read(
@@ -30,13 +32,13 @@ export class RecordWindow {
     if (!Number.isSafeInteger(target) || target < 1) throw new RangeError('history_page_invalid');
     reset ||= scope !== this.scope;
     const starts = reset ? new Map<number, Cursor | undefined>([[1, undefined]]) : new Map(this.starts);
-    const pages = reset ? new Map<number, RecordPage>() : new Map(this.pages);
+    const pages = reset ? new Map<number, CachedPage>() : new Map(this.pages);
     let number = Math.max(...[...starts.keys()].filter((page) => page <= target));
     for (;;) {
       signal.throwIfAborted();
       const cursor = starts.get(number);
       const cached = pages.get(number);
-      const data = cached ? structuredClone(cached) : await fetchPage(cursor);
+      const data = cached?.data ?? await fetchPage(cursor);
       signal.throwIfAborted();
       const next = data.next;
       validateCursor(next, cursor);
@@ -50,14 +52,17 @@ export class RecordWindow {
         starts.set(number + 1, { ...next });
       }
       pages.delete(number);
-      if (JSON.stringify(data).length <= 131072) pages.set(number, structuredClone(data));
+      const serializedLength = cached?.serializedLength ?? JSON.stringify(data).length;
+      if (serializedLength <= maximumPageLength)
+        pages.set(number, cached ?? { data: structuredClone(data), serializedLength });
       while (pages.size > 8) pages.delete(pages.keys().next().value!);
       while (starts.size > 32) starts.delete([...starts.keys()].find((page) => page !== 1)!);
       if (number >= target || !next) {
+        const result = cached ? structuredClone(data) : data;
         this.starts = starts;
         this.pages = pages;
         this.scope = scope;
-        return { number, data };
+        return { number, data: result };
       }
       number++;
     }

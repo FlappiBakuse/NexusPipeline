@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { fieldHelp as vHelp } from '../components/field-help';
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, ref } from 'vue';
 import type { AutomationStore } from '../app/store-ports';
 import type { AutomationBundle } from '../control/wire.generated';
 import { desktop } from '../app/desktop';
 import { usePathPicker } from './editor-path-picker';
-import { notificationCatalog, type NotificationTask } from './notification-types';
+import { useEditorNotifications } from './editor-notification-choices';
 import { hookPaths } from './hook-paths';
 import { t } from '../app/locale';
 
@@ -20,9 +20,10 @@ const props = defineProps<{
   userId?: string;
 }>();
 const emit = defineEmits<{ 'update:modelValue': [value: Binding | Overrides] }>();
-const notifications = ref<NotificationTask[]>([]);
 const failure = ref('');
-const owner = new AbortController();
+const notifications = useEditorNotifications(props.store, reason => {
+  failure.value = reason instanceof Error ? reason.message : '通知任务不可用';
+});
 const choosePath = usePathPicker();
 const locked = (group: keyof Overrides) => !props.global && props.overrides?.[group]?.syncEnabled === true;
 const groups = computed(() => props.global ? props.modelValue as Overrides : {
@@ -50,17 +51,6 @@ async function browse(kind: 'pre' | 'post'): Promise<void> {
   const id = props.id, selected = await choosePath('file');
   if (selected && props.id === id) path(kind, selected);
 }
-onMounted(async () => {
-  if (!props.store.can('notifications.read')) return;
-  try {
-    notifications.value = (
-      await props.store.client.read('/control/v1/notifications', notificationCatalog, owner.signal)
-    ).tasks;
-  } catch (reason) {
-    if (!owner.signal.aborted) failure.value = reason instanceof Error ? reason.message : '通知任务不可用';
-  }
-});
-onBeforeUnmount(() => owner.abort());
 </script>
 
 <template>

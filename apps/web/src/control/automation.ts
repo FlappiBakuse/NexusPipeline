@@ -1,4 +1,4 @@
-import type { AutomationBundle, AutomationTarget, AutomationBindingPolicyOverrides,
+import type { AutomationBundle, AutomationTarget, AutomationBindingPolicyOverrides, ControlAutomationChange, ControlAutomationImport,
   AutomationPathsPortablePath, ConfigurationSelectorAccess } from './wire.generated';
 import { arrayValue, booleanValue, boundedInteger, dateValue, enumValue, integerValue, objectValue, stringValue } from './client';
 
@@ -8,6 +8,24 @@ const strings = (value: unknown) => arrayValue(value, stringValue);
 const optional = <T>(row: Record<string, unknown>, key: string, decode: (value: unknown) => T): { [key: string]: T } =>
   row[key] === undefined ? {} : { [key]: decode(row[key]) };
 const days = (value: unknown) => boundedInteger(value, -1, 36500);
+
+export function acceptedCatalogRevision(value: unknown, change: ControlAutomationChange): number {
+  const result = objectValue(value), catalog = integerValue(result.catalogRevision);
+  if (result.operationId !== change.operationId || catalog !== change.expectedCatalogRevision + 1 || typeof result.isNew !== 'boolean')
+    throw new TypeError('automation_result_invalid');
+  return catalog;
+}
+
+export function automationImportState(value: unknown, command: ControlAutomationImport) {
+  const result = objectValue(value), state = enumValue(result.state, ['accepted', 'published', 'cancelled', 'quarantined']);
+  const catalog = result.catalogRevision == null ? null : integerValue(result.catalogRevision);
+  if (result.operationId !== command.operationId || typeof result.isNew !== 'boolean' ||
+    (state === 'published' && catalog !== command.expectedRevision + 1) ||
+    (state === 'cancelled' && (catalog === null || catalog < command.expectedRevision)) ||
+    ((state === 'accepted' || state === 'quarantined') && catalog !== null))
+    throw new TypeError('automation_import_result_invalid');
+  return state;
+}
 function daily(value: unknown): number {
   const result = boundedInteger(value, -1, 9999);
   if (result === 0) throw new TypeError('automation_daily_limit_invalid');

@@ -20,20 +20,22 @@ export function useAdapterAvailability(
   );
   let owner: AbortController | undefined;
   watch(
-    [visible, extensionId],
-    async ([shown, id]) => {
+    [visible, extensionId, () => store.state.capabilities?.instanceId, () => store.state.events?.extensionGeneration,
+      () => store.can('extensions.read')],
+    async ([shown, id, instance, _generation, allowed]) => {
       owner?.abort();
       extension.value = null;
       details.value = undefined;
-      if (!shown || !id) {
+      if (!shown || !id || !instance || !allowed) {
         loadingExtension.value = false;
+        if (shown && id && !allowed) unavailable();
         return;
       }
       const current = new AbortController();
       owner = current;
       loadingExtension.value = true;
       try {
-        const result = await store.client.read('/control/v1/extensions', extensionList, current.signal);
+        const result = await store.readEditorDirectory('extensions', extensionList, current.signal);
         current.signal.throwIfAborted();
         extension.value =
           result.items.find((item) => item.extensionId === id) || null;

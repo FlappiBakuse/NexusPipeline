@@ -103,11 +103,14 @@ export class DraftPresentation {
       this.nodes.set(element, key);
       element.setAttribute('data-observe-value', '');
       const sensitive = element.type === 'password' || element.hasAttribute('data-sensitive') || !!element.closest('[data-secret-field]');
-      if (!this.baseline.has(key)) this.baseline.set(key, { sensitive, itemId, changed: false,
-        value: sensitive ? undefined : this.value(element) && typeof this.value(element) === 'object' ?
-          JSON.parse(JSON.stringify(this.value(element))) : this.value(element) });
-      const saved = this.baseline.get(key)!;
-      if (!saved.sensitive) saved.changed = !same(saved.value, this.value(element));
+      let saved = this.baseline.get(key);
+      const value = (saved?.sensitive ?? sensitive) ? undefined : this.value(element);
+      if (!saved) {
+        saved = { sensitive, itemId, changed: false,
+          value: value && typeof value === 'object' ? JSON.parse(JSON.stringify(value)) : value };
+        this.baseline.set(key, saved);
+      }
+      if (!saved.sensitive) saved.changed = !same(saved.value, value);
       this.mark(element, saved);
     }
     this.state.changed = [...this.baseline.values()].some(item => item.changed);

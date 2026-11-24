@@ -7,7 +7,7 @@ import { ControlFailure, objectValue } from '../control/client';
 import type { ExtensionDetails } from '../control/extensions';
 import { createIdentity } from '../control/identity';
 import AdapterDiagnostics from './AdapterDiagnostics.vue';
-import { adapterCommand, adapterResult, adapterSelection, type AdapterResult, type AdapterSource } from './adapter-results';
+import { adapterCommand, adapterResult, adapterSelection, type AdapterResult, type AdapterSource } from './adapter-contracts';
 import { configurationDrafts } from './configuration-drafts';
 import './configuration-messages';
 

@@ -264,4 +264,55 @@ function editSecret(field: SecretField, value: string): void {
   </div>
 </template>
 
-<style scoped src="./notification-fields.css"></style>
+<style scoped>
+.notification-fields {
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+}
+label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+.required {
+  display: inline;
+  color: var(--nx-color-danger);
+}
+label:has(> .required) {
+  display: block;
+}
+label:has(> .required) > input {
+  display: block;
+  margin-top: 8px;
+}
+input,
+textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 40px;
+  font: inherit;
+  font-weight: 400;
+}
+textarea {
+  min-height: 100px;
+  resize: none;
+}
+.columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+@media (max-width: 650px) {
+  .columns,
+  .three {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+</style>

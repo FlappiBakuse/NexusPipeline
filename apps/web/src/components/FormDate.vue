@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, onUpdated, ref, watch, useAttrs } from 'vue';
-import { DateControl } from '../ui/date-control';
-import { TimeControl } from '../ui/time-control';
+import { DateControl, TimeControl } from '../ui/date-time-controls';
 import { useFormLabel } from './form-label';
 defineOptions({ inheritAttrs: false });
 const props = defineProps<{

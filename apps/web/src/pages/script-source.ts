@@ -4,7 +4,7 @@ import { objectValue } from '../control/client';
 import { schemaAt, matchesSchema } from '../control/schema';
 import { createIdentity } from '../control/identity';
 import { argumentText, scriptPaths, scriptPathKey } from './script-paths';
-import type { AutomationAction } from './automation-session';
+import type { AutomationAction } from './automation-editor';
 
 type Script = AutomationBundle['scripts'][number];
 export const scriptSourceKey = (id: string): string => 'script-source/' + id;
@@ -36,10 +36,14 @@ export function selectSource(store: AutomationStore, script: Script, row: Script
   })) };
 }
 
+export function hasSourceSelection(store: AutomationStore, action: AutomationAction): boolean {
+  return action.kind === 'scripts' && action.action === 'save' &&
+    !!(action.sourceSelection || store.drafts.get(scriptSourceKey(action.target))?.selection);
+}
+
 export async function saveSourceSelection(store: AutomationStore, action: AutomationAction, current: () => boolean): Promise<void> {
-  if (action.kind !== 'scripts' || action.action !== 'save') return;
+  if (!hasSourceSelection(store, action)) return;
   const draft = store.drafts.get(scriptSourceKey(action.target));
-  if (!draft?.selection && !action.sourceSelection) return;
   if (!store.can('configuration.edit')) throw new Error('需要配置编辑权限才能保存所选实例。');
   if (!action.sourceSelection) {
     const context = await store.client.query('/control/v1/projects/context', {

@@ -4,7 +4,7 @@ import { computed } from 'vue';
 import type { RecordsStore } from '../app/store-ports';
 import type { RecordPage, RecordRow } from '../control/models';
 import ExtensionOutlet from '../extensions/ExtensionOutlet.vue';
-import { historyRow, recordBusiness, recordLifecycle } from './history-row';
+import { historyRow, recordBusiness, recordLifecycle } from './history-format';
 import { t } from '../app/locale';
 const props = defineProps<{
   store: RecordsStore;
@@ -81,4 +81,82 @@ const recordRows = computed(() =>
     <nexus-toast v-if="linkError" tone="danger" :message.prop="t(linkError)" />
   </nexus-scroll-area>
 </template>
-<style scoped src="./history-records.css"></style>
+<style scoped>
+.history-records {
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--panel);
+}
+.history-records > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  padding: 0 14px;
+}
+.history-records > nexus-empty-state {
+  border: 0;
+  background: transparent;
+}
+.back-history {
+  display: none;
+}
+.record-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 8px;
+  background: var(--content-card-soft);
+}
+.record-open {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+.record-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+.record-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.record-main strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.record-main small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+.record-open > nexus-icon {
+  color: var(--accent);
+  flex: none;
+  width: 16px;
+}
+@media (max-width: 767px) {
+  .back-history {
+    display: block;
+    width: 100%;
+    text-align: left;
+    margin-bottom: 8px;
+  }
+  .record-open {
+    flex-wrap: wrap;
+  }
+}
+</style>

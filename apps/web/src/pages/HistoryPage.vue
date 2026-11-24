@@ -1,25 +1,23 @@
 <script setup lang="ts">
-import { computed, ref, watch, onBeforeUnmount } from 'vue';
+import { computed, ref, watch, onBeforeUnmount, onMounted } from 'vue';
 import type { RecordsStore } from '../app/store-ports';
 import { recordPage } from '../control/models';
 import type { RecordPage, RecordRow } from '../control/models';
 import { objectValue, arrayValue } from '../control/client';
 import HistoryDetail from './HistoryDetail.vue';
 import ModalTransition from '../components/ModalTransition.vue';
-import { t } from '../app/locale';
+import { locale, t } from '../app/locale';
 import './history-messages';
 import type { DateRange } from '@nexuspipeline/extension-sdk';
-import { RecordWindow } from './record-window';
-import HistoryDescription from './HistoryDescription.vue';
+import { HistoryPageCache } from './history-page-cache';
 import HistoryIndex from './HistoryIndex.vue';
-import { outcomeName } from './history-row';
+import { historyDate, outcomeName, localDate, timeRange } from './history-format';
 import HistoryRecords from './HistoryRecords.vue';
 import { HistoryLink } from './history-link';
-import { localDate, timeRange } from './history-range';
 const props = defineProps<{ store: RecordsStore; visible: boolean }>();
 const page = ref<RecordPage>();
 const pageNumber = ref(1);
-const records = new RecordWindow();
+const records = new HistoryPageCache();
 const user = ref('');
 const business = ref('');
 const lifecycle = ref('');
@@ -32,6 +30,11 @@ const selectedStatus = computed({
 });
 const from = ref('');
 const until = ref('');
+const descriptionTarget = ref<HTMLElement | null>(null);
+onMounted(() => { descriptionTarget.value = document.getElementById('page-description-override'); });
+const dateDescription = computed(() => [from.value, until.value]
+  .map(historyDate)
+  .join(locale.value === 'zh-CN' ? ' 至 ' : ' to '));
 const loading = ref(false);
 const summary = ref<Record<string, unknown>>();
 const chosenDate = ref('');
@@ -223,7 +226,9 @@ onBeforeUnmount(() => {
 });
 </script>
 <template>
-  <HistoryDescription :from="from" :until="until" :visible="visible" />
+  <Teleport :to="descriptionTarget || 'body'" :disabled="!descriptionTarget">
+    <span v-if="visible">{{ dateDescription }}</span>
+  </Teleport>
   <div class="history-layout" :data-selected="!!chosenUser">
     <div class="history-left">
       <div class="history-filters">
@@ -288,4 +293,34 @@ onBeforeUnmount(() => {
     />
   </ModalTransition>
 </template>
-<style scoped src="./history-page.css"></style>
+<style scoped>
+.history-layout {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(220px, 0.36fr) minmax(0, 0.64fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 18px;
+  min-height: 0;
+}
+.history-left {
+  display: grid;
+  min-height: 0;
+  min-width: 0;
+  grid-template-rows: 40px minmax(0, 1fr);
+  gap: 12px;
+}
+.history-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 8px;
+}
+@media (max-width: 767px) {
+  .history-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .history-layout:not([data-selected='true']) .history-records,
+  .history-layout[data-selected='true'] .history-left {
+    display: none;
+  }
+}
+</style>

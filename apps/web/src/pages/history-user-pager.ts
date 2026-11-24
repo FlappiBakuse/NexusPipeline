@@ -3,7 +3,7 @@ export interface UserPage {
   next: string | null;
 }
 
-export class UserWindow {
+export class HistoryUserPager {
   private starts = new Map<number, string | undefined>([[1, undefined]]);
 
   async read(

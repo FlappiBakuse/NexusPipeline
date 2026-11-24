@@ -4,17 +4,10 @@ import type { RecordsStore } from '../app/store-ports';
 import type { RecordRow } from '../control/models';
 import { historyAttempts, historyDisplay, type HistoryAttempt, type HistoryDisplay } from '../control/records';
 import { executionRun, type ActiveStep, type ActiveRun } from '../control/execution';
-import { historyRow } from './history-row';
-import {
-  historyDuration,
-  historyTime,
-  historyReason,
-  startedInvocations
-} from './history-detail';
+import { historyRow, historyDuration, historyTime, historyReason, startedInvocations } from './history-format';
 import AttemptDetail from './AttemptDetail.vue';
 import HistoryTasks from './HistoryTasks.vue';
 import { t } from '../app/locale';
-import './history-detail.css';
 
 const props = defineProps<{ store: RecordsStore; row: RecordRow; attemptId: string; visible: boolean }>();
 const emit = defineEmits<{ close: []; attempt: [id: string] }>();
@@ -193,3 +186,77 @@ onBeforeUnmount(() => owner?.abort());
     <button slot="footer" @click="close">{{ t('关闭') }}</button>
   </nexus-modal>
 </template>
+<style>
+.history-detail-content {
+  border-top: 1px solid var(--border);
+}
+.history-detail-metadata {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 18px;
+  margin: 0 0 20px;
+}
+.history-detail-metadata > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 44px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.history-detail-metadata dt {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.history-detail-metadata dd {
+  min-width: 0;
+  margin: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  font-weight: 400;
+}
+.history-detail-content > .history-detail-metadata > div:nth-child(-n + 2) {
+  min-height: 48px;
+}
+.history-attempt-card {
+  margin-top: 20px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--content-card-soft);
+}
+.history-attempt-card > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 0 12px;
+  border-bottom: 1px solid var(--border);
+}
+.history-attempt-card h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.history-attempt-card .history-detail-metadata {
+  margin-bottom: 20px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.history-attempt-card .history-detail-metadata > .history-attempt-reason {
+  grid-column: 1 / -1;
+}
+.history-attempt-card .history-detail-metadata > div {
+  min-height: 40px;
+}
+@media (max-width: 600px) {
+  .history-detail-metadata,
+  .history-attempt-card .history-detail-metadata {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .history-attempt-card {
+    padding: 14px;
+  }
+}
+</style>

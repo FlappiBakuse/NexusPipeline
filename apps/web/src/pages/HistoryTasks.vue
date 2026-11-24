@@ -4,8 +4,7 @@ import type { ActiveStep } from '../control/execution';
 import type { HistoryDisplay } from '../control/records';
 import { t, locale, registerMessages } from '../app/locale';
 import { taskTitle } from '../control/extension-metadata';
-import { historyTaskStatus } from './history-row';
-import { historyReason } from './history-detail';
+import { historyTaskStatus, historyReason } from './history-format';
 import TaskCards from './TaskCards.vue';
 import TaskSummary from './TaskSummary.vue';
 

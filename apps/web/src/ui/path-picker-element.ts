@@ -8,8 +8,6 @@ const styles =
 border-radius:var(--nx-radius-sm,8px);background:var(--content-control,#ffffff08)}
 `;
 
-export { DateRangePicker } from './range-picker.js';
-
 export class PathPicker extends NexusElement {
   static readonly observedAttributes = [...elementAttributes('nexus-path-picker'), 'placeholder'];
   private readonly field: HTMLInputElement;

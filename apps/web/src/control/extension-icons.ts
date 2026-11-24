@@ -2,6 +2,7 @@ import { shallowReactive } from 'vue';
 import { boundedBytes, type ControlClient } from './client';
 import generic from '../assets/script-icons/generic.ico';
 import { abortable } from './abortable';
+import { retryRead } from './read-retry';
 
 const icons = shallowReactive(new Map<string, string>());
 let generation = 0;
@@ -22,10 +23,12 @@ export async function prepareExtensionIcons(client: ControlClient, ids: readonly
       let url: string | undefined;
       try {
         if (!/^[a-z][a-z0-9-]{0,79}$/.test(id)) throw new Error('extension_icon_identity_invalid');
-        const response = await client.response('/control/v1/extensions/' + id + '/icon', signal);
-        const bytes = await boundedBytes(response, 1048576);
+        const { bytes, type } = await retryRead(async () => {
+          const response = await client.response('/control/v1/extensions/' + id + '/icon', signal);
+          return { bytes: await boundedBytes(response, 1048576, signal),
+            type: response.headers.get('Content-Type')?.split(';')[0] };
+        }, signal);
         if (bytes.length) {
-          const type = response.headers.get('Content-Type')?.split(';')[0];
           if (type !== 'image/png' && type !== 'image/x-icon') throw new Error('extension_icon_format_invalid');
           const blob = new Blob([bytes as BlobPart], { type });
           const decoding = createImageBitmap(blob).then(bitmap => {
@@ -48,5 +51,5 @@ export async function prepareExtensionIcons(client: ControlClient, ids: readonly
     }
   }));
   signal.throwIfAborted();
-  if (errors.length) throw new AggregateError(errors, 'extension_icons_unavailable');
+  if (errors.length) throw errors[0];
 }

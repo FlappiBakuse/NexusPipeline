@@ -6,11 +6,12 @@ import { ControlFailure, integerValue, objectValue, stringValue } from '../contr
 import {
   extensionList,
   extensionState,
+  type ExtensionDirectory,
   type ExtensionState,
   type ExtensionCatalog,
   type CatalogEntry
 } from '../control/extensions';
-import { completedSettings, savedSettings } from '../control/settings-command';
+import { completedSettings, savedSettings } from '../control/settings';
 import type {
   ControlExtensionApply,
   ControlExtensionReconcile,
@@ -33,7 +34,7 @@ interface PluginSession {
   retryable: boolean;
 }
 
-export class PluginOwner {
+export class PluginOperations {
   readonly state: PluginSession;
   private readonly instance: string;
   private readonly key: string;
@@ -168,7 +169,7 @@ export class PluginOwner {
     );
     if (this.current()) await this.store.refresh();
   }
-  async enable(item: ExtensionState): Promise<void> {
+  async enable(item: ExtensionState): Promise<ExtensionDirectory | undefined> {
     const saved = this.store.state.settings?.saved;
     if (
       !this.current() ||
@@ -206,6 +207,7 @@ export class PluginOwner {
       journalId: ''
     };
     const pending = this.state.pending;
+    const authority = this.store.client.authoritySignal;
     this.state.busy = true;
     this.state.error = '';
     this.state.notice = '';
@@ -215,13 +217,11 @@ export class PluginOwner {
         '/control/v1/settings',
         body,
         (value) => savedSettings(value, body),
-        body.operationId
+        body.operationId, authority
       );
       pending.kind = 'reconcile';
-      if (this.current()) {
-        await this.store.refresh();
-        await this.reconcile(pending);
-      }
+      if (this.current() && !authority.aborted)
+        return await this.reconcile(pending, authority, pending.reconcile!.expectedSettingsRevision);
     } catch (reason) {
       if (pending.kind === 'setting' && !(reason instanceof ControlFailure && reason.uncertain))
         this.state.pending = null;
@@ -231,7 +231,7 @@ export class PluginOwner {
       this.mark();
     }
   }
-  private async reconcile(pending: PluginCommand): Promise<void> {
+  private async reconcile(pending: PluginCommand, authority: AbortSignal, acceptedSettings?: number): Promise<ExtensionDirectory | undefined> {
     this.state.retryable = false;
     await this.store.client.write('/control/v1/extensions/reconcile', pending.reconcile, (value) => {
       const result = extensionState(value);
@@ -241,14 +241,17 @@ export class PluginOwner {
       )
         throw new TypeError('extension_reconcile_unbound');
       return result;
-    });
-    await this.inspectReconcile(pending);
+    }, undefined, authority);
+    return this.inspectReconcile(pending, authority, acceptedSettings);
   }
-  private async inspectReconcile(pending: PluginCommand): Promise<void> {
-    await this.store.refresh();
-    const saved = this.store.state.settings!.saved,
-      command = pending.reconcile!;
-    const result = await this.store.client.read('/control/v1/extensions', extensionList);
+  private async inspectReconcile(pending: PluginCommand, authority: AbortSignal, acceptedSettings?: number): Promise<ExtensionDirectory | undefined> {
+    if (!this.current() || authority.aborted || this.state.pending !== pending) return;
+    const command = pending.reconcile!;
+    const [saved, result] = await Promise.all([
+      this.store.refreshSettings(acceptedSettings, authority),
+      this.store.client.read('/control/v1/extensions', extensionList, authority)
+    ]);
+    if (!this.current() || authority.aborted || this.state.pending !== pending) return;
     const current = result.items.find((item) => item.extensionId === pending.extensionId);
     const enabled = pending.setting!.values.extensions.find(
       (item) => item.extensionId === pending.extensionId
@@ -261,16 +264,18 @@ export class PluginOwner {
       throw new TypeError('extension_target_changed');
     if (current.desiredEnabled === enabled && (enabled ? !!current.activationId : !current.activationId)) {
       this.finish('插件状态已更新。');
-      return;
+      return result;
     }
     // Reconciliation has no durable operation ID; only an explicit retry may repeat an unresolved activation.
     this.state.retryable =
       saved.revision === command.expectedSettingsRevision && current.desiredEnabled === enabled;
     this.state.error = current.unavailableReason || '偏好已保存，运行状态尚未确认。';
+    return result;
   }
-  async inspect(): Promise<void> {
+  async inspect(): Promise<ExtensionDirectory | undefined> {
     const pending = this.state.pending;
     if (!this.current() || !pending || this.state.busy || !this.store.can('operations.read')) return;
+    const authority = this.store.client.authoritySignal;
     this.state.busy = true;
     try {
       if (pending.kind === 'apply') await this.inspectApply(pending);
@@ -278,13 +283,14 @@ export class PluginOwner {
         if (pending.kind === 'setting') {
           const operation = await this.store.client.read(
             '/control/v1/operations/' + pending.setting!.operationId,
-            objectValue
+            objectValue, authority
           );
+          if (!this.current() || authority.aborted || this.state.pending !== pending) return;
           if (!completedSettings(operation, pending.setting!))
             throw new TypeError('settings_operation_unbound');
           pending.kind = 'reconcile';
         }
-        await this.inspectReconcile(pending);
+        return await this.inspectReconcile(pending, authority);
       }
     } catch (reason) {
       this.failed(reason);
@@ -293,7 +299,7 @@ export class PluginOwner {
       this.mark();
     }
   }
-  async retry(): Promise<void> {
+  async retry(): Promise<ExtensionDirectory | undefined> {
     const pending = this.state.pending;
     if (
       !this.current() ||
@@ -304,10 +310,13 @@ export class PluginOwner {
       !this.store.can('extensions.write')
     )
       return;
+    const authority = this.store.client.authoritySignal;
     this.state.busy = true;
     try {
-      await this.inspectReconcile(pending);
-      if (this.state.pending === pending && this.state.retryable) await this.reconcile(pending);
+      const result = await this.inspectReconcile(pending, authority);
+      if (this.current() && !authority.aborted && this.state.pending === pending && this.state.retryable)
+        return await this.reconcile(pending, authority);
+      return result;
     } catch (reason) {
       this.failed(reason);
     } finally {

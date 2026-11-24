@@ -89,7 +89,7 @@ export class FrontendLoader {
       const connection = AbortSignal.any([this.lifetime.signal, this.connection.signal]);
       const signal = AbortSignal.any([connection, this.batch.signal]);
       let catalog: Record<string, unknown>;
-      try { catalog = await this.client.read('/control/v1/extensions/frontend', objectValue, signal); }
+      try { catalog = await retryRead(() => this.client.read('/control/v1/extensions/frontend', objectValue, signal), signal); }
       catch (error) { if (signal.aborted) return; throw error; }
       if (signal.aborted) return;
       const kind = stringValue(catalog.connectionKind);
@@ -111,7 +111,7 @@ export class FrontendLoader {
       await Promise.all(Array.from({ length: Math.min(6, pending.length) }, async () => {
         while (next < pending.length && !signal.aborted && !this.halted) {
           const entry = pending[next++]!;
-          try { await retryRead(() => this.load(entry, kind, connection), signal); }
+          try { await this.load(entry, kind, connection); }
           catch (error) { if (!signal.aborted) this.report(error); }
           finally { if (!signal.aborted) progress(++done, pending.length); }
         }
@@ -127,15 +127,15 @@ export class FrontendLoader {
     const base = `/control/v1/extensions/${id}/frontend/${entry.activationId}/assets`;
     let url: string | undefined;
     try {
-      const { bytes, styles } = await this.profile(id, 'resources', async () => {
+      const { bytes, styles } = await this.profile(id, 'resources', () => retryRead(async () => {
         const response = await this.client.response(base, signal);
         const decoder = new TextDecoder('utf-8', { fatal: true });
-        const assets = objectValue(JSON.parse(decoder.decode(await boundedBytes(response, 6 * 1024 * 1024))));
+        const assets = objectValue(JSON.parse(decoder.decode(await boundedBytes(response, 6 * 1024 * 1024, signal))));
         if (!Array.isArray(assets.styles) || assets.styles.length !== entry.manifest.frontend!.styles.length)
           throw new Error('extension_frontend_styles_invalid');
         return { bytes: assetBytes(assets.entry, 2 * 1024 * 1024),
           styles: assets.styles.map(style => decoder.decode(assetBytes(style, 128 * 1024))) };
-      });
+      }, signal));
       signal.throwIfAborted();
       url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'text/javascript' }));
       const module = await this.profile(id, 'import', () => import(/* @vite-ignore */ url!)) as BrowserModule;
@@ -144,15 +144,14 @@ export class FrontendLoader {
       await this.profile(id, 'identity-before', () => this.requireCurrent(entry, signal));
       const transport = new InstalledTransport(kind, id, entry.activationId, this.client, this.media, signal);
       const extension = module.createFrontend(transport);
-      const scope = await this.profile(id, 'activate', () => abortable(this.registry.activate(entry.manifest, {
+      const scope = await abortable(this.registry.activate(entry.manifest, {
         ...extension,
-        activate(context) {
+        activate: context => this.profile(id, 'activate', async () => {
           for (const style of styles) context.registerStyle(style);
           return extension.activate(context);
-        }
-      }, signal), signal));
-      try { await this.profile(id, 'identity-after', () => this.requireCurrent(entry, signal)); signal.throwIfAborted(); }
-      catch (error) { await scope.dispose(); throw error; }
+        })
+      }, signal, () => this.profile(id, 'identity-after', () => this.requireCurrent(entry, signal))), signal);
+      if (signal.aborted) { await scope.dispose(); signal.throwIfAborted(); }
       this.active.set(id, { activationId: entry.activationId, controller, scope, transport });
     } catch (error) {
       controller.abort();
@@ -170,8 +169,8 @@ export class FrontendLoader {
   }
 
   private async requireCurrent(entry: InstalledModule, signal: AbortSignal): Promise<void> {
-    const current = await this.client.read(
-      `/control/v1/extensions/${entry.manifest.extensionId}/frontend/${entry.activationId}/identity`, objectValue, signal);
+    const path = `/control/v1/extensions/${entry.manifest.extensionId}/frontend/${entry.activationId}/identity`;
+    const current = await retryRead(() => this.client.read(path, objectValue, signal), signal);
     if (current.activationId !== entry.activationId) throw new Error('extension_frontend_activation_changed');
   }
 }

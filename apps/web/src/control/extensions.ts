@@ -72,7 +72,9 @@ export function extensionState(value: unknown): ExtensionState {
     capabilities: arrayValue(row.capabilities, stringValue), metadata: extensionMetadata(row.metadata)
   };
 }
-export function extensionList(value: unknown): { hasReleaseTrust: boolean; items: ExtensionState[] } {
+export type ExtensionDirectory = { hasReleaseTrust: boolean; items: ExtensionState[] };
+
+export function extensionList(value: unknown): ExtensionDirectory {
   const row = objectValue(value);
   const items = arrayValue(row.items, extensionState);
   if (items.length > 256 || new Set(items.map((item) => item.extensionId)).size !== items.length)

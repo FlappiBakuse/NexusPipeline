@@ -11,8 +11,7 @@ import AdapterEditorPanel from './AdapterEditorPanel.vue';
 import TaskCards from './TaskCards.vue';
 import TaskSummary from './TaskSummary.vue';
 import { configurationDrafts } from './configuration-drafts';
-import { configurationOverview, type ConfigurationOverview } from './configuration-types';
-import { adapterCommand, adapterResult, adapterSelection, adapterTasks, type AdapterResult, type AdapterSource, type AdapterTask } from './adapter-results';
+import { configurationOverview, type ConfigurationOverview, adapterCommand, adapterResult, adapterSelection, adapterTasks, type AdapterResult, type AdapterSource, type AdapterTask } from './adapter-contracts';
 import './configuration-messages';
 
 const props = defineProps<{ store: ConfigurationStore; bindingId: string; visible: boolean;
@@ -52,6 +51,18 @@ const gamePathCheck = computed(() => result.value?.coverage && result.value.game
 const readOverview = (id: string, signal: AbortSignal) => props.store.client.read(
   '/control/v1/configuration/bindings/' + encodeURIComponent(id) + '/resources', configurationOverview, signal);
 
+async function readLatestOverview(id: string, signal: AbortSignal, isCurrent: () => boolean) {
+  for (;;) {
+    const revision = mutation();
+    try {
+      const value = await readOverview(id, signal);
+      if (!isCurrent() || mutation() === revision) return { value, revision };
+    } catch (reason) {
+      if (!isCurrent() || mutation() === revision) throw reason;
+    }
+  }
+}
+
 function discoveryIssue(reason: unknown): string {
   const code = reason instanceof Error ? reason.message : '';
   if (code === 'configuration_recovery_pending') return recovering;
@@ -60,38 +71,33 @@ function discoveryIssue(reason: unknown): string {
   return '读取任务计划失败，请重新探测。';
 }
 
-async function savedPlan(value: ConfigurationOverview, current: AbortController, isCurrent: () => boolean): Promise<void> {
-  overview.value = value;
+async function savedPlan(value: ConfigurationOverview, current: AbortController, isCurrent: () => boolean):
+  Promise<{ source?: AdapterSource; result?: AdapterResult; issue?: string }> {
   const { extensionId, resources } = value;
   if (!extensionId) throw new Error('adapter_source_unbound');
   const signal = current.signal;
   const installed = await props.store.client.read('/control/v1/extensions', extensionList, signal);
-  if (!isCurrent()) return;
+  if (!isCurrent()) return {};
   const extension = installed.items.find(item => item.extensionId === extensionId);
-  if (!extension?.isInstalled || !extension.desiredEnabled || !extension.activationId || extension.installedRevision < 1) {
-    issue.value = '扩展未安装或未启用，专项配置不可用。';
-    return;
-  }
-  if (!resources.length || resources.some(item => !item.isSaved || item.revision < 1 || item.shape === 'missing' || item.fileCount < 1)) {
-    issue.value = missing;
-    return;
-  }
-  if (resources.every(item => item.syntax === null)) {
-    issue.value = '请在项目配置编辑器中查看此项目的任务。';
-    return;
-  }
+  if (!extension?.isInstalled || !extension.desiredEnabled || !extension.activationId || extension.installedRevision < 1)
+    return { issue: '扩展未安装或未启用，专项配置不可用。' };
+  if (!resources.length || resources.some(item => !item.isSaved || item.revision < 1 || item.shape === 'missing' || item.fileCount < 1))
+    return { issue: missing };
+  if (resources.every(item => item.syntax === null)) return { issue: '请在项目配置编辑器中查看此项目的任务。' };
   const verified = { overview: value, installedRevision: extension.installedRevision };
-  source.value = verified;
   const selection = adapterSelection(verified, createIdentity());
   void props.store.client.read('/control/v1/extensions/' + encodeURIComponent(extensionId) + '/details',
     row => extensionDetails(row, extensionId), signal).then(metadata => {
     if (isCurrent() && metadata.installedRevision === extension.installedRevision) details.value = metadata;
   }).catch(() => {});
-  const discovered = await props.store.client.query('/control/v1/adapters/discover', adapterCommand('discover', selection),
-    row => adapterResult(row, 'discover', selection, undefined, '', value.scriptRevision), signal);
-  if (!isCurrent()) return;
-  result.value = discovered;
-  tasks.value = discovered.tasks;
+  try {
+    const discovered = await props.store.client.query('/control/v1/adapters/discover', adapterCommand('discover', selection),
+      row => adapterResult(row, 'discover', selection, undefined, '', value.scriptRevision), signal);
+    return { source: verified, result: discovered };
+  } catch (reason) {
+    const failure = discoveryIssue(reason);
+    return { source: failure === recovering || failure === missing ? undefined : verified, issue: failure };
+  }
 }
 
 async function load(prepared?: ConfigurationOverview): Promise<void> {
@@ -107,7 +113,8 @@ async function load(prepared?: ConfigurationOverview): Promise<void> {
   }
   const current = new AbortController();
   owner = current;
-  const key = visibleKey.value, revision = mutation();
+  const key = visibleKey.value;
+  let revision = mutation();
   const isCurrent = () => owner === current && !current.signal.aborted && visibleKey.value === key;
   const id = props.bindingId, draft = props.draft;
   loading.value = true;
@@ -118,14 +125,31 @@ async function load(prepared?: ConfigurationOverview): Promise<void> {
       if (isCurrent()) tasks.value = read;
       return;
     }
-    const read = prepared ?? await readOverview(id, current.signal);
+    const latest = () => readLatestOverview(id, current.signal, isCurrent);
+    const snapshot = prepared ? { value: prepared, revision } : await latest();
     if (!isCurrent()) return;
+    const read = snapshot.value;
+    revision = snapshot.revision;
     if (read.bindingId !== id || read.kind !== 'specialized' ||
       (binding.value && read.scriptId !== binding.value.scriptId) ||
       (bindingRevision.value !== undefined && read.bindingRevision !== bindingRevision.value) ||
       (scriptRevision.value !== undefined && read.scriptRevision !== scriptRevision.value))
       throw new Error('adapter_source_unbound');
-    await savedPlan(read, current, isCurrent);
+    const plan = await savedPlan(read, current, isCurrent).catch(reason =>
+      ({ source: undefined, result: undefined, issue: discoveryIssue(reason) }));
+    while (isCurrent() && mutation() !== revision) {
+      const checked = await latest();
+      if (!isCurrent()) return;
+      if (JSON.stringify(checked.value) !== JSON.stringify(read)) {
+        await load(checked.value);
+        return;
+      }
+      revision = checked.revision;
+    }
+    if (!isCurrent()) return;
+    overview.value = read; source.value = plan.source;
+    result.value = plan.result; tasks.value = plan.result?.tasks;
+    issue.value = plan.issue ?? '';
   } catch (reason) {
     if (isCurrent()) {
       issue.value = discoveryIssue(reason);
@@ -141,9 +165,10 @@ async function load(prepared?: ConfigurationOverview): Promise<void> {
 
 async function verifyOverview(): Promise<void> {
   const current = owner, previous = overview.value;
-  if (!current || current.signal.aborted || !previous || props.draft || checking.value) return;
+  if (!current || current.signal.aborted || !previous || props.draft || loading.value || checking.value) return;
   const key = visibleKey.value, revision = mutation();
-  const isCurrent = () => owner === current && !current.signal.aborted && visibleKey.value === key;
+  const sameScope = () => owner === current && !current.signal.aborted && visibleKey.value === key;
+  const isCurrent = () => sameScope() && mutation() === revision;
   checking.value = true;
   try {
     const read = await readOverview(previous.bindingId, current.signal);
@@ -158,7 +183,7 @@ async function verifyOverview(): Promise<void> {
   } finally {
     if (owner === current) {
       checking.value = false;
-      if (isCurrent() && mutation() !== revision) void verifyOverview();
+      if (sameScope() && mutation() !== revision) void verifyOverview();
     }
   }
 }

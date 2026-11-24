@@ -2,7 +2,7 @@ import { ControlClient, ControlFailure } from '../control/client';
 import { capabilities, type Capabilities } from '../control/models';
 import { EventFeed, eventSnapshot, type EventSnapshot } from '../control/event-feed';
 import type { HostState } from './host-state';
-import { HostSnapshots, type SnapshotReads, type SnapshotRevisions } from './host-snapshots';
+import { HostSnapshots, SnapshotStreamChanged, type SnapshotReads, type SnapshotRevisions } from './host-snapshots';
 import type { AppRoute } from './navigation';
 
 const sameAccess = (left: Capabilities | null, right: Capabilities): boolean =>
@@ -20,6 +20,7 @@ export class AppSession {
   private stopFeed: (() => void) | undefined;
   private accessRequiresRefresh = false;
   private pendingRoute: AppRoute | undefined;
+  private authority: AbortSignal;
 
   constructor(
     private readonly client: ControlClient,
@@ -28,10 +29,12 @@ export class AppSession {
     private readonly report: (error: unknown) => void,
     private readonly readRoute: () => AppRoute
   ) {
+    this.authority = client.authoritySignal;
     this.feed = new EventFeed(
       client,
       (error) => {
         this.client.invalidatePrepared();
+        this.client.invalidateDirectories();
         state.feedError = error instanceof Error ? error.message : 'connection_lost';
       },
       () => state.capabilities?.instanceId
@@ -47,12 +50,15 @@ export class AppSession {
     const cancel = () => owner.abort(signal?.reason);
     signal?.addEventListener('abort', cancel, { once: true });
     if (signal?.aborted) cancel();
+    const scope = AbortSignal.any([owner.signal, this.client.authoritySignal]);
     this.pendingRoute = page;
     this.state.busy = true;
     try {
-      const { snapshot, access } = await this.readAccess(owner.signal, initialAccess, initialSnapshot);
+      const { snapshot, access } = await this.readAccess(scope, initialAccess, initialSnapshot);
+      scope.throwIfAborted();
       const plan = this.prepare(snapshot, access);
-      await this.synchronize(page, snapshot, plan, owner.signal);
+      await this.synchronize(page, snapshot, plan, scope);
+      scope.throwIfAborted();
       if (this.navigationOwner !== owner) return;
       this.state.page = page;
       this.accessRequiresRefresh = false;
@@ -62,7 +68,7 @@ export class AppSession {
       if (!this.stopFeed && this.state.automation) this.subscribe();
     } catch (error) {
       if (initialAccess) throw error;
-      if (!owner.signal.aborted) this.report(error);
+      if (!scope.aborted) this.report(error);
     } finally {
       signal?.removeEventListener('abort', cancel);
       if (this.navigationOwner === owner) this.state.busy = false;
@@ -74,26 +80,15 @@ export class AppSession {
     const cancel = () => owner.abort(signal?.reason);
     signal?.addEventListener('abort', cancel, { once: true });
     if (signal?.aborted) cancel();
+    const scope = AbortSignal.any([owner.signal, this.client.authoritySignal]);
     try {
-      const { snapshot, access } = await this.readAccess(owner.signal);
-      owner.signal.throwIfAborted();
+      const { snapshot, access } = await this.readAccess(scope);
+      scope.throwIfAborted();
       if (snapshot.instanceId !== access.instanceId) throw new ControlFailure(409, 'control_instance_changed');
-      if (this.state.capabilities && this.state.capabilities.instanceId !== access.instanceId) {
-        this.stopFeed?.();
-        this.stopFeed = undefined;
-        this.feed.stop();
+      if (this.state.capabilities && this.state.capabilities.instanceId !== access.instanceId)
         this.navigationOwner?.abort();
-        this.updateOwner?.abort();
-        this.updateWork = undefined;
-        this.client.clearPrepared();
-        this.snapshots.reset();
-      }
-      if (!sameAccess(this.state.capabilities, access)) {
-        this.client.clearPrepared();
-        this.state.capabilities = access;
-        this.accessRequiresRefresh = true;
-      }
-      await this.navigate(this.pendingRoute ?? this.readRoute(), !this.pendingRoute, access, owner.signal, snapshot);
+      if (this.accessChanged(access)) this.changeAccess(access);
+      await this.navigate(this.pendingRoute ?? this.readRoute(), !this.pendingRoute, access, scope, snapshot);
     } catch (error) {
       owner.abort();
       throw error;
@@ -107,7 +102,26 @@ export class AppSession {
     this.feed.stop();
     this.navigationOwner?.abort();
     this.updateOwner?.abort();
+    this.client.invalidateDirectories();
+    this.snapshots.reset();
     document.removeEventListener('visibilitychange', this.visibility);
+  }
+
+  private accessChanged(access: Capabilities): boolean {
+    return this.authority !== this.client.authoritySignal || !sameAccess(this.state.capabilities, access);
+  }
+
+  private changeAccess(access: Capabilities): void {
+    this.stopFeed?.();
+    this.stopFeed = undefined;
+    this.feed.reset();
+    this.updateOwner?.abort();
+    this.updateWork = undefined;
+    this.client.clearPrepared();
+    this.snapshots.reset();
+    this.authority = this.client.authoritySignal;
+    this.state.capabilities = access;
+    this.accessRequiresRefresh = true;
   }
 
   private async readAccess(signal: AbortSignal, initialAccess?: Capabilities,
@@ -139,12 +153,8 @@ export class AppSession {
       (this.state.capabilities && access.instanceId !== this.state.capabilities.instanceId)
     )
       throw new ControlFailure(409, 'control_instance_changed');
-    const accessChanged = !sameAccess(this.state.capabilities, access);
-    if (accessChanged) {
-      this.client.clearPrepared();
-      this.state.capabilities = access;
-      this.accessRequiresRefresh = true;
-    }
+    const accessChanged = this.accessChanged(access);
+    if (accessChanged) this.changeAccess(access);
     const restart =
       !!this.stopFeed && !!this.snapshots.streamId && this.snapshots.streamId !== snapshot.streamId;
     if (restart) {
@@ -176,11 +186,25 @@ export class AppSession {
     plan: { current: SnapshotRevisions | null; full: boolean },
     signal: AbortSignal
   ): Promise<void> {
+    try { await this.synchronizeStream(page, snapshot, plan, signal); }
+    catch (error) {
+      signal.throwIfAborted();
+      if (!(error instanceof SnapshotStreamChanged)) throw error;
+      await this.synchronizeStream(page, snapshot, { current: this.latest(snapshot), full: true }, signal);
+    }
+  }
+
+  private async synchronizeStream(
+    page: AppRoute,
+    snapshot: EventSnapshot,
+    plan: { current: SnapshotRevisions | null; full: boolean },
+    signal: AbortSignal
+  ): Promise<void> {
     const { current, full } = plan;
     const issued = await this.snapshots.read(
       {
         automation: full || current!.catalog !== this.state.automation?.catalogRevision,
-        settings: full || page === 'settings' || current!.settings !== this.state.settings?.saved.revision,
+        settings: full || page === 'settings' || current!.settings !== this.snapshots.settingsRevision,
         status:
           full ||
           page === 'dashboard' ||
@@ -189,7 +213,7 @@ export class AppSession {
         interface: full || current!.appearance !== this.state.interface?.revision
       },
       signal,
-      current?.mutation
+      current
     );
     for (let attempt = 0; attempt < 2; attempt++) {
       if (this.snapshots.aligned(this.latest(snapshot)) && this.fresh(page, issued)) break;
@@ -204,7 +228,7 @@ export class AppSession {
           settings:
             !this.state.settings ||
             !pending ||
-            this.state.settings.saved.revision < pending.settings ||
+            this.snapshots.settingsRevision < pending.settings ||
             (page === 'settings' && this.snapshots.settingsRead < issued.settings),
           status:
             !this.state.status ||
@@ -214,7 +238,7 @@ export class AppSession {
           interface: !this.state.interface || !pending || this.state.interface.revision < pending.appearance
         },
         signal,
-        pending?.mutation
+        pending
       );
     }
     if (!this.snapshots.aligned(this.latest(snapshot)) || !this.fresh(page, issued))
@@ -235,6 +259,7 @@ export class AppSession {
   private subscribe(): void {
     let initial = true;
     this.stopFeed = this.feed.subscribe((snapshot, fresh) => {
+      if (this.authority.aborted) return;
       if (snapshot.instanceId !== this.state.capabilities?.instanceId) {
         this.report(new Error('event_instance_changed'));
         return;
@@ -243,7 +268,7 @@ export class AppSession {
       const observed = this.snapshots.observe(snapshot);
       if (!observed.accepted) return;
       this.state.feedError = '';
-      this.updateOwner?.abort();
+      const previous = this.updateOwner;
       const owner = new AbortController();
       this.updateOwner = owner;
       const current = this.snapshots.revisions(snapshot);
@@ -254,14 +279,15 @@ export class AppSession {
         .read(
           {
             automation: full || current!.catalog !== this.state.automation?.catalogRevision,
-            settings: full || current!.settings !== this.state.settings?.saved.revision,
+            settings: full || current!.settings !== this.snapshots.settingsRevision,
             status: full || current!.mutation !== this.snapshots.mutation,
             interface: full || current!.appearance !== this.state.interface?.revision
           },
           owner.signal,
-          current?.mutation
+          current
         )
         .then(() => {});
+      previous?.abort();
       this.updateWork = work;
       void work
         .catch((error) => {
@@ -276,6 +302,10 @@ export class AppSession {
   private readonly visibility = (): void => {
     this.state.visible = !document.hidden;
     this.feed.visibility(this.state.visible);
-    if (!this.state.visible) { this.client.invalidatePrepared(); this.updateOwner?.abort(); }
+    if (!this.state.visible) {
+      this.client.invalidatePrepared();
+      this.client.invalidateDirectories();
+      this.updateOwner?.abort();
+    }
   };
 }

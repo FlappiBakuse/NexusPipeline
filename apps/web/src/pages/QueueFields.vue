@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { fieldHelp as vHelp } from '../components/field-help';
 import { createIdentity } from '../control/identity';
-import { computed, ref, onBeforeUnmount, onMounted } from 'vue';
+import { computed, ref } from 'vue';
 import type { AutomationBundle } from '../control/wire.generated';
 import type { AutomationStore } from '../app/store-ports';
 import { t } from '../app/locale';
-import { notificationCatalog, type NotificationTask } from './notification-types';
+import { useEditorNotifications } from './editor-notification-choices';
 import QueueTasks from './QueueTasks.vue';
 
 type Queue = AutomationBundle['queues'][number];
@@ -29,19 +29,7 @@ const mode = computed(() =>
       ? 'schedule'
       : 'none'
 );
-const notifications = ref<NotificationTask[]>([]);
-const owner = new AbortController();
-onMounted(async () => {
-  if (!props.store.can('notifications.read')) return;
-  try {
-    notifications.value = (
-      await props.store.client.read('/control/v1/notifications', notificationCatalog, owner.signal)
-    ).tasks;
-  } catch (reason) {
-    if (!owner.signal.aborted) props.store.report(reason);
-  }
-});
-onBeforeUnmount(() => owner.abort());
+const notifications = useEditorNotifications(props.store, props.store.report);
 function update<K extends keyof Queue>(key: K, value: Queue[K]): void {
   emit('update:modelValue', { ...props.modelValue, [key]: value });
 }
@@ -248,4 +236,142 @@ function setTime(id: string, value: string): void {
   </div>
 </template>
 
-<style scoped src="./queue-fields.css"></style>
+<style scoped>
+.queue-fields {
+  display: grid;
+  gap: 20px;
+}
+label,
+.weekday-field {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.required::first-line {
+  color: var(--muted);
+}
+em {
+  color: var(--bad);
+  font-style: normal;
+}
+.columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.notification-setting {
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+.queue-section {
+  border-top: 1px solid var(--border);
+  padding-top: 20px;
+}
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+h3 {
+  font-size: 15px;
+  line-height: 1.35;
+  margin: 0;
+}
+small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.schedule-item {
+  padding: 8px 0 14px;
+  border-radius: var(--radius-md);
+  transition: background-color var(--nx-motion-duration-fast, 160ms) ease;
+}
+@media (hover: hover) {
+  .schedule-item:hover {
+    background-color: var(--content-control-hover);
+  }
+}
+.schedule-item:has(.schedule-heading > button:focus-visible) {
+  background-color: var(--content-control-hover);
+}
+@media (prefers-reduced-motion: reduce) {
+  .schedule-item { transition: none; }
+}
+.schedule-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.schedule-heading nexus-drag-handle {
+  --nx-drag-size: 32px;
+}
+.schedule-heading > button {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex: 1;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 8px 8px 8px 0;
+}
+.schedule-heading span {
+  color: var(--muted);
+}
+.schedule-heading > button:hover { background: transparent; }
+.schedule-toggle-hint {
+  flex: none;
+  margin-inline-start: auto;
+  font-size: 12px;
+}
+.schedule-content {
+  padding: 14px 0 0 34px;
+}
+.schedule-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(150px, 1fr);
+  gap: 16px;
+}
+.weekdays {
+  display: flex;
+  gap: 4px;
+}
+.weekdays button {
+  flex: 1;
+  padding: 0 6px;
+}
+.weekdays [aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.end-actions {
+  display: flex;
+  align-items: center;
+  justify-content: end;
+  gap: 12px;
+  margin-top: 24px;
+}
+.queue-section > button,
+.end-actions > button {
+  color: var(--muted);
+}
+@media (max-width: 600px) {
+  .columns,
+  .schedule-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  header {
+    flex-wrap: wrap;
+  }
+  .schedule-content {
+    padding-left: 0;
+  }
+  .weekdays { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+</style>

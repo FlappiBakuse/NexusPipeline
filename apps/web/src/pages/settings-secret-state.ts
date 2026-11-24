@@ -1,7 +1,6 @@
 import { computed, onBeforeUnmount, reactive, ref, shallowRef, watch, type Ref } from 'vue';
 import type { AppStore } from '../app/store';
-import { readStatus, readValue, type LocalField } from './local-secrets';
-import { hostSecretSession, inspectHostSecret, writeHostSecret } from './host-secret-session';
+import { readStatus, readValue, type LocalField, hostSecretSession, inspectHostSecret, writeHostSecret } from './host-secret-session';
 
 interface Owner {
   store: AppStore;

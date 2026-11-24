@@ -26,7 +26,7 @@ footer[hidden]{display:none}footer button,footer ::slotted(button){min-width:80p
 `;
 
 export class ModalSurface {
-  private static readonly layers: HTMLDialogElement[] = [];
+  private static readonly layers: ModalSurface[] = [];
   private static readonly observers = new Set<(dialog?: HTMLDialogElement) => void>();
   private returnFocus: HTMLElement | null = null;
   private closing: Animation[] = [];
@@ -38,25 +38,25 @@ export class ModalSurface {
 
   static watchLayer(observer: (dialog?: HTMLDialogElement) => void): () => void {
     this.observers.add(observer);
-    observer(this.layers.at(-1));
+    observer(this.layers.at(-1)?.dialog);
     return () => {
       this.observers.delete(observer);
     };
   }
 
   private publishLayer(open: boolean): void {
-    const index = ModalSurface.layers.indexOf(this.dialog);
+    const index = ModalSurface.layers.indexOf(this);
     if (open === index >= 0) return;
-    if (open) ModalSurface.layers.push(this.dialog);
+    if (open) ModalSurface.layers.push(this);
     else ModalSurface.layers.splice(index, 1);
-    for (const observer of ModalSurface.observers) observer(ModalSurface.layers.at(-1));
+    for (const observer of ModalSurface.observers) observer(ModalSurface.layers.at(-1)?.dialog);
   }
 
   connect(signal: AbortSignal): void {
     // A descendant toast or nested dialog closes only its own surface.
     this.dialog.addEventListener('nexus-close', event => event.stopPropagation(), { signal });
     this.dialog.addEventListener('keydown', (event) => {
-      if (event.key !== 'Tab' || ModalSurface.layers.at(-1) !== this.dialog) return;
+      if (event.key !== 'Tab' || ModalSurface.layers.at(-1) !== this) return;
       const targets: HTMLElement[] = [];
       const visit = (element: Element): void => {
         if (element instanceof HTMLElement && (element.hidden || element.inert ||
@@ -174,9 +174,36 @@ export class ModalSurface {
   }
 
   private finish(): void {
+    const index = ModalSurface.layers.indexOf(this);
+    const next = index < 0 ? undefined : ModalSurface.layers[index + 1];
+    const target = this.returnFocus;
+    this.returnFocus = null;
+    // A remaining modal keeps the original invoker inert until it closes.
+    if (next && target) next.returnFocus = target;
     this.publishLayer(false);
     this.dialog.close();
-    if (this.returnFocus?.isConnected) this.returnFocus.focus({ preventScroll: true });
-    this.returnFocus = null;
+    if (!next?.dialog.open && target?.isConnected) target.focus({ preventScroll: true });
   }
+}
+
+export function leaveModal(element: Element, done: () => void): void {
+  if (!(element instanceof HTMLElement)) {
+    done();
+    return;
+  }
+  element.inert = true;
+  // Vue retains leaving DOM for the animation; credentials must leave it immediately.
+  element
+    .querySelectorAll<HTMLInputElement>('input[type=password],input[autocomplete=new-password]')
+    .forEach((input) => {
+      input.value = '';
+    });
+  element
+    .querySelectorAll<HTMLElement & { type?: string; value: string }>('nexus-text-input')
+    .forEach((input) => {
+      if (input.type === 'password') input.value = '';
+    });
+  (element as HTMLElement & { open: boolean }).open = false;
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) done();
+  else setTimeout(done, modalExitDuration + 16);
 }

@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import { fieldHelp as vHelp } from '../components/field-help';
 import { t } from '../app/locale';
 import type { SecretField } from './notification-types';
 
-defineProps<{ field: SecretField; label: string; value: string; configured: boolean; disabled: boolean }>();
+const props = defineProps<{ field: SecretField; label: string; value: string; configured: boolean; disabled: boolean }>();
 const emit = defineEmits<{ edit: [field: SecretField, value: string] }>();
+const secretValue = computed({ get: () => props.value, set: (value) => emit('edit', props.field, value) });
 </script>
 
 <template>
@@ -12,13 +14,12 @@ const emit = defineEmits<{ edit: [field: SecretField, value: string] }>();
     <span class="field-help-caption"><span>{{ t(label) }}</span></span>
     <input
         data-draft-field="NotificationSecretInput/value"
-      :value="value"
+      v-model="secretValue"
       type="password"
       :aria-label="t(label)"
       :placeholder="configured ? t('留空不修改') : ''"
       autocomplete="new-password"
       :disabled="disabled"
-      @input="emit('edit', field, ($event.target as HTMLInputElement).value)"
     />
   </label>
 </template>

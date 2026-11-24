@@ -173,4 +173,17 @@ onBeforeUnmount(() => {
   <nexus-toast v-if="visible && completionError" :tone="cancellationPending ? 'warning' : 'danger'"
     :message.prop="t(completionError)" />
 </template>
-<style scoped src="./completion-notice.css"></style>
+<style scoped>
+.completion {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+  border: 1px solid var(--warn);
+  border-radius: 12px;
+  background: var(--panel);
+}
+.completion h2,
+.completion p {
+  margin: 0;
+}
+</style>

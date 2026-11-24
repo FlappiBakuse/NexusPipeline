@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { scriptIcon } from './script-icons';
+import { extensionIcon as scriptIcon } from '../control/extension-icons';
 import { computed, onBeforeUnmount, watch, ref } from 'vue';
 import type { AutomationStore } from '../app/store-ports';
 import { extensionList, type ExtensionState } from '../control/extensions';
@@ -30,7 +30,7 @@ async function refresh(): Promise<void> {
   loading.value = true;
   error.value = '';
   try {
-    const catalog = await props.store.client.read('/control/v1/extensions', extensionList, current.signal);
+    const catalog = await props.store.readEditorDirectory('extensions', extensionList, current.signal);
     if (!current.signal.aborted && instance() === instanceId) {
       installed.value = catalog.items;
     }

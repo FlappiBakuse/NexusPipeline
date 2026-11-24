@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { leaveModal } from '../ui/modal-transition';
+import { leaveModal } from '../ui/modal-surface';
 </script>
 
 <template>

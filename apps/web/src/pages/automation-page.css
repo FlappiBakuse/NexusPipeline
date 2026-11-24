@@ -1,8 +1,0 @@
-.entity-list-page,
-.entity-list {
-  display: grid;
-  gap: 14px;
-}
-.error-text {
-  color: var(--bad);
-}

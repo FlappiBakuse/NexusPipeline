@@ -5,9 +5,9 @@ import { metadataText } from '../control/extension-metadata';
 import type { AutomationStore } from '../app/store-ports';
 import type { AutomationDraft } from '../app/automation-draft';
 import type { AutomationBundle } from '../control/wire.generated';
-import { AutomationEditor, type EntityKind } from './automation-editor';
-import type { AutomationSession } from './automation-session';
-import AutomationRelationEditor from './AutomationRelationEditor.vue';
+import { AutomationEditor, type EntityKind, type AutomationSession } from './automation-editor';
+import { initialValue, schemaAt } from '../control/schema';
+import BindingPolicyFields from './BindingPolicyFields.vue';
 import QueueFields from './QueueFields.vue';
 import AccountFields from './AccountFields.vue';
 import ScriptFields from './ScriptFields.vue';
@@ -49,6 +49,9 @@ const { saving, error, notice, pending } = toRefs(props.session);
 const presentation: ComputedRef<ReturnType<typeof draftPresentation>> = computed(() => draftPresentation(props.store.editors.target(
   props.store.state.capabilities?.instanceId || '', activeKind.value, selected.value).child('host-form'),
   existing.value, (): boolean => props.model.edited || presentation.value.state.changed || !!props.session.pending));
+type BindingOverrides = NonNullable<AutomationBundle['users'][number]['bindingOverrides']>;
+const defaultBindingOverrides = initialValue(schemaAt('automation-binding-policy.schema.json#/$defs/overrides')) as BindingOverrides;
+const bindingOverrides = computed(() => (draft.value as AutomationBundle['users'][number]).bindingOverrides || defaultBindingOverrides);
 const scriptUnavailable = computed(() => props.model.unavailable);
 onBeforeUnmount(() => { if (!presentation.value.modified) props.model.releasePristine(); });
 const specializedTitle = computed(() => props.scriptType && activeKind.value === 'scripts' ?
@@ -116,12 +119,13 @@ const specializedTitle = computed(() => props.scriptType && activeKind.value ===
             @update:bindings="accountBindings = $event"
             @configure="emit('configure', $event)"
           />
-          <AutomationRelationEditor
+          <BindingPolicyFields
             v-else-if="bundle && activeKind === 'users'"
-            v-model="draft"
-            :kind="activeKind"
-            :bundle="bundle"
+            :id="String(draft.id)"
             :store="store"
+            global
+            :model-value="bindingOverrides"
+            @update:model-value="draft = { ...draft, bindingOverrides: $event as BindingOverrides }"
           />
           <ScriptFields
             v-else-if="activeKind === 'scripts'"
@@ -147,8 +151,9 @@ const specializedTitle = computed(() => props.scriptType && activeKind.value ===
       </form>
     </div>
     <div slot="footer" class="editor-actions" :class="{ 'account-actions': activeKind === 'users' && existing }">
-      <button v-if="pending" type="button" :disabled="saving || !store.can('operations.read')" @click="emit('inspect')">
-        {{ t('查询操作状态并刷新') }}
+      <button v-if="pending" type="button"
+        :disabled="saving || (!pending.definitionCommitted || pending.sourcePending) && !store.can('operations.read')" @click="emit('inspect')">
+        {{ t(!pending.definitionCommitted ? '查询操作状态并刷新' : pending.sourcePending ? '继续处理所选配置' : '刷新已提交结果') }}
       </button>
       <button type="button" :disabled="saving || !!pending" @click="model.discard()">{{ t('取消') }}</button>
       <button
@@ -162,4 +167,26 @@ const specializedTitle = computed(() => props.scriptType && activeKind.value ===
     </div>
   </nexus-modal>
 </template>
-<style scoped src="./automation-editor-dialog.css"></style>
+<style scoped>
+.editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.editor-actions button {
+  min-width: 80px;
+}
+.editor-actions button:not(.primary) {
+  color: var(--muted);
+}
+.account-actions .primary {
+  order: -1;
+}
+.editor-fields {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+</style>

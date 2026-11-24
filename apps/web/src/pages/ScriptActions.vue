@@ -3,6 +3,7 @@ import { onBeforeUnmount, ref } from 'vue';
 import type { AutomationStore } from '../app/store-ports';
 import type { AutomationBundle } from '../control/wire.generated';
 import { arrayValue, objectValue, stringValue } from '../control/client';
+import { BlobDownloads } from '../control/blob-downloads';
 import { t } from '../app/locale';
 
 const props = defineProps<{
@@ -14,7 +15,7 @@ const props = defineProps<{
 const emit = defineEmits<{ import: [file: File]; error: [message: string] }>();
 const picker = ref<HTMLInputElement>();
 const busy = ref(false);
-const urls = new Set<string>();
+const downloads = new BlobDownloads();
 const owner = new AbortController();
 
 function choose(event: Event): void {
@@ -24,23 +25,11 @@ function choose(event: Event): void {
   if (file && !props.locked && !busy.value) emit('import', file);
 }
 
-function download(data: Blob, name: string): void {
-  const url = URL.createObjectURL(data);
-  urls.add(url);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = name;
-  link.click();
-  setTimeout(() => {
-    URL.revokeObjectURL(url);
-    urls.delete(url);
-  }, 30000);
-}
-
 async function exportScript(): Promise<void> {
   const revision = props.store.state.automation?.catalogRevision;
   if (busy.value || props.locked || revision === undefined || !props.store.can('automation.exchange')) return;
   const scriptId = props.script.id;
+  const signal = AbortSignal.any([owner.signal, props.store.client.authoritySignal]);
   busy.value = true;
   try {
     const row = await props.store.client.read(
@@ -49,7 +38,7 @@ async function exportScript(): Promise<void> {
         '&templateScriptId=' +
         encodeURIComponent(scriptId),
       objectValue,
-      owner.signal
+      signal
     );
     const bundle = objectValue(row.bundle) as unknown as AutomationBundle;
     if (
@@ -79,18 +68,18 @@ async function exportScript(): Promise<void> {
           encodeURIComponent(scriptId) +
           '&sourceSha256=' +
           file.sha256,
-        owner.signal
+        signal
       );
       files.push({ name: file.name.split(/[\\/]/).pop() || file.id, data: await response.blob() });
     }
-    owner.signal.throwIfAborted();
-    download(
+    signal.throwIfAborted();
+    downloads.save(
       new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' }),
       'NexusPipeline-template-' + scriptId + '.json'
     );
-    for (const file of files) download(file.data, file.name);
+    for (const file of files) downloads.save(file.data, file.name);
   } catch (reason) {
-    if (!owner.signal.aborted) {
+    if (!signal.aborted) {
       emit('error', reason instanceof Error ? reason.message : '导出失败。');
     }
   } finally {
@@ -100,8 +89,7 @@ async function exportScript(): Promise<void> {
 
 onBeforeUnmount(() => {
   owner.abort();
-  for (const url of urls) URL.revokeObjectURL(url);
-  urls.clear();
+  downloads.release();
 });
 </script>
 

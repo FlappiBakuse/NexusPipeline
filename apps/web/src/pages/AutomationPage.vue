@@ -12,14 +12,11 @@ import { scriptPathKey } from './script-paths';
 import type { AutomationDraft } from '../app/automation-draft';
 import type { AutomationBundle } from '../control/wire.generated';
 import AutomationExchange from './AutomationExchange.vue';
-import { automationSession, type AutomationAction } from './automation-session';
+import { automationSession, type AutomationAction, AutomationCommands, AutomationEditor, type EntityKind, AutomationSave } from './automation-editor';
 import { t } from '../app/locale';
 import { copyDraft } from '../app/draft-copy';
 import './automation-messages';
-import { AutomationCommands } from './automation-commands';
 import { loadTemplate, templateKey } from './script-template';
-import { AutomationEditor, type EntityKind } from './automation-editor';
-import { AutomationSave } from './automation-save';
 import { useAccountSummaries } from './account-summary';
 import { accountDraft, retainBindingCandidate } from './account-draft';
 const props = defineProps<{ store: AutomationStore; kind: EntityKind; visible: boolean }>();
@@ -210,7 +207,9 @@ function openRow(row: unknown, global = false): void {
     >
       {{ t(createLabel) }}
     </button>
-    <button v-if="pending && !editing" :disabled="saving" @click="checkPending">{{ t('查询操作状态并刷新') }}</button>
+    <button v-if="pending && !editing"
+      :disabled="saving || (!pending.definitionCommitted || pending.sourcePending) && !store.can('operations.read')"
+      @click="checkPending">{{ t(!pending.definitionCommitted ? '查询操作状态并刷新' : pending.sourcePending ? '继续处理所选配置' : '刷新已提交结果') }}</button>
   </PageActions>
   <ScriptTypes v-if="kind === 'scripts'" v-model:installed="scriptCatalog" :store="store" :active="visible"
     :visible="visible && typesOpen" @choose="chooseScript" @close="typesOpen = false" />
@@ -289,4 +288,13 @@ function openRow(row: unknown, global = false): void {
   <AutomationDeleteDialog :target="deleting" :kind="kind" :visible="visible"
     @confirm="remove" @cancel="deleting = null" />
 </template>
-<style scoped src="./automation-page.css"></style>
+<style scoped>
+.entity-list-page,
+.entity-list {
+  display: grid;
+  gap: 14px;
+}
+.error-text {
+  color: var(--bad);
+}
+</style>

@@ -87,6 +87,7 @@ export class HistoryLink {
     }
     const key = this.key(runId, user, attempt);
     if (
+      this.detailOpen.value &&
       key === this.applied &&
       this.selected.value?.runId === runId &&
       (this.selected.value.userId || '') === user &&

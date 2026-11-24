@@ -3,7 +3,7 @@ import { computed, markRaw, onBeforeUnmount, reactive, ref, watch, type Raw } fr
 import type { RecordsStore } from '../app/store-ports';
 import { arrayValue, objectValue } from '../control/client';
 import { t, locale } from '../app/locale';
-import { UserWindow } from './user-window';
+import { HistoryUserPager } from './history-user-pager';
 const props = defineProps<{
   store: RecordsStore;
   days: Record<string, unknown>[];
@@ -23,7 +23,7 @@ const emit = defineEmits<{
 type Window = {
   items: Record<string, unknown>[];
   next: string | null;
-  index: Raw<UserWindow>;
+  index: Raw<HistoryUserPager>;
   page: number;
   error: string;
   busy: boolean;
@@ -79,7 +79,7 @@ async function load(date: string, page = 1): Promise<void> {
   if (previous && previous.page === page && !previous.error) return;
   const state: Window =
     previous ||
-    reactive({ items: [], next: null, index: markRaw(new UserWindow()), page: 1, error: '', busy: false });
+    reactive({ items: [], next: null, index: markRaw(new HistoryUserPager()), page: 1, error: '', busy: false });
   state.busy = true;
   state.error = '';
   windows.value.set(date, state);
@@ -247,4 +247,72 @@ onBeforeUnmount(() => {
   </nexus-scroll-area>
 </template>
 
-<style scoped src="./history-index.css"></style>
+<style scoped>
+.history-index-pane {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--panel);
+}
+.history-index-pane > p {
+  text-align: center;
+  color: var(--muted);
+}
+.history-index-pane > nexus-empty-state {
+  border: 0;
+  background: transparent;
+}
+.date-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 14px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+.date-heading strong {
+  font-size: 15px;
+}
+nexus-icon {
+  color: var(--accent);
+  width: 16px;
+  height: 16px;
+}
+.history-user {
+  display: flex;
+  width: 100%;
+  min-height: 40px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+.history-user strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.history-user[aria-pressed='true'],
+.history-user:hover {
+  background: var(--content-card-soft);
+  color: var(--accent);
+}
+.date-users {
+  padding-bottom: 8px;
+}
+.user-pages {
+  display: flex;
+  justify-content: end;
+  gap: 8px;
+}
+</style>

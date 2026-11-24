@@ -1,9 +1,8 @@
 import { computed, watch } from 'vue';
 import type { AppStore } from '../app/store';
 import { SettingsWrites } from '../app/settings-writes';
-import { completedSettings, savedSettings } from '../control/settings-command';
+import { completedSettings, savedSettings } from '../control/settings';
 import { objectValue } from '../control/client';
-import { settings } from '../control/models';
 import type { ControlHostSettingsValues, ControlHostSettings } from '../control/wire.generated';
 
 const owners = new WeakMap<AppStore, Map<string, SettingsWrites<ControlHostSettingsValues>>>();
@@ -19,32 +18,34 @@ export function useSettingsSession(store: AppStore, valid: () => boolean) {
   let owner = instances.get(instance);
   if (!owner) {
     const current = () => {
-      if (store.state.capabilities?.instanceId !== instance) throw new Error('control_instance_changed');
-      return store.state.settings!.saved;
+      if (store.state.capabilities?.instanceId !== instance || !store.state.settings) throw new Error('control_instance_changed');
+      return store.state.settings.saved;
     };
     const body = (value: { id: string; revision: number; values: ControlHostSettingsValues }): ControlHostSettings => ({
       format: 'nexus.control.host-settings', version: 1, operationId: value.id,
       expectedRevision: value.revision, values: value.values
     });
-    const read = async () => {
-      const snapshot = await store.client.read('/control/v1/settings', settings);
-      current();
-      if (snapshot.saved.revision >= store.state.settings!.saved.revision) store.state.settings = snapshot;
-      return snapshot.saved;
+    const read = async (accepted?: number, authority = store.client.authoritySignal) => {
+      await store.refreshSettings(accepted, authority);
+      return current();
     };
     owner = new SettingsWrites({ current, signal: store.editors.signal, read,
       write: async value => {
         const command = body(value);
-        await store.client.write('/control/v1/settings', command, result => savedSettings(result, command), value.id);
-        current();
+        const authority = store.client.authoritySignal;
+        const startupChanged = current().values.autoStart !== value.values.autoStart;
+        const receipt = await store.client.write('/control/v1/settings', command, result => savedSettings(result, command), value.id, authority);
+        authority.throwIfAborted();
         const saved = { revision: value.revision + 1, values: value.values };
-        store.state.settings = { ...store.state.settings!, saved };
-        try { return await read(); }
-        catch { return saved; }
+        if (current().revision < saved.revision) store.state.settings = { ...store.state.settings!, saved };
+        // Startup registration can finish after a same-revision SSE read has started.
+        try { return await read(startupChanged || receipt.startupEffect != null ? undefined : saved.revision, authority); }
+        catch { authority.throwIfAborted(); return current(); }
       },
       inspect: async value => {
-        const result = await store.client.read('/control/v1/operations/' + value.id, objectValue);
-        return completedSettings(result, body(value)) ? read() : undefined;
+        const authority = store.client.authoritySignal;
+        const result = await store.client.read('/control/v1/operations/' + value.id, objectValue, authority);
+        return completedSettings(result, body(value)) ? read(undefined, authority) : undefined;
       } });
     instances.set(instance, owner);
   }

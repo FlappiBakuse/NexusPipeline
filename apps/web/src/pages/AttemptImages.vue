@@ -3,11 +3,11 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import type { RecordsStore } from '../app/store-ports';
 import { boundedBytes } from '../control/client';
 import type { HistoryImage } from '../control/records';
-import { historyReason } from './history-detail';
+import { historyReason } from './history-format';
 import { BlobDownloads } from '../control/blob-downloads';
 import ImageGallery from '../components/ImageGallery.vue';
 import HistoryImagePreview from './HistoryImagePreview.vue';
-import HistoryCatalogWindow from '../components/HistoryCatalogWindow.vue';
+import VirtualHistoryList from '../components/VirtualHistoryList.vue';
 import { t } from '../app/locale';
 const props = defineProps<{
   store: RecordsStore;
@@ -66,12 +66,12 @@ onBeforeUnmount(close);
     :visible="visible"
     @select="displayed = captured[$event] || null"
   />
-  <HistoryCatalogWindow v-if="unavailable.length" :items="unavailable" :item-key="image => image.key.captureId"
+  <VirtualHistoryList v-if="unavailable.length" :items="unavailable" :item-key="image => image.key.captureId"
     :label="t('运行截图')" :visible="visible">
     <template #default="{ item: image }">
       <p role="status" class="history-image-unavailable">{{ historyReason(image.reasonCode) }}</p>
     </template>
-  </HistoryCatalogWindow>
+  </VirtualHistoryList>
   <!-- Keep one accessibility identity across opens; visibility controls media release. -->
   <HistoryImagePreview
     :pool="store.media"

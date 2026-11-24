@@ -7,11 +7,10 @@ import ExtensionOutlet from '../extensions/ExtensionOutlet.vue';
 import HistoryInvocations from './HistoryInvocations.vue';
 import AttemptLogs from './AttemptLogs.vue';
 import AttemptImages from './AttemptImages.vue';
-import { attemptTitle, historyDuration, historyTime, historyReason } from './history-detail';
-import { historyRow } from './history-row';
+import { attemptTitle, historyDuration, historyTime, historyReason, historyRow } from './history-format';
 import { t } from '../app/locale';
 import { useAttemptResources } from './attempt-resources';
-import './attempt-messages';
+import './history-messages';
 
 const props = withDefaults(
   defineProps<{

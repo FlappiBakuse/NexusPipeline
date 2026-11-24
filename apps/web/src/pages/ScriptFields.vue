@@ -8,7 +8,6 @@ import { usePathPicker } from './editor-path-picker';
 import { t, registerMessages } from '../app/locale';
 import { templateKey } from './script-template';
 import { scriptPaths, scriptPathKey, scriptRootValid, type ScriptPaths } from './script-paths';
-import ScriptLimits from './ScriptLimits.vue';
 import GameFields from './GameFields.vue';
 import ScriptSourceFields from './ScriptSourceFields.vue';
 import { useScriptRoot } from './script-root';
@@ -28,6 +27,10 @@ let fileRevision = 0;
 onBeforeUnmount(() => fileRevision++);
 function update<K extends keyof Script>(key: K, value: Script[K]): void {
   emit('update:modelValue', { ...props.modelValue, [key]: value });
+}
+function updateLimit(key: keyof Script['limits'], value: number): void {
+  update('limits', { ...props.modelValue.limits,
+    [key]: key === 'maximumAttempts' ? value : Math.round(value * 60) });
 }
 function path(key: Exclude<keyof ScriptPaths, 'judgeLanguage' | 'emulatorRoot'>, value: string): void {
   if (key !== 'root' && ['executable', 'configuration', 'logs', 'arguments'].includes(key) && !rootReady.value) return;
@@ -184,7 +187,47 @@ async function upload(event: Event): Promise<void> {
       :store="store"
       @update:model-value="emit('update:modelValue', $event)"
     />
-    <ScriptLimits :model-value="modelValue.limits" @update:model-value="update('limits', $event)" />
+    <section class="script-section">
+      <h3>{{ t('运行设置') }}</h3>
+      <div class="columns three">
+        <label v-help="t('每个步骤最多尝试的次数，包含首次运行；实际重试还需满足插件声明与安全条件。')">
+          <span class="field-help-caption"><span>{{ t('最大尝试次数（含首次）') }} </span><em>*</em></span>
+          <nexus-number-input
+        data-draft-field="ScriptFields/modelValue.maximumAttempts"
+            :aria-label="t('最大尝试次数（含首次）')"
+            aria-required="true"
+            :min.prop="1"
+            :max.prop="99"
+            :value.prop="modelValue.limits.maximumAttempts"
+            @nexus-change="updateLimit('maximumAttempts', $event.detail.value)"
+          />
+        </label>
+        <label v-help="t('达到该时长且日志无更新时判定停滞；0 表示不启用日志停滞限制。')">
+          <span class="field-help-caption"><span>{{ t('日志无更新上限（分钟）') }} </span><em>*</em></span>
+          <nexus-number-input
+        data-draft-field="ScriptFields/modelValue.stallTimeoutSeconds / 60"
+            :aria-label="t('日志无更新上限（分钟）')"
+            aria-required="true"
+            :min.prop="0"
+            :max.prop="1440"
+            :value.prop="modelValue.limits.stallTimeoutSeconds / 60"
+            @nexus-change="updateLimit('stallTimeoutSeconds', $event.detail.value)"
+          />
+        </label>
+        <label v-help="t('限制当前步骤的总运行时间，包含重试；0 表示不启用总时间限制。')">
+          <span class="field-help-caption"><span>{{ t('运行总时间上限（分钟）') }} </span><em>*</em></span>
+          <nexus-number-input
+        data-draft-field="ScriptFields/modelValue.totalTimeoutSeconds / 60"
+            :aria-label="t('运行总时间上限（分钟）')"
+            aria-required="true"
+            :min.prop="0"
+            :max.prop="10080"
+            :value.prop="modelValue.limits.totalTimeoutSeconds / 60"
+            @nexus-change="updateLimit('totalTimeoutSeconds', $event.detail.value)"
+          />
+        </label>
+      </div>
+    </section>
     <section v-if="modelValue.kind === 'generic'" class="script-section judgement">
       <h3>{{ t('自定义完成标志') }}</h3>
       <template v-if="modelValue.judgement.language === 'keywords'">
@@ -271,4 +314,96 @@ async function upload(event: Event): Promise<void> {
   </div>
 </template>
 
-<style scoped src="./script-fields.css"></style>
+<style scoped>
+.script-fields {
+  display: grid;
+  gap: 24px;
+}
+.columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px 16px;
+}
+.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+label {
+  display: flex;
+  align-content: start;
+  flex-wrap: wrap;
+  gap: 6px 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+label > :not(em) {
+  flex-basis: 100%;
+  width: 100%;
+}
+em {
+  font-style: normal;
+  color: var(--bad);
+}
+h3 {
+  margin: 0 0 14px;
+  font-size: 15px;
+  line-height: 1.35;
+}
+.script-section {
+  border-top: 1px solid var(--border);
+  padding-top: 20px;
+}
+.judgement {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.judgement h3 {
+  margin-bottom: -2px;
+}
+.keywords {
+  --nx-input-font-size: 14px;
+  --nx-textarea-line-height: 1.55;
+  --nx-textarea-padding: 12px;
+}
+.judge-code {
+  font-family: Consolas, SFMono-Regular, monospace;
+  --nx-input-font-size: 12px;
+  --nx-textarea-line-height: 1.6;
+  --nx-textarea-padding: 12px;
+}
+.judge-actions {
+  display: flex;
+  align-items: end;
+  justify-content: end;
+  gap: 12px;
+}
+.judge-switch {
+  width: calc((100% - 24px) / 3);
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--content-control);
+}
+.judge-switch.enabled {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.upload-script {
+  color: var(--text);
+  font-size: 12px;
+  padding: 0 16px;
+}
+@media (max-width: 650px) {
+  .columns,
+  .three {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .judge-switch {
+    width: 100%;
+  }
+  .judge-actions {
+    flex-wrap: wrap;
+  }
+}
+</style>

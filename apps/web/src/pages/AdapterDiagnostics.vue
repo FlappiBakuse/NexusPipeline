@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ExtensionDetails } from '../control/extensions';
 import { locale, t } from '../app/locale';
-import type { AdapterResult } from './adapter-results';
+import type { AdapterResult } from './adapter-contracts';
 
 const props = defineProps<{ items?: AdapterResult['diagnostics']; details?: ExtensionDetails }>();
 const levels: Record<string, string> = { information: '信息', warning: '警告', blocking: '阻断' };

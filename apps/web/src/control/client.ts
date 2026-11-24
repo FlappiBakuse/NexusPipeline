@@ -1,5 +1,5 @@
 import { FrontendSession } from './frontend-session';
-import { ControlReads } from './control-reads';
+import { ControlReads, type EditorDirectory } from './control-reads';
 
 export class ControlFailure extends Error {
   constructor(
@@ -7,9 +7,10 @@ export class ControlFailure extends Error {
     readonly code: string,
     readonly correlationId?: string,
     readonly operationId?: string,
-    readonly uncertain = false
+    readonly uncertain = false,
+    options?: ErrorOptions
   ) {
-    super(code);
+    super(code, options);
   }
 }
 
@@ -19,10 +20,15 @@ export class ControlClient {
   private readonly reads = new ControlReads((path, signal) => this.request(path, undefined, signal));
   clearPrepared(): void { this.reads.clear(); }
   invalidatePrepared(): void { this.reads.invalidatePrepared(); }
-  prepareRead<T = unknown>(path: string, signal: AbortSignal, decode?: Decoder<T>): Promise<T> {
-    return this.reads.prepare(path, signal, decode);
+  invalidateDirectories(): void { this.reads.invalidateDirectories(); }
+  readEditorDirectory<T>(name: EditorDirectory, scope: string, reusable: boolean, decode: Decoder<T>, signal: AbortSignal): Promise<T> {
+    return this.reads.readDirectory(name, scope, reusable, decode, signal);
+  }
+  prepareRead<T = unknown>(path: string, signal: AbortSignal, decode?: Decoder<T>, directoryScope?: string): Promise<T> {
+    return this.reads.prepare(path, signal, decode, directoryScope);
   }
   private token = '';
+  private authority = new AbortController();
   private writes = 0;
   private exitBlocked = false;
   private restarting = false;
@@ -34,6 +40,7 @@ export class ControlClient {
   get pendingWrites(): number {
     return this.writes;
   }
+  get authoritySignal(): AbortSignal { return this.authority.signal; }
   setExitBlocked(value: boolean): void { this.exitBlocked = value; }
   private requireWrite(): void {
     if (this.exitBlocked) throw new ControlFailure(409, 'desktop_exit_in_progress');
@@ -43,6 +50,8 @@ export class ControlClient {
     return this.writes === (this.restarting ? 1 : 0);
   }
   authenticate(token: string): void {
+    this.authority.abort();
+    this.authority = new AbortController();
     this.clearPrepared();
     this.frontendSession.reset();
     this.token = token;
@@ -100,11 +109,13 @@ export class ControlClient {
   async response(path: string, signal?: AbortSignal): Promise<Response> {
     if (!path.startsWith('/control/v1/') || path.includes('..') || path.includes('\\'))
       throw new Error('control_path_invalid');
-    const response = await this.send(new URL(path, this.origin), {
-      headers: this.headers(),
+    const url = new URL(path, this.origin);
+    const headers = this.headers();
+    const response = await readTransport(() => this.send(url, {
+      headers,
       cache: 'no-store',
       ...(signal ? { signal } : {})
-    });
+    }), signal);
     if (!response.ok) throw await this.failure(response);
     return response;
   }
@@ -124,8 +135,8 @@ export class ControlClient {
         if (!response.ok) throw await this.failure(response, operationId);
         return JSON.parse(new TextDecoder().decode(await boundedBytes(response, 1048576)));
       } catch (error) {
-        if (error instanceof ControlFailure) throw error;
-        throw new ControlFailure(0, 'write_outcome_unknown', undefined, operationId, true);
+        if (error instanceof ControlFailure && error.status !== 0) throw error;
+        throw new ControlFailure(0, 'write_outcome_unknown', undefined, operationId, true, { cause: error });
       }
     });
   }
@@ -142,16 +153,18 @@ export class ControlClient {
     const deadline = AbortSignal.timeout(path.includes('/frontend/') && path.includes('/invoke/') ? 360000 : 30000);
     if (body !== undefined) headers.set('Content-Type', 'application/json');
     try {
-      const response = await this.send(new URL(path, this.origin), {
+      const url = new URL(path, this.origin);
+      const init: RequestInit = {
         method: body === undefined ? 'GET' : 'POST',
         headers,
         cache: 'no-store',
         ...(body === undefined || body === null ? {} : { body: JSON.stringify(body) }),
         signal: signal ? AbortSignal.any([signal, deadline]) : deadline
-      });
+      };
+      const response = await (isWrite ? this.send(url, init) : readTransport(() => this.send(url, init), signal));
       if (!response.ok) throw await this.failure(response, operationId);
       if (response.status === 204) return null;
-      const text = new TextDecoder().decode(await boundedBytes(response, 16 * 1024 * 1024));
+      const text = new TextDecoder().decode(await boundedBytes(response, 16 * 1024 * 1024, signal));
       try {
         return JSON.parse(text);
       } catch {
@@ -164,14 +177,8 @@ export class ControlClient {
         );
       }
     } catch (error) {
-      if (error instanceof ControlFailure || signal?.aborted && !isWrite) throw error;
-      throw new ControlFailure(
-        0,
-        isWrite ? 'write_outcome_unknown' : 'connection_lost',
-        undefined,
-        operationId,
-        isWrite
-      );
+      if (!isWrite || error instanceof ControlFailure && error.status !== 0) throw error;
+      throw new ControlFailure(0, 'write_outcome_unknown', undefined, operationId, true, { cause: error });
     }
   }
   private async failure(response: Response, operationId?: string): Promise<ControlFailure> {
@@ -189,23 +196,35 @@ export class ControlClient {
   }
 }
 
-export async function boundedBytes(response: Response, maximum: number): Promise<Uint8Array> {
+export async function readTransport<T>(receive: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  signal?.throwIfAborted();
+  try { return await receive(); }
+  catch (error) {
+    signal?.throwIfAborted();
+    if (error instanceof TypeError || error instanceof DOMException && ['NetworkError', 'TimeoutError'].includes(error.name))
+      throw new ControlFailure(0, 'connection_lost', undefined, undefined, false, { cause: error });
+    throw error;
+  }
+}
+
+export async function boundedBytes(response: Response, maximum: number, signal?: AbortSignal): Promise<Uint8Array> {
   const reader = response.body?.getReader();
   if (!reader) return new Uint8Array();
   const chunks: Uint8Array[] = [];
   let size = 0;
+  let failure: unknown;
   try {
     while (true) {
-      const next = await reader.read();
+      const next = await readTransport(() => reader.read(), signal);
       if (next.done) break;
       size += next.value.byteLength;
       if (size > maximum) throw new Error('control_response_limit');
       chunks.push(next.value);
     }
-  } finally {
-    await reader.cancel();
-    reader.releaseLock();
-  }
+  } catch (error) {
+    failure = error;
+    throw error;
+  } finally { await closeResponseReader(reader, failure, signal); }
   const result = new Uint8Array(size);
   let offset = 0;
   for (const chunk of chunks) {
@@ -213,6 +232,16 @@ export async function boundedBytes(response: Response, maximum: number): Promise
     offset += chunk.length;
   }
   return result;
+}
+
+export async function closeResponseReader(reader: ReadableStreamDefaultReader<Uint8Array>, failure: unknown,
+  signal?: AbortSignal): Promise<void> {
+  try { await reader.cancel(); }
+  catch (error) {
+    const cancelled = signal?.aborted && error instanceof Error && error.name === 'AbortError';
+    if (!cancelled && error !== failure && (!(failure instanceof ControlFailure) || error !== failure.cause))
+      console.warn('control_response_cleanup_failed', error instanceof Error ? error.name : typeof error);
+  } finally { reader.releaseLock(); }
 }
 
 export function objectValue(value: unknown): Record<string, unknown> {

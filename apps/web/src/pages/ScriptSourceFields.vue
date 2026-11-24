@@ -29,9 +29,12 @@ const message = computed(() => {
 let owner: AbortController | undefined;
 const identity = () => [props.store.state.capabilities?.instanceId, props.modelValue.id,
   props.modelValue.extensionId, paths.value.root].join('\n');
-watch(identity, (_, previous) => {
-  owner?.abort(); candidates.value = []; busy.value = false; note.value = ''; diagnosticDetails.value = undefined;
-  if (previous) {
+const discoveryScope = () => JSON.stringify([identity(), props.store.state.events?.extensionGeneration,
+  props.store.can('configuration.read'), props.store.can('automation.declare')]);
+watch([identity, discoveryScope], ([key], [previous]) => {
+  owner?.abort(); owner = undefined;
+  candidates.value = []; busy.value = false; note.value = ''; diagnosticDetails.value = undefined;
+  if (previous && previous !== key) {
     paths.value.executable = ''; paths.value.configuration = ''; paths.value.logs = ''; paths.value.arguments = '';
     props.store.drafts.delete(scriptSourceKey(props.modelValue.id));
     emit('update:modelValue', { ...props.modelValue, adapterResources: [] });
@@ -41,10 +44,12 @@ watch(identity, (_, previous) => {
 onBeforeUnmount(() => owner?.abort());
 async function discover(): Promise<void> {
   owner?.abort(); const operation = new AbortController(); owner = operation;
-  const ticket = identity(), root = paths.value.root, extensionId = props.modelValue.extensionId!;
+  const key = discoveryScope(), root = paths.value.root, extensionId = props.modelValue.extensionId!;
+  const current = () => owner === operation && !operation.signal.aborted && discoveryScope() === key;
   busy.value = true; note.value = '';
   try {
-    const installed = await props.store.client.read('/control/v1/extensions', extensionList, operation.signal);
+    const installed = await props.store.readEditorDirectory('extensions', extensionList, operation.signal);
+    if (!current()) return;
     const extension = installed.items.find(item => item.extensionId === extensionId && item.isInstalled &&
       item.desiredEnabled && item.activationId && !item.unavailableReason);
     if (!extension) throw new Error('专项插件尚未就绪。');
@@ -53,10 +58,11 @@ async function discover(): Promise<void> {
       format: 'nexus.control.script-source', version: 1, operationId, extensionId,
       expectedInstalledRevision: extension.installedRevision, rootPath: root, purpose: 'edit'
     }, value => readSource(value, operationId, extensionId, root, extension.installedRevision), operation.signal);
+    if (!current()) return;
     const details = result.diagnostics?.length ? await props.store.client.read(
       '/control/v1/extensions/' + encodeURIComponent(extensionId) + '/details',
       value => extensionDetails(value, extensionId), operation.signal) : undefined;
-    if (operation.signal.aborted || ticket !== identity()) return;
+    if (!current()) return;
     diagnosticDetails.value = details;
     candidates.value = result.candidates!;
     note.value = !candidates.value.length && !result.editor ? result.diagnostics?.[0] || '此目录没有可用的脚本配置。' : '';
@@ -68,12 +74,12 @@ async function discover(): Promise<void> {
       }
     }
   } catch (error) {
-    if (!operation.signal.aborted && ticket === identity()) {
+    if (current()) {
       note.value = error instanceof Error && error.message === 'script_source_root_missing'
         ? '脚本根目录不存在，请选择有效目录后重试。'
         : error instanceof Error ? error.message : '读取失败，请核对脚本目录后重试。';
     }
-  } finally { if (owner === operation) busy.value = false; }
+  } finally { if (current()) { owner = undefined; busy.value = false; } }
 }
 </script>
 <template>

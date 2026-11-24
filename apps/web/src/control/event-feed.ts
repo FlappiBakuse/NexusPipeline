@@ -46,6 +46,10 @@ export class EventFeed {
     this.owner = undefined;
     clearTimeout(this.timer);
   }
+  reset(): void {
+    this.stop();
+    this.current = undefined;
+  }
   private start(): void {
     if (this.owner) return;
     const owner = new AbortController();

@@ -1,3 +1,4 @@
+import type { InjectionKey } from 'vue';
 import {
   ExtensionScope,
   contractFingerprint,
@@ -21,6 +22,8 @@ interface ActiveExtension {
   readonly routes: readonly RouteContribution[];
   readonly localeListeners: Set<(locale: string) => void>;
 }
+
+export const registryKey: InjectionKey<FrontendRegistry> = Symbol('frontend-registry');
 
 export interface FrontendEnvironment {
   readonly locale: string;
@@ -77,7 +80,8 @@ export class FrontendRegistry {
   async activate(
     manifest: ExtensionManifest,
     extension: FrontendExtension,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    confirm?: () => Promise<void>
   ): Promise<ExtensionScope> {
     this.validate(manifest, extension);
     const id = manifest.extensionId;
@@ -171,6 +175,8 @@ export class FrontendRegistry {
       const cleanup = await extension.activate(context);
       if (cleanup) await scope.own(cleanup);
       accepting = false;
+      scope.signal.throwIfAborted();
+      if (confirm) await confirm();
       scope.signal.throwIfAborted();
       this.commit(id, scope, surfaces, routes, styles, localeListeners);
       return scope;

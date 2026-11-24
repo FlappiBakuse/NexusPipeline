@@ -7,10 +7,11 @@ interface HistoryLogPart {
   size: number;
   continues: boolean;
 }
+const textSegmentLimit = 131072;
 
 export async function readHistoryLog(
   client: ControlClient, runId: string, attemptId: string, log: HistoryLog, signal: AbortSignal
-): Promise<string> {
+): Promise<readonly string[]> {
   const { stepId, role, invocationOrdinal } = log.key;
   const base = '/control/v1/records/' + runId + '/attempts/' + attemptId + '/logs/' +
     encodeURIComponent(stepId) + '/' + encodeURIComponent(role);
@@ -55,11 +56,12 @@ function readLogParts(value: unknown, size: number): HistoryLogPart[] {
   return parts;
 }
 
-async function decodeLog(response: Response, parts: HistoryLogPart[], size: number, signal: AbortSignal): Promise<string> {
+async function decodeLog(response: Response, parts: HistoryLogPart[], size: number, signal: AbortSignal): Promise<readonly string[]> {
   const reader = response.body?.getReader();
   if (!reader) throw Error('log_stream_unavailable');
   const decoders = new Map<string, TextDecoder>();
-  const chunks: string[] = [];
+  const segments: string[] = [];
+  let text = '';
   let received = 0;
   let index = 0;
   let remaining = parts[index]?.size ?? 0;
@@ -78,7 +80,11 @@ async function decodeLog(response: Response, parts: HistoryLogPart[], size: numb
         // Transport chunks may span several archive parts from different sources.
         const stream = remaining > 0 || part.continues;
         const decoder = decoders.get(part.source) ?? new TextDecoder();
-        chunks.push(decoder.decode(chunk.value.subarray(offset, end), { stream }));
+        const decoded = decoder.decode(chunk.value.subarray(offset, end), { stream });
+        if (text.length + decoded.length > textSegmentLimit) {
+          segments.push(text);
+          text = decoded;
+        } else text += decoded;
         if (stream) decoders.set(part.source, decoder);
         else decoders.delete(part.source);
         if (remaining === 0) remaining = parts[++index]?.size ?? 0;
@@ -90,5 +96,6 @@ async function decodeLog(response: Response, parts: HistoryLogPart[], size: numb
     reader.releaseLock();
   }
   if (received !== size) throw Error('history_log_size_invalid');
-  return chunks.join('');
+  if (text) segments.push(text);
+  return segments;
 }

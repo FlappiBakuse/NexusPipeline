@@ -8,8 +8,7 @@ import { ControlFailure, integerValue, objectValue } from '../control/client';
 import { validateForm } from '../components/form-validation';
 import { useSettingsSecrets } from './settings-secret-state';
 import { useSettingsSession } from './settings-session';
-import { useSettingsView } from './settings-view-state';
-import { useSettingsCategories } from './settings-categories';
+import { useSettingsView, useSettingsCategories } from './settings-view';
 import SettingsFields from './SettingsFields.vue';
 import SettingsDiagnostics from './SettingsDiagnostics.vue';
 import SettingsUpdates from './SettingsUpdates.vue';
@@ -37,6 +36,8 @@ const categoryOwner = useSettingsCategories(form, categoryIds, view);
 const extensionCategories = categoryOwner.extensions;
 watch(() => [view.state.values.pinnedSettings, view.state.values.collapsedSettings], categoryOwner.synchronize, { flush: 'post' });
 const secrets = reactive(useSettingsSecrets(props, notice));
+const accessToken = computed({ get: () => secrets.token, set: secrets.editToken });
+const proxyPassword = computed({ get: () => secrets.secret, set: secrets.editSecret });
 const panels = computed(() =>
   [...categories].sort(
     (left, right) => Number(view.pinned.includes(right.id)) - Number(view.pinned.includes(left.id))
@@ -142,7 +143,7 @@ async function restart(): Promise<void> {
                 <div class="token-input">
                   <input
                     id="settings-access-token"
-                    :value="secrets.token"
+                    v-model="accessToken"
                     :type="secrets.tokenVisible ? 'text' : 'password'"
                     :placeholder="t('留空不修改')"
                     :disabled="tokenDisabled"
@@ -151,7 +152,6 @@ async function restart(): Promise<void> {
                     autocapitalize="none"
                     spellcheck="false"
                     @focus="secrets.revealToken"
-                    @input="secrets.editToken(($event.target as HTMLInputElement).value)"
                     @blur="secrets.blurToken"
                   />
                   <button type="button" :disabled="tokenDisabled" @pointerdown="preserveTokenFocus" @click="generateToken">
@@ -197,7 +197,7 @@ async function restart(): Promise<void> {
               <span class="field-help-caption"><span>{{ t('密码') }}</span></span>
               <input
                 type="password"
-                :value="secrets.secret"
+                v-model="proxyPassword"
                 :placeholder="t('留空不修改')"
                 :disabled="
                   !secrets.secretReady ||
@@ -207,7 +207,6 @@ async function restart(): Promise<void> {
                 "
                 autocomplete="new-password"
                 @focus="secrets.revealSecret"
-                @input="secrets.editSecret(($event.target as HTMLInputElement).value)"
                 @change="setPassword(($event.target as HTMLInputElement).value)"
               />
               <nexus-toast v-if="visible && secrets.secretError" tone="danger" :message.prop="t(secrets.secretError)" />
@@ -236,4 +235,143 @@ async function restart(): Promise<void> {
   </main>
 </template>
 
-<style scoped src="./settings-page.css"></style>
+<style scoped>
+.settings-page {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+.categories button[aria-expanded='true'] {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--content-control);
+}
+.panel {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+}
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 76px;
+  padding: 16px 24px;
+  text-align: left;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.panel-heading > span {
+  display: grid;
+  gap: 4px;
+}
+.panel-heading strong {
+  font-size: 15px;
+}
+.panel-heading small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.panel-heading:hover { background: transparent; }
+.panel-body {
+  border-top: 1px solid var(--border);
+  padding: 24px;
+}
+.token {
+  display: grid;
+  gap: 16px;
+}
+label,
+.token-field {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.token-input {
+  display: flex;
+  gap: 8px;
+}
+.token-input input {
+  min-width: 0;
+  flex: 1;
+}
+.token-input button {
+  flex-shrink: 0;
+}
+input {
+  min-height: 40px;
+  box-sizing: border-box;
+  font-weight: 400;
+}
+dl,
+dd,
+p {
+  margin: 0;
+}
+.addresses > div {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-height: 34px;
+  border-bottom: 1px solid var(--border);
+}
+dt {
+  width: 94px;
+  color: var(--muted);
+}
+.warning {
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--content-card-soft);
+}
+.warning {
+  border-left: 2px solid var(--warning);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.restart-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.restart-notice p { flex: 1 1 240px; }
+.error {
+  color: var(--nx-color-danger);
+}
+@media (max-width: 600px) {
+  .panel-heading,
+  .panel-body {
+    padding: 16px;
+  }
+  .token-input {
+    flex-wrap: wrap;
+  }
+  .token-input input {
+    flex-basis: 100%;
+  }
+  .addresses > div {
+    align-items: flex-start;
+    padding: 8px 0;
+  }
+}
+
+#settings-extension-panels,
+#settings-extension-panels :deep(.surface-outlet),
+#settings-extension-panels :deep(.surface-outlet-content),
+#settings-extension-panels :deep(.plugin-panel) { display: contents; }
+</style>

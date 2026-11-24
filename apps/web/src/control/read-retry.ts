@@ -1,14 +1,22 @@
 import { ControlFailure } from './client';
 
+export function transientReadFailure(error: unknown): boolean {
+  return error instanceof ControlFailure && !error.uncertain &&
+    (error.status === 0 && error.code === 'connection_lost' || [408, 429, 502, 503, 504].includes(error.status));
+}
+
 export async function retryRead<T>(read: () => Promise<T>, signal: AbortSignal): Promise<T> {
   const delays = [1000, 3000, 10000];
   for (let attempt = 0; ; attempt++) {
     signal.throwIfAborted();
-    try { return await read(); }
+    try {
+      const result = await read();
+      signal.throwIfAborted();
+      return result;
+    }
     catch (error) {
-      const transient = error instanceof TypeError || error instanceof Error && error.message === 'prepared_read_revoked' ||
-        (error instanceof ControlFailure && (error.status >= 500 || [408, 429].includes(error.status)));
-      if (signal.aborted || !transient || attempt >= delays.length) throw error;
+      signal.throwIfAborted();
+      if (!transientReadFailure(error) || attempt >= delays.length) throw error;
       await new Promise<void>((resolve, reject) => {
         const cancel = () => { clearTimeout(timer); reject(signal.reason); };
         const timer = setTimeout(() => { signal.removeEventListener('abort', cancel); resolve(); }, delays[attempt]);

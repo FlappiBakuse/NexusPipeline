@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { fieldHelp as vHelp } from '../components/field-help';
 import { createIdentity } from '../control/identity';
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import type { AutomationBundle } from '../control/wire.generated';
 import { t } from '../app/locale';
 
@@ -9,28 +9,34 @@ type Queue = AutomationBundle['queues'][number];
 const props = defineProps<{ modelValue: Queue; scripts: AutomationBundle['scripts'] }>();
 const emit = defineEmits<{ 'update:modelValue': [value: Queue] }>();
 const rows = ref(props.modelValue.scriptIds.map((scriptId) => ({ id: createIdentity(), scriptId })));
+const scriptOptions = computed(() => props.scripts.map(script => ({ id: script.id, label: script.name })));
 
 watch(
   () => props.modelValue.scriptIds,
   (ids) => {
     if (ids.length === rows.value.length && ids.every((id, index) => id === rows.value[index]?.scriptId))
       return;
-    const previous = [...rows.value];
-    rows.value = ids.map((scriptId) => {
-      const index = previous.findIndex((row) => row.scriptId === scriptId);
-      return index >= 0 ? previous.splice(index, 1)[0]! : { id: createIdentity(), scriptId };
-    });
+    const previous = new Map<string, typeof rows.value>();
+    for (let index = rows.value.length - 1; index >= 0; index--) {
+      const row = rows.value[index]!;
+      const matching = previous.get(row.scriptId);
+      if (matching) matching.push(row);
+      else previous.set(row.scriptId, [row]);
+    }
+    rows.value = ids.map(scriptId => previous.get(scriptId)?.pop() ?? { id: createIdentity(), scriptId });
   }
 );
 
 function publish(): void {
   const scriptIds = rows.value.map((row) => row.scriptId);
+  const positions = new Map<string, number>();
+  scriptIds.forEach((id, index) => { if (!positions.has(id)) positions.set(id, index); });
   const dependencies = props.modelValue.successDependencies
-    ?.filter((item) => scriptIds.includes(item.scriptId))
+    ?.filter((item) => positions.has(item.scriptId))
     .map((item) => ({
       ...item,
       requiredScriptIds: item.requiredScriptIds.filter(
-        (id) => scriptIds.indexOf(id) >= 0 && scriptIds.indexOf(id) < scriptIds.indexOf(item.scriptId)
+        (id) => (positions.get(id) ?? Infinity) < positions.get(item.scriptId)!
       )
     }));
   emit('update:modelValue', {
@@ -59,7 +65,8 @@ function remove(id: string): void {
 
 function reorder(ids: string[]): void {
   if (ids.length !== rows.value.length || new Set(ids).size !== ids.length) return;
-  const next = ids.map((id) => rows.value.find((row) => row.id === id));
+  const indexed = new Map(rows.value.map(row => [row.id, row]));
+  const next = ids.map(id => indexed.get(id));
   if (next.some((row) => !row)) return;
   rows.value = next as typeof rows.value;
   publish();
@@ -80,12 +87,7 @@ function reorder(ids: string[]): void {
           aria-required="true"
           :value.prop="row.scriptId"
           :placeholder="t('请选择脚本实例')"
-          :options.prop="
-            scripts.map((script) => ({
-              id: script.id,
-              label: script.name
-            }))
-          "
+          :options.prop="scriptOptions"
           @nexus-change="choose(row.id, $event.detail.value)"
         />
         <button type="button" class="danger" @click="remove(row.id)">{{ t('删除') }}</button>

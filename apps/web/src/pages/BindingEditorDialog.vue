@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue';
-import { arrayValue, ControlFailure, integerValue, objectValue, stringValue } from '../control/client';
+import { arrayValue, ControlFailure, integerValue, objectValue, stringValue, type Decoder } from '../control/client';
 import { createIdentity } from '../control/identity';
 import type { AutomationStore } from '../app/store-ports';
 import { registerMessages, t } from '../app/locale';
@@ -41,9 +41,16 @@ const emit = defineEmits<{ close: []; changed: []; draftCandidate: [id: string] 
 const base = '/control/v1/configuration/editor/';
 type Session = ReturnType<typeof readSession>;
 type Option = { id: string; title: string };
-type Pending = { action: 'open' | 'save' | 'cancel' | 'resume'; id: string; candidate?: string };
+type Pending = Readonly<{
+  action: 'open' | 'save' | 'cancel' | 'resume';
+  id: string;
+  route: string;
+  body: Readonly<Record<string, unknown>>;
+  draft: boolean;
+}>;
 const managed = useSurfaceAvailability('automation.binding.editor', () => props.extensionId);
-const scope = configurationDrafts(props.store, props.bindingId).child('binding-editor');
+const configuration = configurationDrafts(props.store, props.bindingId);
+const scope = configuration.child('binding-editor');
 const state = scope.retain('session', () => {
   const value = reactive({
     session: null as Session | null, pending: null as Pending | null, options: [] as Option[],
@@ -89,57 +96,56 @@ function open(candidate?: string): void {
     state.issue = 'configuration_editor_local_required';
     return;
   }
-  void send({ action: 'open', id: createIdentity(), candidate });
+  const id = createIdentity(), draft = props.draftBinding;
+  submit('open', id, base + 'open-binding', {
+    sessionId: id, bindingId: props.bindingId, expectedBindingRevision: props.bindingRevision,
+    expectedScriptRevision: props.scriptRevision, candidateId: candidate,
+    draft: draft ? Object.freeze({ userId: draft.userId, scriptId: draft.scriptId }) : undefined,
+    draftCandidateId: draft?.candidateId
+  });
+}
+
+function submit(action: Pending['action'], id: string, route: string, body: Record<string, unknown>): void {
+  if (state.pending || state.busy) return;
+  void send(Object.freeze({ action, id, route, body: Object.freeze(body), draft: !!props.draftBinding }));
 }
 
 async function send(operation: Pending): Promise<void> {
-  if (state.busy) return;
+  if (state.busy || state.pending && state.pending !== operation) return;
   state.busy = true; state.pending = operation; state.issue = '';
-  const session = state.session;
+  const write = <T>(decode: Decoder<T>) =>
+    props.store.client.write(operation.route, operation.body, decode, operation.id);
   try {
     if (operation.action === 'open') {
-      const response = await props.store.client.write(base + 'open-binding', {
-        sessionId: operation.id, bindingId: props.bindingId, expectedBindingRevision: props.bindingRevision,
-        expectedScriptRevision: props.scriptRevision, candidateId: operation.candidate,
-        draft: props.draftBinding ? { userId: props.draftBinding.userId, scriptId: props.draftBinding.scriptId } : undefined,
-        draftCandidateId: props.draftBinding?.candidateId
-      }, objectValue, operation.id);
-      state.session = response.session == null ? null : readSession(response.session);
-      state.canResume = response.canResume === true;
-      state.options = readOptions(response.options);
-      state.issue = response.issue == null ? '' : stringValue(response.issue);
+      const result = await write(value => {
+        const response = objectValue(value);
+        return { session: response.session == null ? null : readSession(response.session), canResume: response.canResume === true,
+          options: readOptions(response.options), issue: response.issue == null ? '' : stringValue(response.issue) };
+      });
+      Object.assign(state, result);
       state.candidate = '';
-    } else if (session) {
-      const endpoint = base + session.id + '/';
-      const revision = { expectedSessionRevision: session.revision };
-      if (operation.action === 'save') {
-        const response = await props.store.client.write(endpoint + 'save-binding', {
-          ...revision, operationId: operation.id, candidateId: operation.candidate
-        }, objectValue, operation.id);
-        state.session = readSession(response.session);
-        if (typeof response.draftCandidate === 'string') emit('draftCandidate', response.draftCandidate);
-        state.canResume = response.canResume === true;
-        if (response.inspection != null) {
-          const inspection = objectValue(response.inspection);
-          state.issue = stringValue(inspection.issue);
-          state.options = readOptions(inspection.options);
-        }
-      } else if (operation.action === 'resume') {
-        state.session = await props.store.client.write(endpoint + 'resume-binding',
-          { ...revision, nextSessionId: operation.id }, readSession, operation.id);
-        state.canResume = false; state.options = [];
-      } else {
-        state.session = await props.store.client.write(endpoint + 'cancel', {
-          ...revision, format: 'nexus.control.native-editor-finish', version: 1, operationId: operation.id
-        }, readSession, operation.id);
-      }
+    } else if (operation.action === 'save') {
+      const result = await write(value => {
+        const response = objectValue(value);
+        const inspection = response.inspection == null ? null : objectValue(response.inspection);
+        return { session: readSession(response.session), canResume: response.canResume === true,
+          draftCandidate: response.draftCandidate,
+          inspection: inspection && { issue: stringValue(inspection.issue), options: readOptions(inspection.options) } };
+      });
+      state.session = result.session;
+      state.canResume = result.canResume;
+      if (result.inspection) Object.assign(state, result.inspection);
+      if (typeof result.draftCandidate === 'string') emit('draftCandidate', result.draftCandidate);
+    } else {
+      state.session = await write(readSession);
+      if (operation.action === 'resume') { state.canResume = false; state.options = []; }
     }
     state.pending = null;
     if (state.session && ['saved', 'cancelled'].includes(state.session.phase)) {
       const saved = state.session.phase === 'saved';
       state.session = null; state.canResume = false; state.options = [];
       if (saved) {
-        if (!props.draftBinding) configurationDrafts(props.store, props.bindingId).changed();
+        if (!operation.draft) configuration.changed();
         emit('changed');
       }
       emit('close');
@@ -153,8 +159,15 @@ async function send(operation: Pending): Promise<void> {
   } finally { state.busy = false; }
 }
 
-function finish(action: Pending['action'], candidate?: string): void {
-  void send({ action, id: createIdentity(), candidate });
+function finish(action: Exclude<Pending['action'], 'open'>, candidate?: string): void {
+  const session = state.session;
+  if (!session) return;
+  const id = createIdentity(), endpoint = base + session.id + '/';
+  const revision = { expectedSessionRevision: session.revision };
+  if (action === 'save') submit(action, id, endpoint + 'save-binding', { ...revision, operationId: id, candidateId: candidate });
+  else if (action === 'resume') submit(action, id, endpoint + 'resume-binding', { ...revision, nextSessionId: id });
+  else submit(action, id, endpoint + 'cancel',
+    { ...revision, format: 'nexus.control.native-editor-finish', version: 1, operationId: id });
 }
 
 watch(() => [props.visible, managed.value] as const, ([visible]) => {

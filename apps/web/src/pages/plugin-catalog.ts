@@ -2,18 +2,8 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import type { AppStore } from '../app/store';
 import { locale } from '../app/locale';
 import { metadataText, type ExtensionMetadata } from '../control/extension-metadata';
-import { pluginIndex, matchesPlugin, comparePlugins, type PluginIndex } from './plugin-list';
-import {
-  extensionCatalog,
-  extensionDetails,
-  extensionList,
-  releaseSummary,
-  upgradeAvailable,
-  type CatalogEntry,
-  type ExtensionCatalog,
-  type ExtensionDetails,
-  type ExtensionState
-} from '../control/extensions';
+import { extensionCatalog, extensionDetails, extensionList, releaseSummary, upgradeAvailable, type CatalogEntry, type ExtensionCatalog, type ExtensionDetails, type ExtensionDirectory, type ExtensionState } from '../control/extensions';
+import { pinyin } from 'pinyin-pro';
 
 export interface PluginRow {
   extensionId: string;
@@ -53,6 +43,7 @@ export function usePluginBrowser(store: AppStore, visible: () => boolean) {
   const channel = computed(() => store.state.settings?.saved.values.updates.pluginSource || 'stable');
   let owner: AbortController | undefined, detailOwner: AbortController | undefined;
   let loaded = false;
+  let directoryRevision = 0, hasReleaseTrust = false;
   const rows = computed<PluginRow[]>(() => {
     const ids =
       view.value === 'installed'
@@ -155,7 +146,7 @@ export function usePluginBrowser(store: AppStore, visible: () => boolean) {
       if (detailOwner === controller) detailLoading.value = false;
     }
   }
-  async function load(refresh = false): Promise<void> {
+  async function load(refresh = false, directory?: ExtensionDirectory): Promise<void> {
     if (!visible() || !current() || (refresh && !store.can('extensions.write'))) return;
     owner?.abort();
     const controller = new AbortController();
@@ -163,13 +154,12 @@ export function usePluginBrowser(store: AppStore, visible: () => boolean) {
     busy.value = true;
     error.value = '';
     try {
-      const list = await store.client.read('/control/v1/extensions', extensionList, controller.signal);
+      const revision = directoryRevision;
+      const list = directory ?? await store.client.read('/control/v1/extensions', extensionList, controller.signal);
       controller.signal.throwIfAborted();
-      installed.value = list.items;
-      const live = new Set(list.items.filter((item) => item.isInstalled).map((item) => item.extensionId));
-      for (const id of localDetails.keys()) if (!live.has(id)) localDetails.delete(id);
+      if (revision === directoryRevision) observeInstalled(list);
       let next: ExtensionCatalog | null = null;
-      if (list.hasReleaseTrust)
+      if (hasReleaseTrust)
         next = refresh
           ? await store.client.write(
               '/control/v1/extensions/catalog/' + channel.value + '/refresh',
@@ -183,6 +173,7 @@ export function usePluginBrowser(store: AppStore, visible: () => boolean) {
             );
       controller.signal.throwIfAborted();
       if (!current()) return;
+      if (!hasReleaseTrust) next = null;
       if (catalog.value?.identity.sha256 !== next?.identity.sha256) catalogDetails.clear();
       catalog.value = next;
       loaded = true;
@@ -196,6 +187,24 @@ export function usePluginBrowser(store: AppStore, visible: () => boolean) {
     } finally {
       if (owner === controller) busy.value = false;
     }
+  }
+
+  function observeInstalled(list: ExtensionDirectory): void {
+    directoryRevision++;
+    hasReleaseTrust = list.hasReleaseTrust;
+    installed.value = list.items;
+    const live = new Set(list.items.filter((item) => item.isInstalled).map((item) => item.extensionId));
+    for (const id of localDetails.keys()) if (!live.has(id)) localDetails.delete(id);
+  }
+
+  async function adoptDirectory(list: ExtensionDirectory): Promise<void> {
+    if (!visible() || !current()) return;
+    const acquiredTrust = !hasReleaseTrust && list.hasReleaseTrust;
+    observeInstalled(list);
+    if (!list.hasReleaseTrust) { catalog.value = null; catalogDetails.clear(); }
+    if (acquiredTrust && !busy.value) { await load(false, list); return; }
+    if (!rows.value.some(item => item.extensionId === selectedId.value)) selectedId.value = filtered.value[0]?.extensionId || '';
+    if (selectedId.value) await select(selectedId.value);
   }
   watch(view, (next, previous) => {
     Object.assign(states[previous], { search: search.value, kind: kind.value, order: order.value, descending: descending.value });
@@ -251,6 +260,7 @@ export function usePluginBrowser(store: AppStore, visible: () => boolean) {
     details,
     channel,
     select,
+    adoptDirectory,
     load
   };
 }
@@ -265,4 +275,47 @@ export function compatiblePlugin(row: PluginRow, hostVersion: string): boolean {
     if (current[index] !== required[index]) return current[index]! > required[index]!;
   }
   return true;
+}
+
+export interface PluginIndex { raw: string[]; romanized: { full: string; initials: string }[] }
+export interface PluginListRow {
+  extensionId: string; name: string; summary: string; kind: string; artifactName?: string; metadata?: ExtensionMetadata;
+}
+const normalize = (value: string) => value.normalize('NFKC').toLocaleLowerCase('zh-CN');
+const roman = (value: string) => normalize(value).normalize('NFD').replace(/\p{M}/gu, '').replace(/ü/g, 'v').replace(/[\s\-_.·'’]+/g, '');
+const han = /\p{Script=Han}/u;
+const nameOrder = new Intl.Collator('zh-CN-u-co-pinyin', { numeric: true, sensitivity: 'base' });
+export function pluginIndex(row: PluginListRow): PluginIndex {
+  const metadata = row.metadata;
+  const names = metadata ? [metadata.displayName, metadata.gameName,
+    ...Object.values(metadata.locales).flatMap(value => [value.displayName, value.gameName])] : [row.name];
+  names.push(row.extensionId, row.artifactName || '');
+  const raw = [...names, metadata?.summary || row.summary, metadata?.author || '', ...(metadata?.tags || []),
+    ...Object.values(metadata?.locales || {}).map(value => value.summary)].map(normalize);
+  return { raw, romanized: names.filter(name => han.test(name)).map(name => {
+    const syllables = pinyin(name, { type: 'array', toneType: 'none', nonZh: 'consecutive' });
+    return { full: roman(syllables.join('')), initials: roman(syllables.map(value => value[0] || '').join('')) };
+  }) };
+}
+export function matchesPlugin(index: PluginIndex, query: string): boolean {
+  const value = normalize(query.trim());
+  if (!value || index.raw.some(field => field.includes(value))) return true;
+  if (han.test(value)) return false;
+  const compact = roman(value);
+  return !!compact && index.romanized.some(name => name.full.includes(compact) || name.initials.includes(compact));
+}
+export function comparePlugins(left: PluginListRow, right: PluginListRow, field: string, descending: boolean): number {
+  const direction = descending ? -1 : 1;
+  if (field === 'created' || field === 'updated') {
+    const first = left.metadata?.[field === 'created' ? 'createdAt' : 'updatedAt'];
+    const second = right.metadata?.[field === 'created' ? 'createdAt' : 'updatedAt'];
+    if (!first && second) return 1;
+    if (first && !second) return -1;
+    if (first && second) {
+      const order = Date.parse(first) - Date.parse(second);
+      if (order) return order * direction;
+    }
+  }
+  const result = nameOrder.compare(left.name, right.name);
+  return (field === 'name' ? result * direction : result) || left.extensionId.localeCompare(right.extensionId, 'en');
 }

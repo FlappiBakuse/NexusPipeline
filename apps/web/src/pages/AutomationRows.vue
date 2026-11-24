@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { AutomationEntity, ScriptDraft, UserDraft } from '../app/automation-draft';
-import { scriptIcon } from './script-icons';
+import { extensionIcon as scriptIcon } from '../control/extension-icons';
 import type { AutomationStore } from '../app/store-ports';
 import type { AutomationBundle } from '../control/wire.generated';
 import ExtensionOutlet from '../extensions/ExtensionOutlet.vue';

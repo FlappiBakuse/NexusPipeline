@@ -1,5 +1,20 @@
 import { arrayValue, integerValue, objectValue, stringValue } from '../control/client';
-import type { RecordSummary, RecordTotals } from './dashboard-types';
+
+export interface RecordTotals {
+  runs: number;
+  succeeded: number;
+  failed: number;
+  cancelled: number;
+  unverified: number;
+  measuredCount: number;
+  measuredMilliseconds: number;
+  lowerBoundCount: number;
+  unknownDurationCount: number;
+}
+export interface RecordSummary {
+  totals: RecordTotals;
+  days: { date: string; totals: RecordTotals }[];
+}
 
 export function dashboardSummary(value: unknown): RecordSummary {
   const row = objectValue(value);
