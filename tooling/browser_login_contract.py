@@ -5,7 +5,7 @@ import re
 
 
 def generate(root):
-    source = (root / "src/core/Desktop/BrowserValueRules.cs").read_text(encoding="utf-8")
+    source = (root / "src/core/Desktop/BrowserLoginPolicy.cs").read_text(encoding="utf-8")
     values = dict(re.findall(r"internal const int (Maximum\w+) = (\d+);", source))
     names = ("MaximumValueLength", "MaximumTotalLength", "MaximumValues", "MaximumJsonDepth")
     if set(values) != set(names):

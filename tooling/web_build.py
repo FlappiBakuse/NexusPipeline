@@ -92,7 +92,7 @@ def build_web(root, output, update_lock=False, source=None, prepare_only=False):
         node = shutil.which("node")
         if not prepare_only:
             commands.extend([
-                ("lint", [node, str(frozen / "tooling/frontend_names.mjs"), "--root", str(frozen), "--modules", str(project / "node_modules")]),
+                ("lint", [node, str(frozen / "tooling/frontend_syntax.mjs"), "--root", str(frozen), "--modules", str(project / "node_modules")]),
                 ("lint", [node, str(frozen / "tooling/frontend_theme.mjs"), "--root", str(frozen)]),
                 ("lint", [node, str(frozen / "tooling/frontend_boundaries.mjs"), "--root", str(frozen), "--modules", str(project / "node_modules"), "--output", str(run / 'boundaries.json')]),
                 ("typecheck", [node, str(project / "node_modules/vue-tsc/bin/vue-tsc.js"), "--noEmit"]),

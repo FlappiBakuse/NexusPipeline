@@ -40,7 +40,7 @@ internal static class SourceBoundaries
             var configurationEvidence = source.StartsWith("src/platform/Storage/Configuration/", StringComparison.Ordinal) &&
                 Path.GetFileName(source) is "ConfigurationRunBinding.cs" or "ConfigurationRunStore.cs" or "ConfigurationRunController.cs" or
                     "ConfigurationRunInventory.cs" or "ConfigurationRunProgress.cs" or "EditOutputRecorder.cs" or "RunStopEvidence.cs" or
-                    "RunCompletionService.cs" or "RunRecoveryBinding.cs" or "SnapshotCompletionOwner.cs" or "SnapshotCompletionPreflight.cs";
+                    "RunCompletionService.cs" or "RunRecoveryBinding.cs" or "SnapshotCompletion.cs";
             if (!source.EndsWith(".g.cs", StringComparison.Ordinal) &&
                 (source.StartsWith("src/", StringComparison.Ordinal) || source.StartsWith("apps/host/", StringComparison.Ordinal)))
                 foreach (var comparison in syntax.DescendantNodes().OfType<BinaryExpressionSyntax>())
@@ -57,7 +57,7 @@ internal static class SourceBoundaries
                 var name = method?.Identifier.ValueText;
                 if (name is "GetService" or "GetRequiredService" or "GetServices")
                 {
-                    var logging = source == "apps/host/Control/Http/ControlExceptionBoundary.cs" && method is GenericNameSyntax generic &&
+                    var logging = source == "apps/host/Control/Http/ControlErrors.cs" && method is GenericNameSyntax generic &&
                         generic.TypeArgumentList.Arguments.Count == 1 && generic.TypeArgumentList.Arguments[0].ToString() == "ILoggerFactory";
                     if (!logging && !source.StartsWith("apps/host/Composition/", StringComparison.Ordinal))
                         Error("NO_SERVICE_LOCATOR", invocation, name);

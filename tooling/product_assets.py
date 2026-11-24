@@ -17,7 +17,7 @@ from product_assembly import owned_inventory
 from initial_extensions import from_assembly, records
 from source_snapshot import write_json
 import update_recipe
-from installer_runtime import render_runtime
+from installer_lifecycle import render_runtime
 from installer_lifecycle import render_lifecycle
 
 

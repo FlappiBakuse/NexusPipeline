@@ -15,7 +15,7 @@ from source_snapshot import write_json
 def prepare_bundles(source, build_root, run_root, methods):
     required = {'NexusPipeline.StorageTests.MaintenanceContentTests.PinsVerifiedContents'} | {
         'NexusPipeline.StorageTests.MaintenanceBinaryTests.' + name for name in (
-            'RestoresFailedCandidate', 'RestoresDerivedPayload', 'CommitsPreparedCandidate',
+            'RestoresFailedCandidate', 'RestoresDerivedPayload', 'CommitsPreparedCandidate', 'RejectsUnconfirmedParentStop',
             'ConsumesStartupUpdate', 'ConsumesDeferredStartup', 'RestartsOwnedDesktop')}
     if not any(required_method == selected or required_method.startswith(selected + '.')
                for required_method in required for selected in methods):

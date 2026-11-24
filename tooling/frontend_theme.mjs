@@ -26,7 +26,7 @@ for (const file of files(path.join(root, 'apps/web/src'))) {
 for (const prefix of ['appearance', 'theme'])
   for (const color of ['accent', 'surface', 'text', 'muted', 'border', 'danger']) defined.add(`--_nexus-${prefix}-color-${color}`);
 const consumers = ['AttemptLogs.vue', 'AdapterEditorPanel.vue', 'BindingTaskPlan.vue', 'TaskCards.vue', 'TaskSummary.vue',
-  'settings-page.css'].map(file => path.join(root, 'apps/web/src/pages', file));
+  'SettingsPage.vue'].map(file => path.join(root, 'apps/web/src/pages', file));
 if (options.has('--plugins-root')) consumers.push(path.join(path.resolve(options.get('--plugins-root')),
   'plugins/managed/frontend-ui/src/style.css'));
 const errors = consumers.flatMap(file => [...text(file).matchAll(/var\(\s*(--[\w-]+)/g)]

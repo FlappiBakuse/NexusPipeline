@@ -168,7 +168,8 @@ def solution_inputs(root, profile, environment=None, projects=None, source_recor
     else:
         records = file_records(root, paths)
     fixture_records = []
-    supplied = (environment or os.environ).get("NexusPluginFixturesRoot")
+    fixture_variable = "NEXUSPLUGINFIXTURESROOT" if os.name == "nt" else "NexusPluginFixturesRoot"
+    supplied = (os.environ if environment is None else environment).get(fixture_variable)
     fixture_kinds = {"OwnedWriter": "owned-writer", "AndroidTool": "android-tool", "NexusPipeline.StorageTests": "storage"}
     if supplied and any(path.stem in fixture_kinds for path in visited):
         fixture_root = Path(supplied).resolve(strict=True)
@@ -209,8 +210,7 @@ def web_inputs(root, environment=None):
              if path.is_file() and path.suffix != ".md"}
     paths.update(root / 'apps/desktop' / name for name in ('startup-content.css', 'nexuspipeline.ico'))
     paths.update(python_inputs(root, ["web_build.py"]))
-    paths.update(root / "tooling" / name for name in ("frontend_names.mjs", "frontend_boundaries.mjs",
-                                                     "frontend-exceptions.json", "generated_sources.json"))
+    paths.update(root / "tooling" / name for name in ("frontend_syntax.mjs", "frontend_boundaries.mjs", "generated_sources.json"))
     value = {"algorithm": "nexus-web-inputs-v2", "files": file_records(root, paths),
              "node": runtime_identity("node"), "context": web_context(environment)}
     return {**value, "sha256": digest(json.dumps(value, sort_keys=True, separators=(",", ":")).encode())}

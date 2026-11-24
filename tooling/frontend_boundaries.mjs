@@ -57,7 +57,7 @@ function rule(source, target, typeOnly) {
   if (source === base + 'components/LiveLogPanel.vue' &&
       (appStore || destination === 'control/client.ts' || destination === 'control/live-logs.ts' && !typeOnly))
     return 'LIVE_LOG_SUBSCRIPTION_REQUIRED';
-  if (['pages/NotificationEditor.vue', 'pages/notification-commands.ts', 'pages/notification-credentials.ts']
+  if (['pages/NotificationEditor.vue', 'pages/notification-commands.ts']
     .includes(source.slice(base.length)) && appStore)
     return 'NOTIFICATION_EDITOR_PORT_REQUIRED';
   if (source.startsWith(base + 'control/') && /^(pages|components|extensions|app)\//.test(destination)) return 'CONTROL_DIRECTION';
@@ -67,7 +67,7 @@ function rule(source, target, typeOnly) {
     return 'PUBLIC_SURFACE_ONLY';
   if (source.startsWith(base + 'app/') && destination.startsWith('extensions/')) {
     if (destination === 'extensions/ExtensionOutlet.vue') return undefined;
-    if (source === base + 'app/App.vue' && ['frontend-registry.ts', 'frontend-loader.ts', 'registry-context.ts', 'SurfaceOutlet.vue']
+    if (source === base + 'app/App.vue' && ['frontend-registry.ts', 'frontend-loader.ts', 'SurfaceOutlet.vue']
       .some(name => destination === 'extensions/' + name)) return undefined;
     if (source === base + 'app/interface-preparation.ts' && typeOnly &&
         ['frontend-loader.ts', 'frontend-registry.ts'].some(name => destination === 'extensions/' + name)) return undefined;

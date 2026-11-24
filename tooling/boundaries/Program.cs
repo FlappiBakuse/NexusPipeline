@@ -2,8 +2,6 @@ using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 using System.Text.Json;
 
-if (args.Length == 3 && args[0] == "--source-names")
-    return SourceNames.Verify(args[1], args[2]);
 if (args.Length == 2 && args[0] == "--source-boundaries")
     return SourceBoundaries.Verify(args[1]);
 

@@ -13,7 +13,6 @@ from source_snapshot import ALGORITHM, digest, export_source, source_files, writ
 from source_evidence import preserve_source
 from frozen_build import save_build, compile_receipt
 from build_inputs import solution_inputs, project_inputs
-from source_names import verify_names
 from source_checks import check_source
 from dotnet_sdk import resolve_sdk, sdk_environment, sdk_key
 from sdk_locks import prepare_locks, lock_arguments
@@ -179,7 +178,6 @@ def build_product(root, output, profile, projects=None):
     compile_code = code
     lock_arguments(locks)
     source_check = None
-    names = None
     if code == 0:
         try:
             code = check_source(source_root, source_records)
@@ -188,9 +186,6 @@ def build_product(root, output, profile, projects=None):
             code = 1
             source_check = {"exitCode": code, "error": str(error)}
             print(f"ERROR: {error}", file=sys.stderr, flush=True)
-    if code == 0:
-        names = verify_names(source_root, output, run_root, env, source_records, sdk['path'])
-        code = names["exitCode"]
     boundaries = None
     if code == 0:
         boundary_command = [sdk['path'], str(output / "build/bin/NexusPipeline.Boundaries/release/NexusPipeline.Boundaries.dll"),
@@ -212,7 +207,7 @@ def build_product(root, output, profile, projects=None):
     sdk_api = {"command": api_command, "exitCode": api_code, "nativeLog": str(run_root / "sdk-api.log")}
     receipt = {
         "responsibilities": {
-            "lint": {"status": lint_status, "sourceCheck": source_check, "sourceNames": names,
+            "lint": {"status": lint_status, "sourceCheck": source_check,
                      "sourceBoundaries": boundaries, "sdkApi": sdk_api},
             "typecheck": {"status": "PASS" if compile_code == 0 else "FAIL", "evidence": str(run_root / "build.log")},
             "test": {"status": "NOT_RUN"},
@@ -221,7 +216,6 @@ def build_product(root, output, profile, projects=None):
         "compileExitCode": compile_code,
         "web": web_receipt,
         "sdkApi": sdk_api,
-        "sourceNames": names,
         "sourceBoundaries": boundaries,
         "status": "PASS" if code == 0 else "FAIL", "profile": profile,
         "runId": run_id, "nativeLog": str(run_root / "build.log"),
