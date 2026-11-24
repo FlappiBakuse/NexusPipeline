@@ -51,7 +51,7 @@ python -B tooling/nexus.py check --scope source
 python -B tooling/nexus.py check --scope contracts
 ```
 
-源码检查对手写文本统一执行每文件 800 个物理行的上限。PR 优先复用原生构建中的源码检查，其余范围独立检查一次。已登记的生成物由原生产者校验。历史 SQL 夹具按其来源登记核对原始字节，新手写 SQL 适用常规检查。
+源码检查验证文本格式、Python 语法、登记的生成物和历史 SQL 夹具原字节。PR 优先复用原生构建中的源码检查，其余范围独立检查一次。前端构建另验证 TS/Vue 语法、组件依赖边界和类型。命名及文件职责由代码审查检查。
 
 按改动选择，契约完全未变不为了凑四项而重复跑契约生成检查。schema 或生成权威确实变更时，代码阶段使用 canonical generator 更新必要源文件，再在统一阶段检查一致性。不能通过修改生成物或旧指纹让验证阶段悄悄改变源码。
 
@@ -121,6 +121,8 @@ python -B tooling/nexus.py product-publish --build-root $NexusBuildRoot --output
 python -B tooling/nexus.py product-assemble --publication-root '<本次实际 publicationRoot>' --output 'C:\NexusWork\nexus-validation\application' --bundle-root '<本次已验证插件 bundle 的绝对路径>'
 ```
 
+本机完整验收发布追加 `--acceptance`，并使用同源 SDK 构建的 Test 信任签名插件包。保留装配回执、候选包清单和实际运行结果，分别记录默认选入与另外安装的插件。
+
 尖括号是必须替换的显式输入，publicationRoot 从真实回执取得，不猜最新目录。完整产品任务需要实际软件；纯规则或文档改动不自动 publish 整个产品。Test 与 Production 结果分开；只有权限清单、发行入口或对应交付任务需要时补生产范围，不能借本地 Test 信任执行正式发布。
 
 ## 发布产物与工具链验证
@@ -157,4 +159,4 @@ python -B tooling/asset_qualification.py --assets-receipt <assets-receipt.json> 
 
 SDK 独立消费者只编译真实公开类型及调用，归 typecheck；不执行自造 DTO 往返或反射方法存在性断言。SDK 默认打包入口另执行前端生命周期行为测试；`--compile-only` 跳过该行为测试。回执的 `runtimeConsumers` 固定为 NOT_RUN，`lifecycle` 按实际执行记录，`validationMode` 为 compile-only 或 lifecycle。包内容、来源与消费者使用的实际 SDK 身份继续核验。
 
-命名检查归 lint，规则与逐项例外见[命名规范](naming.md)。
+命名、功能内聚和阅读成本按[命名与文件组织](naming.md)审查。

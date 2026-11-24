@@ -15,7 +15,7 @@
 
 ## 工程要求
 
-架构边界见[系统架构](docs/architecture/overview.md)，用例归属见[Storage owner](docs/architecture/storage-owners.md)，命名及例外见[命名规范](docs/development/naming.md)。注释解释代码不易表达的原因；长期文档只描述最终行为与仍有效的设计背景。
+架构边界见[系统架构](docs/architecture/overview.md)，用例归属见[Storage owner](docs/architecture/storage-owners.md)，文件职责、命名和阅读成本见[命名与文件组织](docs/development/naming.md)。注释解释代码不易表达的原因；长期文档只描述最终行为与仍有效的设计背景。
 
 依赖、缓存、构建、测试实例和报告使用显式仓外路径，用户数据与测试夹具分离。生成输出用现役 producer；常规开发使用仓内依赖锁。只有明确的依赖更新任务才使用[锁更新命令](docs/reference/commands.md#工具链与依赖锁)。
 

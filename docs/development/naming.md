@@ -1,23 +1,15 @@
-# 手写代码命名
+# 命名与文件组织
 
-手写文件和声明最多四个英文词；含检查器完整介词词元时最多五词，六词超限。PascalCase、camelCase、snake_case 和连字符使用相同分词口径，标准接口 I 前缀单列。`Async`、`Tests`、`Fixture`、`Is`、`Has`、`Can` 都计词。
+名称说明对象的业务职责、操作或持有范围。目录和命名空间提供共同语境，方法名表达可观察动作。保留标准缩写、产品名称、公开 SDK 名称、序列化字段、原生签名与动态注册入口。
 
-介词按显式词表匹配，例如 `within` 命中，`input` 中的 `in` 不命中。HTTP、JSON、SQL 等标准缩写与 MuMu 等品牌沿检查器现有拆分处理，不造缩写规避规则。
+同一用例的规则、私有数据及持久化读写可以放在同一文件。事务、权限、异步和资源所有权边界通过类型与方法表达。超过 800 个物理行的文件或超过 100 行的函数应审查职责、导航与测试成本，决定是否拆分。行数和词数用于审查讨论，源码工具检查文本、语法、来源与依赖边界。
 
-目录和命名空间表达上下文，方法表达核心动作；测试场景写在参数、docstring 或 DisplayName。注释说明非显然原因。
+## 记录阅读成本
 
-## 代码权威与例外
+为变更选定一个具体场景与公开入口。按实际调用顺序记录为理解规则、错误和结果而打开的必要文件，重复打开同一路径只计一份。另列实际修改的路径和必须跳到其他文件的调用点，分别标明产品代码、生成器、测试以及跨仓消费者。前后用同一场景和入口复核，记录遇到的重复规则与错误定位路径。
 
-| 范围 | 检查器 |
-|---|---|
-| 文件、Python AST 声明 | [source_names.py](../../tooling/source_names.py)、[source_checks.py](../../tooling/source_checks.py) |
-| C# 类型、方法和局部函数 | [SourceNames.cs](../../tooling/boundaries/SourceNames.cs) |
-| TS/Vue/桌面声明 | [frontend_names.mjs](../../tooling/frontend_names.mjs) |
+## 保护边界
 
-生成文件只按现役 producer 的精确输出集合排除，字节仍需匹配生成器。固定 SDK/系统签名、override 和 native entrypoint 使用逐项例外，索引为 [naming-exceptions.json](../../tooling/naming-exceptions.json)，前端为 [frontend-exceptions.json](../../tooling/frontend-exceptions.json)。例外限定文件、名称、类别、数量与原因；不设整目录手写豁免。
+生成物通过权威生产者更新，现役工具核对字节。Python 与 TS/Vue 保留语法检查，C# 保留编译、架构验证和 SDK 公共表面核对。公开合同或 ABI 的改动需要实际消费者验证。
 
-## 测试身份
-
-选择测试使用完整命名空间、类和方法，以实际原生发现与 runner 参数为准。保留零选择、失败、异常 skip、取消、超时与缺报告检查；不维护第二份全量方法/参数数量清单。原始历史回执保持自己的身份。
-
-执行入口见[验证规范](validation.md)，文件行数边界由 [AGENTS](../../AGENTS.md) 和现役 source checker 维护。
+测试使用完整命名空间、类和方法进行发现与选择。零选择、异常跳过、失败、取消、超时和缺报告依然由验证入口检查。历史回执保留原执行身份。见[验证规范](validation.md)。

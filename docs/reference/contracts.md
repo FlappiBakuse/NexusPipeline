@@ -1,8 +1,7 @@
 # 新契约与 SDK
 
-`contracts/schemas` 是自有 JSON 格式的权威源，`protocol-catalog.json` 登记格式与实施状态。
-自有格式从整数版本 1 开始；Host 0.18.0、插件 0.5.0 与 SDK 0.1.0 各自独立。
-没有 schema 或运行用例的目录项不能视为已经实现。
+自有 JSON 格式以 [contracts/schemas](../../contracts/schemas) 中的 schema 为权威，HTTP 入口由 [OpenAPI](../../contracts/openapi.json) 定义。持久格式的读写规则和错误由对应运行 owner 维护。
+自有格式从整数版本 1 开始。Host 应用、官方插件包和 SDK 各自维护版本。
 
 ```text
 python tooling/contract_codegen.py

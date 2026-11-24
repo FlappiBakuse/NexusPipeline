@@ -48,7 +48,7 @@
 | 判定脚本与探测 | [判定](reference/judgement.md) | `src/platform/Execution/Judgement` |
 | Android 目标 | [模拟器目标](reference/emulator-targets.md) | `Storage/Emulation`；厂商规则归 Plugins |
 | 工具参数与依赖锁 | [命令参考](reference/commands.md) | `tooling`、`global.json`、原生锁 |
-| 命名与例外 | [命名规范](development/naming.md) | Python / C# / TS AST 检查器 |
+| 命名与文件组织 | [开发规范](development/naming.md) | 功能内聚、阅读成本、语法及契约门禁 |
 
 ## 决策与版本
 

@@ -37,3 +37,5 @@ Core 不引用这两种 wire DTO，控制面类型不默认成为插件 API。
 独立 SDK 消费者编译归类型检查；运行消费者、前端生命周期和受公共变化影响的加载/拒绝路径按[验证范围](../development/validation.md#sdk-消费者与命名职责)选择，回执记录实际执行结果。
 
 编译任务的有限重复由 `task.repetitionLimit` 声明，观察返回 `completedRepetitions`；本次续跑起点由 Host 在观察请求和执行项目 selection 的 `repetitionOffsets` 中提供。worker 必须核对任务身份、原总次数和已完成次数，仅执行剩余次数，并保留原绝对次数编号。
+
+原版进程任务在 `task.projection.repetitionSelector` 声明与选择开关处于同一配置资源的总次数字段。Host 使用前次的完整观察计算并临时投影剩余次数。适配器用 `repetitionOffsets` 复核本次原生终态并报告累计完成次数。
