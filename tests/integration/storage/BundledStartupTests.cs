@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.IO.Compression;
@@ -176,16 +177,38 @@ public sealed class BundledStartupTests
     {
         using var emulator = new BuiltExtensionInputs("emulator-support", "NEXUS_FORMAL_EMULATOR_PACKAGE_RECEIPT");
         using var screenshot = new BuiltExtensionInputs("live-screenshot", "NEXUS_PACKAGED_SCREENSHOT_RECEIPT");
-        await using var host = new FrontendHostFixture();
-        await Assert.ThrowsAsync<IOException>(() => host.StartAsync(emulator, additional: [screenshot], defaultBundle: true,
-            changeInitial: directory =>
-            {
-                var path = Directory.GetFiles(directory, "LiveScreenshot-*.zip").Single();
-                var bytes = File.ReadAllBytes(path); bytes[0] ^= 1; File.WriteAllBytes(path, bytes);
-            }));
+        var host = new FrontendHostFixture();
+        string? changedPath = null;
+        byte[]? changedBytes = null;
+        PhysicalObjectIdentity? changedIdentity = null;
+        await using (host)
+        {
+            await Assert.ThrowsAsync<IOException>(() => host.StartAsync(emulator, additional: [screenshot], defaultBundle: true,
+                changeInitial: directory =>
+                {
+                    changedPath = Directory.GetFiles(directory, "LiveScreenshot-*.zip").Single();
+                    changedBytes = File.ReadAllBytes(changedPath);
+                    changedBytes[0] ^= 1;
+                    File.WriteAllBytes(changedPath, changedBytes);
+                    changedIdentity = PhysicalObjectIdentity.Read(changedPath);
+                }));
+        }
+        var errors = File.ReadAllLines(Path.Combine(host.Root, "frontend-host.stderr.log"));
+        var failure = Assert.Single(errors, line => line.Contains("\"kind\":\"host.startup.failed\"", StringComparison.Ordinal));
+        using var diagnostic = JsonDocument.Parse(failure);
+        Assert.Equal("initial_extensions_package_changed", diagnostic.RootElement.GetProperty("reason").GetString());
+        Assert.NotNull(changedPath);
+        Assert.Equal(changedBytes, File.ReadAllBytes(changedPath));
+        Assert.Equal(changedIdentity, PhysicalObjectIdentity.Read(changedPath));
         Assert.False(Directory.Exists(Path.Combine(host.Root, "runtime", "extensions", "emulator-support")));
         Assert.False(Directory.Exists(Path.Combine(host.Root, "runtime", "extensions", "live-screenshot")));
         Assert.True(Directory.Exists(Path.Combine(host.Root, "host", "package-info", "initial-extensions")));
+        var state = Path.Combine(host.Root, "runtime", "state");
+        using var database = DatabaseConnections.Open(Path.Combine(state, "runtime.db"), readOnly: true,
+            domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions);
+        using var query = database.CreateCommand();
+        query.CommandText = "SELECT (SELECT count(*) FROM main.operations WHERE subject_id='host:initial-extensions' AND operation_kind='extension.apply') + (SELECT count(*) FROM extensions.extension_installations);";
+        Assert.Equal(0L, query.ExecuteScalar());
     }
 
     [Fact]
@@ -203,12 +226,13 @@ public sealed class BundledStartupTests
         Assert.False(removed.GetProperty("isInstalled").GetBoolean());
         Assert.Equal(2, removed.GetProperty("installedRevision").GetInt64());
         Assert.Equal(JsonValueKind.Null, removed.GetProperty("unavailableReason").ValueKind);
+        Assert.Equal(JsonValueKind.Null, removed.GetProperty("activationId").ValueKind);
         await host.ColdRestartAsync();
         using var restarted = Client(host);
         using var again = JsonDocument.Parse(await restarted.GetStringAsync("/control/v1/extensions"));
         var retained = Assert.Single(again.RootElement.GetProperty("items").EnumerateArray(),
             item => item.GetProperty("extensionId").GetString() == "live-screenshot");
-        Assert.Equal(removed.GetRawText(), retained.GetRawText());
+        Assert.True(JsonElement.DeepEquals(removed, retained));
     }
 
     [Theory]
@@ -220,12 +244,29 @@ public sealed class BundledStartupTests
         using var screenshot = new BuiltExtensionInputs("live-screenshot", "NEXUS_PACKAGED_SCREENSHOT_RECEIPT");
         await using var host = new FrontendHostFixture();
         await host.StartAsync(emulator, additional: [screenshot], defaultBundle: true);
+        var scanner = new FileTreeScanner(SnapshotBudget.Default);
+        string? heldExtensions = null;
+        FileTreeSnapshot? heldTree = null;
+        IReadOnlyList<PhysicalTreeObject>? heldObjects = null;
         await host.ChangeStoppedAsync(root =>
         {
             if (parentChanged)
             {
-                Directory.Move(Path.Combine(root, "extensions"), Path.Combine(root, "held-extensions"));
-                Directory.CreateDirectory(Path.Combine(root, "extensions"));
+                var original = Path.Combine(root, "extensions");
+                heldExtensions = Path.Combine(root, "held-extensions");
+                var originalIdentity = PhysicalObjectIdentity.Read(original);
+                var wait = Stopwatch.StartNew();
+                while (true)
+                {
+                    try { Directory.Move(original, heldExtensions); break; }
+                    catch (IOException error) when (error.HResult == unchecked((int)0x80070020) && wait.Elapsed < TimeSpan.FromSeconds(3))
+                    { Thread.Sleep(25); }
+                }
+                Assert.Equal(originalIdentity, PhysicalObjectIdentity.Read(heldExtensions));
+                heldTree = scanner.Capture(heldExtensions, default);
+                heldObjects = PhysicalTreeIdentity.Capture(heldExtensions, heldTree);
+                Directory.CreateDirectory(original);
+                Assert.NotEqual(originalIdentity, PhysicalObjectIdentity.Read(original));
             }
             else File.Delete(Path.Combine(root, "extensions", "live-screenshot", "manifest.json"));
         });
@@ -238,6 +279,17 @@ public sealed class BundledStartupTests
         Assert.Equal(parentChanged ? "extension_directory_unavailable" : "extension_files_changed",
             broken.GetProperty("unavailableReason").GetString());
         Assert.Equal(JsonValueKind.Null, broken.GetProperty("activationId").ValueKind);
+        if (parentChanged)
+        {
+            Assert.NotNull(heldExtensions);
+            Assert.NotNull(heldTree);
+            Assert.NotNull(heldObjects);
+            var retained = scanner.Capture(heldExtensions, default);
+            Assert.Equal(FileObjectKind.Directory, retained.Shape);
+            Assert.Contains(heldTree.Entries, entry => entry.RelativePath == "live-screenshot/manifest.json");
+            Assert.True(heldTree.Entries.SequenceEqual(retained.Entries));
+            Assert.Equal(heldObjects, PhysicalTreeIdentity.Capture(heldExtensions, retained));
+        }
         if (!parentChanged)
         {
             using var settings = JsonDocument.Parse(await client.GetStringAsync("/control/v1/settings"));
@@ -259,6 +311,8 @@ public sealed class BundledStartupTests
             }
             Assert.False(Directory.Exists(Path.Combine(host.Root, "runtime", "extensions", "live-screenshot")));
         }
+        emulator.VerifyUnchanged();
+        screenshot.VerifyUnchanged();
     }
 
     [Theory]
@@ -279,9 +333,19 @@ public sealed class BundledStartupTests
         File.WriteAllBytes(input, JsonSerializer.SerializeToUtf8Bytes(new { Instance = instance, Source = source, HostRoot = host, Report = report, Point = point }));
         catalog.Lease.Dispose();
         using var owner = new OwnedCrashProcess();
-        _ = owner.Start(["initial-extensions-recovery", input], root, instance.InstanceId, Guid.NewGuid(), Path.Combine(root, "native.json"));
-        _ = await owner.ReadReportAsync(report, TimeSpan.FromSeconds(60));
-        Assert.True((await owner.StopAsync()).CompleteJobStopped);
+        var writer = owner.Start(["initial-extensions-recovery", input], root, instance.InstanceId, Guid.NewGuid(), Path.Combine(root, "native.json"));
+        var barrier = await owner.ReadReportAsync(report, TimeSpan.FromSeconds(60));
+        Assert.Equal(instance, barrier.GetProperty("Instance").Deserialize<RuntimeInstance>());
+        Assert.Equal(writer.ProcessId, barrier.GetProperty("processId").GetInt32());
+        Assert.Equal(point, barrier.GetProperty("requestedPoint").GetString());
+        var applied = point == "applied";
+        Assert.Equal(applied ? JournalPhase.Applied : JournalPhase.Committed, (JournalPhase)barrier.GetProperty("phase").GetInt32());
+        Assert.Equal(applied ? "SqlProjectionCommitted" : "JournalFlushed", barrier.GetProperty("persistencePoint").GetString());
+        Assert.NotEqual(Guid.Empty, barrier.GetProperty("journalId").GetGuid());
+        var stopped = await owner.StopAsync();
+        Assert.True(stopped.CompleteJobStopped);
+        Assert.Equal(writer, stopped.Identity);
+        Assert.False(File.Exists(input + ".failure.json"));
         Directory.Delete(source, recursive: true);
         using var lease = InstanceLease.Acquire(instance, new());
         var roots = new PayloadApplyRoots(host, Path.Combine(instance.RuntimeRoot, "extensions"));
@@ -294,7 +358,7 @@ public sealed class BundledStartupTests
         var initializer = new InitialExtensionInstaller(instance, database, lease, new(), roots, resources, recovery, runtime);
         await initializer.InitializeAsync(source, default);
         var installed = runtime.ReadStates();
-        Assert.Equal(2, installed.Count);
+        Assert.Equal(new[] { "emulator-support", "live-screenshot" }, installed.Select(item => item.ExtensionId).Order(StringComparer.Ordinal));
         Assert.All(installed, item => { Assert.True(item.IsInstalled); Assert.True(item.DesiredEnabled); });
         await initializer.InitializeAsync(source, default);
         Assert.Equal(installed.Select(item => (item.ExtensionId, item.InstalledRevision, item.IsInstalled, item.DesiredEnabled)),

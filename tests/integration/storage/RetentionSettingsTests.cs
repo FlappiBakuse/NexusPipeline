@@ -16,6 +16,51 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class RetentionSettingsTests
 {
+    [Theory(DisplayName = "A Real Registered Route Binds Each Claim To Its Saved Target Before An Unknown Outcome")]
+    [InlineData(1)]
+    [InlineData(10)]
+    public async Task ClaimsSavedRouteTargets(int taskCount)
+    {
+        using var fixture = new NotificationReceiptFixture();
+        await fixture.Execute(taskCount: taskCount);
+        var source = fixture.Source;
+        Assert.Equal(1, fixture.Delivery.MaterializePending());
+        var queue = new NotificationRuntimeQueue(source.Instance, source.Database, new());
+        var evidence = new NotificationDeliveryEvidence(source.Instance, source.Database, new());
+        var snapshots = new List<NotificationDeliverySnapshot>();
+        Guid? after = null;
+        while (true)
+        {
+            var page = queue.Read("queued", after);
+            if (page.Count == 0) break;
+            snapshots.AddRange(page.Select(item => evidence.Read(item.Reference)));
+            after = page[^1].Operation;
+        }
+        Assert.Equal(taskCount, snapshots.Count);
+        Assert.Single(snapshots.Select(item => item.Document.Registration).Distinct());
+
+        NotificationDeliveryNetwork network;
+        using (var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true,
+            domains: DatabaseDomain.Runtime | DatabaseDomain.System))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
+            network = DeliveryNetworkEvidence.CaptureCurrent(connection, transaction, source.Instance.InstanceId);
+        var sending = new NotificationSendingStore(source.Instance, source.Database, new(), source.Lease);
+        var first = snapshots[0];
+        var damaged = first with { Document = first.Document with { Body = first.Document.Body + " invalid" } };
+        Assert.ThrowsAny<IOException>(() => sending.Claim(damaged, network));
+        Assert.Equal(taskCount, fixture.Delivery.ReadPendingForRun(fixture.Receipt.Facts.RunId).Queued);
+
+        var claims = snapshots.Select(item => sending.Claim(item, network)).ToArray();
+        Assert.Equal(snapshots.Select(item => item.Document.OperationId), claims.Select(item => item.OperationId));
+        Assert.All(claims, item => Assert.Equal(NotificationDeliveryState.Sending, item.State));
+        Assert.Equal(taskCount, fixture.Delivery.ReadPendingForRun(fixture.Receipt.Facts.RunId).Sending);
+        for (var index = 0; index < claims.Length; index++)
+            sending.Publish(snapshots[index], claims[index], new(NotificationTransportOutcome.Unknown, null));
+        var published = fixture.Delivery.ReadPendingForRun(fixture.Receipt.Facts.RunId);
+        Assert.Equal(taskCount, published.Unknown);
+        Assert.Empty(queue.Read("queued"));
+    }
+
     [Fact(DisplayName = "Unknown Delivery Keeps Its Own Run While Unrelated Expired History Still Retires")]
     public async Task RetiresBesideUnknownDelivery()
     {

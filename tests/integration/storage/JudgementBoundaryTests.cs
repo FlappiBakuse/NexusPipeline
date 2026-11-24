@@ -115,6 +115,10 @@ public sealed class JudgementBoundaryTests
         await using var step = new JudgementOwnedStep(fixture);
         step.Prepare(); step.Start(); await fixture.Ready();
         const long evidenceLimit = 64L * 1024 * 1024;
+        const long finalInvocationReserve = 32L * 1024 * 1024;
+        const long responseReserve = 128L * 1024;
+        const long probeFaultReserve = 328704;
+        const long periodicInputLimit = evidenceLimit - finalInvocationReserve - 2 * (responseReserve + probeFaultReserve);
         var blobs = new ImmutableBlobStore(fixture.Source.Instance, new()); ExecutionJudgementEvidence? exhausted = null;
         var total = fixture.Source.Lease.PublishExecution(() => fixture.State.Total);
         var inputBuilder = new JudgementInputBuilder(fixture.Source.Instance, fixture.Source.Database, new());
@@ -126,9 +130,14 @@ public sealed class JudgementBoundaryTests
             var pending = JudgementEvidenceCodec.Read(blobs, step.Binding, snapshot);
             if (pending.Exchanges.IsEmpty) continue;
             var raw = await step.Collector.SnapshotOutputAsync();
-            var next = inputBuilder.Prepare(total, pending.Identity, raw).MaximumEncodedBytes;
-            if (next > JudgementEvidenceBudget.MaximumInputBytes(evidenceLimit, EvidenceBytes(pending), final: false))
-            { exhausted = pending; break; }
+            var draft = inputBuilder.Prepare(total, pending.Identity, raw);
+            var remaining = periodicInputLimit - EvidenceBytes(pending);
+            if (draft.MaximumEncodedBytes <= remaining) continue;
+            var maximum = draft.Bind(new(pending.Identity.Primary.AttemptId, 4095, false, pending.Identity.OwnerId)) with
+                { ProbeEvidenceAllowance = 16L * 1024 * 1024 };
+            Assert.True(JudgementWorkerProtocol.Encode(maximum).LongLength > remaining);
+            exhausted = pending;
+            break;
         }
         Assert.NotNull(exhausted);
         var prior = exhausted.Exchanges;
@@ -141,6 +150,8 @@ public sealed class JudgementBoundaryTests
         Assert.Equal(prior.Select(item => item.Invocation), final.Exchanges.Take(prior.Length).Select(item => item.Invocation));
         var last = JudgementInvocationArchive.Decode(blobs, final.Exchanges[^1].Invocation);
         Assert.True(last.IsFinal); Assert.Equal(prior.Length + 1L, last.Generation);
+        var escapedLine = string.Concat(Enumerable.Repeat(@"\u003C", 4094)) + @"\n";
+        Assert.Contains(escapedLine, last.Input.GetProperty("log").GetRawText(), StringComparison.Ordinal);
         Assert.Equal(BusinessOutcome.Succeeded, evidence.Business);
         Assert.True(EvidenceBytes(final) <= evidenceLimit);
 

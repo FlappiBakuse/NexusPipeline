@@ -1,0 +1,6 @@
+{
+  "group": "storage-maa-original",
+  "classes": [
+    "NexusPipeline.StorageTests.MaaOriginalProcessRetryTests"
+  ]
+}

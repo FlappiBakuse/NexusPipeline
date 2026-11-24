@@ -50,7 +50,8 @@ public sealed class AndroidScopeTests
         await fixture.ExecuteAsync(async () =>
         {
             await fixture.RunAsync(); var state = fixture.State; var source = fixture.Source;
-            var registration = AndroidControlCodec.Read(state.Latest.Root, state.Total, state.Attempt.ExecutionPlan.Sha256)[0];
+            var registrations = AndroidControlCodec.Read(state.Latest.Root, state.Total, state.Attempt.ExecutionPlan.Sha256);
+            var registration = registrations[0];
             using var scope = new AndroidEvidenceScope(state.Total, source.Database);
             var reader = new AndroidControlEvidence(source.Instance, source.Database, new(), scope);
             var before = reader.Request(state.Total, registration);
@@ -63,10 +64,20 @@ public sealed class AndroidScopeTests
             var originalDigest = reader.Digest(foreign);
             ((IList<NexusPipeline.Extensibility.Protocol.ExecutionPlanRuntimeFile>)foreign.Tool.RuntimeFiles).Clear();
             Assert.NotEqual(originalDigest, reader.Digest(foreign));
+            var next = reader.Request(state, registrations[1]);
+            var predecessor = registrations[1].PreviousObservation;
+            void RequireNext() => AndroidControlSequence.RequireNext(source.Instance, source.Database, new(), state,
+                next, new[] { registration }, predecessor);
+            RequireNext();
             var where = " WHERE operation_id='" + state.Journal.OperationId.ToString("D") + "';";
             fixture.Base.Execute("UPDATE main.operations SET subject_id='changed-current-subject'" + where);
-            try { Assert.Throws<IOException>(() => reader.Request(state.Total, registration)); }
+            try
+            {
+                Assert.Throws<IOException>(() => reader.Request(state.Total, registration));
+                Assert.Throws<IOException>(RequireNext);
+            }
             finally { fixture.Base.Execute("UPDATE main.operations SET subject_id='" + AndroidRuntimeFixture.Subject + "'" + where); }
+            RequireNext();
             Assert.Equal(before, reader.Request(state.Total, registration)); fixture.VerifyOriginal();
         });
     }

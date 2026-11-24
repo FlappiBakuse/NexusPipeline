@@ -152,7 +152,9 @@ public sealed class LocalAuthorizationTests
         {
             use.Start(); Assert.True(entered.Wait(TimeSpan.FromSeconds(10)));
             revoke.Start(); Assert.True(revokeStarted.Wait(TimeSpan.FromSeconds(10)));
-            Assert.False(revoked.Wait(TimeSpan.FromMilliseconds(100)));
+            Assert.True(SpinWait.SpinUntil(() => revoked.IsSet ||
+                (revoke.ThreadState & System.Threading.ThreadState.WaitSleepJoin) != 0, TimeSpan.FromSeconds(10)));
+            Assert.False(revoked.IsSet);
             release.Set(); Assert.True(use.Join(TimeSpan.FromSeconds(10))); Assert.True(revoke.Join(TimeSpan.FromSeconds(10)));
             Assert.Null(useFailure); Assert.Null(revokeFailure); Assert.Equal(1, effects);
             Assert.False(fixture.Authorization.IsApproved(context)); Assert.Equal(0, fixture.Power.Calls);

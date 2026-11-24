@@ -186,11 +186,19 @@ public sealed class ImageRetirementTests
                 var page = fixture.Retire(operation);
                 if (fault == "proof")
                 {
-                    fixture.Fixture.Base.Execute($"UPDATE records.record_content_retirements SET family_digest='{new string('0', 64)}' WHERE operation_id='{operation:D}';");
+                    var captured = File.ReadAllBytes(path);
+                    var identity = PhysicalObjectIdentity.Read(path);
+                    var invalidDigest = new string('0', 64);
+                    fixture.Fixture.Base.Execute($"UPDATE records.record_content_retirements SET family_digest='{invalidDigest}' WHERE operation_id='{operation:D}';");
                     Assert.ThrowsAny<IOException>(() => RecordRetirementInventory.VerifyReadOnly(source.Instance, source.Database, new()));
                     Assert.ThrowsAny<IOException>(() => fixture.Images.OpenOriginal(image.Key, image.ResultSha256));
-                    Assert.True(File.Exists(path));
                     Assert.Equal(FileCleanupResult.Quarantined, fixture.Cleanup(page));
+                    Assert.Equal(captured, File.ReadAllBytes(path));
+                    Assert.Equal(identity, PhysicalObjectIdentity.Read(path));
+                    using var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Records);
+                    using var command = DatabaseConnections.Command(connection, null,
+                        "SELECT family_digest FROM records.record_content_retirements WHERE operation_id=$0;", operation.ToString("D"));
+                    Assert.Equal(invalidDigest, command.ExecuteScalar());
                 }
                 else
                 {

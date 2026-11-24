@@ -17,13 +17,20 @@ internal sealed class NativeHttpFixture : IAsyncDisposable
     private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
     private readonly CancellationTokenSource _stopping = new();
     private readonly ConcurrentBag<Task> _connections = [];
-    private readonly Func<NativeHttpRequest, CancellationToken, Task<NativeHttpReply>> _reply;
+    private readonly Func<NativeHttpRequest, CancellationToken, Task<NativeHttpReply>>? _reply;
+    private readonly TaskCompletionSource<NativeHttpRequest> _pending = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _peerClosed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly X509Certificate2? _certificate;
     private readonly Task _accepting;
     internal ConcurrentQueue<NativeHttpRequest> Requests { get; } = [];
     internal Uri Address { get; }
 
-    internal NativeHttpFixture(Func<NativeHttpRequest, CancellationToken, Task<NativeHttpReply>> reply, bool tls = false)
+    internal Task<NativeHttpRequest> PendingRequest => _pending.Task;
+    internal Task PeerClosed => _peerClosed.Task;
+
+    internal NativeHttpFixture() : this((Func<NativeHttpRequest, CancellationToken, Task<NativeHttpReply>>?)null) { }
+
+    internal NativeHttpFixture(Func<NativeHttpRequest, CancellationToken, Task<NativeHttpReply>>? reply, bool tls = false)
     {
         _reply = reply;
         if (tls)
@@ -81,6 +88,12 @@ internal sealed class NativeHttpFixture : IAsyncDisposable
                     if (colon < 1 || !headers.TryAdd(line[..colon], line[(colon + 1)..].Trim())) throw new InvalidDataException("fixture_headers_invalid");
                 }
                 var request = new NativeHttpRequest(parts[1], headers); Requests.Enqueue(request);
+                if (_reply is null)
+                {
+                    _pending.TrySetResult(request);
+                    await ObservePeerClosingAsync(stream);
+                    return;
+                }
                 var reply = await _reply(request, _stopping.Token);
                 var head = $"HTTP/1.1 {reply.Status} Fixture\r\nContent-Length: {reply.Body.Length}\r\nConnection: close\r\n";
                 if (reply.Headers is not null) head += string.Concat(reply.Headers.Select(header => header.Key + ": " + header.Value + "\r\n"));
@@ -92,6 +105,18 @@ internal sealed class NativeHttpFixture : IAsyncDisposable
             catch (AuthenticationException) when (_certificate is not null) { }
             finally { await stream.DisposeAsync(); }
         }
+    }
+
+    private async Task ObservePeerClosingAsync(Stream stream)
+    {
+        try
+        {
+            var bytes = await stream.ReadAsync(new byte[1], _stopping.Token);
+            if (bytes != 0) throw new IOException("fixture_unexpected_request_body");
+        }
+        catch (IOException error) when (error.InnerException is SocketException
+            { SocketErrorCode: SocketError.ConnectionReset or SocketError.ConnectionAborted }) { }
+        if (!_stopping.IsCancellationRequested) _peerClosed.TrySetResult();
     }
 
     public async ValueTask DisposeAsync()

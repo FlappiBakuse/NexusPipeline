@@ -10,8 +10,10 @@ public sealed class AttemptCoordinatorTests
     {
         var session = new Session(); var result = await new ExecutionAttemptCoordinator().RunAsync(session);
         Assert.Equal(session.Receipt, result);
-        Assert.Equal(new[] { "groups", "prepare:a", "enter:a", "execute:a", "collect:a", "restore:a", "prepare:b", "enter:b", "execute:b",
-            "collect:b", "restore:b", "freeze:Completed", "collectRemaining", "closeSuffix", "applied", "restoreRemaining", "commit:Completed" }, session.Trace);
+        Assert.False(session.RestoredUncollectedStep);
+        Assert.True(session.PreparedSuccessorAfterRestoringPredecessor);
+        Assert.True(session.RestoredBeforePublication);
+        Assert.Equal(ExecutionStopReason.Completed, session.PublishedStop);
     }
 
     [Theory(DisplayName = "Manual Cancellation Before Effect Entry Collects Only Actual Preparation And Never Invents An Entered Step")]
@@ -95,7 +97,13 @@ public sealed class AttemptCoordinatorTests
     private sealed class Session : IExecutionAttemptSession
     {
         private readonly List<string> _stepIds = ["a", "b"];
-        private bool _prepared, _restored;
+        private bool _prepared, _restored, _remainingRestored;
+        private readonly HashSet<string> _collectedSteps = [];
+        private readonly HashSet<string> _restoredSteps = [];
+        internal bool RestoredUncollectedStep { get; private set; }
+        internal bool PreparedSuccessorAfterRestoringPredecessor { get; private set; }
+        internal bool RestoredBeforePublication { get; private set; }
+        internal ExecutionStopReason? PublishedStop { get; private set; }
         internal List<string> Trace { get; } = [];
         internal bool CancelBeforePreparation { get; init; }
         internal bool CancelAfterPreparation { get; init; }
@@ -115,7 +123,12 @@ public sealed class AttemptCoordinatorTests
         public ExecutionStopReason? ReadStopRequest() => InvalidStop ? ExecutionStopReason.Completed :
             CancelBeforePreparation || CancelAfterPreparation && _prepared ? ExecutionStopReason.Cancelled :
             ExhaustAfterFirstRestore && _restored ? ExecutionStopReason.TotalBudgetExhausted : null;
-        public void PrepareNextStep(string stepId) { _prepared = true; Trace.Add("prepare:" + stepId); }
+        public void PrepareNextStep(string stepId)
+        {
+            _prepared = true;
+            if (stepId == "b") PreparedSuccessorAfterRestoringPredecessor = _restoredSteps.Contains("a");
+            Trace.Add("prepare:" + stepId);
+        }
         public void EnterEffect(string stepId) { HasEnteredEffect = true; Trace.Add("enter:" + stepId); }
         public Task<ExecutionStopReason?> ExecuteStepAsync(string stepId, CancellationToken hostStopping)
         {
@@ -124,19 +137,37 @@ public sealed class AttemptCoordinatorTests
             if (StopHostDuringExecution is not null) { StopHostDuringExecution.Cancel(); hostStopping.ThrowIfCancellationRequested(); }
             return Task.FromResult(ExecutionStop);
         }
-        public Task CollectStepAsync(string stepId) { Trace.Add("collect:" + stepId); return Task.CompletedTask; }
+        public Task CollectStepAsync(string stepId)
+        {
+            _collectedSteps.Add(stepId);
+            Trace.Add("collect:" + stepId);
+            return Task.CompletedTask;
+        }
         public Task RestoreStepAsync(string stepId)
         {
+            RestoredUncollectedStep |= !_collectedSteps.Contains(stepId);
             Trace.Add("restore:" + stepId); _restored = true;
             if (FailRestoration) throw new IOException("fixture_restore_failed");
+            _restoredSteps.Add(stepId);
             return Task.CompletedTask;
         }
         public void FreezeDispatch(ExecutionStopReason reason) => Trace.Add("freeze:" + reason);
         public Task CollectRemainingAsync() { Trace.Add("collectRemaining"); return Task.CompletedTask; }
         public void CloseUndispatched() => Trace.Add("closeSuffix");
         public void MarkApplied() => Trace.Add("applied");
-        public Task RestoreRemainingAsync(ExecutionStopReason reason) { Trace.Add("restoreRemaining"); return Task.CompletedTask; }
-        public AttemptReceipt Commit(ExecutionStopReason reason) { Trace.Add("commit:" + reason); return Receipt; }
+        public Task RestoreRemainingAsync(ExecutionStopReason reason)
+        {
+            _remainingRestored = true;
+            Trace.Add("restoreRemaining");
+            return Task.CompletedTask;
+        }
+        public AttemptReceipt Commit(ExecutionStopReason reason)
+        {
+            RestoredBeforePublication = _remainingRestored && _restoredSteps.Contains("a") && _restoredSteps.Contains("b");
+            PublishedStop = reason;
+            Trace.Add("commit:" + reason);
+            return Receipt;
+        }
         public Task QuarantineFailureAsync() { Trace.Add("quarantine"); return Task.CompletedTask; }
     }
 }

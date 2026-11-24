@@ -30,8 +30,13 @@ public sealed class NoEffectTests
         var pending = registry.ReadJournal(fixture.Plan.JournalId);
         Assert.Equal(JournalPhase.Prepared, pending.Phase); Assert.Equal(2, pending.Revision);
         Assert.Equal("accepted", Status());
-        Assert.All(registry.ReadSnapshot().FileEffects.Where(item => item.JournalId == pending.JournalId),
-            item => Assert.Equal(FileEffectState.NotExecuted, item.State));
+        void ReadUnexecutedEffect()
+        {
+            var effect = Assert.Single(new FileEffectOutbox(fixture.Database).Read(pending.JournalId));
+            Assert.Equal(("install-candidate", FileEffectAction.InstallCandidate, FileEffectState.NotExecuted),
+                (effect.StepId, effect.Action, effect.State));
+        }
+        ReadUnexecutedEffect();
         Assert.Contains(registry.ReadSnapshot().Isolations, item => item.JournalId == pending.JournalId);
         Assert.Equal(EffectGateState.Sealed, new JournalEffectGate(fixture.Database).Read(pending.JournalId).State);
         var history = new JournalStore(fixture.Instance, new ContractReader()).ReadAllRevisions(pending.JournalId);
@@ -39,6 +44,7 @@ public sealed class NoEffectTests
         var bytes = history.Select(item => Convert.ToHexStringLower(SHA256.HashData(item.Export()))).ToArray();
         Sql("DROP TRIGGER main.reject_no_effect_operation;");
         Assert.Equal(JournalRecoveryResult.AlreadyCompleted, fixture.Recover());
+        ReadUnexecutedEffect();
         Assert.Equal("completed", Status());
         Assert.Equal(JournalPhase.Committed, registry.ReadJournal(pending.JournalId).Phase);
         Assert.Equal(bytes, new JournalStore(fixture.Instance, new ContractReader()).ReadAllRevisions(pending.JournalId)

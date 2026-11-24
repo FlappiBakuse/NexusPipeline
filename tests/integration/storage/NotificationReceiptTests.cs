@@ -196,6 +196,120 @@ public sealed class NotificationReceiptTests(ITestOutputHelper output)
         Assert.True(fixture.Base.Index.Current.IsReady);
     }
 
+    [Fact(DisplayName = "Each Multi-Target Route Commits Its Exact Prefix And Rolls Back Changed References")]
+    public async Task MaterializesMultiTargetPrefixes()
+    {
+        using var fixture = new NotificationReceiptFixture();
+        await fixture.Execute(taskCount: 10, queueNotifications: false, repetitions: 3);
+        var run = fixture.Receipt.Facts.RunId;
+        Assert.Equal(3, fixture.Snapshot.Document.RouteCount);
+
+        Assert.Equal(1, fixture.Delivery.MaterializePending(1));
+        Assert.Equal(1, fixture.Count("notification_receipt_routes"));
+        Assert.Equal(10, fixture.Count("notification_deliveries"));
+        var first = fixture.Delivery.ReadPendingForRun(run);
+        Assert.False(first.IsExpanded);
+        Assert.Equal(10, first.Queued);
+
+        var firstRoute = PrepareRoute(fixture, 0);
+        Publish(0);
+        Assert.Equal(first, fixture.Delivery.ReadPendingForRun(run));
+        Assert.ThrowsAny<IOException>(() => Publish(0, (connection, transaction) =>
+        {
+            using var command = NotificationDeliveryRows.Command(connection, transaction,
+                "DELETE FROM notifications.notification_receipt_deliveries WHERE delivery_operation_id=$0;",
+                firstRoute.Deliveries[0].Document.OperationId.ToString("D"));
+            Assert.Equal(1, command.ExecuteNonQuery());
+        }));
+        Assert.ThrowsAny<IOException>(() => Publish(2));
+        Assert.Equal(first, fixture.Delivery.ReadPendingForRun(run));
+
+        var selected = fixture.Snapshot.Document.Tasks[0];
+        var other = fixture.Snapshot.Document.Tasks[1];
+        var original = Assert.Single(selected.Secrets.Where(field => field.Payload is not null)).Payload!;
+        var alien = Assert.Single(other.Secrets.Where(field => field.Payload is not null)).Payload!;
+        Assert.NotEqual(original.SecretId, alien.SecretId);
+        fixture.Sql("CREATE TRIGGER notifications.damage_route_refs AFTER INSERT ON notification_receipt_routes " +
+            "WHEN NEW.ordinal=1 BEGIN UPDATE notification_receipt_secrets SET secret_id='" + alien.SecretId.ToString("D") +
+            "' WHERE operation_id=NEW.operation_id AND task_id='" + selected.TaskId.ToString("D") + "' AND field='webhook-url'; END;");
+        try { Assert.ThrowsAny<IOException>(() => fixture.Delivery.MaterializePending(1)); }
+        finally { fixture.Sql("DROP TRIGGER notifications.damage_route_refs;"); }
+        Assert.Equal(1, fixture.Count("notification_receipt_routes"));
+        Assert.Equal(10, fixture.Count("notification_deliveries"));
+        Assert.Equal(first, fixture.Delivery.ReadPendingForRun(run));
+
+        Assert.Equal(1, fixture.Delivery.MaterializePending(1));
+        Assert.Equal(2, fixture.Count("notification_receipt_routes"));
+        Assert.Equal(20, fixture.Delivery.ReadPendingForRun(run).Queued);
+        Assert.Equal(1, fixture.Delivery.MaterializePending(1));
+        fixture.Registration.OnCommitted(fixture.Receipt);
+        Assert.Equal(0, fixture.Delivery.MaterializePending(1));
+        var saved = fixture.Delivery.ReadPendingForRun(run);
+        Assert.True(saved.IsExpanded);
+        Assert.Equal(30, saved.Queued);
+        Assert.Equal(30, fixture.Count("notification_deliveries"));
+
+        void Publish(int ordinal, Action<SqliteConnection, SqliteTransaction>? change = null)
+        {
+            var route = PrepareRoute(fixture, ordinal);
+            fixture.Source.Database.Write((connection, transaction) =>
+            {
+                change?.Invoke(connection, transaction);
+                ReceiptRouteRows.PublishInside(connection, transaction, fixture.Snapshot, route.Document, route.Reference,
+                    route.Deliveries, DateTimeOffset.UtcNow, fixture.Source.Lease.StartupGeneration);
+                return true;
+            });
+        }
+    }
+
+    [Fact(DisplayName = "Materializing A Partly Accepted Route Preserves The Existing Delivery And Fills Its Membership")]
+    public async Task ReusesPartlyAcceptedRoute()
+    {
+        using var fixture = new NotificationReceiptFixture();
+        await fixture.Execute(taskCount: 10);
+        var source = fixture.Source;
+        var route = PrepareRoute(fixture, 0);
+        var prior = route.Deliveries[0];
+        var id = prior.Document.OperationId;
+        var before = source.Database.Write((connection, transaction) =>
+        {
+            NotificationDeliveryRows.AcceptRegisteredInside(connection, transaction, prior, fixture.Snapshot, DateTimeOffset.UtcNow, source.Lease.StartupGeneration);
+            return NotificationDeliveryRows.ReadState(connection, transaction, id);
+        });
+        Assert.Equal(1, fixture.Count("notification_deliveries"));
+        Assert.Equal(0, fixture.Count("notification_receipt_deliveries"));
+
+        Assert.Equal(1, fixture.Delivery.MaterializePending(1));
+        Assert.Equal(10, fixture.Count("notification_deliveries"));
+        Assert.Equal(10, fixture.Count("notification_receipt_deliveries"));
+        var status = fixture.Delivery.ReadPendingForRun(fixture.Receipt.Facts.RunId);
+        Assert.True(status.IsExpanded);
+        Assert.Equal(10, status.Queued);
+        using var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true,
+            domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications);
+        using var transaction = DatabaseConnections.BeginRead(connection);
+        NotificationDeliveryRows.RequireSaved(connection, transaction, prior);
+        ReceiptRouteRows.RequireMembership(connection, transaction, prior);
+        Assert.Equal(before, NotificationDeliveryRows.ReadState(connection, transaction, id));
+        transaction.Commit();
+    }
+
+    private static (ReceiptRouteDocument Document, BlobReference Reference, IReadOnlyList<NotificationDeliverySnapshot> Deliveries)
+        PrepareRoute(NotificationReceiptFixture fixture, int ordinal)
+    {
+        var source = fixture.Source;
+        ReceiptReadContext context;
+        using (var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.All))
+        using (var transaction = DatabaseConnections.BeginRead(connection))
+        {
+            context = new NotificationReceiptCodec(source.Instance, source.Database, new())
+                .ReadContext(fixture.Snapshot.Reference, connection, transaction);
+            transaction.Commit();
+        }
+        var result = new ReceiptRouteCodec(source.Instance, source.Database, new()).Prepare(context, ordinal);
+        return (result.Document, result.Reference, result.Deliveries);
+    }
+
     [Theory(DisplayName = "Actual Delivery Uses The Saved Receipt Locale Even If Settings Change Before Fanout")]
     [InlineData(NexusPipeline.Core.Settings.HostLocale.ZhCn)]
     [InlineData(NexusPipeline.Core.Settings.HostLocale.EnUs)]
@@ -273,20 +387,68 @@ public sealed class NotificationReceiptTests(ITestOutputHelper output)
         Assert.Equal(1, fixture.Count("notification_deliveries"));
     }
 
-    [Fact(DisplayName = "Source And Delivery Reference Handoff Uses One Sql Read Snapshot")]
-    public async Task ReadsCoherentHandoff()
+    [Theory(DisplayName = "Verified Source And Delivery Retain An Old Credential Across Materialization")]
+    [InlineData(1)]
+    [InlineData(10)]
+    public async Task ReadsCoherentHandoff(int taskCount)
     {
-        using var fixture = new NotificationReceiptFixture(); await fixture.Execute(); await fixture.Replace();
-        var sourceCalls = 0; var deliveryCalls = 0; var sourceHeld = false;
-        NotificationReferenceInventory.Visit(fixture.Source.Instance, fixture.Source.Database, new(), (source, expanded, _) =>
+        using var fixture = new NotificationReceiptFixture();
+        await fixture.Execute(taskCount: taskCount);
+        await fixture.Replace();
+        var payload = Assert.Single(fixture.Snapshot.Document.Tasks.Single(task => task.TaskId == fixture.TaskId)
+            .Secrets.Where(item => item.Payload is not null)).Payload!;
+        var instance = fixture.Source.Instance;
+        var database = fixture.Source.Database;
+        var run = fixture.Receipt.Facts.RunId;
+        var source = fixture.Delivery.ReadPendingForRun(run);
+        Assert.True(source.IsRegistered);
+        Assert.False(source.IsExpanded);
+        Assert.Equal(0, fixture.Count("notification_deliveries"));
+        DeliveryReferenceIndex.VerifyReadOnly(instance, database, new());
+        Assert.True(DeliveryReferenceIndex.IsSecretReferenced(instance, database, new(), payload.SecretId, payload.Digest, payload.SizeBytes));
+
+        Assert.Equal(1, fixture.Delivery.MaterializePending());
+        var expanded = fixture.Delivery.ReadPendingForRun(run);
+        Assert.True(expanded.IsExpanded);
+        Assert.Equal(taskCount, expanded.Queued);
+        Assert.Equal(taskCount, fixture.Count("notification_deliveries"));
+        DeliveryReferenceIndex.VerifyReadOnly(instance, database, new());
+        Assert.True(DeliveryReferenceIndex.IsSecretReferenced(instance, database, new(), payload.SecretId, payload.Digest, payload.SizeBytes));
+
+        var lastTarget = $" WHERE task_id='{fixture.TaskIds[^1]:D}';";
+        fixture.Sql("UPDATE notifications.notification_deliveries SET size_bytes=size_bytes+1" + lastTarget);
+        try { Assert.ThrowsAny<IOException>(() => fixture.Delivery.ReadPendingForRun(run)); }
+        finally { fixture.Sql("UPDATE notifications.notification_deliveries SET size_bytes=size_bytes-1" + lastTarget); }
+        Assert.Equal(expanded, fixture.Delivery.ReadPendingForRun(run));
+
+        if (taskCount > 1)
         {
-            sourceCalls++; Assert.False(expanded); sourceHeld = source.Snapshot.Document.Tasks.Any(task => task.Secrets.Any(item => item.Payload is not null));
-            Assert.Equal(1, fixture.Delivery.MaterializePending());
-        }, (_, _) => deliveryCalls++);
-        Assert.Equal(1, sourceCalls); Assert.True(sourceHeld); Assert.Equal(0, deliveryCalls);
-        var payload = Assert.Single(Assert.Single(fixture.Snapshot.Document.Tasks).Secrets.Where(item => item.Payload is not null)).Payload!;
-        Assert.True(DeliveryReferenceIndex.IsSecretReferenced(fixture.Source.Instance, fixture.Source.Database,
-            new(), payload.SecretId, payload.Digest, payload.SizeBytes));
+            var sourceId = fixture.Snapshot.Document.OperationId;
+            BlobReference original;
+            using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true,
+                domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications))
+            using (var transaction = DatabaseConnections.BeginRead(connection))
+            {
+                original = Assert.IsType<BlobReference>(ReceiptRouteRows.Find(connection, transaction, sourceId, 0));
+                transaction.Commit();
+            }
+            var route = new NotificationCatalogCodec(instance, new()).ReadDocument<ReceiptRouteDocument>(original);
+            var first = route.Targets[0];
+            var second = route.Targets[1];
+            Assert.NotNull(first.Delivery);
+            Assert.NotNull(second.Delivery);
+            Assert.NotEqual(first.Delivery, second.Delivery);
+            var swapped = route with { Targets = route.Targets.SetItem(0, first with { Delivery = second.Delivery })
+                .SetItem(1, second with { Delivery = first.Delivery }) };
+            var replacement = new ImmutableBlobStore(instance, new()).PersistPlan(NotificationCatalogCodec.Encode(swapped));
+            StoreRoute(replacement);
+            try { Assert.ThrowsAny<IOException>(() => fixture.Delivery.ReadPendingForRun(run)); }
+            finally { StoreRoute(original); }
+            Assert.Equal(expanded, fixture.Delivery.ReadPendingForRun(run));
+
+            void StoreRoute(BlobReference reference) => fixture.Sql(FormattableString.Invariant(
+                $"UPDATE notifications.notification_receipt_routes SET relative_path='{reference.RelativePath}',size_bytes={reference.SizeBytes},sha256='{reference.Sha256}' WHERE operation_id='{sourceId:D}' AND ordinal=0;"));
+        }
     }
 
     [Fact(DisplayName = "Damaged Source Metadata Is Rejected Before Its Old Credential Can Be Retired")]

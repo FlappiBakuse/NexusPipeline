@@ -48,14 +48,16 @@ public sealed class NotificationPortTests
             var result = await frontend.InvokeAsync("notification-targets", null, "remote:metadata", false, "{}"u8.ToArray(), () => { }, default);
             using var json = JsonDocument.Parse(result.Content);
             Assert.Equal(3, json.RootElement.GetProperty("Revision").GetInt64());
-            var targets = json.RootElement.GetProperty("Items").EnumerateArray().ToArray();
-            Assert.Equal(3, targets.Length);
-            var target = targets.Single(item => item.GetProperty("TaskId").GetGuid() == targetId);
-            Assert.Equal(targetId, target.GetProperty("TaskId").GetGuid()); Assert.Equal("Fixture target", target.GetProperty("Name").GetString());
-            Assert.False(target.GetProperty("IsEnabled").GetBoolean()); Assert.Equal("smtp", target.GetProperty("Kind").GetString());
-            Assert.True(target.GetProperty("IsConfigured").GetBoolean());
-            Assert.All(targets.Where(item => item.GetProperty("TaskId").GetGuid() != targetId),
-                item => Assert.False(item.GetProperty("IsConfigured").GetBoolean()));
+            var targets = json.RootElement.GetProperty("Items").EnumerateArray().Select(item => (
+                Id: item.GetProperty("TaskId").GetGuid(), Name: item.GetProperty("Name").GetString(), Kind: item.GetProperty("Kind").GetString(),
+                Enabled: item.GetProperty("IsEnabled").GetBoolean(), Configured: item.GetProperty("IsConfigured").GetBoolean()));
+            (Guid Id, string? Name, string? Kind, bool Enabled, bool Configured)[] expected =
+            [
+                (targetId, "Fixture target", "smtp", false, true),
+                (incompleteId, "Incomplete SMTP", "smtp", true, false),
+                (webhookId, "Generic webhook", "webhook", true, false)
+            ];
+            Assert.Equal(expected.OrderBy(item => item.Id), targets.OrderBy(item => item.Id));
             var text = Encoding.UTF8.GetString(result.Content.Span);
             foreach (var value in new[] { "synthetic-smtp-secret", "private remark", "fixture.invalid", "Configuration", "SecretId" })
                 Assert.DoesNotContain(value, text, StringComparison.Ordinal);

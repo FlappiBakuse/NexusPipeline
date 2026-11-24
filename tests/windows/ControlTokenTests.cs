@@ -72,17 +72,23 @@ public sealed class ControlTokenTests
             fixture.Index.PublishVerified(blocked.Revision, blocked.Revision + 1, []);
         }));
         await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        var saving = service.ChangeAsync(Guid.NewGuid(), 0, SecretDisposition.Set, value, confirm: false);
-        bool queued;
+        var operation = Guid.NewGuid();
+        var waiting = fixture.Lease.WaitForNextExecutionPublication();
+        var saving = service.ChangeAsync(operation, 0, SecretDisposition.Set, value, confirm: false);
         try
         {
-            queued = SpinWait.SpinUntil(() => fixture.Lease.ExecutionPublicationCount > 1 || saving.IsCompleted,
-                TimeSpan.FromSeconds(5)) && !saving.IsCompleted;
+            Assert.Same(waiting, await Task.WhenAny(waiting, saving).WaitAsync(TimeSpan.FromSeconds(5)));
+            await waiting;
+            Assert.False(saving.IsCompleted);
+            Assert.False(service.ReadOperation(operation)!.IsDurable);
         }
         finally { release.Set(); }
         await publication;
-        Assert.True(queued);
         Assert.Equal(1, (await saving.WaitAsync(TimeSpan.FromSeconds(10))).Revision);
+        var committed = Assert.IsType<ControlTokenOperation>(service.ReadOperation(operation));
+        Assert.Equal(operation, committed.OperationId);
+        Assert.Equal("completed", committed.Status);
+        Assert.True(committed.IsDurable);
     }
 
     [Fact]

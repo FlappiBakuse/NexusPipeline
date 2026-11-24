@@ -15,16 +15,26 @@ namespace NexusPipeline.StorageTests;
 public sealed class MuMuFaultTests
 {
     [Theory(DisplayName = "Only Matching Complete Before And After Observations Can Publish An Image")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task RequiresMatchingObservations(bool changedAfterImage)
+    [InlineData("beforePort")]
+    [InlineData("afterPort")]
+    [InlineData("beforeOffline")]
+    public async Task RequiresMatchingObservations(string fault)
     {
+        var changedAfterImage = fault == "afterPort";
         var fixture = new AndroidRuntimeFixture(mumu: true, pairedCapture: true, capture: true,
             forceClose: false, captureMode: changedAfterImage ? "mappingAfter" : "rgb");
         var observer = new CaptureObserver(point =>
         {
-            if (!changedAfterImage && point == TargetPersistencePoint.CaptureSourcePublished)
+            if (changedAfterImage || point != TargetPersistencePoint.CaptureSourcePublished) return;
+            if (fault == "beforePort")
+            {
                 fixture.ChangeReportedPort(16385);
+                return;
+            }
+            var path = Path.Combine(fixture.Directory, "fixture-device.json");
+            var device = JsonNode.Parse(File.ReadAllBytes(path))!.AsObject();
+            device["online"] = false;
+            File.WriteAllBytes(path, System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(device));
         });
         await RunAsync(fixture, observer, receipt =>
         {
@@ -43,6 +53,17 @@ public sealed class MuMuFaultTests
             Assert.Equal(changedAfterImage, File.Exists(Path.Combine(fixture.ScreenshotDirectory!, "fixture-screenshot.png")));
             if (!changedAfterImage) Assert.False(System.IO.Directory.Exists(Path.Combine(fixture.ScreenshotDirectory!, "observed")));
             Assert.All(saved.Commands, command => Assert.NotNull(command.Observation));
+            if (fault == "beforeOffline")
+            {
+                var mapping = Assert.Single(saved.Commands);
+                var stdout = Assert.Single(mapping.Observation!.StandardOutput.Parts);
+                using var content = new ImmutableBlobStore(fixture.Source.Instance, new()).OpenVerified(stdout);
+                using var parsed = System.Text.Json.JsonDocument.Parse(content);
+                var device = parsed.RootElement.GetProperty("0");
+                Assert.Equal(16384, device.GetProperty("adb_port").GetInt32());
+                Assert.False(device.GetProperty("is_process_started").GetBoolean());
+                Assert.False(device.GetProperty("is_android_started").GetBoolean());
+            }
         });
     }
 

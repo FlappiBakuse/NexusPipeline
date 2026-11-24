@@ -9,11 +9,12 @@ export async function logPanelContract(fixture: HTMLElement, check: (value: unkn
     return () => { owner.released = true; };
   };
   const visible = ref(true);
+  const roles = ref(['main']);
   const identity = ref({ runId: crypto.randomUUID(), attemptId: crypto.randomUUID(), stepId: 'first' });
   const mount = document.createElement('section');
   mount.style.cssText = 'position:fixed;top:0;left:0;width:500px;height:250px;z-index:1000';
   fixture.append(mount);
-  const app = createApp({ render: () => h(LiveLogPanel, { subscribe, identity: identity.value, roles: ['main'], visible: visible.value }) });
+  const app = createApp({ render: () => h(LiveLogPanel, { subscribe, identity: identity.value, roles: roles.value, visible: visible.value }) });
   app.mount(mount);
   const wait = async (ready: () => boolean) => {
     for (let count = 0; count < 100 && !ready(); count++) await new Promise(resolve => setTimeout(resolve, 20));
@@ -55,9 +56,36 @@ export async function logPanelContract(fixture: HTMLElement, check: (value: unkn
     const third = subscriptions[2]!;
     third.send(frame('resumed-run', 3));
     await wait(() => pre.textContent === 'resumed-run');
+    third.send({ ...frame('resumed-run', 3), connected: false, error: 'log_event_invalid' });
+    await wait(() => !!mount.querySelector('[role="status"]')?.textContent?.includes('log_event_invalid'));
+    visible.value = false; await nextTick();
+    visible.value = true; await nextTick();
+    await wait(() => subscriptions.length === 4);
+    const fourth = subscriptions[3]!;
+    fourth.send({ text: '', sequence: 0, connected: false, omitted: false });
+    await wait(() => !mount.querySelector('[role="status"]'));
+    check(pre.textContent === 'resumed-run', 'reopening the same role clears a stale log error and preserves prior text');
+    roles.value = ['postHook', 'main', 'preHook']; await nextTick();
+    await wait(() => subscriptions.length === 7);
+    check(fourth.released, 'changing selected roles releases the former subscription');
+    const grouped = subscriptions.slice(4);
+    const send = (role: string, text: string, sequence: number) => grouped.find(owner => owner.key.role === role)!.send(frame(text, sequence));
+    const renderedText = () => [...pre.childNodes].filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.nodeValue).join('');
+    const order = ['preHook', 'main', 'postHook'];
+    const strings = order.map(role => Array.from({ length: 200 }, (_item, index) => role + '-' + index + '\n').join(''));
+    order.forEach((role, index) => send(role, strings[index]!, 1));
+    const expectedLines = strings.join('').split('\n').slice(-500).join('\n');
+    await wait(() => renderedText() === expectedLines);
+    check(renderedText() === expectedLines, 'the combined roles retain the final five hundred lines in canonical role order');
+    const longPre = '😀' + 'a'.repeat(256 * 1024 - 34);
+    const main = 'm'.repeat(16), post = 'p'.repeat(17);
+    send('preHook', longPre, 2); send('main', main, 2); send('postHook', post, 2);
+    const expectedUnits = longPre.slice(2) + main + post;
+    await wait(() => renderedText().length > 250000 && renderedText().endsWith(post));
+    check(renderedText() === expectedUnits && pre.querySelector('.omitted'), 'the combined roles keep a separate character limit without splitting a code point');
     mount.style.top = '-2000px';
-    await wait(() => third.released);
-    check(subscriptions.length === 3, 'offscreen log panels leave no active stream');
+    await wait(() => grouped.every(owner => owner.released));
+    check(subscriptions.length === 7, 'offscreen log panels leave no active stream');
   } finally {
     changes.disconnect(); app.unmount(); mount.remove();
   }

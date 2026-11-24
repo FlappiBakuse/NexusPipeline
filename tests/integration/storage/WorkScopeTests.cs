@@ -23,12 +23,14 @@ public sealed class WorkScopeTests
         var remaining = Directory.EnumerateFiles(Path.Combine(fixture.Workspace, "before"), "*", SearchOption.AllDirectories).First();
         var sources = new[] { artifact, producer, previous };
         var bytes = sources.ToDictionary(path => path, File.ReadAllBytes);
+        var identities = sources.ToDictionary(path => path, PhysicalObjectIdentity.Read);
         var observer = new BeforeFirstRemoval(() =>
         {
             foreach (var path in sources.Append(remaining))
             {
                 var original = File.ReadAllBytes(path);
-                Assert.ThrowsAny<IOException>(() => File.WriteAllBytes(path, [9, 7, 3]));
+                var locked = Assert.Throws<IOException>(() => File.WriteAllBytes(path, [9, 7, 3]));
+                Assert.Equal(32, locked.HResult & 0xffff);
                 Assert.Equal(original, File.ReadAllBytes(path));
             }
         });
@@ -39,8 +41,9 @@ public sealed class WorkScopeTests
         Assert.False(Directory.Exists(fixture.Workspace));
         foreach (var path in sources)
         {
-            File.WriteAllBytes(path, bytes[path]);
             Assert.Equal(bytes[path], File.ReadAllBytes(path));
+            using var released = File.Open(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            Assert.Equal(identities[path], PhysicalObjectIdentity.Read(released.SafeFileHandle));
         }
     }
 
@@ -52,16 +55,22 @@ public sealed class WorkScopeTests
         await using var fixture = await WorkCleanupFixture.CreateAsync();
         var owner = fixture.Original.Package.Catalog;
         var plan = fixture.DirectPage(Guid.NewGuid());
+        var steps = plan.ExtensionWork!.Page.Indices.Select((_, index) => $"remove-{index:000}").ToArray();
+        Assert.NotEmpty(steps);
         using var root = owner.Resources.TryAcquire(plan.OperationId, FileCleanupItems.Claims(plan)).Lease!;
         Assert.NotNull(root);
         using var prepared = await PreparedWorkCleanup.PrepareAsync(owner.Instance, owner.Database, owner.Lease,
             owner.Contracts, fixture.Original.Roots, owner.Resources, fixture.Original.Activator, root, plan, "local", true, default);
-        _ = new FileCleanupAcceptance(owner.Instance, owner.Contracts, owner.Database, payloadRoots: fixture.Original.Roots)
+        var accepted = new FileCleanupAcceptance(owner.Instance, owner.Contracts, owner.Database, payloadRoots: fixture.Original.Roots)
             .AcceptPrepared(prepared.Identity, prepared, DateTimeOffset.UtcNow);
         using var protection = prepared.Execution.ProtectEvidence(plan);
         Assert.NotNull(protection);
+        var archive = new FileTreeScanner(SnapshotBudget.Default);
+        var before = archive.Capture(fixture.Workspace, default);
+        var unknown = Path.Combine(owner.Instance.RuntimeRoot, "journals", fixture.Producer.Plan.JournalId.ToString("D"), "unknown.bin");
+        byte[] unknownBytes = [8, 6, 4];
         if (change == "unknown-sibling")
-            File.WriteAllBytes(Path.Combine(owner.Instance.RuntimeRoot, "journals", fixture.Producer.Plan.JournalId.ToString("D"), "unknown.bin"), [8, 6, 4]);
+            File.WriteAllBytes(unknown, unknownBytes);
         else
         {
             using var connection = DatabaseConnections.Open(owner.Database.DatabasePath, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
@@ -71,8 +80,22 @@ public sealed class WorkScopeTests
             Assert.Equal(1, command.ExecuteNonQuery());
         }
         Assert.ThrowsAny<IOException>(() => prepared.Execution.Require(plan));
-        Assert.True(Directory.Exists(fixture.Workspace));
-        Assert.All(new FileEffectOutbox(owner.Database).Read(plan.JournalId), item => Assert.Equal(FileEffectState.Pending, item.State));
+        var after = archive.Capture(fixture.Workspace, default);
+        Assert.Equal(before.Shape, after.Shape);
+        Assert.Equal(before.Entries, after.Entries);
+        if (change == "unknown-sibling") Assert.Equal(unknownBytes, File.ReadAllBytes(unknown));
+        else
+        {
+            using var connection = DatabaseConnections.Open(owner.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT status FROM main.operations WHERE operation_id=$operation;";
+            command.Parameters.AddWithValue("$operation", fixture.Producer.Plan.OperationId.ToString("D"));
+            Assert.Equal("accepted", command.ExecuteScalar());
+        }
+        var effects = new FileEffectOutbox(owner.Database).Read(plan.JournalId);
+        Assert.Equal(steps, effects.Select(item => item.StepId).Order(StringComparer.Ordinal));
+        Assert.All(effects, item => Assert.Equal(
+            new FileEffect(plan.JournalId, item.StepId, FileEffectAction.RemoveOwned, FileEffectState.Pending, accepted.Plan.Sha256, null), item));
     }
 
     private sealed class BeforeFirstRemoval(Action action) : ICleanupPersistenceObserver

@@ -93,6 +93,7 @@ public sealed class JournalStoreTests
     [Theory(DisplayName = "Frozen Identity And Prior Receipts Cannot Be Changed")]
     [InlineData("operationId")]
     [InlineData("planPath")]
+    [InlineData("planBinding")]
     [InlineData("resourceKeys")]
     [InlineData("receipt")]
     public void FreezesJournalIdentity(string field)
@@ -106,11 +107,21 @@ public sealed class JournalStoreTests
         {
             case "operationId": fixture.Document[field] = Guid.NewGuid().ToString("D"); break;
             case "planPath": fixture.Document[field] = "blobs/other.json"; break;
+            case "planBinding":
+                var otherDigest = Convert.ToHexStringLower(SHA256.HashData("another plan"u8));
+                fixture.Document["planDigest"] = otherDigest;
+                fixture.Document["planPath"] = $"blobs/plans/{otherDigest}.json";
+                break;
             case "resourceKeys": fixture.Document[field]!.AsArray().Add("other:resource"); break;
             case "receipt": fixture.Document["receipts"]![0]!["detailCode"] = "changed"; break;
         }
         var before = Fingerprint(fixture.Directory);
-        Assert.ThrowsAny<Exception>(() => fixture.Store.Append(fixture.Id, 2, Bytes(fixture.Document)));
+        if (field == "planPath")
+            Assert.Equal("journal_identity_invalid",
+                Assert.Throws<JsonException>(() => fixture.Store.Append(fixture.Id, 2, Bytes(fixture.Document))).Message);
+        else
+            Assert.Equal(field == "receipt" ? "journal_evidence_changed" : "journal_frozen_identity_changed",
+                Assert.Throws<IOException>(() => fixture.Store.Append(fixture.Id, 2, Bytes(fixture.Document))).Message);
         Assert.Equal(before, Fingerprint(fixture.Directory));
         Assert.Equal(2, fixture.Store.Read(fixture.Id).Revision);
     }
@@ -135,7 +146,11 @@ public sealed class JournalStoreTests
             File.WriteAllBytes(path, Bytes(fixture.Document));
         }
         var before = Fingerprint(fixture.Directory);
-        Assert.ThrowsAny<Exception>(() => fixture.Store.Read(fixture.Id));
+        if (fault is "partial-revision" or "unknown-phase")
+            Assert.ThrowsAny<JsonException>(() => fixture.Store.Read(fixture.Id));
+        else
+            Assert.Equal(fault == "illegal-edge" ? "journal_transition_rejected" : "journal_unknown_entry_or_revision_gap",
+                Assert.Throws<IOException>(() => fixture.Store.Read(fixture.Id)).Message);
         Assert.Equal(before, Fingerprint(fixture.Directory));
     }
 
@@ -163,17 +178,21 @@ public sealed class JournalStoreTests
         fixture.Store.Create(Bytes(fixture.Document));
         Assert.Throws<IOException>(() => fixture.Store.Create(Bytes(fixture.Document)));
         Advance(fixture.Document, "applying");
-        var attempts = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
+        var bytes = Bytes(fixture.Document);
+        using var arrived = new CountdownEvent(8);
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var attempts = Enumerable.Range(0, 8).Select(_ => Task.Run(async () =>
         {
-            try
-            {
-                new JournalStore(fixture.Instance, new ContractReader()).Append(fixture.Id, 1, Bytes(fixture.Document));
-                return true;
-            }
-            catch (IOException) { return false; }
-        })));
-        Assert.Single(attempts, result => result);
-        Assert.Equal(2, fixture.Store.Read(fixture.Id).Revision);
+            arrived.Signal();
+            await start.Task;
+            return Record.Exception(() => new JournalStore(fixture.Instance, new ContractReader()).Append(fixture.Id, 1, bytes));
+        })).ToArray();
+        try { Assert.True(arrived.Wait(TimeSpan.FromSeconds(10))); }
+        finally { start.SetResult(); }
+        var results = await Task.WhenAll(attempts).WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.Single(results, result => result is null);
+        Assert.All(results.OfType<Exception>(), error => Assert.Equal("journal_revision_conflict", Assert.IsType<IOException>(error).Message));
+        Assert.Equal(bytes, fixture.Store.Read(fixture.Id).Export());
     }
 
     [Fact(DisplayName = "An Independent Reader Waits For The Actual Open Revision To Be Flushed And Published")]
@@ -190,10 +209,11 @@ public sealed class JournalStoreTests
         {
             Assert.True(observer.Created.Wait(TimeSpan.FromSeconds(10)));
             Assert.Throws<IOException>(() => File.ReadAllBytes(Path.Combine(fixture.Directory, "0000000002.json")));
-            using var entered = new ManualResetEventSlim();
-            read = Task.Run(() => { entered.Set(); return new JournalStore(fixture.Instance, new()).Read(fixture.Id); });
-            Assert.True(entered.Wait(TimeSpan.FromSeconds(10)));
-            Assert.NotSame(read, await Task.WhenAny(read, Task.Delay(100)));
+            read = Task.Run(() => new JournalStore(fixture.Instance, new(), observer).Read(fixture.Id));
+            Assert.Same(observer.Blocked.Task,
+                await Task.WhenAny(observer.Blocked.Task, read).WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Equal(fixture.Id, await observer.Blocked.Task);
+            Assert.False(read.IsCompleted);
         }
         finally { observer.Release.Set(); }
         Assert.Equal(2, (await append.WaitAsync(TimeSpan.FromSeconds(10))).Revision);
@@ -281,9 +301,16 @@ public sealed class JournalStoreTests
         Assert.Equal(3, fixture.Store.ReadAllRevisions(fixture.Id).Count);
         if (fault == "unknown-entry")
         {
+            using var attributes = DirectoryAttributeScope.Hold(fixture.Instance);
+            Assert.Equal(3, fixture.Store.Read(fixture.Id).Revision);
             File.WriteAllText(Path.Combine(fixture.Directory, "unknown.bin"), "preserve");
             var before = Fingerprint(fixture.Directory);
-            Assert.Throws<IOException>(() => fixture.Store.Read(fixture.Id));
+            using (DirectoryAttributeScope.Hold(fixture.Instance))
+            {
+                DirectoryAttributeScope.Refresh();
+                Assert.Equal("journal_protected_history_changed",
+                    Assert.Throws<IOException>(() => fixture.Store.Read(fixture.Id)).Message);
+            }
             Advance(fixture.Document, "reverting");
             Assert.Throws<IOException>(() => fixture.Store.Append(fixture.Id, 3, Bytes(fixture.Document)));
             Assert.Equal(before, Fingerprint(fixture.Directory));
@@ -302,7 +329,9 @@ public sealed class JournalStoreTests
         held.Dispose();
         File.WriteAllText(path, "changed");
         var changed = File.ReadAllBytes(path);
-        Assert.ThrowsAny<Exception>(() => new JournalStore(fixture.Instance, new()).Read(fixture.Id));
+        if (fault == "plan")
+            Assert.Equal("journal_plan_digest_mismatch", Assert.Throws<IOException>(() => new JournalStore(fixture.Instance, new()).Read(fixture.Id)).Message);
+        else Assert.ThrowsAny<JsonException>(() => new JournalStore(fixture.Instance, new()).Read(fixture.Id));
         Assert.Equal(changed, File.ReadAllBytes(path));
     }
 
@@ -337,9 +366,9 @@ public sealed class JournalStoreTests
             Assert.Equal(Bytes(fixture.Document), fixture.Store.Read(fixture.Id).Export());
         File.WriteAllText(first, "changed");
         var before = Fingerprint(fixture.Directory);
-        Assert.ThrowsAny<Exception>(() => fixture.Store.Read(fixture.Id));
+        Assert.ThrowsAny<JsonException>(() => fixture.Store.Read(fixture.Id));
         Advance(fixture.Document, "applying");
-        Assert.ThrowsAny<Exception>(() => fixture.Store.Append(fixture.Id, current.Revision, Bytes(fixture.Document)));
+        Assert.ThrowsAny<JsonException>(() => fixture.Store.Append(fixture.Id, current.Revision, Bytes(fixture.Document)));
         Assert.Equal(before, Fingerprint(fixture.Directory));
         Console.WriteLine($"protection fallback: bytes={total}; revisions={current.Revision}; limit={(byteLimit ? "bytes" : "revisions")}");
     }
@@ -358,6 +387,8 @@ public sealed class JournalStoreTests
     {
         internal ManualResetEventSlim Created { get; } = new();
         internal ManualResetEventSlim Release { get; } = new();
+        internal TaskCompletionSource<Guid> Blocked { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public void ReadBlocked(Guid journalId) => Blocked.TrySetResult(journalId);
         public void RevisionCreated(string path)
         {
             Created.Set();

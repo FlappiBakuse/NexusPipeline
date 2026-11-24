@@ -307,25 +307,42 @@ async function retainedOutlet(checks: string[]): Promise<void> {
     context: { surfaceId: 'overview.cards', instanceId: 'retained-instance' }, visible: true,
     extensionIds: ['retained-fixture'] }) });
   const flush = async () => { await nextTick(); await new Promise(resolve => setTimeout(resolve, 0)); };
-  app.mount(host); await flush();
-  const draft = host.querySelector('input')!;
-  if (!draft) throw new Error('Retained surface did not mount');
-  draft.value = 'unsaved draft'; draft.focus();
-  const unrelated = await registry.activate(manifest('unrelated-fixture'), extension('unrelated-fixture', context => {
-    context.registerSurface({ id: 'other', target: 'overview.cards', mount: () => {} });
-  }));
-  await flush();
-  if (host.querySelector('input')?.value !== 'unsaved draft' || document.activeElement !== host.querySelector('input'))
-    throw new Error('Unrelated activation replaced the selected surface and its draft');
-  await unrelated.dispose(); await flush();
-  if (host.querySelector('input')?.value !== 'unsaved draft' || document.activeElement !== host.querySelector('input'))
-    throw new Error('Unrelated retirement replaced the selected surface');
-  checks.push('unrelated extension activation and retirement preserve the mounted surface and ordinary draft');
-  await owner.dispose(); await flush();
-  if (host.querySelector('input') || disposed < 1) throw new Error('Selected extension retirement did not release its surface');
-  owner = await registry.activate(manifest(card.extensionId), card); await flush();
-  if (host.querySelector('input')?.value !== '')
-    throw new Error('Selected extension reactivation did not mount its current contribution');
-  checks.push('selected extension retirement and reactivation replace only its own surface');
-  app.unmount(); await flush(); await owner.dispose(); host.remove();
+  let unrelated: typeof owner | undefined;
+  let mainFailure: unknown;
+  try {
+    app.mount(host); await flush();
+    const draft = host.querySelector('input');
+    if (!draft) throw new Error('Retained surface did not mount');
+    draft.value = 'unsaved draft'; draft.focus();
+    unrelated = await registry.activate(manifest('unrelated-fixture'), extension('unrelated-fixture', context => {
+      context.registerSurface({ id: 'other', target: 'overview.cards', mount: () => {} });
+    }));
+    await flush();
+    if (host.querySelector('input')?.value !== 'unsaved draft' || document.activeElement !== host.querySelector('input'))
+      throw new Error('Unrelated activation replaced the selected surface and its draft');
+    await unrelated.dispose(); unrelated = undefined; await flush();
+    if (host.querySelector('input')?.value !== 'unsaved draft' || document.activeElement !== host.querySelector('input'))
+      throw new Error('Unrelated retirement replaced the selected surface');
+    checks.push('unrelated extension activation and retirement preserve the mounted surface and ordinary draft');
+    await owner.dispose(); await flush();
+    if (host.querySelector('input') || disposed < 1) throw new Error('Selected extension retirement did not release its surface');
+    owner = await registry.activate(manifest(card.extensionId), card); await flush();
+    if (host.querySelector('input')?.value !== '')
+      throw new Error('Selected extension reactivation did not mount its current contribution');
+    checks.push('selected extension retirement and reactivation replace only its own surface');
+  } catch (error) {
+    mainFailure = error;
+    throw error;
+  } finally {
+    const failures: unknown[] = [];
+    try { app.unmount(); await flush(); } catch (error) { failures.push(error); }
+    try { await unrelated?.dispose(); } catch (error) { failures.push(error); }
+    try { await owner.dispose(); } catch (error) { failures.push(error); }
+    host.remove();
+    if (failures.length) {
+      const reason = failures.map(String).join(', ');
+      throw new AggregateError(failures, (mainFailure ? String(mainFailure) + '\n' : '') +
+        'Retained outlet cleanup failed: ' + reason, { cause: mainFailure });
+    }
+  }
 }

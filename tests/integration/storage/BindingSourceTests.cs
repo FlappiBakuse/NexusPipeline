@@ -1,8 +1,21 @@
 using System.Collections.Immutable;
+using System.Net;
+using System.Net.Http.Json;
 using System.Runtime.Versioning;
+using System.Text.Json;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using NexusPipeline.Core.Automation;
 using NexusPipeline.Core.Configuration;
+using NexusPipeline.Core.Control;
 using NexusPipeline.Core.Execution;
+using NexusPipeline.Core.Settings;
+using NexusPipeline.Host.Control.Configuration;
+using NexusPipeline.Host.Control.Http;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Automation;
@@ -52,10 +65,33 @@ public sealed class BindingSourceTests
             { CandidateId = "User/OneDragon/" + name + ".json", ExpectedInstalledRevision = installed.Metadata.Revision };
         var a = Request(first.Id, "first"); var b = Request(second.Id, "second");
         await Assert.ThrowsAsync<ConfigurationException>(() => service.ImportAsync("binding-source", a with { CandidateId = "missing" }, () => {}, default).AsTask());
-        Assert.Null(new ConfigurationRevisionStore(source.Instance, source.Database, new()).Read(new(first.Id, BindingConfigurationSource.ResourceId)));
-        Assert.True((await service.ImportAsync("binding-source", a, () => {}, default)).IsNew);
+        var revisions = new ConfigurationRevisionStore(source.Instance, source.Database, new());
+        using var cancellation = new CancellationTokenSource();
+        var revoked = false;
+        var rejectedAt = new List<BatchPersistencePoint>();
+        var guarded = new ConfigurationImportService(source.Instance, source.Database, new(), source.Lease, fixture.Execution.Resources,
+            new Observer((point, operation) =>
+            {
+                if (point != BatchPersistencePoint.OperationAccepted) return;
+                rejectedAt.Add(point);
+                if (operation == a.OperationId) revoked = true;
+                if (operation == b.OperationId) cancellation.Cancel();
+            }));
+        var control = new ImportUseCases(guarded, new(), new(source.Database, sources, guarded));
+        var caller = new AuthenticatedControlRequest(ControlOrigin.Local, "binding-source", null, () => revoked
+            ? throw new UnauthorizedAccessException("control_credential_revoked") : new(true, true));
+        using (var body = StrictJson.Parse(BoundedJson.Serialize(Wire(a))))
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => control.ExecuteAsync(caller, body.RootElement, default).AsTask());
+        revoked = false;
+        using (var body = StrictJson.Parse(BoundedJson.Serialize(Wire(b))))
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => control.ExecuteAsync(caller, body.RootElement, cancellation.Token).AsTask());
+        Assert.Equal(new[] { BatchPersistencePoint.OperationAccepted, BatchPersistencePoint.OperationAccepted }, rejectedAt);
+        Assert.Null(guarded.ReadAccepted("binding-source", a));
+        Assert.Null(guarded.ReadAccepted("binding-source", b));
+        Assert.Null(revisions.Read(new(first.Id, BindingConfigurationSource.ResourceId)));
+        Assert.Null(revisions.Read(new(second.Id, BindingConfigurationSource.ResourceId)));
+        await ImportOverHttpAsync(source.Instance.InstanceId, new(imports, new(), service), a);
         Assert.True((await service.ImportAsync("binding-source", b, () => {}, default)).IsNew);
-        Assert.False((await service.ImportAsync("binding-source", a, () => {}, default)).IsNew);
         await Assert.ThrowsAsync<ConfigurationException>(() => service.ImportAsync("binding-source", Request(first.Id, "second"), () => {}, default).AsTask());
         var saved = source.Definitions.Read();
         var firstBinding = saved.Bindings.Single(item => item.Id == first.Id);
@@ -75,5 +111,41 @@ public sealed class BindingSourceTests
         Assert.Equal("second", frozen.Arguments.Last());
         foreach (var item in originals) Assert.Equal(item.Value, File.ReadAllBytes(item.Key));
         fixture.Inputs.VerifyUnchanged();
+    }
+
+    private static object Wire(ConfigurationImportRequest request) => new
+    {
+        format = "nexus.control.configuration-import", version = 1, operationId = request.OperationId,
+        bindingId = request.BindingId, expectedBindingRevision = request.ExpectedBindingRevision,
+        expectedScriptRevision = request.ExpectedScriptRevision, candidateId = request.CandidateId,
+        expectedInstalledRevision = request.ExpectedInstalledRevision,
+        resources = request.Resources.Select(item => new { resourceId = item.ResourceId, expectedRevision = item.ExpectedRevision })
+    };
+
+    private static async Task ImportOverHttpAsync(Guid instanceId, ImportUseCases imports, ConfigurationImportRequest request)
+    {
+        var builder = WebApplication.CreateSlimBuilder(); builder.Logging.ClearProviders();
+        builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
+        await using var app = builder.Build();
+        var authority = new ControlAuthentication(instanceId, false, null, () => new(0, HostSettings.Default), null!, TimeProvider.System);
+        app.Use(ControlExceptionBoundary.InvokeAsync); app.Use(authority.InvokeAsync);
+        new ConfigurationImportControl(authority, imports).Map(app);
+        await app.StartAsync();
+        var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
+        using var http = new HttpClient(new SocketsHttpHandler { UseProxy = false }) { BaseAddress = new(address) };
+        foreach (var isNew in new[] { true, false })
+        {
+            using var response = await http.PostAsJsonAsync("/control/v1/configuration/import", Wire(request));
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal(request.OperationId, result.GetProperty("operationId").GetGuid());
+            Assert.Equal(isNew, result.GetProperty("isNew").GetBoolean());
+        }
+        await app.StopAsync();
+    }
+
+    private sealed class Observer(Action<BatchPersistencePoint, Guid> reached) : IBatchPersistenceObserver
+    {
+        public void Reached(BatchPersistencePoint point, Guid operationId, int resourceOrdinal) => reached(point, operationId);
     }
 }

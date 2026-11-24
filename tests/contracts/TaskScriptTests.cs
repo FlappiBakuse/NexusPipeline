@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Jint.Runtime;
 using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Extensions;
 using Xunit;
@@ -26,7 +27,7 @@ public sealed class TaskScriptTests
             using var result = JsonDocument.Parse(Execute());
             Assert.Equal("read", result.RootElement.GetProperty("value").GetString());
         }
-        else Assert.NotNull(Record.Exception(() => Execute()));
+        else Assert.Throws<MemoryLimitExceededException>(() => Execute());
     }
 
     [Fact(DisplayName = "Actual Interpreter Has No Clr Filesystem Network Or Node Api")]
@@ -107,7 +108,8 @@ public sealed class TaskScriptTests
         var execution = Task.Run(() => fixture.Execute(fixture.Executor("while(true) {}")));
         var exception = await Record.ExceptionAsync(async () => await execution.WaitAsync(TimeSpan.FromSeconds(5)));
         Assert.True(execution.IsCompleted, "The interpreter must stop before the outer test deadline");
-        Assert.NotNull(exception);
+        Assert.True(exception is StatementsCountOverflowException or IOException { Message: "task_script_timeout" },
+            exception?.ToString() ?? "The interpreter returned without enforcing its execution budget");
         Assert.Empty(fixture.Execute(fixture.Executor()).Tasks!);
     }
 

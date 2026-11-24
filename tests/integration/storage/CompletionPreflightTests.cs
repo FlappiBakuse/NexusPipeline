@@ -64,10 +64,14 @@ public sealed class CompletionPreflightTests
             var result = completion.CompleteInterrupted(fixture.CompletionId, ConfigurationRunFixture.Subject, fixture.SessionId);
             Assert.Equal(point != "intent-fulfilled", result.IsNew); Assert.Equal(ConfigurationRunPhase.Interrupted, result.Session.Phase);
             Assert.Equal(fixture.CompletionId, result.Session.CompletionOperationId);
+            var binding = fixture.Run.Saved.Address.BindingId;
+            ConfigurationAddress[] expected = [new(binding, "extra"), new(binding, "main")];
+            Assert.Equal(expected, result.Items.Select(item => item.Address).OrderBy(address => address.ResourceId, StringComparer.Ordinal));
             Assert.All(result.Items, item => { Assert.Equal(1, item.PreviousRevision); Assert.Equal(1, item.CurrentRevision); Assert.Equal("configuration_sync_not_due", item.ReasonCode); });
             Assert.Empty(index.Current.ResourceHolds); Assert.Empty(index.Current.SnapshotCompletions);
             Assert.Contains(index.Current.Isolations, item => item.JournalId == fixture.ParentId);
-            Assert.False(completion.CompleteInterrupted(fixture.CompletionId, ConfigurationRunFixture.Subject, fixture.SessionId).IsNew);
+            var replay = completion.CompleteInterrupted(fixture.CompletionId, ConfigurationRunFixture.Subject, fixture.SessionId);
+            Assert.False(replay.IsNew); Assert.Equal(result.Items.ToArray(), replay.Items.ToArray());
             ConfigurationRunInventory.VerifyReadOnly(instance, database, new());
             Assert.Equal(identity, PhysicalObjectIdentity.Read(target));
             if (point == "intent-fulfilled") Assert.Equal(new byte[] { 77, 88 }, File.ReadAllBytes(target));

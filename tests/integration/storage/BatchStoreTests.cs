@@ -24,12 +24,22 @@ public sealed class BatchStoreTests
         var result = fixture.Save(new([main, extra]));
         Assert.True(result.IsNew);
         Assert.All(result.Items, item => Assert.True(item.IsNew));
-        Assert.Equal(new[] { "extra", "main" }, result.Items.Select(item => item.Saved.Address.ResourceId));
+        Assert.Equal(new[] { "extra", "main" }, result.Items.Select(item => item.Saved.Address.ResourceId).Order(StringComparer.Ordinal));
         var reopened = StateDatabase.OpenExisting(fixture.Instance, Path.Combine(fixture.Root, "diagnostics"), new JournalStartupAdmission(fixture.Instance, new()));
         var store = new ConfigurationRevisionStore(fixture.Instance, reopened, new());
-        AssertSaved(store.Read(main.Address), main, 1);
-        AssertSaved(store.Read(extra.Address), extra, 1);
+        var savedMain = Assert.IsType<ConfigurationRevision>(store.Read(main.Address));
+        var savedExtra = Assert.IsType<ConfigurationRevision>(store.Read(extra.Address));
+        AssertSaved(savedMain, main, 1);
+        AssertSaved(savedExtra, extra, 1);
+        byte[] ReadContent(ConfigurationRevision revision)
+        {
+            var entry = Assert.Single(revision.Tree.Entries);
+            return File.ReadAllBytes(Path.Combine(fixture.Instance.RuntimeRoot, "blobs", "content", entry.Sha256 + ".bin"));
+        }
+        Assert.Equal("first"u8.ToArray(), ReadContent(savedMain));
+        Assert.Equal("second"u8.ToArray(), ReadContent(savedExtra));
         Assert.Null(store.Read(new(fixture.OtherBinding, "main")));
+        Assert.Null(store.Read(new(fixture.OtherBinding, "extra")));
     }
 
     [Theory(DisplayName = "Failure After The First Resource Publication Rolls Back Every Pointer Asset Result And Operation")]

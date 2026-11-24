@@ -85,7 +85,25 @@ public sealed class RunPreparationTests
         }
         using var root = Assert.IsType<ResourceOperationLease>(manager.TryAcquire(fixture.Owner, required).Lease);
         var before = PersistentFingerprints(fixture.Source.Root);
-        Assert.ThrowsAny<Exception>(() => fixture.Preparation.Prepare(root, fixture.Owner, fixture.Execution.Plan, fixture.StepId, request));
+        PreparedConfigurationRun Prepare() =>
+            fixture.Preparation.Prepare(root, fixture.Owner, fixture.Execution.Plan, fixture.StepId, request);
+        var rejected = fault switch
+        {
+            "missing-configuration" or "contract" or "binding-revision" or "user-definition" =>
+                Assert.Throws<ConfigurationException>(() => Prepare()).Message,
+            "revision" or "account" => Assert.Throws<IOException>(() => Prepare()).Message,
+            _ => Assert.Throws<InvalidOperationException>(() => Prepare()).Message
+        };
+        var expected = fault switch
+        {
+            "missing-configuration" or "contract" => "configuration_required",
+            "revision" => "configuration_run_slots_unbound",
+            "binding-revision" => "configuration_binding_revision_conflict",
+            "user-definition" => "configuration_run_definition_changed",
+            "account" => "configuration_run_step_unbound",
+            _ => "resource_operation_borrow_unbound"
+        };
+        Assert.Equal(expected, rejected);
         Assert.Equal(before, PersistentFingerprints(fixture.Source.Root));
         fixture.VerifyOriginal();
         root.Dispose();

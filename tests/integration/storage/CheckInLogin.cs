@@ -2,6 +2,7 @@ using System.Runtime.Versioning;
 using System.Text.Json;
 using NexusPipeline.Core.Desktop;
 using NexusPipeline.Core.Secrets;
+using NexusPipeline.Platform.Storage.Extensions;
 using NexusPipeline.Platform.Storage.Secrets;
 using Xunit;
 
@@ -10,6 +11,65 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class CheckInLogin
 {
+    [Fact(DisplayName = "Retiring The Original CheckIn Activation Rejects Its Offered Native Callback Without Publishing Credential Material")]
+    public async Task RejectsRetiredCapture()
+    {
+        using var inputs = new BuiltExtensionInputs("game-checkin", "NEXUS_PACKAGED_CHECKIN_RECEIPT");
+        await using var fixture = new CheckInFixture(inputs, new CheckInHttp(200), native: true);
+        await fixture.OpenAsync();
+        var editor = await fixture.Call("open-editor", new { taskId = (Guid?)null, expectedRevision = 0 });
+        var editorSessionId = editor.GetProperty("editorSessionId").GetString();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        fixture.Logins!.Poll(fixture.Native!);
+        var pending = fixture.Call("begin-browser-login", new { editorSessionId, platformId = "kuro", fieldGeneration = 0 },
+            cancellation: deadline.Token);
+        var offer = await AwaitOffer(expectedCancelled: false);
+        var scope = Assert.Single(fixture.Installed.Activator.ReadPublishedScopes());
+        Assert.Equal(scope.ActivationId, offer.ActivationId);
+        Assert.False(pending.IsCompleted);
+        var stopping = fixture.Installed.Activator.StopAllAsync(TimeSpan.FromSeconds(10));
+        var retired = await AwaitOffer(expectedCancelled: true);
+        Assert.Equal((offer.CaptureId, offer.Nonce), (retired.CaptureId, retired.Nonce));
+        var values = Capture("kuro").ToDictionary(pair => pair.Key, pair => new SecretValue(pair.Value));
+        try { fixture.Logins.Complete(fixture.Native!, offer.CaptureId, offer.Nonce, "completed", values); }
+        finally { foreach (var value in values.Values) value.Dispose(); }
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
+        await stopping;
+        Assert.Empty(fixture.Installed.Activator.ReadPublishedScopes());
+        Assert.Empty(fixture.Logins.Poll(fixture.Native!));
+        Assert.Equal(0, fixture.Http.Roles); Assert.Equal(0, fixture.Http.Submissions);
+        Assert.Equal(0, fixture.Execution.Count("manual_work_runs"));
+        inputs.VerifyUnchanged();
+
+        async Task<BrowserLoginOffer> AwaitOffer(bool expectedCancelled)
+        {
+            while (true)
+            {
+                var current = fixture.Logins.Poll(fixture.Native!).SingleOrDefault();
+                if (current is not null && current.IsCanceled == expectedCancelled) return current;
+                await Task.Delay(20, deadline.Token);
+            }
+        }
+    }
+
+    [Fact(DisplayName = "The Original CheckIn Callback Failure Restores A First Install Without Leaving An Active Frontend")]
+    public async Task RollsBackFailedActivation()
+    {
+        using var inputs = new BuiltExtensionInputs("game-checkin", "NEXUS_PACKAGED_CHECKIN_RECEIPT");
+        await using var fixture = new CheckInFixture(inputs, new CheckInHttp(200), includeHttpPort: false);
+        var installation = fixture.Installed;
+        var failure = await Record.ExceptionAsync(fixture.OpenAsync);
+        Assert.NotNull(failure);
+        Assert.Equal("checkin_http_required", failure.Message);
+        Assert.Empty(installation.Activator.ReadPublishedScopes());
+        Assert.False(Directory.Exists(installation.Target));
+        var installed = new ExtensionInstalledEvidence(fixture.Catalog.Instance, fixture.Catalog.Database, new(), installation.Roots);
+        Assert.Null(installed.ReadCurrent("game-checkin"));
+        Assert.Equal(0, fixture.Execution.Count("manual_work_runs"));
+        Assert.Equal(0, fixture.Http.Roles); Assert.Equal(0, fixture.Http.Submissions);
+        inputs.VerifyUnchanged();
+    }
+
     [Theory(DisplayName = "The Original CheckIn Package Accepts An Official Login Fixture Only Through Its Current Native Capture Then Atomically Saves Its Opaque Candidate Without Secret Readback")]
     [InlineData("cn")]
     [InlineData("os")]
@@ -35,7 +95,13 @@ public sealed class CheckInLogin
         Assert.Equal("game-checkin", offer.ExtensionId); Assert.Equal("checkin-" + platform + "-v1", offer.Policy.Id);
         Assert.False(pending.IsCompleted);
         var values = Capture(platform).ToDictionary(pair => pair.Key, pair => new SecretValue(pair.Value));
-        try { fixture.Logins.Complete(fixture.Native!, offer.CaptureId, offer.Nonce, "completed", values); }
+        try
+        {
+            Assert.Equal("browser_login_validation_required", Assert.Throws<IOException>(() =>
+                fixture.Logins.Complete(fixture.Native!, offer.CaptureId, offer.Nonce, "completed", values)).Message);
+            Assert.True(await fixture.Logins.ValidateAsync(fixture.Native!, offer.CaptureId, offer.Nonce, values));
+            fixture.Logins.Complete(fixture.Native!, offer.CaptureId, offer.Nonce, "completed", values);
+        }
         finally { foreach (var value in values.Values) value.Dispose(); }
         var candidate = await pending; Assert.DoesNotContain("synthetic-", candidate.ToString(), StringComparison.Ordinal);
         editor = await fixture.Call("read-editor", new { editorSessionId = editorId }, read: true);
@@ -51,6 +117,11 @@ public sealed class CheckInLogin
         var task = Assert.Single(state.GetProperty("tasks").EnumerateArray()).GetProperty("id").GetGuid();
         var stored = await fixture.Secrets.GetStateAsync(new("game-checkin", task, platform), default);
         Assert.True(stored.IsReadable); Assert.Equal(1, stored.Revision); Assert.Equal(0, http.Submissions);
+        Assert.Contains(platform switch
+        {
+            "cn" => "bbs-api.miyoushe.com", "os" => "bbs-api-os.hoyolab.com", "skland" => "zonai.skland.com",
+            "skport" => "zonai.skport.com", "kuro" => "api.kurobbs.com", _ => throw new InvalidOperationException()
+        }, http.Origins);
         Assert.DoesNotContain("synthetic-", state.ToString(), StringComparison.Ordinal);
         new SecretDocumentInventory(fixture.Catalog.Instance, fixture.Catalog.Database, new()).Verify(); inputs.VerifyUnchanged();
     }

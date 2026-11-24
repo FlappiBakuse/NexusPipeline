@@ -10,7 +10,8 @@ internal static class ControlledNativeLibrary
     internal static async ValueTask ActivateAsync(string mode, string evidenceDirectory,
         IExtensionPackageReadLease assets, IExtensionScope scope)
     {
-        var path = assets.File("native/nexus-native-fixture.dll").Path;
+        var cleanupFailure = mode == "native-cleanup-fail";
+        var path = assets.File(cleanupFailure ? "native/nexus-native-cleanup-fixture.dll" : "native/nexus-native-fixture.dll").Path;
         var requested = mode switch
         {
             "native-basename" => Path.GetFileName(path),
@@ -19,14 +20,14 @@ internal static class ControlledNativeLibrary
         };
         var module = NativeLibrary.Load(requested, typeof(ControlledNativeLibrary).Assembly,
             DllImportSearchPath.UseDllDirectoryForDependencies | DllImportSearchPath.System32);
-        var owned = new Module(module, evidenceDirectory, Guid.NewGuid().ToString("N"));
+        var owned = new Module(module, evidenceDirectory, Guid.NewGuid().ToString("N"), cleanupFailure);
         await scope.OwnAsync(owned);
         if (NativeLibrary.GetExport(module, "GetFileVersionInfoSizeW") == 0) throw new IOException("fixture_native_export_missing");
         File.WriteAllBytes(Path.Combine(evidenceDirectory, "native-loaded-" + owned.Id + ".json"),
             JsonSerializer.SerializeToUtf8Bytes(new { path, requested, SdkAssembly = typeof(IExtension).Assembly.FullName }));
     }
 
-    private sealed class Module(nint handle, string directory, string id) : IAsyncDisposable
+    private sealed class Module(nint handle, string directory, string id, bool failCleanup) : IAsyncDisposable
     {
         private nint _handle = handle;
         internal string Id => id;
@@ -37,6 +38,7 @@ internal static class ControlledNativeLibrary
             {
                 NativeLibrary.Free(handle);
                 File.WriteAllText(Path.Combine(directory, "native-closed-" + id), "closed");
+                if (failCleanup) throw new IOException("fixture_native_destructor_failed");
             }
             return ValueTask.CompletedTask;
         }

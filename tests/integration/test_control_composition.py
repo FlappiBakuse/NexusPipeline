@@ -1,8 +1,15 @@
+import contextlib
+import http.client
 import json
 import os
+import re
+import socket
 import time
 import subprocess
 import unittest
+import urllib.error
+import urllib.parse
+import urllib.request
 import uuid
 import queue
 import threading
@@ -129,6 +136,19 @@ class ControlCompositionTests(unittest.TestCase):
         snap = self.get(address, "/control/v1/events/snapshot")
         self.assertGreater(snap["sequence"], 0)
         self.assertIn("completedRuns", snap["state"])
+        stream = address + f'/control/v1/events?streamId={snap["streamId"]}&afterSequence={snap["sequence"] - 1}'
+        with urllib.request.urlopen(stream, timeout=10) as connected:
+            self.assertEqual("text/event-stream", connected.headers.get_content_type())
+            for _ in range(8):
+                line = connected.readline()
+                if line.startswith(b"data: "):
+                    state_event = json.loads(line[6:])
+                    break
+            else:
+                self.fail("No state event returned for the snapshot revision")
+        self.assertEqual("state", state_event["kind"])
+        self.assertEqual(snap["sequence"], state_event["sequence"])
+        self.assertEqual(snap["state"], state_event["data"])
         status, raw = self.host.request(address, "/control/v1/events?streamId=" + str(uuid.uuid4()) + "&afterSequence=0")
         self.assertEqual(200, status)
         data = next(line[6:] for line in raw.decode().splitlines() if line.startswith("data: "))
@@ -150,6 +170,19 @@ class ControlCompositionTests(unittest.TestCase):
 
     def test_cancels_queue(self):
         """actual local queue with a completion action uses original local authorization then cancels without system effects."""
+        address, operation, accepted, selection, deadline = self.start_waiting_queue("shutdown")
+        self.cancel_waiting_queue(address, operation, accepted)
+        while True:
+            value = self.get(address, "/control/v1/operations/" + operation)
+            if value["status"] == "completed":
+                break
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(0.05)
+        status, _ = self.host.request(address, "/control/v1/status")
+        self.assertEqual(200, status)
+        self.assertEqual(202, self.post(address, "/control/v1/execution/start/" + operation, selection)[0])
+
+    def start_waiting_queue(self, completion_action):
         runtime = self.host.scope / "runtime"
         _, started = self.host.start(runtime)
         address = started["address"]
@@ -169,7 +202,7 @@ class ControlCompositionTests(unittest.TestCase):
             roots=[dict(id=root_id, expectedRevision=1, name="actual-owned-worker", kind="external", path=str(executable.parent))],
             scripts=[dict(expectedRevision=1, value=script)],
             queues=[dict(expectedRevision=0, value=dict(id=queue_id, name="local-completion-origin", scriptIds=[script["id"]], order=0,
-                                                       completionAction="shutdown", notifyEnabled=False, notificationTaskIds=[]))])
+                                                       completionAction=completion_action, notifyEnabled=False, notificationTaskIds=[]))])
         self.assertEqual(200, self.post(address, "/control/v1/automation/change", change)[0])
         settings = self.get(address, "/control/v1/settings/service")
         selection = dict(format="nexus.control.execution-selection", version=1, target=dict(kind="queue", queueId=queue_id),
@@ -182,21 +215,109 @@ class ControlCompositionTests(unittest.TestCase):
         while not ready.exists():
             self.assertLess(time.monotonic(), deadline)
             time.sleep(0.02)
+        return address, operation, accepted, selection, deadline
+
+    def cancel_waiting_queue(self, address, operation, accepted):
         cancel_id = str(uuid.uuid4())
         cancellation = dict(format="nexus.control.execution-cancellation", version=1,
                             runId=accepted["runId"], attemptId=accepted["attemptId"])
         status, cancelled = self.post(address, "/control/v1/execution/" + operation + "/cancel/" + cancel_id, cancellation)
         self.assertEqual(202, status)
         self.assertEqual("dispatch-closed", cancelled["acknowledgement"])
-        while True:
-            value = self.get(address, "/control/v1/operations/" + operation)
-            if value["status"] == "completed":
-                break
-            self.assertLess(time.monotonic(), deadline)
-            time.sleep(0.05)
-        status, _ = self.host.request(address, "/control/v1/status")
+
+    def open_control_stream(self, address, path, stack):
+        try:
+            response = urllib.request.urlopen(address + path, timeout=10)
+        except urllib.error.HTTPError as error:
+            with error:
+                self.assertEqual(503, error.code, path)
+                self.assertEqual("control_busy", json.load(error)["code"])
+                return None
+        self.assertEqual("text/event-stream", response.headers.get_content_type())
+        return stack.enter_context(response)
+
+    def control_stream_paths(self, address, accepted):
+        snap = self.get(address, "/control/v1/events/snapshot")
+        active = self.get(address, "/control/v1/execution/active")["items"]
+        current = next(row for row in active if row["runId"] == accepted["runId"])
+        step = urllib.parse.quote(current["steps"][0]["stepId"], safe="")
+        event = f'/control/v1/events?streamId={snap["streamId"]}&afterSequence={snap["sequence"]}'
+        log = f'/control/v1/execution/runs/{accepted["runId"]}/attempts/{accepted["attemptId"]}/logs/{step}/main/events'
+        return event, log
+
+    def save_control_preferences(self, address):
+        path = "/control/v1/settings/interface"
+        before = self.get(address, path)
+        values = {key: value for key, value in before["values"].items() if value is not None}
+        values["theme"] = "light" if values["theme"] == "dark" else "dark"
+        status, saved = self.post(address, path + "/change", dict(format="nexus.control.interface-change", version=1,
+            operationId=str(uuid.uuid4()), expectedRevision=before["revision"], values=values))
+        self.assertEqual(200, status, saved)
+        self.assertEqual(before["revision"] + 1, saved["revision"])
+        self.assertEqual(saved, self.get(address, path))
+
+    def test_keeps_controls_available_under_long_streams(self):
+        """Real status subscriptions and live logs leave room to read, save and cancel on Kestrel."""
+        address, operation, accepted, _, _ = self.start_waiting_queue("none")
+        event_path, log_path = self.control_stream_paths(address, accepted)
+        with contextlib.ExitStack() as streams:
+            logs = [self.open_control_stream(address, log_path, streams) for _ in range(8)]
+            events = [self.open_control_stream(address, event_path, streams) for _ in range(24)]
+            status, response = self.host.request(address, "/control/v1/status")
+            self.assertEqual(200, status, response)
+            self.assertEqual(8, sum(response is not None for response in logs))
+            connected = [response for response in events if response is not None]
+            self.assertEqual(8, len(connected))
+            self.assertIsNone(self.open_control_stream(address, log_path, streams))
+            for path, response in ((event_path, connected[0]), (log_path, logs[0])):
+                response.close()
+                deadline = time.monotonic() + 5
+                while self.open_control_stream(address, path, streams) is None:
+                    self.assertLess(time.monotonic(), deadline, path)
+                    time.sleep(0.025)
+            self.save_control_preferences(address)
+            self.cancel_waiting_queue(address, operation, accepted)
+            self.assertEqual(200, self.host.request(address, "/control/v1/status")[0])
+
+    def test_keeps_controls_available_during_asset_downloads(self):
+        """Clients that hold embedded asset response bodies leave control and cancellation available."""
+        address, operation, accepted, _, _ = self.start_waiting_queue("none")
+        status, page = self.host.request(address, "/")
         self.assertEqual(200, status)
-        self.assertEqual(202, self.post(address, "/control/v1/execution/start/" + operation, selection)[0])
+        entry = re.search(rb'src="(/assets/[^"\r\n]+\.js)"', page)
+        self.assertIsNotNone(entry)
+        peer = urllib.parse.urlsplit(address)
+        request = b"GET " + entry[1] + f" HTTP/1.1\r\nHost: {peer.netloc}\r\nConnection: close\r\n\r\n".encode("ascii")
+        with contextlib.ExitStack() as downloads:
+            attempts = []
+            for _ in range(16):
+                client = downloads.enter_context(socket.socket(socket.AF_INET, socket.SOCK_STREAM))
+                client.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024)
+                client.settimeout(8)
+                client.connect((peer.hostname, peer.port))
+                client.sendall(request)
+                response = downloads.enter_context(http.client.HTTPResponse(client))
+                response.begin()
+                attempts.append(response.status)
+                if response.status == 200:
+                    self.assertGreater(int(response.getheader("Content-Length")), 1024 * 1024)
+                else:
+                    self.assertEqual(503, response.status)
+                    self.assertEqual("control_busy", json.load(response)["code"])
+            status, body = self.host.request(address, "/control/v1/status")
+            self.assertEqual(200, status, body)
+            self.assertEqual(8, attempts.count(200))
+            self.assertEqual(8, attempts.count(503))
+            self.save_control_preferences(address)
+            self.cancel_waiting_queue(address, operation, accepted)
+        deadline = time.monotonic() + 5
+        while True:
+            status, body = self.host.request(address, entry[1].decode("ascii"))
+            if status == 200:
+                break
+            self.assertEqual(503, status, body)
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(0.025)
 
     def test_selects_binary(self):
         """cli binary selection is explicit and never becomes a generic url or file writer."""

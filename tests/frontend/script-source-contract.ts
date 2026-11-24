@@ -35,7 +35,8 @@ export async function scriptSourceContract(): Promise<string[]> {
     });
     const store = createStore(client);
     store.state.capabilities = { instanceId: 'source-fixture', hostVersion: '0.18.0',
-      capabilities: mode === 'readonly' ? ['configuration.read'] : ['configuration.read', 'automation.declare'] };
+      capabilities: mode === 'readonly' ? ['configuration.read', 'extensions.read']
+        : ['configuration.read', 'extensions.read', 'automation.declare'] };
     const script = ref(initialValue(schemaAt('automation-script.schema.json#/$defs/script')) as Script);
     script.value.id = crypto.randomUUID(); script.value.extensionId = 'maaend'; script.value.kind = 'specialized';
     const paths = scriptPaths(store, script.value); paths.root = 'D:/source-fixture'; paths.executable = '';
@@ -70,6 +71,44 @@ export async function scriptSourceContract(): Promise<string[]> {
           mode + ' discovery cannot change paths or publish a late selection', checks);
       }
     } finally { if (!unmounted) app.unmount(); store.dispose(); mount.remove(); }
+  }
+  for (const obsolete of ['success', 'failure'] as const) {
+    let discovery = 0, release!: () => void;
+    const client = new ControlClient(location.origin, async (input, init) => {
+      if (new URL(String(input)).pathname === '/control/v1/extensions')
+        return json({ hasReleaseTrust: true, items: [{ extensionId: 'maaend', installedRevision: 3,
+          isInstalled: true, desiredEnabled: true, activationId: 'active', unavailableReason: null, capabilities: [] }] });
+      const request = JSON.parse(String(init!.body));
+      const current = ++discovery;
+      if (current === 1) {
+        await new Promise<void>(resolve => { release = resolve; });
+        if (obsolete === 'failure') return json({ code: 'obsolete_source_read' }, 409);
+      }
+      return json({ rootPath: request.rootPath, installedRevision: 3, discovery: {
+        format: 'nexus.script.source', version: 1, direction: 'response', operationId: request.operationId, extensionId: 'maaend',
+        candidates: [{ ...candidate, executable: current === 1 ? 'obsolete.exe' : 'current.exe' }], diagnostics: [] } });
+    });
+    const store = createStore(client);
+    store.state.capabilities = { instanceId: 'source-fixture', hostVersion: '0.18.0',
+      capabilities: ['configuration.read', 'extensions.read', 'automation.declare'] };
+    const script = ref({ ...initialValue(schemaAt('automation-script.schema.json#/$defs/script')) as Script,
+      id: crypto.randomUUID(), extensionId: 'maaend', kind: 'specialized' } as Script);
+    const paths = scriptPaths(store, script.value);
+    paths.root = 'D:/source-fixture'; paths.executable = '';
+    const mount = document.createElement('div'); document.body.append(mount);
+    const app = createApp({ render: () => h(ScriptSourceFields, { store, modelValue: script.value,
+      'onUpdate:modelValue': (value: Script) => { script.value = value; } }) });
+    app.mount(mount);
+    try {
+      await until(() => discovery === 1);
+      store.state.events = { extensionGeneration: 'replacement' };
+      await new Promise(resolve => setTimeout(resolve, 30));
+      release();
+      await until(() => !!paths.executable || !!mount.querySelector('nexus-toast'));
+      await new Promise(resolve => setTimeout(resolve, 30));
+      check(discovery === 2 && paths.executable === 'current.exe' && !mount.querySelector('nexus-toast'),
+        'a new plugin generation supersedes the obsolete discovery ' + obsolete, checks);
+    } finally { release?.(); app.unmount(); store.dispose(); mount.remove(); }
   }
   return checks;
 }

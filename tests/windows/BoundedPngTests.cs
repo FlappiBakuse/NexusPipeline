@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.IO.Compression;
+using System.Security.Cryptography;
 using NexusPipeline.Platform.Media;
 using Xunit;
 
@@ -12,12 +13,19 @@ public sealed class BoundedPngTests
     [InlineData(6)]
     public void PreservesPixelBytes(int color)
     {
-        var bytes = Image(color);
+        // Independent PNG vectors with filter 0 and consecutive channel values from 1.
+        var (encoded, digest) = color == 2
+            ? ("iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAIAAAASFvFNAAAAHElEQVR4nGNgZGJmYWVj5+Bk4OLm4eXjFxAUAgAEtQCszolp4wAAAABJRU5ErkJggg==",
+                "d989e3ca57ae91200382d713ab92f2850a1ca629d0c1455adaef04639f91bb93")
+            : ("iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAYAAACddGYaAAAAIklEQVR4nGNgZGJmYWVj5+Dk4uZh4OXjFxAUEhYRFROXAAAKkAEtnasIrQAAAABJRU5ErkJggg==",
+                "fc1013bde0ef78eec474b4f3621898562ba551310c9312db1a0a69923dd01828");
+        var bytes = Convert.FromBase64String(encoded);
         using var input = new MemoryStream(bytes, writable: false); input.Position = 11;
         Assert.Equal(new CapturePngInfo(3, 2, color), BoundedCapturePng.Verify(input, allowRgba: true));
-        Assert.Equal(11, input.Position); Assert.Equal(bytes, input.ToArray());
         if (color == 6) Assert.Throws<IOException>(() => RgbCapturePng.Verify(input, 3, 2));
         else RgbCapturePng.Verify(input, 3, 2);
+        Assert.Equal(11, input.Position);
+        Assert.Equal(digest, Convert.ToHexStringLower(SHA256.HashData(input.ToArray())));
     }
 
     [Theory(DisplayName = "Unsupported Or Incomplete Png Never Grants Observed Dimensions")]

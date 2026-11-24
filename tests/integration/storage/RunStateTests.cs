@@ -160,10 +160,18 @@ public sealed class RunStateTests
         var content = fixture.State.Source.Tree.Entries.Single();
         var paths = new[] { Path.Combine(fixture.Instance.RuntimeRoot, prepared.Reference.RelativePath),
             Path.Combine(fixture.Instance.RuntimeRoot, $"blobs/content/{content.Sha256}.bin") };
+        var before = paths.ToDictionary(path => path, File.ReadAllBytes);
+        Assert.Equal("{\"tasks\":{\"daily\":true},\"count\":7}"u8.ToArray(), before[paths[1]]);
         foreach (var path in paths) Assert.Throws<IOException>(() => File.Delete(path));
         prepared.Dispose(); prepared.Dispose();
         Assert.Throws<ObjectDisposedException>(() => prepared.Reference);
-        foreach (var path in paths) { using var writer = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None); Assert.True(writer.Length > 0); }
+        foreach (var path in paths)
+        {
+            using var writer = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            var bytes = new byte[checked((int)writer.Length)];
+            writer.ReadExactly(bytes);
+            Assert.Equal(before[path], bytes);
+        }
     }
 
     [Theory(DisplayName = "Configuration Exchange Rejects Unbound Run State And An Untransformed Candidate Without Writing Content")]
@@ -226,7 +234,11 @@ public sealed class RunStateTests
         using var repeated = fixture.Codec.Freeze(reopened);
         Assert.Equal(prepared.Reference, repeated.Reference);
         var selected = new ConfigurationTaskTransformation(fixture.Blobs).Select(reopened.ConfigurationOperationId, reopened.Source, reopened.Tasks);
-        Assert.NotEqual(reopened.Source.Tree.Entries[0].Sha256, selected.Entries[0].Sha256);
+        var saved = Assert.Single(selected.Entries);
+        using var bytes = fixture.Blobs.OpenVerified(new($"blobs/content/{saved.Sha256}.bin", saved.SizeBytes, saved.Sha256!));
+        using var document = JsonDocument.Parse(bytes);
+        Assert.False(document.RootElement.GetProperty("tasks").GetProperty("daily").GetBoolean());
+        Assert.Equal(7, document.RootElement.GetProperty("count").GetInt32());
         Assert.Equal("external original", File.ReadAllText(fixture.Target));
     }
 

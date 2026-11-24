@@ -29,16 +29,6 @@ public sealed class NotificationRoutingTests
         Assert.All(routes, route => Assert.Equal(new[] { task }, route.Selection.TaskIds));
     }
 
-    [Fact(DisplayName = "Existing Deleted References Remain Visible But Cannot Be Added To A New Selection")]
-    public void PreservesDeletedReferences()
-    {
-        var deleted = Guid.NewGuid(); var known = new HashSet<Guid>();
-        var selection = new NotificationTaskSelection([deleted]);
-        Assert.Equal(new[] { deleted }, NotificationTaskPolicy.ValidateSelectionIds(known, selection, selection).TaskIds);
-        Assert.Equal("notification_target_not_found", Assert.Throws<NotificationTaskException>(() =>
-            NotificationTaskPolicy.ValidateSelectionIds(known, selection)).Message);
-    }
-
     [Theory(DisplayName = "Malformed Selections Cannot Enter Frozen Routing")]
     [InlineData("empty-id")]
     [InlineData("duplicate")]

@@ -100,6 +100,45 @@ public sealed class ActionFaultTests
         Assert.Equal(receipt, new AttemptReceiptStore(fixture.Source.Database).Read(receipt.Facts.AttemptId));
     }
 
+    [Fact(DisplayName = "A Damaged Saved Countdown Transition Blocks Native Effects And Preserves The Original Receipt")]
+    public async Task RejectsDamagedTransitions()
+    {
+        var clock = new CompletionControlledClock();
+        await using var fixture = new CompletionActionFixture(clock: clock);
+        var (receipt, countdown) = await fixture.RunToCountdown();
+        var database = fixture.Source.Database;
+        var operation = countdown.OperationId.ToString("D");
+        var original = database.Write((connection, transaction) =>
+        {
+            using var command = DatabaseConnections.Command(connection, transaction,
+                "SELECT snapshot_json FROM main.completion_action_transitions WHERE operation_id=$0 AND ordinal=1;", operation);
+            var saved = Assert.IsType<string>(command.ExecuteScalar());
+            UpdateTransition(connection, transaction, "{}");
+            return saved;
+        });
+        try
+        {
+            clock.Advance(TimeSpan.FromSeconds(60));
+            await WaitForFailure(fixture);
+            Assert.Equal("completion_reconciliation_required", fixture.Completion.FailureCode);
+            Assert.Contains(fixture.Base.Index.Current.ResourceHolds, hold => hold.Owner == RecoveryHoldOwner.CompletionActions);
+            Assert.Equal(0, EffectEntries(fixture));
+            Assert.Equal(0, fixture.Power.Calls);
+            Assert.Equal(receipt, new AttemptReceiptStore(database).Read(receipt.Facts.AttemptId));
+        }
+        finally
+        {
+            database.Write((connection, transaction) => { UpdateTransition(connection, transaction, original); return true; });
+        }
+
+        void UpdateTransition(SqliteConnection connection, SqliteTransaction transaction, string json)
+        {
+            using var command = DatabaseConnections.Command(connection, transaction,
+                "UPDATE main.completion_action_transitions SET snapshot_json=$0 WHERE operation_id=$1 AND ordinal=1;", json, operation);
+            Assert.Equal(1, command.ExecuteNonQuery());
+        }
+    }
+
     private static long EffectEntries(CompletionActionFixture fixture)
     {
         using var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);

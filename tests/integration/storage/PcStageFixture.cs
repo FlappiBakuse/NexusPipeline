@@ -22,6 +22,7 @@ internal sealed class PcStageFixture : IDisposable
     internal string HookMarker { get; }
     internal string GameMarker { get; }
     internal string GameImage { get; }
+    internal string? CaptureBroker { get; }
     internal string GameExitSignal { get; }
     internal string Nonce { get; } = Guid.NewGuid().ToString("N");
     internal ExecutionRuntimeConsumer Consumer { get; }
@@ -38,12 +39,19 @@ internal sealed class PcStageFixture : IDisposable
     internal PcStageFixture(bool configuration = false, bool launch = true, bool forceClose = true,
         string targetMode = "ready", bool mainWait = false, bool external = false, bool hooks = true, bool distinctConfiguration = false,
         bool gameCanExit = false, bool accept = true, bool nativeWindow = false, int totalBudgetSeconds = 120,
-        int captureFrames = 1, bool distinctCaptureFrames = true)
+        int captureFrames = 1, bool distinctCaptureFrames = true, bool holdNativeCapture = false)
     {
         if (totalBudgetSeconds is < 1 or > 120) throw new ArgumentOutOfRangeException(nameof(totalBudgetSeconds));
         _nativeWindow = nativeWindow;
+        if (holdNativeCapture)
+        {
+            var image = Environment.GetEnvironmentVariable("NEXUS_PROCESS_FIXTURE_EXE") ?? throw new IOException("fixture_image_missing");
+            var directory = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "preview-broker-" + Nonce);
+            Directory.CreateDirectory(directory);
+            CaptureBroker = CopyImage(image, directory);
+        }
         Base = new(judgementRuntime: nativeWindow ? new ExecutionJudgementRuntime(
-            Environment.GetEnvironmentVariable("NEXUS_TEST_HOST_EXE")!, null) { CaptureFrameCount = captureFrames } : null);
+            CaptureBroker ?? Environment.GetEnvironmentVariable("NEXUS_TEST_HOST_EXE")!, null) { CaptureFrameCount = captureFrames } : null);
         try
         {
             HookMarker = Path.Combine(Source.Root, "pc-hooks");

@@ -5,6 +5,7 @@ using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Execution;
+using NexusPipeline.Platform.Storage.Extensions;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
@@ -16,6 +17,7 @@ public sealed class FileLogTests
 {
     [Theory(DisplayName = "Real File Selectors Skip Their Own Baselines And Use File Judgement While Preserving Pipe Bytes")]
     [InlineData("append", "logs/events.log", "file")]
+    [InlineData("invalid-pipe", "logs/events.log", "file")]
     [InlineData("latest", "logs/*.log", "latestMatchingFile")]
     [InlineData("latest", "logs", "latestFile")]
     [InlineData("date", "logs/{YYYY-MM-DD}/run*.log", "latestMatchingFile")]
@@ -32,8 +34,17 @@ public sealed class FileLogTests
         Assert.True(raw.IsComplete); Assert.NotEmpty(raw.FileSources); Assert.NotNull(raw.FileLogBaseline);
         var lines = new List<string>(); Assert.True(RawOutputReplay.Read(blobs, raw, lines.Add));
         Assert.DoesNotContain("old-file-success", lines); Assert.DoesNotContain("pipe-success", lines);
-        Assert.Contains(mode == "split" ? "file-中文🙂-failure" : "file-failure", lines);
+        var expectedFileLine = mode == "split" ? "file-中文🙂-failure" : "file-failure";
+        Assert.Contains(expectedFileLine, lines);
         if (mode == "split") Assert.Contains("final-tail", lines);
+        var adapterEvents = new List<TaskLogEvent>();
+        Assert.True(AdapterLogReader.Read(blobs, raw, (batch, _) => adapterEvents.AddRange(batch)));
+        if (mode == "invalid-pipe")
+            Assert.Contains(adapterEvents, item => item.SourceId == "stdout" && item.Epoch == 1 && item.Sequence == 1 && item.Text == "");
+        else
+            Assert.Contains(adapterEvents, item => item.SourceId == "stdout" && item.Text == "pipe-success");
+        Assert.Contains(adapterEvents, item => item.SourceId == "file:0" && item.Text == expectedFileLine);
+        Assert.DoesNotContain(adapterEvents, item => item.Text == "old-file-success");
         var pipe = raw.Parts.Where(part => part.FileSourceId is null).SelectMany(part => Read(blobs, part.Content)).ToArray();
         Assert.Contains("pipe-success", System.Text.Encoding.UTF8.GetString(pipe));
         await fixture.Complete();
@@ -106,7 +117,9 @@ public sealed class FileLogTests
     public async Task CollectsUnreadableFiles()
     {
         await using var fixture = new FileLogFixture("locked", "logs/locked.log"); fixture.Prepare(); await fixture.Start(); await fixture.Ready(".locked");
-        await Task.Delay(500); var document = await fixture.Collect();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while ((await fixture.Snapshot()).Raw.FailureCode is null) await Task.Delay(25, deadline.Token);
+        var document = await fixture.Collect();
         Assert.Equal(BusinessOutcome.Unverified, document.Business);
         var raw = RawOutputCodec.Read(new(fixture.Source.Instance, new()), fixture.Binding, document.RawOutput!);
         Assert.Equal("execution_log_read_failed", raw.FailureCode);
@@ -120,7 +133,10 @@ public sealed class FileLogTests
     public async Task ObservesPartialActivity()
     {
         await using var fixture = new FileLogFixture("activity", limits: new(1, 1, 30)); fixture.Prepare(); await fixture.Start();
-        await Task.Delay(1500); Assert.False(fixture.Collector.TryRequestStop());
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while ((await fixture.Snapshot()).Raw.Parts.Where(part => part.FileSourceId is not null).Sum(part => part.Content.SizeBytes) < 6)
+            await Task.Delay(25, deadline.Token);
+        Assert.False(fixture.Collector.TryRequestStop());
         await fixture.WaitExit(); var document = await fixture.Collect(); Assert.Null(document.Stop);
         Assert.Equal(BusinessOutcome.Unverified, document.Business); await fixture.Complete();
     }

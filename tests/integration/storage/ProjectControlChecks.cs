@@ -1,8 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Runtime.Versioning;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading.Channels;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -15,6 +17,7 @@ using NexusPipeline.Host.Control.Cli;
 using NexusPipeline.Host.Control.Configuration;
 using NexusPipeline.Host.Control.Http;
 using NexusPipeline.Host.Control.Mcp;
+using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Extensions;
 using Xunit;
 
@@ -32,15 +35,31 @@ internal static class ProjectControlChecks
         var builder = WebApplication.CreateSlimBuilder(); builder.Logging.ClearProviders();
         builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
         await using var app = builder.Build();
+        var profiles = Channel.CreateUnbounded<string>();
+        app.Use(async (context, next) =>
+        {
+            if (!context.Request.Headers.ContainsKey("X-Nexus-Test-Project-Profile")) { await next(context); return; }
+            using var capture = new StringWriter();
+            var previous = Console.Error;
+            try
+            {
+                Console.SetError(capture);
+                using var profile = StartupProfile.Begin("project-control-json");
+                await next(context);
+            }
+            finally { Console.SetError(previous); }
+            profiles.Writer.TryWrite(capture.ToString());
+        });
         var authority = new ControlAuthentication(catalog.Instance.InstanceId, false, null, () => new(0, HostSettings.Default), null!, TimeProvider.System);
         app.Use(ControlExceptionBoundary.InvokeAsync); app.Use(authority.InvokeAsync);
-        new ProjectControl(authority, useCases, new()).Map(app);
+        new ProjectControl(authority, useCases).Map(app);
         var frontends = new ExtensionFrontendControl(authority, provider.Activator); frontends.Map(app);
         using var drafts = new NexusPipeline.Platform.Storage.Configuration.BindingDrafts(catalog.Instance, catalog.Database, new());
         new ProjectFrontendControl(catalog.Instance.InstanceId, authority, frontends, useCases, new(), drafts).Map(app);
         await app.StartAsync();
         var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
         using var http = new HttpClient(new SocketsHttpHandler { UseProxy = false }) { BaseAddress = new(address) };
+        await ValidatesOwnedProjectRequestAsync(http, profiles.Reader);
         var discover = Binding(project, "discover"); discover["selection"] = new JsonObject();
         using (var response = await http.PostAsJsonAsync("/control/v1/projects/discover", discover))
         {
@@ -63,6 +82,37 @@ internal static class ProjectControlChecks
             Assert.Equal(HttpMethod.Post, request.Method); Assert.Equal("/control/v1/projects/" + action, request.Path);
         }
         await app.StopAsync();
+    }
+
+    private static async Task ValidatesOwnedProjectRequestAsync(HttpClient client, ChannelReader<string> profiles)
+    {
+        var body = Command("release");
+        body["previewId"] = Guid.NewGuid().ToString("D");
+        var raw = body.ToJsonString();
+        for (var visit = 0; visit < 2; visit++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "/control/v1/projects/release")
+            {
+                Content = new StringContent(raw, Encoding.UTF8, "application/json")
+            };
+            request.Headers.Add("X-Nexus-Test-Project-Profile", "1");
+            using var response = await client.SendAsync(request);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.False((await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("released").GetBoolean());
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var evidence = await profiles.ReadAsync(deadline.Token);
+            using var profile = JsonDocument.Parse(evidence);
+            var steps = profile.RootElement.GetProperty("steps").EnumerateArray().ToDictionary(
+                value => value.GetProperty("name").GetString()!, value => value.GetProperty("count").GetInt64());
+            Assert.Equal(0L, steps.GetValueOrDefault("contract.read"));
+            Assert.Equal(visit == 0 ? 1L : 0L, steps.GetValueOrDefault("contract.evaluate"));
+        }
+        using var duplicate = new StringContent(raw.Insert(1, "\"action\":\"release\","), Encoding.UTF8, "application/json");
+        using var rejected = await client.PostAsync("/control/v1/projects/release", duplicate);
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        using var oversized = new StringContent(raw.PadRight(ControlRequestBody.MaximumBytes + 1), Encoding.UTF8, "application/json");
+        using var limited = await client.PostAsync("/control/v1/projects/release", oversized);
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, limited.StatusCode);
     }
 
     private static async Task PreviewAsync(HttpClient http, ProjectSourceFixture project)
@@ -149,6 +199,9 @@ internal static class ProjectControlChecks
         var parameters = JsonSerializer.SerializeToElement(new { name = "project_discover", arguments = body });
         var reply = JsonSerializer.SerializeToElement(await tools.CallAsync(caller, parameters));
         Assert.True(reply.GetProperty("structuredContent").GetProperty("Exists").GetBoolean());
+        var invalid = body.DeepClone(); invalid["unrecognized"] = true;
+        await Assert.ThrowsAsync<JsonException>(() => tools.CallAsync(caller,
+            JsonSerializer.SerializeToElement(new { name = "project_discover", arguments = invalid })));
         enabled = false;
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => tools.CallAsync(caller, parameters));
         Assert.Empty(tools.List(caller));

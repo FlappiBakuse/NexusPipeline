@@ -192,9 +192,11 @@ public sealed class ResourceClaimsTests
         var fixture = AttemptTestFixture.Create(); var accepted = fixture.Accept();
         if (change == "missing-image") File.Move(fixture.Source.Image, Path.Combine(fixture.Root, "retained-image"));
         else Directory.Move(fixture.Configuration.TargetPath, Path.Combine(fixture.Root, "retained-configuration"));
-        var before = RuntimeBytes(fixture.Instance.RuntimeRoot);
+        var before = RuntimeState(fixture);
         Assert.Equal(accepted with { Acceptance = accepted.Acceptance with { IsNew = false } }, fixture.Accept());
-        Assert.Equal(before, RuntimeBytes(fixture.Instance.RuntimeRoot));
+        var after = RuntimeState(fixture);
+        Assert.Equal(before.RowsAndFiles, after.RowsAndFiles);
+        Assert.Equal(before.DatabaseFiles, after.DatabaseFiles);
     }
 
     [Theory(DisplayName = "Accepted Replay Rejects Changed Candidate Or Operation Identity Before Writing Anything")]
@@ -213,10 +215,13 @@ public sealed class ResourceClaimsTests
             "digest" => new(operation.OperationId, operation.SubjectId, new('c', 64), operation.Kind), _ => operation
         };
         var candidate = change == "candidate" ? fixture.Plan with { AttemptOrdinal = 2 } : fixture.Plan;
-        var before = RuntimeBytes(fixture.Instance.RuntimeRoot); var commits = fixture.Database.CommitSequence;
+        var before = RuntimeState(fixture); var commits = fixture.Database.CommitSequence;
         Assert.Throws<OperationConflictException>(() => new RunAttemptAcceptance(fixture.Instance, new(), fixture.Database)
             .Accept(operation, candidate, DateTimeOffset.UtcNow));
-        Assert.Equal(before, RuntimeBytes(fixture.Instance.RuntimeRoot)); Assert.Equal(commits, fixture.Database.CommitSequence);
+        var after = RuntimeState(fixture);
+        Assert.Equal(before.RowsAndFiles, after.RowsAndFiles);
+        Assert.Equal(before.DatabaseFiles, after.DatabaseFiles);
+        Assert.Equal(commits, fixture.Database.CommitSequence);
         Assert.Equal(accepted with { Acceptance = accepted.Acceptance with { IsNew = false } }, fixture.Accept());
     }
 
@@ -281,11 +286,15 @@ public sealed class ResourceClaimsTests
     private static string[] TreeBytes(string root) => Directory.GetFiles(root, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal)
         .Select(path => Path.GetRelativePath(root, path) + ":" + PhysicalObjectIdentity.Read(path) + ":" +
             Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path)))).ToArray();
-    private static string[] RuntimeBytes(string root) => Directory.GetFiles(root, "*", SearchOption.AllDirectories)
-        .Where(path => Path.GetFileName(path) != "instance.lock" && !path.EndsWith("runtime.db", StringComparison.Ordinal) &&
-            !path.EndsWith("nexus.db-wal", StringComparison.Ordinal) && !path.EndsWith("nexus.db-shm", StringComparison.Ordinal))
-        .Order(StringComparer.Ordinal).Select(path => Path.GetRelativePath(root, path) + ":" +
-            Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path)))).ToArray();
+    private static (string[] RowsAndFiles, string[] DatabaseFiles) RuntimeState(AttemptTestFixture fixture)
+    {
+        var rows = RuntimeFingerprint.Capture(fixture.Instance.RuntimeRoot);
+        Assert.Contains(rows, row => row.StartsWith("state/runtime.db:operations:", StringComparison.Ordinal) &&
+            row.Contains(fixture.Plan.OperationId, StringComparison.Ordinal));
+        var files = RuntimeFingerprint.CaptureDatabaseFiles(fixture.Database.DatabasePath, DatabaseDomain.All);
+        Assert.Contains(files, value => value.StartsWith("runtime.db:", StringComparison.Ordinal));
+        return (rows, files);
+    }
     private static Dictionary<string, byte[]> DatabaseBytes(StateDatabase database) => new[] { "", "-wal", "-shm", "-journal" }
         .Where(suffix => File.Exists(database.DatabasePath + suffix)).ToDictionary(suffix => suffix, suffix => File.ReadAllBytes(database.DatabasePath + suffix));
     private static void AssertDatabaseBytes(StateDatabase database, Dictionary<string, byte[]> expected)

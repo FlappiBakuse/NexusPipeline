@@ -36,13 +36,35 @@ public sealed class RevisionStoreTests
         var heldKey = fault == "slot" ? ConfigurationRevisionService.ResourceKey(change.Address)
             : fault == "definitions" ? "automation:definitions" : fault == "blobs" ? "blobs:content" : null;
         using var conflict = heldKey is null ? null : resources.TryAcquire(Guid.NewGuid(), [new(heldKey, ResourceClaimMode.Mutation)]).Lease;
+        if (heldKey is not null) Assert.NotNull(conflict);
+        var session = Guid.NewGuid();
+        var correlation = Guid.NewGuid();
         if (fault == "recovery") index.BlockUnknown("fixture_unknown");
-        if (fault == "closing") lifecycle.RequestClose(Guid.NewGuid(), Guid.NewGuid());
+        if (fault == "closing") Assert.NotNull(lifecycle.RequestClose(session, correlation).Permit);
         if (fault == "expired") instanceLease.Dispose();
         var identity = Identity(change);
-        Assert.NotNull(Record.Exception(() => service.Save(identity, change, DateTimeOffset.UtcNow)));
+        if (fault == "expired")
+            Assert.Equal("runtime_exclusive_lease_required", Assert.Throws<IOException>(() =>
+                service.Save(identity, change, DateTimeOffset.UtcNow)).Message);
+        else
+            Assert.Equal(heldKey is null ? "configuration_host_unavailable" : "configuration_resource_conflict",
+                Assert.Throws<ConfigurationException>(() => service.Save(identity, change, DateTimeOffset.UtcNow)).Message);
         Assert.Null(fixture.Store.Read(change.Address));
         Assert.Null(fixture.Store.Lookup(identity, change));
+
+        conflict?.Dispose();
+        if (fault == "closing") Assert.True(lifecycle.AbandonClose(session, correlation));
+        using var restoredLease = fault == "expired" ? InstanceLease.Acquire(fixture.Instance, new()) : null;
+        var activeLease = restoredLease ?? instanceLease;
+        if (fault is "recovery" or "expired")
+        {
+            var recovered = new StartupJournalRecovery(fixture.Instance, new(), fixture.Database,
+                new(fixture.Root, Path.Combine(fixture.Instance.RuntimeRoot, "extensions"))).Recover(activeLease);
+            service = new(fixture.Instance, fixture.Database, new(), activeLease, new(new HostLifecycle(recovered, TimeProvider.System)));
+        }
+        var saved = service.Save(identity, change, DateTimeOffset.UtcNow);
+        Assert.True(saved.IsNew);
+        Assert.Equal(change.Tree.Entries, saved.Saved.Tree.Entries);
     }
 
     [Fact(DisplayName = "A Configuration Save Checks The Binding Revision And Can Retry Its Unaccepted Identity Against The Current Definition")]
@@ -218,13 +240,17 @@ public sealed class RevisionStoreTests
     {
         var fixture = Create();
         Save(fixture, Capture(fixture, "main", "saved"));
+        string? unknownManifest = null;
+        byte[]? unknownBytes = null;
         if (missingPointer) Execute(fixture, "DELETE FROM configuration.configuration_current;");
         else
         {
             var bytes = Encoding.UTF8.GetBytes("{\"format\":\"nexus.configuration.snapshot\",\"version\":2,\"tree\":{}}");
             var digest = Convert.ToHexStringLower(SHA256.HashData(bytes));
             var relative = $"blobs/plans/{digest}.json";
-            File.WriteAllBytes(Path.Combine(fixture.Instance.RuntimeRoot, relative), bytes);
+            unknownManifest = Path.Combine(fixture.Instance.RuntimeRoot, relative);
+            unknownBytes = bytes;
+            File.WriteAllBytes(unknownManifest, unknownBytes);
             using var connection = Connection(fixture);
             using var command = connection.CreateCommand();
             command.CommandText = "UPDATE configuration.configuration_revisions SET manifest_path=$path,manifest_digest=$digest,manifest_size=$size;";
@@ -233,9 +259,14 @@ public sealed class RevisionStoreTests
             command.Parameters.AddWithValue("$size", bytes.Length);
             command.ExecuteNonQuery();
         }
-        var before = DatabaseBytes(fixture.Database.DatabasePath);
-        Assert.Throws<IOException>(() => StateDatabase.OpenExisting(fixture.Instance, Path.Combine(fixture.Root, "diagnostics"), new JournalStartupAdmission(fixture.Instance, new())));
-        Assert.Equal(before, DatabaseBytes(fixture.Database.DatabasePath));
+        string[] CaptureDatabase() => RuntimeFingerprint.CaptureDatabaseFiles(fixture.Database.DatabasePath, DatabaseDomain.Configuration);
+        var before = CaptureDatabase();
+        Assert.Contains(before, file => file.StartsWith("configuration.db:", StringComparison.Ordinal));
+        var error = Assert.Throws<IOException>(() => StateDatabase.OpenExisting(fixture.Instance,
+            Path.Combine(fixture.Root, "diagnostics"), new JournalStartupAdmission(fixture.Instance, new())));
+        Assert.Equal(missingPointer ? "configuration_current_missing" : "configuration_snapshot_format_unknown", error.Message);
+        Assert.Equal(before, CaptureDatabase());
+        if (unknownManifest is not null) Assert.Equal(unknownBytes, File.ReadAllBytes(unknownManifest));
     }
 
     private static ConfigurationSaveResult Save(Fixture fixture, ConfigurationRevisionChange change)
@@ -279,7 +310,5 @@ public sealed class RevisionStoreTests
     }
     private static BlobReference ContentReference(FileTreeEntry entry) =>
         new($"blobs/content/{entry.Sha256}.bin", entry.SizeBytes, entry.Sha256!);
-    private static byte[] DatabaseBytes(string path) => new[] { "", "-wal", "-shm" }
-        .Where(suffix => File.Exists(path + suffix)).SelectMany(suffix => File.ReadAllBytes(path + suffix)).ToArray();
     private sealed record Fixture(string Root, RuntimeInstance Instance, StateDatabase Database, ConfigurationRevisionStore Store, Guid Binding, Guid OtherBinding);
 }

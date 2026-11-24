@@ -27,6 +27,17 @@ public sealed class RunHistoryTests
         using (var sample = capture.Read(Current(), fixture.Writer, sealedOutput: false))
             Assert.All(progress.Publish(Guid.NewGuid(), ConfigurationRunFixture.Subject, sample).Session.Resources,
                 resource => Assert.Equal(2, resource.CurrentRevision));
+        var published = Current();
+        using (var unchanged = capture.Read(published, fixture.Writer, sealedOutput: false))
+        {
+            Assert.Null(unchanged.Batch);
+            Assert.Null(unchanged.Prepared);
+            Assert.All(unchanged.Items, item => Assert.Equal("configuration_sync_unchanged", item.ReasonCode));
+        }
+        var afterRead = Current();
+        Assert.Equal(published.Revision, afterRead.Revision);
+        Assert.Equal(published.Resources.Select(resource => resource.CurrentRevision),
+            afterRead.Resources.Select(resource => resource.CurrentRevision));
         var main = fixture.Base.Request.Resources.Single(resource => resource.Target.Address.ResourceId == "main");
         File.WriteAllText(Path.Combine(main.Target.TargetPath, "tasks.json"), "{\"tasks\":{\"one\":true,\"new\":false},\"count\":42}");
         var stopped = await fixture.StopAsync(); fixture.Seal(stopped);

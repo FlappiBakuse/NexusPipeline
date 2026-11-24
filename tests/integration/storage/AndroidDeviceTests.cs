@@ -80,7 +80,14 @@ public sealed class AndroidDeviceTests
     {
         await using var fixture = await ProviderAndroidFixture.CreateAsync(false, mumu, fault);
         var runtime = fixture.Runtime;
-        var receipt = await runtime.RunAsync().WaitAsync(TimeSpan.FromSeconds(60));
+        var reason = fault switch
+        {
+            "timeout" => "execution_device_command_deadline",
+            "overflow" => "execution_device_output_limit",
+            "mapping" => "execution_mumu_mapping_unproven",
+            _ => throw new ArgumentOutOfRangeException(nameof(fault))
+        };
+        var receipt = await DeviceProviderTests.RunWithDeviceRejection(runtime, reason);
         var error = runtime.Marker + ".device-error";
         Assert.True(receipt.Facts.Engine == EngineOutcome.Succeeded, File.Exists(error) ? File.ReadAllText(error) : receipt.Facts.Engine.ToString());
         var elapsed = long.Parse(File.ReadAllText(runtime.Marker + ".device-denied"), System.Globalization.CultureInfo.InvariantCulture);
@@ -88,7 +95,14 @@ public sealed class AndroidDeviceTests
         var family = RequireStopped(runtime);
         var invocations = fixture.Invocations();
         if (fault == "mapping")
-            Assert.All(invocations, value => Assert.Equal("info", value.GetProperty("arguments")[0].GetString()));
+        {
+            Assert.NotEmpty(invocations);
+            Assert.All(invocations, value => Assert.Equal(new[] { "info", "-v", "all" },
+                value.GetProperty("arguments").EnumerateArray().Select(item => item.GetString())));
+            var nonce = File.ReadAllText(Path.Combine(fixture.ToolDirectory, "response-written"));
+            Assert.Contains(invocations, value => value.GetProperty("nonce").GetString() == nonce &&
+                family.Contains(value.GetProperty("processId").GetInt32()));
+        }
         else
         {
             var invoked = Assert.Single(invocations, value => value.GetProperty("arguments").EnumerateArray()

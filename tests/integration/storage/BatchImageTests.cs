@@ -15,6 +15,100 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class BatchImageTests(ITestOutputHelper output)
 {
+    [Fact(DisplayName = "Actual Batch Image Retirement Skips Previously Retired Content And Preserves Sorted Page Membership")]
+    public async Task RetiresSortedImagePages()
+    {
+        var fixture = new PcStageFixture(launch: false, external: true, hooks: false,
+            nativeWindow: true, captureFrames: 40);
+        await fixture.ExecuteAsync(async () =>
+        {
+            var receipt = Assert.IsType<AttemptReceipt>(await fixture.Consumer.RunNextAsync());
+            var source = fixture.Source;
+            new ExecutionRecordProjection(source.Instance, source.Database, new(), source.Lease,
+                new(source.Instance, source.Database, new())).OnCommitted(receipt);
+            var run = receipt.Facts.RunId;
+            var images = new ImageCatalogReader(source.Instance, source.Database, new());
+            var query = new ImageCatalogQuery(run, receipt.Facts.AttemptId);
+            var firstView = images.ReadPage(query).Items;
+            Assert.Equal(40, firstView.Count);
+            var ordered = firstView.OrderBy(item => item.ImageSha256, StringComparer.Ordinal).ToArray();
+            Assert.Equal(ordered.Length, ordered.Select(item => item.ImageSha256).Distinct().Count());
+            var service = new ContentRetirementService(source.Instance, source.Database, new(),
+                source.Lease, fixture.Base.Resources, fixture.Base.Index, source.PayloadRoots);
+
+            var first = Assert.IsType<ContentRetirementPage>(service.RetireImagesPage(Guid.NewGuid(), "image-retirement", run, limit: 12));
+            Assert.Equal(12, first.Count);
+            Assert.Equal(ordered[11].ImageSha256, first.LastSha256);
+            Assert.True(service.CompleteCleanup(first));
+
+            var second = Assert.IsType<ContentRetirementPage>(service.RetireImagesPage(Guid.NewGuid(), "image-retirement", run, limit: 5));
+            Assert.Equal(5, second.Count);
+            Assert.Equal(ordered[16].ImageSha256, second.LastSha256);
+            Assert.True(service.CompleteCleanup(second));
+
+            RecordRetirementInventory.VerifyReadOnly(source.Instance, source.Database, new());
+            var lastProof = new[] { first.OperationId.ToString("D"), second.OperationId.ToString("D") }.Max(StringComparer.Ordinal);
+            var proof = $" WHERE operation_id='{lastProof}';";
+            fixture.Base.Execute("UPDATE records.record_content_retirements SET size_bytes=size_bytes+1" + proof);
+            try { Assert.ThrowsAny<IOException>(() => RecordRetirementInventory.VerifyReadOnly(source.Instance, source.Database, new())); }
+            finally { fixture.Base.Execute("UPDATE records.record_content_retirements SET size_bytes=size_bytes-1" + proof); }
+
+            var after = images.ReadPage(query).Items;
+            Assert.Equal(firstView.Select(item => item.Key), after.Select(item => item.Key));
+            Assert.Equal(ordered.Take(17).Select(item => item.ImageSha256),
+                after.Where(item => item.ContentAvailability == RecordContentAvailability.Retired)
+                    .Select(item => item.ImageSha256).Order(StringComparer.Ordinal));
+            Assert.Throws<RetiredContentException>(() => images.OpenOriginal(ordered[7].Key, ordered[7].ResultSha256));
+            using var original = images.OpenOriginal(ordered[17].Key, ordered[17].ResultSha256);
+            Assert.Equal(ordered[17].ImageSha256, Convert.ToHexStringLower(SHA256.HashData(original)));
+        });
+    }
+
+    [Fact(DisplayName = "An Actual Batch Image Catalog Preserves Ordered Pages And Revalidates Off-Page Rows")]
+    public async Task PagesVerifiedBatchFrames()
+    {
+        var fixture = new PcStageFixture(launch: false, external: true, hooks: false,
+            nativeWindow: true, captureFrames: 12);
+        await fixture.ExecuteAsync(async () =>
+        {
+            var receipt = Assert.IsType<AttemptReceipt>(await fixture.Consumer.RunNextAsync());
+            var source = fixture.Source;
+            var validated = AttemptPreparedBinding.Read(source.Instance, new(), source.Database, receipt.JournalId).ValidatedRead;
+            var expected = Assert.Single(validated.Captures).Result!.Frames!;
+            Assert.Equal(12, expected.Count);
+            new ImageCatalogProjection(source.Instance, source.Database, new(), source.Lease).OnCommitted(receipt);
+            var reader = new ImageCatalogReader(source.Instance, source.Database, new());
+            var query = new ImageCatalogQuery(receipt.Facts.RunId, receipt.Facts.AttemptId, Limit: 5);
+            var first = reader.ReadPage(query);
+            Assert.Equal(4, first.NextPosition);
+            var next = reader.ReadPage(query with { AfterPosition = first.NextPosition!.Value });
+            Assert.Equal(9, next.NextPosition);
+            var end = reader.ReadPage(query with { AfterPosition = next.NextPosition!.Value });
+            Assert.Null(end.NextPosition);
+            var past = reader.ReadPage(query with { AfterPosition = 11 });
+            Assert.Empty(past.Items);
+            Assert.Null(past.NextPosition);
+
+            var items = first.Items.Concat(next.Items).Concat(end.Items).ToArray();
+            Assert.Equal(Enumerable.Range(0, 12), items.Select(item => item.Position));
+            Assert.Equal(expected.Select(frame => frame.FrameId), items.Select(item => item.Key.CaptureId));
+            Assert.Equal(expected.Select(frame => frame.Png.Sha256), items.Select(item => item.ImageSha256));
+            Assert.All(items, item =>
+            {
+                Assert.Equal(RunImageOutcome.Captured, item.Outcome);
+                Assert.Equal(1, item.InvocationOrdinal);
+            });
+            using (var original = reader.OpenOriginal(end.Items[^1].Key, end.Items[^1].ResultSha256))
+                Assert.Equal(expected[^1].Png.Sha256, Convert.ToHexStringLower(SHA256.HashData(original)));
+
+            var row = $" WHERE attempt_id='{receipt.Facts.AttemptId:D}' AND position=11;";
+            fixture.Base.Execute("UPDATE records.execution_image_entries SET width=width-1" + row);
+            try { Assert.ThrowsAny<IOException>(() => reader.ReadPage(query)); }
+            finally { fixture.Base.Execute("UPDATE records.execution_image_entries SET width=width+1" + row); }
+            Assert.Equal(first.Items, reader.ReadPage(query).Items);
+        });
+    }
+
     [Fact(DisplayName = "Two Frame Identities Sharing One PNG Retire Together As One Content Blob")]
     public async Task RetiresSharedContent()
     {

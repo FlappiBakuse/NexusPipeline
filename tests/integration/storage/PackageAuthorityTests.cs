@@ -22,16 +22,45 @@ public sealed class PackageAuthorityTests
         using var package = fixture.Prepare(root);
         var candidate = package.CaptureCandidate(root, fixture.Blobs, CancellationToken.None);
         var bytes = package.ManifestBytes(); bytes[0] = 0;
-        var returned = package.Manifest; ((IList<string>)returned.Capabilities).Add("media.capture");
-        var count = candidate.Use(root, fixture.Blobs, CancellationToken.None, (binding, tree) =>
+        if (package.Manifest.Capabilities is ICollection<string> capabilities && !capabilities.IsReadOnly)
+            capabilities.Add("media.capture");
+        string[] files = kind == "managed-code" ? ["entry.dll", "manifest.json"] : ["adapter/main.js", "manifest.json"];
+        string[] dirs = kind == "managed-code" ? [""] : ["", "adapter"];
+        _ = candidate.Use(root, fixture.Blobs, CancellationToken.None, (binding, tree) =>
+        {
+            if (tree.Snapshot.Entries is IList<NexusPipeline.Core.Configuration.FileTreeEntry> entries && entries.Count > 0)
+            {
+                try { entries[0] = entries[0] with { RelativePath = "caller-modification" }; }
+                catch (NotSupportedException) { }
+            }
+            if (tree.Contents is IList<BlobReference> contents && contents.Count > 0)
+            {
+                try { contents[0] = contents[0] with { SizeBytes = 0 }; }
+                catch (NotSupportedException) { }
+            }
+            return true;
+        });
+        _ = candidate.Use(root, fixture.Blobs, CancellationToken.None, (binding, tree) =>
         {
             Assert.Equal(fixture.OperationId, binding.OperationId);
             Assert.Equal(fixture.Catalog.Instance.InstanceId, binding.InstanceId);
-            Assert.Throws<NotSupportedException>(() => ((IList<NexusPipeline.Core.Configuration.FileTreeEntry>)tree.Snapshot.Entries).Clear());
-            Assert.Throws<NotSupportedException>(() => ((IList<BlobReference>)tree.Contents).Clear());
-            return tree.Snapshot.Entries.Count;
+            Assert.Equal(NexusPipeline.Core.Configuration.FileObjectKind.Directory, tree.Snapshot.Shape);
+            Assert.Equal(dirs.Concat(files).Order(StringComparer.Ordinal), tree.Snapshot.Entries.Select(entry => entry.RelativePath));
+            Assert.Equal(dirs, tree.Snapshot.Entries.Where(entry => entry.Kind == NexusPipeline.Core.Configuration.FileObjectKind.Directory)
+                .Select(entry => entry.RelativePath));
+            var captured = tree.Snapshot.Entries.Where(entry => entry.Kind == NexusPipeline.Core.Configuration.FileObjectKind.File).ToArray();
+            Assert.Equal(files, captured.Select(entry => entry.RelativePath));
+            Assert.Equal(files.Length, tree.Contents.Count);
+            foreach (var entry in captured)
+            {
+                var reference = Assert.Single(tree.Contents, blob => blob.Sha256 == entry.Sha256);
+                var original = File.ReadAllBytes(Path.Combine(fixture.Deployed, entry.RelativePath));
+                Assert.Equal(original.LongLength, entry.SizeBytes);
+                Assert.Equal(original.LongLength, reference.SizeBytes);
+                Assert.Equal(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(original)), reference.Sha256);
+            }
+            return true;
         });
-        Assert.Equal(3, count);
         Assert.Empty(package.Manifest.Capabilities);
         Assert.Equal(fixture.ManifestBytes, package.ManifestBytes());
         Assert.Throws<IOException>(() => File.Open(fixture.Archive, FileMode.Open, FileAccess.Write, FileShare.ReadWrite).Dispose());

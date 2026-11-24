@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from store_release_metadata import release_metadata
+from release_catalog import release_metadata
 
 
 class StoreMetadataTests(unittest.TestCase):

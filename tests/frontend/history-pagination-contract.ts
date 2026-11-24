@@ -2,12 +2,14 @@ import { createApp, h, nextTick, ref } from 'vue';
 import AttemptDetail from '../../apps/web/src/pages/AttemptDetail.vue';
 import HistoryIndex from '../../apps/web/src/pages/HistoryIndex.vue';
 import HistoryInvocations from '../../apps/web/src/pages/HistoryInvocations.vue';
+import AttemptLogs from '../../apps/web/src/pages/AttemptLogs.vue';
 import { ControlClient } from '../../apps/web/src/control/client';
 import { createStore } from '../../apps/web/src/app/store';
-import type { AttemptFacts } from '../../apps/web/src/control/records';
+import type { AttemptFacts, HistoryImage } from '../../apps/web/src/control/records';
 import type { ActiveStep } from '../../apps/web/src/control/execution';
 import type { HistoryLog } from '../../apps/web/src/pages/attempt-resources';
 import type { UiElement } from '@nexuspipeline/extension-sdk';
+import { showsHeightMotion } from './disclosure-motion';
 
 const fullMainLog = 'start\n' + 'middle line\n'.repeat(250) + 'x'.repeat(70000) + '\n你好\nend';
 const postHookLog = 'OE你\nXY好你G�S�';
@@ -123,20 +125,18 @@ export async function historyPaginationContract(fixture: HTMLElement, check: (va
       'a pending log read replaces the disclosure label with progress inside the original button');
     trigger.click();
     check(requests.filter(path => path.includes('/original?')).length === 1, 'a busy log trigger cannot start a second read');
-    finishOriginal!();
     const output = () => mount.querySelector<HTMLElement>('.history-log-preview pre');
-    await wait(() => output()?.textContent === fullMainLog);
+    const revealed = await showsHeightMotion([
+      () => mount.querySelector('.history-log-disclosure .disclosure-clip')?.getBoundingClientRect().height ?? 0
+    ], finishOriginal!, () => output()?.textContent === fullMainLog);
+    check(revealed, 'the loaded log grows through an intermediate height before displaying its complete content');
     check(!trigger.isConnected && document.activeElement === output()?.closest('.history-log-content'),
       'the completed read removes the disclosure button and moves its focus to the displayed log');
-    await new Promise(requestAnimationFrame);
-    await new Promise(requestAnimationFrame);
-    check(mount.querySelector('.history-log-disclosure')!.getAnimations({ subtree: true }).some(animation =>
-      animation instanceof CSSTransition && animation.transitionProperty === 'grid-template-rows' &&
-      animation.effect?.getTiming().duration === 220), 'the loaded log expands with the existing card animation');
     const viewport = output()!.parentElement!.shadowRoot!.querySelector<HTMLElement>('.viewport')!;
-    check(viewport.scrollWidth <= viewport.clientWidth + 1 && viewport.scrollHeight > viewport.clientHeight &&
-      getComputedStyle(output()!).overflowWrap === 'anywhere',
-      'the selected complete log wraps an unbroken line inside the card and scrolls vertically');
+    viewport.scrollTop = viewport.scrollHeight;
+    check(viewport.scrollWidth <= viewport.clientWidth + 1 && viewport.scrollTop > 0 &&
+      viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 1 && output()?.textContent?.endsWith('你好\nend'),
+      'the selected complete log fits horizontally and scrolls to its final original text');
     check(!button('查看完整日志') && !mount.querySelector('nexus-modal'),
       'the complete log is available without opening a separate viewer');
     const originals = requests.filter(path => path.includes('/original?')).length;
@@ -159,7 +159,28 @@ export async function historyPaginationContract(fixture: HTMLElement, check: (va
   } finally { finishOriginal?.(); app.unmount(); mount.remove(); owner.dispose(); }
   await scopeChangeContract(fixture, check);
   await invocationContract(fixture, check);
+  await largeTranscriptContract(fixture, check);
   await userPageContract(fixture, check);
+}
+
+async function largeTranscriptContract(fixture: HTMLElement, check: (value: unknown, name: string) => void): Promise<void> {
+  const id = '10000000-0000-4000-8000-000000000001', key = { stepId: 'long', role: 'main' };
+  const contents = '0123456789 你好 🚀\n'.repeat(160000) + 'last line';
+  const store = createStore(new ControlClient(location.origin, async input =>
+    historyLogResponse(new URL(String(input)), { runId: id, attemptId: id, ...key }, 'e'.repeat(64), contents)));
+  const holder = document.createElement('section'); fixture.append(holder);
+  const app = createApp({ render: () => h(AttemptLogs, { store, runId: id, attemptId: id, visible: true, logs: [{ key }] }) });
+  app.mount(holder);
+  try {
+    holder.querySelector<HTMLButtonElement>('.history-log-toggle')!.click();
+    const until = Date.now() + 5000;
+    const shown = () => holder.querySelector<HTMLPreElement>('.history-log-preview pre');
+    while (!shown() && Date.now() < until) await new Promise(resolve => setTimeout(resolve, 20));
+    check(shown()?.textContent === contents, 'the visible transcript retains every original decoded character across its internal segments');
+    const sizes = [...shown()!.childNodes].filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent!.length);
+    check(sizes.length > 1 && Math.max(...sizes) <= 131072,
+      `large logs avoid materializing one giant rendered text node (${sizes.length} nodes, largest ${Math.max(...sizes)} characters)`);
+  } finally { app.unmount(); holder.remove(); store.dispose(); }
 }
 
 async function scopeChangeContract(fixture: HTMLElement, check: (value: unknown, name: string) => void): Promise<void> {
@@ -233,17 +254,23 @@ async function invocationContract(fixture: HTMLElement, check: (value: unknown, 
       'a'.repeat(64), role + ':' + ordinal);
   });
   const owner = createStore(client), store = { ...owner, can: () => true };
+  let logVisits = 0, imageVisits = 0;
   const logs = ref<HistoryLog[]>([{ key: { stepId: 'wanted', role: 'main', invocationOrdinal: 1 } },
-    { key: { stepId: 'wanted', role: 'preHook' } }]);
+    { key: { stepId: 'wanted', role: 'preHook' } },
+    ...Array.from({ length: 32 }, (_, index) => ({ key: { get stepId() { logVisits++; return 'other-' + index; }, role: 'main' } }))]);
+  const unavailable = { outcome: 'unavailable', invocationOrdinal: 2, reasonCode: 'execution_capture_deadline', resultSha256: 'b'.repeat(64) } as const;
+  const images: HistoryImage[] = [{ ...unavailable, key: { captureId: 'capture-wanted', stepId: 'wanted' } },
+    ...Array.from({ length: 32 }, (_, index) => ({ ...unavailable,
+      key: { captureId: 'capture-' + index, get stepId() { imageVisits++; return 'other-' + index; } } }))];
   const invocation = (ordinal: number) => ({ ordinal, engine: 'Succeeded', business: 'Succeeded',
     reasonCode: 'fixture', startedAt: null, endedAt: null, durationMilliseconds: null });
   const steps: ActiveStep[] = [{ stepId: 'wanted', scriptId: 'script', userId: null, bindingId: null,
     dependsOn: [], phase: 'collected', tasks: [], logRoles: ['main', 'preHook'],
-    invocations: [invocation(1), invocation(2)] }];
+    invocations: Array.from({ length: 10 }, (_, index) => invocation(index + 1)) }];
   const mount = document.createElement('section'); fixture.prepend(mount);
   const app = createApp({ render: () => h(HistoryInvocations, { store, runId: id, attemptId: id, visible: true,
-    steps, stepNames: [{ stepId: 'wanted', scriptName: 'Historical Script' }], logs: logs.value, images: [],
-    logsReady: true, imagesReady: false }) });
+    steps, stepNames: [{ stepId: 'wanted', scriptName: 'Historical Script' }], logs: logs.value, images,
+    logsReady: true, imagesReady: true }) });
   const wait = async (condition: () => boolean) => {
     const until = Date.now() + 5000;
     while (!condition() && Date.now() < until) await new Promise(resolve => setTimeout(resolve, 20));
@@ -253,6 +280,9 @@ async function invocationContract(fixture: HTMLElement, check: (value: unknown, 
   try {
     await nextTick();
     const cards = () => [...mount.querySelectorAll<HTMLElement>('.history-attempt-card')];
+    check(logVisits === 32 && imageVisits === 32, `history scans unrelated logs and screenshots once for ten invocations (${logVisits}/${imageVisits})`);
+    check(!cards()[0]!.querySelector('.history-image-unavailable') && cards()[1]!.querySelector('.history-image-unavailable'),
+      'an unavailable screenshot appears only under its recorded invocation');
     check(mount.querySelector('section')?.getAttribute('aria-label') === 'Historical Script' &&
       !mount.innerText.includes('Historical Script'), 'the invocation section retains its accessible name without repeating the script title');
     cards()[0]!.querySelector<HTMLElement>('.history-log-toggle')!.click();

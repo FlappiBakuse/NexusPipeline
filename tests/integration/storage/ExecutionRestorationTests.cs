@@ -48,25 +48,14 @@ public sealed class ExecutionRestorationTests
         var adjacent = Path.Combine(Path.GetDirectoryName(source.Configuration)!, $".nexus-{fault.JournalId:D}");
         Assert.True(Directory.Exists(adjacent));
         var cleanup = new ConfigurationWorkspaceCleanup(source.Instance, source.Database, new(), source.Lease, fixture.Base.Resources);
-        var console = Console.Error;
-        using var profileOutput = new StringWriter();
-        try
-        {
-            Console.SetError(profileOutput);
-            using var profile = StartupProfile.Begin("cleanup-inventory-test");
-            Assert.True(await cleanup.SweepAsync(default));
-            source.Database.Write((connection, transaction) => AutomationRowWriter.Row(connection, transaction,
-                "UPDATE main.scheduling_watermark SET revision=revision+1 WHERE singleton=1;"));
-            Assert.True(await cleanup.SweepAsync(default));
-        }
-        finally { Console.SetError(console); }
-        using var measured = JsonDocument.Parse(profileOutput.ToString().Split('\n').Single(line =>
-            line.Contains("\"phase\":\"cleanup-inventory-test\"", StringComparison.Ordinal)));
-        Assert.Equal(1, measured.RootElement.GetProperty("steps").EnumerateArray().Single(step =>
-            step.GetProperty("name").GetString() == "configuration.cleanup.journal").GetProperty("count").GetInt32());
+        Assert.True(await cleanup.SweepAsync(default));
+        Assert.False(Directory.Exists(adjacent));
+        Assert.True(await cleanup.SweepAsync(default));
         Assert.False(Directory.Exists(adjacent));
         Assert.True(cleanup.TryClean(fault.JournalId));
         Assert.Equal(original, PhysicalObjectIdentity.Read(source.Configuration));
+        Assert.Equal(bytes, File.ReadAllBytes(source.Configuration));
+        Assert.Equal(receipt, new AttemptReceiptStore(source.Database).Read(receipt.Facts.AttemptId));
         var next = fixture.Base.Service.Start(Guid.NewGuid(), ExecutionSequentialFixture.Subject,
             source.Request(new QueueTarget(source.QueueId)), DateTimeOffset.UtcNow);
         Assert.NotEqual(fixture.Accepted.JournalId, next.JournalId);

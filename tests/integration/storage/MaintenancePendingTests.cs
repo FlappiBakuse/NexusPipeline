@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using System.Text.Json;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Platform.Storage;
@@ -13,6 +14,30 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class MaintenancePendingTests
 {
+    [Fact(DisplayName = "Maintenance diagnostics retain the original stage and cleanup fault without sensitive exception text")]
+    public void RecordsPrimaryAndCleanup()
+    {
+        using var fixture = PayloadTestFixture.Create(JournalKind.UpdateApply, PayloadAction.Upgrade);
+        var operation = Guid.NewGuid();
+        const string privateContent = "private_configuration_or_token";
+        var error = new IOException("maintenance_helper_exited_before_ready", new InvalidOperationException(privateContent));
+        MaintenanceDiagnostic.Record(fixture.Instance, operation, "controller", "helper-ready", error,
+            new UnauthorizedAccessException(privateContent), 23);
+        MaintenanceDiagnostic.Record(fixture.Instance, operation, "controller", "helper-ready", error);
+        var directory = Path.Combine(fixture.Instance.RuntimeRoot, "diagnostics");
+        var file = Assert.Single(Directory.EnumerateFiles(directory, $"maintenance-controller-{operation:D}-*-failed.json"));
+        var text = File.ReadAllText(file);
+        using var document = JsonDocument.Parse(text);
+        var record = document.RootElement;
+        Assert.Equal(operation, record.GetProperty("operationId").GetGuid());
+        Assert.Equal("helper-ready", record.GetProperty("stage").GetString());
+        Assert.Equal(23, record.GetProperty("exitCode").GetInt32());
+        Assert.Equal(nameof(IOException), record.GetProperty("errorType").GetString());
+        Assert.Contains(nameof(InvalidOperationException), record.GetProperty("causes").GetRawText());
+        Assert.Contains(nameof(UnauthorizedAccessException), record.GetProperty("cleanup").GetRawText());
+        Assert.DoesNotContain(privateContent, text);
+    }
+
     [Theory(DisplayName = "Maintenance Metadata Queries And Generic Operation Queries Respect Subjects Without An Initial Journal")]
     [InlineData(false)]
     [InlineData(true)]

@@ -2,7 +2,7 @@ import hashlib
 import json
 import subprocess
 
-from installer_runtime import render_runtime
+from installer_lifecycle import render_runtime
 
 
 ADAPTERS = r'''

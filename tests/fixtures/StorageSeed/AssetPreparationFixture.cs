@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Security.Cryptography;
 using NexusPipeline.Core.Automation;
 using NexusPipeline.Core.Configuration;
@@ -14,12 +15,23 @@ internal sealed record AssetPreparationFixture(string Root, RuntimeInstance Inst
     RecoveryIndex Index, PreparedAssetPreparation Prepared, AssetPreparationSources Sources, OperationIdentity Operation,
     InstanceLease InstanceLease, ResourceOperationLease Resources, ResourceLeaseManager ResourceManager, HostLifecycle Lifecycle) : IDisposable
 {
-    internal static AssetPreparationFixture Create(int assetCount = 1, string? selectedRoot = null, int scriptCount = 1)
+    internal static AssetPreparationFixture Create(int assetCount = 1, string? selectedRoot = null, int scriptCount = 1, bool updateExisting = false)
     {
         var root = selectedRoot ?? Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "asset-execution-" + Guid.NewGuid().ToString("N"));
         var instance = new InstanceRoot(new()).OpenOrCreate(Path.Combine(root, "runtime"));
         var database = StateDatabase.CreateFresh(instance);
-        var definitions = AutomationEdits.Apply(AutomationCatalog.Empty, AutomationDefinitionSeed.Create(root));
+        var changes = AutomationDefinitionSeed.Create(root);
+        var definitions = AutomationEdits.Apply(AutomationCatalog.Empty, changes);
+        var expectedRevision = 0L;
+        if (updateExisting)
+        {
+            var store = new AutomationDefinitionStore(database);
+            var seeded = store.Commit(AutomationDefinitionStore.Identity(Guid.NewGuid(), "fixture", changes), changes, DateTimeOffset.UtcNow);
+            expectedRevision = seeded.CatalogRevision;
+            definitions = store.Read();
+            definitions = definitions with { Roots = [definitions.Roots[0] with { Name = "Imported root" }],
+                Scripts = definitions.Scripts.Select(script => script with { Name = "Imported " + script.Name }).ToImmutableArray() };
+        }
         if (scriptCount == 2) definitions = definitions with { Scripts = definitions.Scripts.Add(definitions.Scripts[0] with { Id = Guid.NewGuid(), Name = "Second" }) };
         var attachments = new List<AutomationImportAttachment>();
         var selected = new Dictionary<Guid, string>();
@@ -36,7 +48,7 @@ internal sealed record AssetPreparationFixture(string Root, RuntimeInstance Inst
         var input = new AutomationBundleCodec(new()).Encode(definitions, DateTimeOffset.UtcNow, selectedAttachments: attachments);
         var operationId = Guid.NewGuid();
         var preview = new AutomationImportPreviewer(instance, new(), database).Preview(operationId, input,
-            definitions.Roots.ToDictionary(value => value.Id, value => value.Path), 0);
+            definitions.Roots.ToDictionary(value => value.Id, value => value.Path), expectedRevision);
         var prepared = new AssetPlanCodec(instance, new(), new(instance, new())).Freeze(preview, input, Guid.NewGuid());
         var sources = new AssetPreparationSources(prepared.Plan, selected);
         var instanceLease = InstanceLease.Acquire(instance, new());

@@ -78,10 +78,10 @@ public sealed class EffectOutboxTests
         Assert.Equal(fixture.Effect with { State = FileEffectState.Completed, ReceiptDigest = completed }, Assert.Single(fixture.Outbox.Read(journal.JournalId)));
     }
 
-    [Theory(DisplayName = "Recovery Revisions Write The Isolation Reason Only When Its Stored Value Changes")]
-    [InlineData("recovery_pending", 0)]
-    [InlineData("recovery_quarantined", 1)]
-    public void UpdatesChangedIsolation(string oldReason, int expectedUpdates)
+    [Theory(DisplayName = "Recovery Advances The Journal And Publishes The Pending Isolation Reason From Either Prior State")]
+    [InlineData("recovery_pending")]
+    [InlineData("recovery_quarantined")]
+    public void UpdatesChangedIsolation(string oldReason)
     {
         var fixture = Create();
         var journal = fixture.Journal;
@@ -90,20 +90,19 @@ public sealed class EffectOutboxTests
         using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, domains: DatabaseDomain.Runtime);
         using var transaction = connection.BeginTransaction();
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "UPDATE main.resource_isolations SET reason_code=$reason; " +
-            "CREATE TEMP TABLE isolation_changes(reason TEXT); " +
-            "CREATE TEMP TRIGGER count_isolation_update AFTER UPDATE ON main.resource_isolations " +
-            "BEGIN INSERT INTO isolation_changes VALUES(new.reason_code); END;";
+        command.CommandText = "UPDATE main.resource_isolations SET reason_code=$reason;";
         command.Parameters.AddWithValue("$reason", oldReason);
         command.ExecuteNonQuery();
         var before = RecoveryJournalRegistry.ReadSnapshot(connection, transaction);
+        var original = Assert.Single(before.Isolations);
+        Assert.Equal(oldReason, original.ReasonCode);
         fixture.Registry.AdvanceInside(connection, transaction, journal with { Revision = 2, Phase = JournalPhase.Applying }, 1);
-        command.CommandText = "SELECT count(*) FROM temp.isolation_changes;";
-        Assert.Equal((long)expectedUpdates, (long)command.ExecuteScalar()!);
-        var after = RecoveryJournalRegistry.ReadSnapshot(connection, transaction);
+        transaction.Commit();
+        var after = fixture.Registry.ReadSnapshot();
         Assert.Equal(before.Revision + 1, after.Revision);
-        Assert.Equal("recovery_pending", Assert.Single(after.Isolations).ReasonCode);
-        Assert.Equal(2, Assert.Single(after.Journals).Revision);
+        Assert.Equal(original with { ReasonCode = "recovery_pending" }, Assert.Single(after.Isolations));
+        var current = Assert.Single(after.Journals);
+        Assert.Equal((journal.JournalId, 2L, JournalPhase.Applying), (current.JournalId, current.Revision, current.Phase));
     }
 
     [Theory(DisplayName = "Batched Recovery Membership Rejects Missing Resources And Per Journal Overflow")]

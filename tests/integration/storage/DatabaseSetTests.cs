@@ -24,16 +24,26 @@ public sealed class DatabaseSetTests
         var change = new HostSettingsChange(0, HostSettings.Default with { HistoryRetentionDays = 30 });
         var operation = HostSettingsStore.Identity(Guid.NewGuid(), "fixture", change);
         store.Commit(operation, change, DateTimeOffset.UtcNow);
-        foreach (var domain in DatabaseLayout.Domains)
+        var state = Path.Combine(instance.RuntimeRoot, "state");
+        var tables = new (string Domain, string Table)[]
         {
-            var file = DatabaseLayout.PathFor(database.DatabasePath, domain);
+            ("automation", "automation_roots"), ("configuration", "configuration_current"), ("content", "blobs"),
+            ("extensions", "extension_installations"), ("notifications", "notification_task_ids"),
+            ("records", "run_records"), ("runtime", "operations"), ("system", "settings_snapshots")
+        };
+        Assert.Equal(tables.Select(item => item.Domain + ".db"), Directory.EnumerateFiles(state, "*.db")
+            .Select(Path.GetFileName).Order(StringComparer.Ordinal));
+        foreach (var (domain, table) in tables)
+        {
+            var file = Path.Combine(state, domain + ".db");
             Assert.True(File.Exists(file));
             Assert.Equal(instance.InstanceId.ToString("D"), Scalar(file, "SELECT instance_id FROM schema_info;"));
-            Assert.Equal(DatabaseLayout.Name(domain), Scalar(file, "SELECT domain_name FROM schema_info;"));
+            Assert.Equal(domain, Scalar(file, "SELECT domain_name FROM schema_info;"));
+            Assert.Equal(1L, Scalar(file, $"SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name='{table}';"));
         }
-        Assert.Equal(30L, Scalar(DatabaseLayout.PathFor(database.DatabasePath, DatabaseDomain.System),
+        Assert.Equal(30L, Scalar(Path.Combine(state, "system.db"),
             "SELECT retention_days FROM settings_snapshots WHERE revision=1;"));
-        Assert.Equal(operation.OperationId.ToString("D"), Scalar(database.DatabasePath, "SELECT operation_id FROM operations;"));
+        Assert.Equal(operation.OperationId.ToString("D"), Scalar(Path.Combine(state, "runtime.db"), "SELECT operation_id FROM operations;"));
     }
 
     [Fact(DisplayName = "An Exception Reverts All Business Databases In The Transaction")]
@@ -93,6 +103,32 @@ public sealed class DatabaseSetTests
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Records);
         using var command = connection.CreateCommand(); command.CommandText = "SELECT count(*) FROM records.run_records;";
         Assert.Equal(0L, command.ExecuteScalar());
+    }
+
+    [Fact(DisplayName = "Maintenance Observes Committed State While The Live Writer Owns Its Rollback Journals")]
+    public void ObservesLiveMaintenancePeer()
+    {
+        var (_, instance, database) = Create();
+        var operation = new OperationIdentity(Guid.NewGuid(), "fixture", new string('a', 64), "fixture.database");
+        using var writer = DatabaseConnections.Open(database.DatabasePath, allowPooling: false,
+            domains: DatabaseDomain.Runtime | DatabaseDomain.System);
+        using var write = writer.BeginTransaction(deferred: false);
+        OperationRows.Accept(writer, write, operation, DateTimeOffset.UtcNow);
+        using var update = DatabaseConnections.Command(writer, write,
+            "UPDATE system.startup_registration_current SET command_json=x'7b7d' WHERE singleton=1;");
+        Assert.Equal(1, update.ExecuteNonQuery());
+
+        // The old inspection failed against these actual SQLite journal handles on Windows.
+        Assert.Equal(32, Assert.Throws<IOException>(() => DatabaseJournals.VerifyPaths(database.DatabasePath)).HResult & 0xffff);
+        var observed = StateDatabase.ObserveMaintenancePeer(instance);
+        Assert.Equal(instance.InstanceId, observed.InstanceId);
+        Assert.Equal(database.DatabasePath, observed.DatabasePath);
+        Assert.Equal("maintenance_observation_is_read_only",
+            Assert.Throws<IOException>(() => observed.Accept(operation, DateTimeOffset.UtcNow)).Message);
+        Assert.Equal(0L, Scalar(observed.DatabasePath, "SELECT count(*) FROM operations;"));
+
+        write.Commit();
+        Assert.Equal(1L, Scalar(observed.DatabasePath, "SELECT count(*) FROM operations;"));
     }
 
     [Theory(DisplayName = "Missing Or Foreign Database Members Never Become An Empty Instance")]

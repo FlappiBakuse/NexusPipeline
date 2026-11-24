@@ -102,11 +102,53 @@ public sealed class EditStoreTests
         var fixture = new ConfigurationEditFixture(); fixture.InstallAll(); fixture.RestoreAll();
         var completion = fixture.Completion(); var save = ConfigurationEditStore.SaveIdentity(Guid.NewGuid(), "fixture", completion);
         var cancel = new ConfigurationEditCancel(fixture.SessionId, 2); var cancelOperation = ConfigurationEditStore.CancelIdentity(Guid.NewGuid(), "fixture", cancel);
-        var results = await Task.WhenAll(Task.Run(() => Record.Exception(() => fixture.Store.Save(save, completion, DateTimeOffset.UtcNow))),
-            Task.Run(() => Record.Exception(() => fixture.Store.Cancel(cancelOperation, cancel, DateTimeOffset.UtcNow))));
-        Assert.Single(results, error => error is null); Assert.IsType<ConfigurationException>(results.Single(error => error is not null));
-        var phase = fixture.Store.Read(fixture.SessionId, "fixture")!.Phase;
-        Assert.All(fixture.Initial.Changes, change => Assert.Equal(phase == ConfigurationEditPhase.Saved ? 2 : 1, fixture.Base.Revisions.Read(change.Address)!.Revision));
+        using var start = new Barrier(2);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var saving = Task.Run(() =>
+        {
+            start.SignalAndWait(deadline.Token);
+            return Record.Exception(() => fixture.Store.Save(save, completion, DateTimeOffset.UtcNow));
+        });
+        var cancelling = Task.Run(() =>
+        {
+            start.SignalAndWait(deadline.Token);
+            return Record.Exception(() => fixture.Store.Cancel(cancelOperation, cancel, DateTimeOffset.UtcNow));
+        });
+        var errors = await Task.WhenAll(saving, cancelling);
+        Assert.Single(errors, error => error is null);
+        Assert.Equal("configuration_edit_revision_conflict", Assert.IsType<ConfigurationException>(Assert.Single(errors.OfType<Exception>())).Message);
+
+        var terminal = fixture.Store.Read(fixture.SessionId, "fixture")!;
+        var saved = errors[0] is null;
+        Assert.Equal(saved ? ConfigurationEditPhase.Saved : ConfigurationEditPhase.Cancelled, terminal.Phase);
+        Assert.Equal(saved ? save.OperationId : cancelOperation.OperationId, terminal.CompletionOperationId);
+        Assert.Equal(3, terminal.Revision);
+        if (saved)
+        {
+            Assert.Equal(save.OperationId, fixture.Store.LookupSave(save, completion)!.OperationId);
+            Assert.Null(fixture.Store.LookupCancel(cancelOperation, cancel));
+            Assert.Equal("configuration_edit_revision_conflict", Assert.Throws<ConfigurationException>(() =>
+                fixture.Store.Cancel(cancelOperation, cancel, DateTimeOffset.UtcNow)).Message);
+        }
+        else
+        {
+            Assert.Equal(cancelOperation.OperationId, fixture.Store.LookupCancel(cancelOperation, cancel)!.CompletionOperationId);
+            Assert.Null(fixture.Store.LookupSave(save, completion));
+            Assert.Equal("configuration_edit_revision_conflict", Assert.Throws<ConfigurationException>(() =>
+                fixture.Store.Save(save, completion, DateTimeOffset.UtcNow)).Message);
+        }
+
+        var stillTerminal = fixture.Store.Read(fixture.SessionId, "fixture")!;
+        Assert.Equal(terminal.Revision, stillTerminal.Revision);
+        Assert.Equal(terminal.Phase, stillTerminal.Phase);
+        Assert.Equal(terminal.CompletionOperationId, stillTerminal.CompletionOperationId);
+        var winningChanges = saved ? completion.Batch.Changes : fixture.Initial.Changes;
+        Assert.All(winningChanges, change =>
+        {
+            var revision = fixture.Base.Revisions.Read(change.Address)!;
+            Assert.Equal(saved ? 2 : 1, revision.Revision);
+            Assert.Equal(change.Tree.Entries, revision.Tree.Entries);
+        });
         fixture.VerifyOriginals(); ConfigurationEditInventory.VerifyReadOnly(fixture.Base.Database);
     }
 
@@ -221,12 +263,14 @@ public sealed class EditStoreTests
             "contract" => "UPDATE configuration.configuration_edit_resources SET contract_digest='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';",
             _ => "UPDATE configuration.configuration_edit_resources SET expected_revision=12345;"
         });
-        byte[] Bytes() => new[] { "", "-wal", "-shm" }.Where(suffix => File.Exists(fixture.Base.Database.DatabasePath + suffix))
-            .SelectMany(suffix => File.ReadAllBytes(fixture.Base.Database.DatabasePath + suffix)).ToArray();
-        var before = Bytes();
-        Assert.Throws<IOException>(() => StateDatabase.OpenExisting(fixture.Base.Instance, Path.Combine(fixture.Base.Root, "diagnostic-copy"),
-            new JournalStartupAdmission(fixture.Base.Instance, new())));
-        Assert.Equal(before, Bytes()); fixture.VerifyOriginals();
+        string[] Capture() => RuntimeFingerprint.CaptureDatabaseFiles(fixture.Base.Database.DatabasePath, DatabaseDomain.Configuration);
+        var before = Capture();
+        Assert.Contains(before, file => file.StartsWith("configuration.db:", StringComparison.Ordinal));
+        var error = Assert.Throws<IOException>(() => StateDatabase.OpenExisting(fixture.Base.Instance,
+            Path.Combine(fixture.Base.Root, "diagnostic-copy"), new JournalStartupAdmission(fixture.Base.Instance, new())));
+        Assert.Equal(field == "instance" ? "configuration_edit_metadata_unrecognized" : "configuration_edit_baseline_unbound", error.Message);
+        Assert.Equal(before, Capture());
+        fixture.VerifyOriginals();
     }
 
     [Fact(DisplayName = "Accepting A Grouped Edit Rolls Back Every Journal Effect Resource And Operation If Any Session Resource Fails")]
@@ -327,5 +371,74 @@ public sealed class EditStoreTests
         fixture.Store.Cancel(ConfigurationEditStore.CancelIdentity(Guid.NewGuid(), "fixture", cancel), cancel, DateTimeOffset.UtcNow);
         fixture.VerifyOriginals(); Assert.Equal(change == "binding" ? 1 : 2, fixture.Base.Revisions.Read(new(fixture.Base.Binding, "main"))!.Revision);
         if (change == "binding") Assert.True(new AutomationDefinitionStore(fixture.Base.Database).Read().Bindings.Single(item => item.Id == fixture.Base.Binding).IsEnabled);
+    }
+}
+
+internal sealed class ConfigurationEditFixture
+{
+    internal ConfigurationBatchFixture Base { get; } = new();
+    internal ConfigurationEditStore Store { get; }
+    internal ConfigurationEditExchange Exchange { get; }
+    internal ConfigurationEditRequest Request { get; }
+    internal ConfigurationRevisionBatch Initial { get; }
+    internal Dictionary<string, (FileTreeSnapshot Tree, IReadOnlyList<PhysicalTreeObject> Objects)> Originals { get; } = [];
+    internal Guid SessionId { get; } = Guid.NewGuid();
+    internal ConfigurationEditStatus Session { get; private set; }
+
+    internal ConfigurationEditFixture(string shape = "file", string[]? resourceIds = null,
+        EditWritePolicy? writePolicy = null, bool directorySnapshot = false)
+    {
+        var resources = resourceIds ?? ["main", "extra"];
+        ConfigurationRevisionChange Snapshot(string id)
+        {
+            if (!directorySnapshot) return Base.Capture(id, "snapshot-" + id);
+            var root = Path.Combine(Base.Root, "snapshot-" + id); Directory.CreateDirectory(Path.Combine(root, "selected"));
+            File.WriteAllText(Path.Combine(root, "selected/task.json"), "selected-old"); File.WriteAllText(Path.Combine(root, "guard.json"), "guard-original");
+            return Base.CaptureTree(id, root);
+        }
+        Initial = new(resources.Select(Snapshot).ToImmutableArray());
+        Base.Save(Initial);
+        var targets = ImmutableArray.CreateBuilder<ConfigurationTarget>();
+        foreach (var change in Initial.Changes)
+        {
+            var path = Path.Combine(Base.Root, Guid.NewGuid().ToString("N"));
+            if (shape == "file") File.WriteAllText(path, "original-" + change.Address.ResourceId);
+            if (shape == "directory") { Directory.CreateDirectory(path); File.WriteAllText(Path.Combine(path, "original.txt"), "original-" + change.Address.ResourceId); }
+            var scanner = new FileTreeScanner(SnapshotBudget.Default);
+            var tree = scanner.Capture(path, default);
+            Originals.Add(path, (tree, PhysicalTreeIdentity.Capture(path, tree)));
+            targets.Add(new ConfigurationTarget(change.Address, 1, change.Contract, path) { WritePolicy = writePolicy });
+        }
+        Request = new(1, targets.ToImmutable());
+        Store = new(Base.Instance, Base.Database, new()); Exchange = new(Base.Instance, Base.Database, new());
+        using var prepared = Store.Prepare(SessionId, Request);
+        Session = Store.Begin(ConfigurationEditStore.BeginIdentity(SessionId, "fixture", Request), prepared, DateTimeOffset.UtcNow);
+    }
+
+    internal void MaterializeAll() { foreach (var resource in Session.Resources) Exchange.Materialize(resource.JournalId); }
+    internal void InstallAll()
+    {
+        foreach (var resource in Session.Resources) Exchange.Install(resource.JournalId);
+        Session = Store.MarkEditing(SessionId, "fixture", 1);
+    }
+    internal void RestoreAll()
+    {
+        foreach (var resource in Session.Resources)
+        {
+            var result = Exchange.Restore(resource.JournalId);
+            if (result is not (ConfigurationRecoveryResult.NotExecuted or ConfigurationRecoveryResult.Restored or ConfigurationRecoveryResult.AlreadyCompleted))
+                throw new IOException("Fixture restoration quarantined");
+        }
+    }
+    internal ConfigurationEditCompletion Completion() => new(SessionId, Session.Revision,
+        new(Initial.Changes.Select(change => change with { ExpectedRevision = 1 }).ToImmutableArray()));
+    internal void VerifyOriginals()
+    {
+        foreach (var pair in Originals)
+        {
+            var tree = new FileTreeScanner(SnapshotBudget.Default).Capture(pair.Key, default);
+            Xunit.Assert.Equal(pair.Value.Tree.Shape, tree.Shape); Xunit.Assert.Equal(pair.Value.Tree.Entries, tree.Entries);
+            Xunit.Assert.Equal(pair.Value.Objects, PhysicalTreeIdentity.Capture(pair.Key, tree));
+        }
     }
 }

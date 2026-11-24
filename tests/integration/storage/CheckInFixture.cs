@@ -33,7 +33,8 @@ internal sealed class CheckInFixture : IAsyncDisposable
 
     internal CheckInFixture(BuiltExtensionInputs inputs, int responseCode) : this(inputs, new CheckInHttp(responseCode)) { }
 
-    internal CheckInFixture(BuiltExtensionInputs inputs, HttpMessageHandler http, TimeProvider? clock = null, bool native = false)
+    internal CheckInFixture(BuiltExtensionInputs inputs, HttpMessageHandler http, TimeProvider? clock = null, bool native = false,
+        bool includeHttpPort = true)
     {
         Catalog = Execution.CreateCatalog(); var source = Execution.Source;
         Schedules = new(source.Instance, source.Database, source.Lease, Execution.Resources, Execution.Lifecycle, Execution.Index, Execution.Service, clock);
@@ -49,7 +50,8 @@ internal sealed class CheckInFixture : IAsyncDisposable
         _http = http;
         Installed = new(catalog: Catalog, portDependencies: new(Schedules, Secrets,
             new SecretAccessPolicy(source.Instance, source.Database, source.Lease, Execution.Resources), null, null, null,
-            () => new HttpClient(_http, disposeHandler: false), NativeClients: Clients, BrowserLogins: Logins), originalManifest: inputs.Manifest, originalManifestBytes: inputs.ManifestBytes,
+            includeHttpPort ? () => new HttpClient(_http, disposeHandler: false) : null,
+            NativeClients: Clients, BrowserLogins: Logins), originalManifest: inputs.Manifest, originalManifestBytes: inputs.ManifestBytes,
             packageArchive: inputs.Archive);
     }
 

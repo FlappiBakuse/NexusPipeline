@@ -26,7 +26,7 @@ internal sealed class CompletionActionFixture : IAsyncDisposable
     internal AttemptAcceptanceResult Accepted { get; }
 
     internal CompletionActionFixture(AutomationCompletionAction action = AutomationCompletionAction.Shutdown, TimeProvider? clock = null,
-        bool successDependency = false, bool skipPredecessor = false)
+        bool successDependency = false, bool skipPredecessor = false, bool observeCompletion = true)
     {
         _source = new(configuration: true, mode: "tail", accept: false,
             independentSuccessors: successDependency, successDependency: successDependency);
@@ -45,7 +45,7 @@ internal sealed class CompletionActionFixture : IAsyncDisposable
             Completion = new(Source.Instance, Source.Database, new(), Source.Lease, Base.Lifecycle, Base.Resources, Base.Index,
                 finality, Approval, Exit, Power, Clock);
             Consumer = new(Source.Instance, Source.Database, new(), Source.Lease, Base.Resources, Base.Index, Base.Inbox,
-                terminalObserver: Completion);
+                terminalObserver: observeCompletion ? Completion : null);
             Accepted = Base.Service.Start(Guid.NewGuid(), "completion-fixture", Source.Request(new QueueTarget(Source.QueueId)), DateTimeOffset.UtcNow);
         }
         catch { _source.Dispose(); throw; }

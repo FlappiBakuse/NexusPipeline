@@ -3,6 +3,7 @@ using System.Runtime.Versioning;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Extensions;
 using NexusPipeline.Core.Media;
+using NexusPipeline.Platform.Storage.Execution;
 using Xunit;
 
 namespace NexusPipeline.StorageTests;
@@ -116,7 +117,197 @@ public sealed class LiveMediaTests
             NexusPipeline.Platform.Media.PreviewScaler.ScaleAsync(frame, canceled.Token).AsTask());
     }
 
-    private static async Task<NexusPipeline.Platform.Storage.Execution.ExecutionLivePreview> OpenAsync(
+    [Fact(DisplayName = "An Unrelated Step Can Open Authorize And Close While A Live Callback Is Blocked")]
+    public async Task AuthorizesDuringAnotherStepsLivenessCheck()
+    {
+        var instance = Guid.NewGuid();
+        var media = new ExecutionLiveMedia(instance);
+        var first = new RunMediaContext(instance, Guid.NewGuid(), Guid.NewGuid());
+        var other = new RunMediaContext(instance, Guid.NewGuid(), Guid.NewGuid());
+        using var gate = new LivenessGate();
+        await using var step = media.Register("subject", first, gate.Require, NoCapture);
+        await using var otherStep = media.Register("subject", other, () => { }, NoCapture);
+        var extension = new ExtensionActivation("live-authority-fixture");
+        using var provider = media.Previews.Register(extension, "window", media);
+        extension.Publish();
+        await using var preview = media.OpenPreview("subject", first, extension.ExtensionId, "window");
+        gate.Block = true;
+        var checking = Task.Run(() => media.AssertAllowed(first, extension.ExtensionId));
+        Task? unrelated = null;
+        try
+        {
+            await gate.Entered.Task.WaitAsync(FixtureTimeout);
+            unrelated = Task.Run(async () =>
+            {
+                await using var independent = media.OpenPreview("subject", other, extension.ExtensionId, "window");
+                media.AssertAllowed(other, extension.ExtensionId);
+            });
+            await unrelated.WaitAsync(FixtureTimeout);
+            Assert.False(checking.IsCompleted);
+            Assert.Throws<UnauthorizedAccessException>(() => media.AssertAllowed(other, extension.ExtensionId));
+        }
+        finally
+        {
+            gate.Release();
+            await checking.WaitAsync(FixtureTimeout);
+            if (unrelated is not null) await unrelated.WaitAsync(FixtureTimeout);
+        }
+    }
+
+    [Theory(DisplayName = "Closing Revokes A Blocked Grant Step Or Pending Open And Waits For Its Authority Borrow")]
+    [InlineData("grant")]
+    [InlineData("step")]
+    [InlineData("opening")]
+    public async Task RevokesInFlightLiveness(string target)
+    {
+        var instance = Guid.NewGuid();
+        var context = new RunMediaContext(instance, Guid.NewGuid(), Guid.NewGuid());
+        var media = new ExecutionLiveMedia(instance);
+        using var gate = new LivenessGate();
+        await using var step = media.Register("subject", context, gate.Require, NoCapture);
+        var extension = new ExtensionActivation("live-revocation-fixture");
+        using var provider = media.Previews.Register(extension, "window", media);
+        extension.Publish();
+        var opening = target == "opening";
+        await using var preview = opening ? null : media.OpenPreview("subject", context, extension.ExtensionId, "window");
+        gate.Block = true;
+        var checking = Task.Run(async () =>
+        {
+            if (opening)
+            {
+                await using var unexpectedlyOpened = media.OpenPreview("subject", context, extension.ExtensionId, "window");
+            }
+            else await preview!.CaptureAsync();
+        });
+        var closing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task? close = null;
+        try
+        {
+            await gate.Entered.Task.WaitAsync(FixtureTimeout);
+            if (opening)
+                await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Task.Run(() =>
+                    media.Previews.Open(context, extension.ExtensionId, "window").Dispose()).WaitAsync(FixtureTimeout));
+            close = Task.Run(async () =>
+            {
+                var revoked = target == "grant" ? preview!.DisposeAsync() : step.DisposeAsync();
+                closing.TrySetResult();
+                await revoked;
+            });
+            await closing.Task.WaitAsync(FixtureTimeout);
+            Assert.False(close.IsCompleted);
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+                Task.Run(() => media.AssertAllowed(context, extension.ExtensionId)).WaitAsync(FixtureTimeout));
+        }
+        finally
+        {
+            gate.Release();
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => checking.WaitAsync(FixtureTimeout));
+            if (close is not null) await close.WaitAsync(FixtureTimeout);
+        }
+    }
+
+    [Fact(DisplayName = "Closing One Grant Does Not Revoke Another Grant For The Same Live Step And Extension")]
+    public async Task RetainsSiblingAuthorization()
+    {
+        var instance = Guid.NewGuid();
+        var context = new RunMediaContext(instance, Guid.NewGuid(), Guid.NewGuid());
+        var media = new ExecutionLiveMedia(instance);
+        using var gate = new LivenessGate();
+        await using var step = media.Register("subject", context, gate.Require, NoCapture);
+        var extension = new ExtensionActivation("live-sibling-fixture");
+        using var provider = media.Previews.Register(extension, "window", media);
+        extension.Publish();
+        await using var first = media.OpenPreview("subject", context, extension.ExtensionId, "window");
+        await using var second = media.OpenPreview("subject", context, extension.ExtensionId, "window");
+        gate.Block = true;
+        var checking = Task.Run(() => media.AssertAllowed(context, extension.ExtensionId));
+        Task? close = null;
+        try
+        {
+            await gate.Entered.Task.WaitAsync(FixtureTimeout);
+            close = first.DisposeAsync().AsTask();
+            await close.WaitAsync(FixtureTimeout);
+            Assert.False(checking.IsCompleted);
+        }
+        finally
+        {
+            gate.Release();
+            await checking.WaitAsync(FixtureTimeout);
+            if (close is not null) await close.WaitAsync(FixtureTimeout);
+        }
+        media.AssertAllowed(context, extension.ExtensionId);
+    }
+
+    [Theory(DisplayName = "Revocation Discards A Returning Frame And A Grant Cannot Replay Its Sequence")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DiscardsFramesAfterClosure(bool closeStep)
+    {
+        var instance = Guid.NewGuid();
+        var context = new RunMediaContext(instance, Guid.NewGuid(), Guid.NewGuid());
+        var media = new ExecutionLiveMedia(instance);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var image = new PreviewImage(1, 1, new byte[33]);
+        var calls = 0;
+        await using var step = media.Register("subject", context, () => { }, async _ =>
+        {
+            if (Interlocked.Increment(ref calls) > 1)
+            {
+                entered.TrySetResult();
+                await release.Task.WaitAsync(FixtureTimeout);
+            }
+            return image;
+        });
+        var extension = new ExtensionActivation("live-frame-fixture");
+        using var provider = media.Previews.Register(extension, "window", media);
+        extension.Publish();
+        await using var preview = media.OpenPreview("subject", context, extension.ExtensionId, "window");
+        var request = new MediaCaptureRequest(context, preview.PreviewId, Guid.NewGuid(), 1, extension.ExtensionId);
+        Assert.Same(image, await media.CaptureAsync(request, default));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => media.CaptureAsync(request, default).AsTask());
+        var next = request with { RequestId = Guid.NewGuid(), Sequence = 2 };
+        var pending = media.CaptureAsync(next, default).AsTask();
+        Task? close = null;
+        try
+        {
+            await entered.Task.WaitAsync(FixtureTimeout);
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => media.CaptureAsync(next, default).AsTask());
+            close = (closeStep ? step.DisposeAsync() : preview.DisposeAsync()).AsTask();
+            Assert.False(close.IsCompleted);
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+                media.CaptureAsync(next with { Sequence = 3 }, default).AsTask());
+        }
+        finally
+        {
+            release.TrySetResult();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending.WaitAsync(FixtureTimeout));
+            if (close is not null) await close.WaitAsync(FixtureTimeout);
+        }
+        Assert.Equal(2, calls);
+    }
+
+    private static readonly TimeSpan FixtureTimeout = TimeSpan.FromSeconds(10);
+    private static ValueTask<PreviewImage> NoCapture(CancellationToken _) => throw new InvalidOperationException("fixture_no_capture_expected");
+
+    private sealed class LivenessGate : IDisposable
+    {
+        private readonly ManualResetEventSlim _release = new();
+        internal volatile bool Block;
+        internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal void Require()
+        {
+            if (!Block) return;
+            Entered.TrySetResult();
+            if (!_release.Wait(FixtureTimeout + FixtureTimeout)) throw new TimeoutException("fixture_liveness_release");
+        }
+
+        internal void Release() => _release.Set();
+        public void Dispose() => _release.Dispose();
+    }
+
+    private static async Task<ExecutionLivePreview> OpenAsync(
         PcStageFixture fixture, RunMediaContext context)
     {
         var clock = Stopwatch.StartNew();

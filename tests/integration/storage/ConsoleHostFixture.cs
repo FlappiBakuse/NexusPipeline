@@ -19,7 +19,7 @@ internal sealed class ConsoleHostFixture : IDisposable
     internal Task<string> Errors { get; }
     private readonly StreamReader _errors;
 
-    internal ConsoleHostFixture(string executable, string runtime, int port)
+    internal ConsoleHostFixture(string executable, string runtime, int port, Action<int>? beforeAdoption = null)
     {
         var handles = new[] { _input.ClientSafePipeHandle.DangerousGetHandle(), _output.ClientSafePipeHandle.DangerousGetHandle(),
             _error.ClientSafePipeHandle.DangerousGetHandle() };
@@ -36,10 +36,37 @@ internal sealed class ConsoleHostFixture : IDisposable
         if (!JobNative.CreateProcessExtended(executable, command, IntPtr.Zero, IntPtr.Zero, true, 0x80010,
             IntPtr.Zero, Path.GetDirectoryName(executable)!, ref startup, out var native))
             throw new Win32Exception(Marshal.GetLastPInvokeError());
-        try { Process = Process.GetProcessById((int)native.ProcessId); _ = Process.SafeHandle; }
-        finally { JobNative.CloseHandle(native.Thread); JobNative.CloseHandle(native.Process); }
-        _output.DisposeLocalCopyOfClientHandle(); _error.DisposeLocalCopyOfClientHandle(); _input.DisposeLocalCopyOfClientHandle();
-        Output = new(_output); _errors = new(_error); Errors = _errors.ReadToEndAsync();
+        using var nativeProcess = new SafeKernelHandle(native.Process);
+        using var nativeThread = new SafeKernelHandle(native.Thread);
+        Process? process = null;
+        StreamReader? output = null;
+        StreamReader? errors = null;
+        try
+        {
+            beforeAdoption?.Invoke((int)native.ProcessId);
+            process = Process.GetProcessById((int)native.ProcessId);
+            _ = process.SafeHandle;
+            _output.DisposeLocalCopyOfClientHandle();
+            _error.DisposeLocalCopyOfClientHandle();
+            _input.DisposeLocalCopyOfClientHandle();
+            output = new(_output);
+            errors = new(_error);
+            Errors = errors.ReadToEndAsync();
+            Process = process;
+            Output = output;
+            _errors = errors;
+        }
+        catch (Exception failure)
+        {
+            if (JobNative.WaitForSingleObject(nativeProcess, 0) != 0 &&
+                (!JobNative.TerminateProcess(nativeProcess, 1) && JobNative.WaitForSingleObject(nativeProcess, 0) != 0 ||
+                    JobNative.WaitForSingleObject(nativeProcess, 5000) != 0))
+                failure.Data["stop-console-host"] = "console_host_construction_stop_failed";
+            process?.Dispose();
+            output?.Dispose(); errors?.Dispose();
+            _output.Dispose(); _error.Dispose(); _input.Dispose();
+            throw;
+        }
     }
 
     public void Dispose()

@@ -2,13 +2,15 @@ using System.Runtime.Versioning;
 using System.Text.Json;
 using NexusPipeline.Core.Desktop;
 using NexusPipeline.Platform.Media;
+using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Extensions;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace NexusPipeline.StorageTests;
 
 [SupportedOSPlatform("windows")]
-public sealed class WallpaperInstalledTests
+public sealed class WallpaperInstalledTests(ITestOutputHelper output)
 {
     [Fact(DisplayName = "The Original Wallpaper Zip Saves Actual Images Effects And Order With Deduplication Cas And Last Reference Retirement")]
     public async Task SavesInstalledWallpaper()
@@ -30,9 +32,26 @@ public sealed class WallpaperInstalledTests
             Assert.Equal("controlled.png", asset.GetProperty("name").GetString());
             state = await Upload(frontend, image);
             Assert.Single(state.GetProperty("assets").EnumerateArray());
-            state = await Invoke(frontend, "save-settings", new { revision = Revision(state), patch = new
-            { enabled = true, selectedId = id, order = new[] { id }, effects = new
-                { blurPx = 40, dimPercent = 80, surfaceTransparencyPercent = 50, secondaryTransparency = false } } }, Guid.NewGuid());
+            var settingsOperation = Guid.NewGuid();
+            using var diagnostics = new StringWriter();
+            var originalError = Console.Error;
+            try
+            {
+                Console.SetError(diagnostics);
+                using var profile = StartupProfile.Begin("wallpaper-installed-settings-save");
+                state = await Invoke(frontend, "save-settings", new { revision = Revision(state), patch = new
+                { enabled = true, selectedId = id, order = new[] { id }, effects = new
+                    { blurPx = 40, dimPercent = 80, surfaceTransparencyPercent = 50, secondaryTransparency = false } } }, settingsOperation);
+            }
+            finally { Console.SetError(originalError); }
+            using var metrics = JsonDocument.Parse(diagnostics.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Single(line => line.Contains("\"phase\":\"wallpaper-installed-settings-save\"", StringComparison.Ordinal)));
+            var databaseOpens = metrics.RootElement.GetProperty("steps").EnumerateArray()
+                .Single(step => step.GetProperty("name").GetString() == "database.open").GetProperty("count").GetInt64();
+            output.WriteLine($"Installed wallpaper save-settings: {databaseOpens} managed database opens");
+            var committed = await Invoke(frontend, "read-settings-result", new { operationId = settingsOperation });
+            Assert.True(committed.GetProperty("committed").GetBoolean());
+            Assert.Equal(Revision(state), Revision(await Read(frontend)));
             Assert.Equal(id, state.GetProperty("currentId").GetString());
             Assert.True(state.GetProperty("effectiveEnabled").GetBoolean());
             Assert.Equal(50, state.GetProperty("effects").GetProperty("surfaceTransparencyPercent").GetInt32());

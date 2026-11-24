@@ -109,7 +109,28 @@ public sealed class MediaPreviewTests
         var provider = new Provider { Fault = fault };
         await using var scope = await Activate(registry, provider);
         using var preview = registry.Open(Context(), "fixture", "preview");
-        Assert.NotNull(await Record.ExceptionAsync(() => preview.CaptureAsync().AsTask()));
+        var error = await Record.ExceptionAsync(() => preview.CaptureAsync().AsTask());
+        switch (fault)
+        {
+            case "generation" or "budget":
+                Assert.Equal("unsupported_or_invalid_contract", Assert.IsType<JsonException>(error).Message);
+                break;
+            case "digest":
+                Assert.Equal("media_frame_digest_mismatch", Assert.IsType<InvalidDataException>(error).Message);
+                break;
+            case "dimensions":
+                Assert.Equal("media_png_header_mismatch", Assert.IsType<InvalidDataException>(error).Message);
+                break;
+            case "excess":
+                Assert.Equal("media_frame_size_mismatch", Assert.IsType<InvalidDataException>(error).Message);
+                break;
+            case "truncated":
+                Assert.IsType<EndOfStreamException>(error);
+                break;
+            default:
+                Assert.Equal("media_frame_identity_mismatch", Assert.IsType<JsonException>(error).Message);
+                break;
+        }
         Assert.True(provider.LastStream!.Disposed);
         provider.Fault = null;
         Assert.Equal(Png, (await preview.CaptureAsync()).Png.ToArray());

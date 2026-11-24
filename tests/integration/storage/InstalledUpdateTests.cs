@@ -36,7 +36,7 @@ public sealed class InstalledUpdateTests
             Assert.False(string.IsNullOrWhiteSpace(line), old.HasExited ? await fixture.HostErrors : "Installed Host not ready");
             using var client = new HttpClient { BaseAddress = fixture.Address, Timeout = TimeSpan.FromSeconds(60) };
             var account = await CreateAccountAsync(client, deadline.Token);
-            await fixture.AwaitSchedulingAsync(deadline.Token);
+            await fixture.AwaitStartupSchedulingAsync(deadline.Token);
             var path = $"control/v1/maintenance/operations/{fixture.Plan.OperationId:D}";
             using var started = await client.PostAsync(path + "/start", null, deadline.Token);
             Assert.True((int)started.StatusCode == 202, await started.Content.ReadAsStringAsync(deadline.Token));

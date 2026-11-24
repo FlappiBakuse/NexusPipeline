@@ -1,4 +1,6 @@
 using System.Runtime.Versioning;
+using System.Security.Cryptography;
+using System.Text.Json;
 using NexusPipeline.Core.Settings;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Installation;
@@ -14,17 +16,39 @@ public sealed class InstallerUninstallTests
     public void AdmitsPublishedRuntime()
     {
         var assembly = Environment.GetEnvironmentVariable("NEXUS_PRODUCT_ASSEMBLY") ?? throw new IOException("product_assembly_required");
-        var runtime = Environment.GetEnvironmentVariable("NEXUS_INSTALLER_RUNTIME") ?? Path.Combine(Path.GetDirectoryName(assembly)!, "runtime");
+        var runtime = PhysicalPathPolicy.NormalizeWithoutLinks(Environment.GetEnvironmentVariable("NEXUS_INSTALLER_RUNTIME") ??
+            Path.Combine(Path.GetDirectoryName(assembly)!, "runtime"));
+        var application = Path.GetDirectoryName(runtime)!;
+        using var release = JsonDocument.Parse(File.ReadAllBytes(assembly));
+        var host = Assert.Single(release.RootElement.GetProperty("files").EnumerateArray(),
+            file => file.GetProperty("path").GetString() == "NexusPipeline.exe");
+        using (var binary = File.OpenRead(Path.Combine(application, "NexusPipeline.exe")))
+        {
+            Assert.Equal(host.GetProperty("sizeBytes").GetInt64(), binary.Length);
+            Assert.Equal(host.GetProperty("sha256").GetString(), Convert.ToHexStringLower(SHA256.HashData(binary)));
+        }
         var instance = new InstanceRoot(new()).OpenExisting(runtime);
-        using var lease = InstanceLease.Acquire(instance, new());
-        var files = new[] { "", "-wal", "-shm", "-journal" }.Select(suffix => Path.Combine(runtime, "state/runtime.db") + suffix).Where(File.Exists).ToArray();
-        var before = files.Select(path => Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path)))).ToArray();
-        var work = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "installer-admission-" + Guid.NewGuid().ToString("N"));
-        var root = Path.GetDirectoryName(runtime)!;
-        var ready = new InstallerRuntimeAdmission(instance, new(), new(root, Path.Combine(runtime, "extensions"))).Open(lease, work);
-        Assert.NotNull(ready);
-        Assert.True(ready.Recovery.Current.IsReady);
-        Assert.Equal(before, files.Select(path => Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path)))).ToArray());
+        var original = Snapshot(runtime);
+        var isolated = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "installer-admission-" + Guid.NewGuid().ToString("N"));
+        var work = Path.Combine(Directory.CreateDirectory(isolated).FullName, "diagnostics");
+        Assert.False(Directory.Exists(work));
+        var state = Path.Combine(runtime, "state");
+        using (var lease = InstanceLease.Acquire(instance, new()))
+        {
+            string[] main = ["automation.db", "configuration.db", "content.db", "extensions.db", "notifications.db", "records.db", "runtime.db", "system.db"];
+            var before = Directory.EnumerateFiles(state).Order(StringComparer.Ordinal).ToArray();
+            Assert.Equal(main, before.Select(Path.GetFileName).Where(name => name!.EndsWith(".db", StringComparison.Ordinal)));
+            var evidence = RuntimeFingerprint.CaptureFileEvidence(before);
+            var ready = new InstallerRuntimeAdmission(instance, new(), new(application, Path.Combine(runtime, "extensions"))).Open(lease, work);
+            Assert.NotNull(ready);
+            Assert.True(ready.Recovery.Current.IsReady);
+            var after = Directory.EnumerateFiles(state).Order(StringComparer.Ordinal).ToArray();
+            Assert.Equal(before, after);
+            Assert.Equal(evidence, RuntimeFingerprint.CaptureFileEvidence(after));
+        }
+        Assert.Equal(original, Snapshot(runtime));
+        Assert.Equal(work, Assert.Single(Directory.EnumerateFileSystemEntries(isolated)));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(work));
     }
 
     [Theory(DisplayName = "Default Uninstall Retains Exact Runtime Bytes And Physical Objects While Publishing The Retained Ownership State")]

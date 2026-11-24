@@ -35,7 +35,7 @@ internal static class ScriptControlChecks
         await using var app = builder.Build();
         var authority = new ControlAuthentication(catalog.Instance.InstanceId, false, null, () => new(0, HostSettings.Default), null!, TimeProvider.System);
         app.Use(ControlExceptionBoundary.InvokeAsync); app.Use(authority.InvokeAsync);
-        new ProjectControl(authority, cases, catalog.Contracts).Map(app);
+        new ProjectControl(authority, cases).Map(app);
         var frontends = new ExtensionFrontendControl(authority, provider.Activator); frontends.Map(app);
         using var drafts = new NexusPipeline.Platform.Storage.Configuration.BindingDrafts(catalog.Instance, catalog.Database, catalog.Contracts);
         new ProjectFrontendControl(catalog.Instance.InstanceId, authority, frontends, cases, catalog.Contracts, drafts).Map(app);

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { executionPreview, executionStep } from '../../apps/web/src/control/execution';
 import { attemptFacts, historyImage, recordRow, recordPage } from '../../apps/web/src/control/records';
 import { extensionMetadata, titleLocales } from '../../apps/web/src/control/extension-metadata';
-import { adapterResult } from '../../apps/web/src/pages/adapter-results';
+import { adapterResult } from '../../apps/web/src/pages/adapter-contracts';
 export async function run(): Promise<string[]> {
   const selection = { bindingId: 'binding', expectedBindingRevision: 2, extensionId: 'bettergi',
     expectedInstalledRevision: 1, resources: [] };

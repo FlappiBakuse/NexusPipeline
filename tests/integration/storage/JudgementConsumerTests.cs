@@ -66,18 +66,29 @@ public sealed class JudgementConsumerTests
     [Fact(DisplayName = "Accepted Cancellation Aborts The Formal Consumers Actual Pending Http Request And Keeps Business Unverified")]
     public async Task CancelsPendingHttp()
     {
-        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var server = new NativeHttpFixture(async (_, stopping) =>
-        {
-            entered.TrySetResult(); await Task.Delay(Timeout.InfiniteTimeSpan, stopping); return new(200, []);
-        });
+        await using var server = new NativeHttpFixture();
         var script = "function nexusJudge(input) { nexus.probes.httpGet({url:'" + server.Address +
             "',timeoutMs:15000}); return {outcome:'succeeded',reason:'late observation must not win'}; }";
         using var fixture = new JudgementIntegrationFixture(AutomationJudgementLanguage.JavaScript, script, mode: "wait");
         var running = fixture.Consumer.RunNextAsync();
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(20));
-        fixture.Cancel();
-        var receipt = Assert.IsType<AttemptReceipt>(await running.WaitAsync(TimeSpan.FromSeconds(30)));
+        AttemptReceipt receipt;
+        try
+        {
+            var pending = await server.PendingRequest.WaitAsync(TimeSpan.FromSeconds(20));
+            Assert.Equal("/", pending.Target);
+            Assert.False(server.PeerClosed.IsCompleted);
+            fixture.Cancel();
+            await server.PeerClosed.WaitAsync(TimeSpan.FromSeconds(5));
+            receipt = Assert.IsType<AttemptReceipt>(await running.WaitAsync(TimeSpan.FromSeconds(30)));
+        }
+        finally
+        {
+            if (!running.IsCompleted)
+            {
+                fixture.Cancel();
+                await running.WaitAsync(TimeSpan.FromSeconds(30));
+            }
+        }
         Assert.Equal(LifecycleOutcome.Cancelled, receipt.Facts.Lifecycle); Assert.Equal(BusinessOutcome.Unverified, receipt.Facts.Business);
         Assert.Equal(0, fixture.Consumer.PendingReconciliationCount); Assert.Single(server.Requests);
         Assert.Equal(JournalPhase.Committed, fixture.State.Journal.Phase);

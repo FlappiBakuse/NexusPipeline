@@ -13,15 +13,26 @@ public sealed class AndroidDetachmentTests
     {
         using var fixture = new AndroidRuntimeFixture(launch: false, forceClose: false);
         var state = fixture.State; var step = Assert.Single(state.Total.Steps);
-        var sourceFiles = Assert.IsAssignableFrom<IList<ExecutionPlanRuntimeFile>>(step.Target!.Android!.Tool.RuntimeFiles);
+        var target = step.Target!;
+        var android = target.Android!;
+        var sourceFiles = android.Tool.RuntimeFiles.ToList();
         Assert.NotEmpty(sourceFiles);
+        var original = sourceFiles.ToArray();
+        var candidateStep = step with
+        {
+            Target = target with { Android = android with { Tool = android.Tool with { RuntimeFiles = sourceFiles } } }
+        };
         var binding = new ExecutionTargetBinding(fixture.Source.Instance.InstanceId, state.Journal.JournalId,
             state.Journal.OperationId, Guid.Parse(state.Attempt.AttemptId), step.StepId, Guid.NewGuid(),
             "Local\\NexusWorker-" + Guid.NewGuid().ToString("N"), Guid.NewGuid(), 0, state.Attempt.ExecutionPlan.Sha256);
-        var request = AndroidCommandIdentity.Derive(state.Total, binding, AndroidRuntimeFixture.Subject,
+        var request = AndroidCommandIdentity.Derive(state.Total with { Steps = [candidateStep] }, binding, AndroidRuntimeFixture.Subject,
             0, AndroidCommandPurpose.CleanupReadiness, ExecutionAndroidAction.DeviceState);
-        var original = request.Tool.RuntimeFiles.ToArray(); var digest = AndroidCommandIdentity.Digest(request);
-        Assert.Throws<NotSupportedException>(() => ((IList<ExecutionPlanRuntimeFile>)request.Tool.RuntimeFiles).Clear());
+        var digest = AndroidCommandIdentity.Digest(request);
+        if (request.Tool.RuntimeFiles is IList<ExecutionPlanRuntimeFile> exposed)
+        {
+            try { exposed[0] = original[0] with { RelativePath = "changed-by-caller" }; }
+            catch (NotSupportedException) { }
+        }
         sourceFiles.Clear();
         Assert.Equal(original, request.Tool.RuntimeFiles);
         Assert.Equal(digest, AndroidCommandIdentity.Digest(request));

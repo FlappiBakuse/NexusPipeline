@@ -1,3 +1,4 @@
+using System.Text.Json;
 using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Execution;
@@ -44,20 +45,34 @@ public sealed class AttemptPlanTests
         var fixture = ExecutionPlanFixture.Create();
         using var total = fixture.Codec.Freeze(fixture.Plan);
         var plan = AttemptPlanSeed.Create(fixture, total);
+        var foreignRun = Guid.NewGuid().ToString("D");
         plan = fault switch
         {
             "instance" => plan with { InstanceId = Guid.NewGuid().ToString("D") },
-            "run" => plan with { RunId = Guid.NewGuid().ToString("D") },
+            "run" => plan with { RunId = foreignRun, OutputDirectory = $"runs/{foreignRun}/{plan.AttemptId}", LogDirectory = $"logs/{foreignRun}/{plan.AttemptId}" },
             "ordinal" => plan with { AttemptOrdinal = 2 },
             "scope" => plan with { ResourceKeys = ["unrelated"] },
             "output" => plan with { OutputDirectory = "runs/unrelated" },
             "log" => plan with { LogDirectory = "logs/unrelated" },
             "configuration" => plan with { ConfigurationPlans = [new() { StepId = "first", Plan = plan.ExecutionPlan }] },
-            _ => plan with { AttemptId = Guid.Empty.ToString("D") }
+            "empty-id" => plan with { AttemptId = Guid.Empty.ToString("D") },
+            _ => throw new ArgumentOutOfRangeException(nameof(fault))
         };
         var directory = Path.Combine(fixture.Instance.RuntimeRoot, "blobs", "plans");
         var before = Directory.GetFiles(directory).Order().ToArray();
-        Assert.ThrowsAny<Exception>(() => new AttemptPlanCodec(fixture.Instance, new ContractReader(), fixture.Blobs).Freeze(plan));
+        var codec = new AttemptPlanCodec(fixture.Instance, new ContractReader(), fixture.Blobs);
+        if (fault == "configuration")
+            Assert.Equal("unsupported_or_invalid_contract", Assert.Throws<JsonException>(() => codec.Freeze(plan)).Message);
+        else
+        {
+            var reason = fault switch
+            {
+                "run" or "ordinal" or "scope" => "run_attempt_total_plan_unbound",
+                "empty-id" => "execution_source_identity_not_canonical",
+                _ => "run_attempt_identity_unbound"
+            };
+            Assert.Equal(reason, Assert.Throws<IOException>(() => codec.Freeze(plan)).Message);
+        }
         Assert.Equal(before, Directory.GetFiles(directory).Order().ToArray());
         Assert.Equal(new byte[] { 0, 1, 255 }, File.ReadAllBytes(fixture.Image));
     }

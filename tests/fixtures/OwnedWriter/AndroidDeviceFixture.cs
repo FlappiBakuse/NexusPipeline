@@ -16,14 +16,15 @@ internal static class AndroidDeviceFixture
         if (mode is "device-android-timeout" or "device-android-overflow" or "device-android-mapping")
         {
             var elapsed = System.Diagnostics.Stopwatch.StartNew();
+            var mapping = mode == "device-android-mapping";
+            if (!mapping) _ = await Call(new() { Sequence = 1, Kind = "connect" });
             try
             {
-                _ = await Call(new() { Sequence = 1, Kind = "connect" });
-                if (mode != "device-android-mapping")
-                    _ = await Call(new() { Sequence = 1, Kind = "shell", Command = mode == "device-android-timeout" ? "device-fixture-hang" : "device-fixture-output",
+                if (mapping) _ = await Call(new() { Sequence = 1, Kind = "connect" });
+                else _ = await Call(new() { Sequence = 1, Kind = "shell", Command = mode == "device-android-timeout" ? "device-fixture-hang" : "device-fixture-output",
                         TimeoutMilliseconds = mode == "device-android-timeout" ? 1500 : 60000 });
             }
-            catch (IOException)
+            catch (EndOfStreamException)
             {
                 await File.WriteAllTextAsync(marker + ".device-denied", elapsed.ElapsedMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture), cancellation);
                 return;

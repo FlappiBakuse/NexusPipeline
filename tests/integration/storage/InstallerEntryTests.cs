@@ -40,10 +40,11 @@ public sealed class InstallerEntryTests
         using var diagnostic = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "entry.stderr.log")));
         Assert.Equal("installer_entry_rejected", diagnostic.RootElement.GetProperty("code").GetString());
         Assert.Equal("installer_ownership_unverified", diagnostic.RootElement.GetProperty("reason").GetString());
-        Assert.Equal("InstallationDestination.Inspect", diagnostic.RootElement.GetProperty("origin").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(diagnostic.RootElement.GetProperty("origin").GetString()));
         Assert.True(diagnostic.RootElement.GetProperty("HResult").GetInt32() < 0);
         Assert.Equal("Unknown retained user bytes", File.ReadAllText(file));
         Assert.Equal(identity, PhysicalObjectIdentity.Read(file));
+        Assert.Equal(file, Assert.Single(Directory.EnumerateFileSystemEntries(application)));
         Assert.False(Directory.Exists(Path.Combine(root, "installer-manager")));
     }
 

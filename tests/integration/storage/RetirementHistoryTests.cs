@@ -48,6 +48,15 @@ public sealed class RetirementHistoryTests
         }
 
         foreach (var (query, retired) in runs)
+        {
             Assert.Equal(retired, logs.ReadPage(query).Items.ToArray());
+            var first = logs.ReadPage(query with { Limit = 1 });
+            Assert.Equal(retired[0], Assert.Single(first.Items));
+            Assert.Equal(retired[0].Position, first.NextPosition);
+            var remaining = logs.ReadPage(query with { AfterPosition = first.NextPosition!.Value });
+            Assert.Equal(retired.Skip(1).ToArray(), remaining.Items.ToArray());
+            Assert.Null(remaining.NextPosition);
+            Assert.Empty(logs.ReadPage(query with { AfterPosition = retired[^1].Position }).Items);
+        }
     }
 }

@@ -56,12 +56,16 @@ public sealed class DocumentCrashTests
             Assert.ThrowsAny<IOException>(() => recovery.Recover(lease));
             Assert.Equal(before, Fingerprints(instance.RuntimeRoot, includeDatabase: false));
             Assert.Equal(business, BusinessRows(database));
-            Assert.Equal(1, ReadDocument(database).Revision);
+            var original = ReadDocument(database);
+            Assert.Equal(1, original.Revision);
+            Assert.Equal("{\"formatVersion\":1,\"name\":\"before\"}"u8.ToArray(), original.Json.ToArray());
             foreach (var field in Fields) Assert.False((await new SecretFieldStore(instance, database).GetStateAsync(new("fixture-plugin", subject, field), default)).IsConfigured);
             return;
         }
         var index = recovery.Recover(lease); Assert.True(index.Current.IsReady); Assert.Empty(index.Current.Isolations);
-        Assert.Equal(2, ReadDocument(database).Revision);
+        var recovered = ReadDocument(database);
+        Assert.Equal(2, recovered.Revision);
+        Assert.Equal("{\"formatVersion\":1,\"name\":\"after\"}"u8.ToArray(), recovered.Json.ToArray());
         foreach (var field in Fields)
         {
             using var value = await new SecretFieldStore(instance, database).ReadAsync(new("fixture-plugin", subject, field), default);
@@ -87,11 +91,12 @@ public sealed class DocumentCrashTests
 
     private static string[] BusinessRows(StateDatabase database)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true,
+            domains: DatabaseDomain.Runtime | DatabaseDomain.System | DatabaseDomain.Extensions);
         var result = new List<string>();
         foreach (var table in new[] { "operations", "secret_fields", "secret_payloads", "secret_mutations", "extension_documents", "secret_document_publications", "secret_document_fields" })
         {
-            using var command = connection.CreateCommand(); command.CommandText = "SELECT * FROM " + table + " ORDER BY 1;";
+            using var command = connection.CreateCommand(); command.CommandText = "SELECT * FROM " + DatabaseTables.Name(table) + " ORDER BY 1;";
             using var rows = command.ExecuteReader();
             while (rows.Read()) result.Add(table + ":" + JsonSerializer.Serialize(Enumerable.Range(0, rows.FieldCount)
                 .Select(index => rows.IsDBNull(index) ? null : rows.GetValue(index))));

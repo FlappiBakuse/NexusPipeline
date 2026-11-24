@@ -90,7 +90,7 @@ internal sealed class NotificationReceiptFixture : IDisposable
     internal async Task Replace()
     {
         using var replacement = new SecretValue("https://notification-fixture.invalid/replacement");
-        _ = await Catalog.SaveAsync(Guid.NewGuid(), "local:receipt-fixture", 1, TaskId, 1, Input,
+        _ = await Catalog.SaveAsync(Guid.NewGuid(), "local:receipt-fixture", TaskIds.Length, TaskId, 1, Input,
             [new(NotificationSecretField.WebhookUrl, 1, SecretDisposition.Set, replacement)]);
     }
 

@@ -2,7 +2,7 @@ import { createApp, h, nextTick, reactive } from 'vue';
 import AdapterEditorPanel from '../../apps/web/src/pages/AdapterEditorPanel.vue';
 import { ControlClient } from '../../apps/web/src/control/client';
 import { createStore } from '../../apps/web/src/app/store';
-import type { ConfigurationOverview } from '../../apps/web/src/pages/configuration-types';
+import type { ConfigurationOverview } from '../../apps/web/src/pages/adapter-contracts';
 import { configurationDrafts } from '../../apps/web/src/pages/configuration-drafts';
 import { draftFixture, settle } from './configuration-draft-fixture';
 

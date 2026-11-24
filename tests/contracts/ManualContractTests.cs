@@ -65,8 +65,18 @@ public sealed class ManualContractTests
         await using var scope = await fixture.ActivateAsync();
         var entry = fixture.Registry.RequireManualEntry("fixture", "daily");
         var error = await Record.ExceptionAsync(() => entry.ReadManualAsync(fixture.Invocation.SubjectId).AsTask());
-        Assert.NotNull(error);
-        Assert.True(error is JsonException or InvalidOperationException or TimeZoneNotFoundException, error.ToString());
+        switch (fault)
+        {
+            case "identity":
+                Assert.Equal("manual_work_task_unbound", Assert.IsType<InvalidOperationException>(error).Message);
+                break;
+            case "timezone":
+                Assert.IsType<TimeZoneNotFoundException>(error);
+                break;
+            default:
+                Assert.Equal("unsupported_or_invalid_contract", Assert.IsType<JsonException>(error).Message);
+                break;
+        }
         Assert.Equal(0, handler.Calls);
     }
 

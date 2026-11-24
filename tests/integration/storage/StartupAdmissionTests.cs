@@ -34,9 +34,19 @@ public sealed class StartupAdmissionTests(ITestOutputHelper output)
     [InlineData("unsupported-kind", true)]
     [InlineData("known-active", false)]
     [InlineData("known-active", true)]
-    public async Task PreservesUnrecognizedPlans(string fault, bool retainWal)
+    public async Task PreservesUnrecognizedPlans(string fault, bool retainRollbackJournal)
     {
-        var fixture = Create(fault, retainWal);
+        var fixture = Create(fault);
+        var rollback = fixture.Database.DatabasePath + "-journal";
+        if (retainRollbackJournal) PreserveRollbackJournal(fixture, rollback);
+        var rollbackBytes = File.Exists(rollback) ? File.ReadAllBytes(rollback) : null;
+        if (retainRollbackJournal)
+        {
+            Assert.NotNull(rollbackBytes);
+            Assert.True(rollbackBytes.Length >= 512);
+            Assert.All(rollbackBytes.Take(8), value => Assert.Equal((byte)0, value));
+        }
+        else Assert.True(rollbackBytes is null or { Length: 0 });
         var before = Fingerprints(fixture.Instance.RuntimeRoot);
         var target = PhysicalObjectIdentity.Read(fixture.Target);
         using var job = new OwnedWorkerJob();
@@ -62,16 +72,17 @@ public sealed class StartupAdmissionTests(ITestOutputHelper output)
         Assert.Equal(reason, Assert.Single(ReadFailureReasons(diagnostic)));
         var after = Fingerprints(fixture.Instance.RuntimeRoot);
         Assert.Equal(before, after);
+        Assert.Equal(rollbackBytes, File.Exists(rollback) ? File.ReadAllBytes(rollback) : null);
         Assert.Equal(target, PhysicalObjectIdentity.Read(fixture.Target));
         Assert.Equal(new byte[] { 1, 2, 3 }, File.ReadAllBytes(fixture.Target));
-        output.WriteLine(JsonSerializer.Serialize(new { faultPoint = fault, retainWal, identity, reason, before, after,
+        output.WriteLine(JsonSerializer.Serialize(new { faultPoint = fault, retainRollbackJournal, rollbackBytes = rollbackBytes?.Length, identity, reason, before, after,
             nativeExitCode = process.ExitCode, accounting = job.GetAccounting(), allProcessesStopped = job.ActiveProcessIds().Count == 0 }));
     }
 
     [Fact(DisplayName = "A Completed Typed Configuration Plan Can Be Admitted Without Rewriting Its Original File Group")]
     public void AdmitsCompletedPlans()
     {
-        var fixture = Create("known-active", retainWal: false);
+        var fixture = Create("known-active");
         Complete(fixture);
         var before = Fingerprints(fixture.Instance.RuntimeRoot);
         var reopened = StateDatabase.OpenExisting(fixture.Instance, Path.Combine(fixture.Root, "diagnostics"),
@@ -85,7 +96,7 @@ public sealed class StartupAdmissionTests(ITestOutputHelper output)
     [Fact(DisplayName = "Actual Host Serves The Current Control Plane After A Typed Configuration Journal Has Completed")]
     public async Task ServesRecoveredState()
     {
-        var fixture = Create("known-active", retainWal: false);
+        var fixture = Create("known-active");
         Complete(fixture);
         var original = PhysicalObjectIdentity.Read(fixture.Target);
         var journals = new JournalStore(fixture.Instance, fixture.Contracts);
@@ -199,14 +210,14 @@ public sealed class StartupAdmissionTests(ITestOutputHelper output)
         var families = new List<Fixture>();
         for (var index = 0; index < 10; index++)
         {
-            var fixture = Create("known-active", retainWal: false, families.LastOrDefault());
+            var fixture = Create("known-active", families.LastOrDefault());
             Complete(fixture);
             families.Add(fixture);
         }
         return families.OrderBy(item => item.JournalId.ToString("D"), StringComparer.Ordinal).Last();
     }
 
-    private static Fixture Create(string fault, bool retainWal, Fixture? previous = null)
+    private static Fixture Create(string fault, Fixture? previous = null)
     {
         var root = previous?.Root ?? Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, Guid.NewGuid().ToString("N"));
         var contracts = previous?.Contracts ?? new ContractReader();
@@ -234,22 +245,37 @@ public sealed class StartupAdmissionTests(ITestOutputHelper output)
         var kind = fault == "unsupported-kind" ? JournalKind.FileCleanup : plan.Kind;
         var registered = new RegisteredJournal(plan.JournalId, operation.OperationId, kind, JournalPhase.Prepared, 1,
             reference.RelativePath, reference.Sha256, ["configuration:startup-fixture"]);
-        Dictionary<string, byte[]>? group = null;
-        using (var anchor = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open($"Data Source={database.DatabasePath};Pooling=False"))
-        {
-            anchor.Open();
-            using var read = anchor.CreateCommand();
-            read.CommandText = "SELECT count(*) FROM main.operations;";
-            read.ExecuteScalar();
-            var effect = new FileEffect(plan.JournalId, kind == JournalKind.FileCleanup ? "remove-owned" : "install-candidate",
-                kind == JournalKind.FileCleanup ? FileEffectAction.RemoveOwned : FileEffectAction.InstallCandidate, FileEffectState.Pending, reference.Sha256, null);
-            new RecoveryJournalRegistry(database).AcceptPrepared(operation, registered, [effect], DateTimeOffset.UtcNow);
-            WriteJournal(instance, contracts, registered, fault);
-            if (retainWal) group = Directory.GetFiles(Path.GetDirectoryName(database.DatabasePath)!)
-                .ToDictionary(path => Path.GetFileName(path), Quiescent);
-        }
-        if (group is not null) foreach (var (name, bytes) in group) File.WriteAllBytes(Path.Combine(Path.GetDirectoryName(database.DatabasePath)!, name), bytes);
+        var effect = new FileEffect(plan.JournalId, kind == JournalKind.FileCleanup ? "remove-owned" : "install-candidate",
+            kind == JournalKind.FileCleanup ? FileEffectAction.RemoveOwned : FileEffectAction.InstallCandidate, FileEffectState.Pending, reference.Sha256, null);
+        new RecoveryJournalRegistry(database).AcceptPrepared(operation, registered, [effect], DateTimeOffset.UtcNow);
+        WriteJournal(instance, contracts, registered, fault);
         return new(root, instance, contracts, database, target, registered);
+    }
+
+    private static void PreserveRollbackJournal(Fixture fixture, string path)
+    {
+        byte[] retained;
+        using (var connection = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open($"Data Source={fixture.Database.DatabasePath};Pooling=False"))
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "PRAGMA main.journal_mode=PERSIST;";
+            Assert.Equal("persist", command.ExecuteScalar());
+            command.CommandText = "PRAGMA main.journal_size_limit=-1;";
+            Assert.Equal(-1L, command.ExecuteScalar());
+            command.Parameters.AddWithValue("$id", fixture.Registered.OperationId.ToString("D"));
+            command.CommandText = "SELECT request_digest FROM main.operations WHERE operation_id=$id;";
+            var original = Assert.IsType<string>(command.ExecuteScalar());
+            command.CommandText = "UPDATE main.operations SET request_digest=$digest WHERE operation_id=$id;";
+            var changed = new string('b', 64);
+            Assert.NotEqual(original, changed);
+            var digest = command.Parameters.AddWithValue("$digest", changed);
+            Assert.Equal(1, command.ExecuteNonQuery());
+            digest.Value = original;
+            Assert.Equal(1, command.ExecuteNonQuery());
+            retained = Quiescent(path);
+            Assert.True(retained.Length >= 512, "SQLite must leave the committed rollback journal before the connection closes.");
+        }
+        File.WriteAllBytes(path, retained);
     }
 
     private static void WriteJournal(RuntimeInstance instance, ContractReader contracts, RegisteredJournal journal, string fault)

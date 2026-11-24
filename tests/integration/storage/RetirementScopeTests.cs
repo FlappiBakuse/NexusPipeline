@@ -38,15 +38,14 @@ public sealed class RetirementScopeTests(ITestOutputHelper output)
         fixture.Base.Execute(damage == "path"
             ? "UPDATE main.operation_journals SET plan_path='blobs/plans/" + new string('0', 64) + ".json' WHERE journal_id='" + id + "';"
             : "DELETE FROM main.journal_resource_claims WHERE journal_id='" + id + "'; DELETE FROM main.journal_resources WHERE journal_id='" + id + "';");
-        var global = Record.Exception(() => new RecoveryJournalRegistry(source.Database).ReadSnapshot());
-        Assert.True(global is IOException or InvalidOperationException);
         var retirement = new ContentRetirementService(source.Instance, source.Database, new(), source.Lease,
             fixture.Base.Resources, fixture.Base.Index, source.PayloadRoots);
         Assert.NotNull(retirement.RetireLogsPage(Guid.NewGuid(), "retirement-local-read", first.Facts.RunId));
         fixture.Base.Execute("UPDATE main.operation_journals SET phase='applying' WHERE journal_id='" + id + "';");
         var commits = source.Database.CommitSequence;
         var rejected = Record.Exception(() => retirement.RetireLogsPage(Guid.NewGuid(), "retirement-local-read", first.Facts.RunId));
-        Assert.NotNull(rejected); Assert.Equal(global!.GetType(), rejected.GetType()); Assert.Equal(global.Message, rejected.Message);
+        if (damage == "path") Assert.Equal("recovery_registry_journal_invalid", Assert.IsType<InvalidOperationException>(rejected).Message);
+        else Assert.Equal("recovery_registry_resource_limit", Assert.IsType<IOException>(rejected).Message);
         Assert.Equal(commits, source.Database.CommitSequence);
         Assert.Equal(first, new AttemptReceiptStore(source.Database).Read(first.Facts.AttemptId));
         Assert.Equal(journalBytes, new JournalStore(source.Instance, new()).Read(first.JournalId).Export());

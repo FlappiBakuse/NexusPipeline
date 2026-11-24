@@ -77,7 +77,8 @@ public sealed class SecretPortTests
         else policy.ReadAllowed = false;
         var material = new SecretValue("fixture-only-token");
         store.Release.SetResult(material);
-        Assert.NotNull(await Record.ExceptionAsync(() => read.WaitAsync(TimeSpan.FromSeconds(5))));
+        if (dispose) await Assert.ThrowsAnyAsync<OperationCanceledException>(() => read.WaitAsync(TimeSpan.FromSeconds(5)));
+        else await Assert.ThrowsAsync<UnauthorizedAccessException>(() => read.WaitAsync(TimeSpan.FromSeconds(5)));
         Assert.Throws<ObjectDisposedException>(() => material.Use(_ => throw new IOException()));
     }
 

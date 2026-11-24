@@ -236,6 +236,8 @@ public sealed class InstallerDataTests
         var seal = Path.Combine(manager, InstallationAnchor.IdentityFile);
         var worker = Path.Combine(manager, InstallationAnchor.WorkerFile);
         var intent = Path.Combine(manager, InstallerDataStore.DirectoryName, "intent.protected");
+        var foreignManagerFile = Path.Combine(manager, "foreign.txt");
+        var foreignJournalFile = Path.Combine(manager, InstallerDataStore.DirectoryName, "foreign.txt");
         if (fault == "identity") File.WriteAllText(seal, "Unknown identity bytes");
         if (fault == "worker") File.WriteAllText(worker, "Unknown worker bytes");
         if (fault == "ownership")
@@ -243,18 +245,20 @@ public sealed class InstallerDataTests
             using var key = Registry.CurrentUser.OpenSubKey(fixture.Product.Paths.RegistryKey, writable: true);
             key!.SetValue("Foreign", "Unknown retained registry value");
         }
-        if (fault == "manager") File.WriteAllText(Path.Combine(manager, "foreign.txt"), "Unknown retained manager bytes");
-        if (fault == "namespace") File.WriteAllText(Path.Combine(manager, InstallerDataStore.DirectoryName, "foreign.txt"), "Unknown retained journal bytes");
+        if (fault == "manager") File.WriteAllText(foreignManagerFile, "Unknown retained manager bytes");
+        if (fault == "namespace") File.WriteAllText(foreignJournalFile, "Unknown retained journal bytes");
         if (fault == "native-registry")
         {
             using var key = Registry.CurrentUser.CreateSubKey(fixture.Product.Paths.UninstallRegistryKey);
             key.SetValue("Foreign", "Unknown retained native registration");
         }
-        var original = new[] { seal, worker, intent }.ToDictionary(path => path, File.ReadAllBytes);
+        var files = RuntimeFingerprint.CaptureFileEvidence(seal, worker, intent, foreignManagerFile, foreignJournalFile);
         var ownership = JsonSerializer.Serialize(InstallerMetadataInventory.CaptureRegistry(fixture.Product.Paths.RegistryKey));
+        var native = JsonSerializer.Serialize(InstallerMetadataInventory.CaptureRegistry(fixture.Product.Paths.UninstallRegistryKey));
         Assert.Throws<IOException>(() => fixture.Owner.FinishData(fixture.Product.Application, Guid.NewGuid(), fixture.Native));
-        foreach (var (path, bytes) in original) Assert.Equal(bytes, File.ReadAllBytes(path));
+        Assert.Equal(files, RuntimeFingerprint.CaptureFileEvidence(seal, worker, intent, foreignManagerFile, foreignJournalFile));
         Assert.Equal(ownership, JsonSerializer.Serialize(InstallerMetadataInventory.CaptureRegistry(fixture.Product.Paths.RegistryKey)));
+        Assert.Equal(native, JsonSerializer.Serialize(InstallerMetadataInventory.CaptureRegistry(fixture.Product.Paths.UninstallRegistryKey)));
     }
 
     private static InstallerDataIntent Prepare(InstallerUninstallFixture fixture)
@@ -277,10 +281,10 @@ public sealed class InstallerDataTests
 
     private static void NativeRemoved(InstallerUninstallFixture fixture)
     {
-        var root = Path.GetFullPath(fixture.Product.Application);
-        Assert.StartsWith(Path.GetFullPath(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!) + Path.DirectorySeparatorChar,
+        var root = PhysicalPathPolicy.NormalizeWithoutLinks(fixture.Product.Application);
+        var owner = PhysicalPathPolicy.NormalizeWithoutLinks(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!);
+        Assert.StartsWith(Path.TrimEndingDirectorySeparator(owner) + Path.DirectorySeparatorChar,
             root, StringComparison.OrdinalIgnoreCase);
-        Assert.StartsWith(@"D:\Projects\Temp\", root, StringComparison.OrdinalIgnoreCase);
         foreach (var name in ApplicationTree.Roots)
         {
             var path = Path.Combine(fixture.Product.Application, name);

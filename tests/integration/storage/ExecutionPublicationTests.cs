@@ -38,8 +38,11 @@ public sealed class ExecutionPublicationTests
             Assert.Equal(cancellationWins ? 0 : 1, StepResultCodec.Read(pending.Latest.Root, pending.Total).Length);
             if (cancellationWins)
             {
+                var waiting = source.Lease.WaitForNextExecutionPublication();
                 result = Task.Run(() => terminal.RecordObservation(fixture.JournalId, proof));
-                await WaitCount(source.Lease, 2); Assert.False(result.IsCompleted);
+                await Task.WhenAny(waiting, result).WaitAsync(TimeSpan.FromSeconds(10));
+                var held = fixture.Scope.VerifyReadOnly();
+                Assert.Empty(StepResultCodec.Read(held.Latest.Root, held.Total));
             }
         }
         finally { release.Set(); }

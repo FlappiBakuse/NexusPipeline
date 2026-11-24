@@ -52,6 +52,9 @@ public sealed class MuMuInputsTests
     public async Task FreezesDiscoveredAssets()
     {
         using var fixture = new MuMuDiscoveryFixture();
+        var managerDirectory = Path.GetDirectoryName(fixture.Manager)!;
+        var managerFiles = Directory.GetFiles(managerDirectory, "*", SearchOption.AllDirectories)
+            .Where(path => path != Path.Combine(managerDirectory, "mumu-discovery-fixture.json")).ToArray();
         using var discovery = fixture.Prepare();
         await discovery.DiscoverAsync(TimeSpan.FromSeconds(15));
         var (root, definition) = Definition(fixture, configured: true);
@@ -75,15 +78,24 @@ public sealed class MuMuInputsTests
             RootBindings = original.RootBindings.Append(rootBinding).ToArray() };
         plan = plan with { PhysicalClaims = ExecutionPlanResources.Capture(plan) };
         var claims = ExecutionPlanResources.Claims(plan);
-        foreach (var file in ExecutionTargetInputs.Files(plan.Steps.Single()))
-            Assert.All(PhysicalResourceAdmission.Read(file.Path, ResourceClaimMode.Reference), claim => Assert.Contains(claim, claims));
+        var pairedDirectory = Path.GetDirectoryName(paired.Path)!;
+        var expectedPaths = managerFiles.Concat(managerFiles.Select(path => Path.Combine(pairedDirectory,
+            Path.GetRelativePath(managerDirectory, path)))).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var actualPaths = ExecutionTargetInputs.Files(plan.Steps.Single()).Select(file => file.Path).ToArray();
+        Assert.Equal(expectedPaths.Count, actualPaths.Length);
+        Assert.True(expectedPaths.SetEquals(actualPaths));
+        var name = Path.GetFileNameWithoutExtension(fixture.Manager);
+        var runtimeNames = new[] { name + ".dll", name + ".runtimeconfig.json", name + ".deps.json", "Microsoft.Windows.SDK.NET.dll" };
+        Assert.All(runtimeNames, artifact => Assert.Contains(Path.Combine(managerDirectory, artifact), expectedPaths));
+        foreach (var assetPath in expectedPaths)
+            Assert.All(PhysicalResourceAdmission.Read(assetPath, ResourceClaimMode.Reference), claim => Assert.Contains(claim, claims));
         discovery.Dispose();
         var held = new List<IDisposable>();
         try
         {
             PlanInputLease.Acquire(plan, held);
-            foreach (var file in ExecutionTargetInputs.Files(plan.Steps.Single()))
-                Assert.ThrowsAny<IOException>(() => new FileStream(file.Path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite).Dispose());
+            foreach (var file in expectedPaths)
+                Assert.ThrowsAny<IOException>(() => new FileStream(file, FileMode.Open, FileAccess.Write, FileShare.ReadWrite).Dispose());
         }
         finally { for (var index = held.Count - 1; index >= 0; index--) held[index].Dispose(); }
         var runtime = paired.RuntimeFiles.First(file => file.RelativePath.EndsWith(".runtimeconfig.json", StringComparison.Ordinal));
@@ -97,7 +109,19 @@ public sealed class MuMuInputsTests
         finally { for (var index = held.Count - 1; index >= 0; index--) held[index].Dispose(); }
         Assert.Equal("changed-paired-runtime", File.ReadAllText(path));
         Assert.Equal(managerBytes, File.ReadAllBytes(originalManagerRuntime));
-        Assert.NotEmpty(ExecutionTargetInputs.MappingReferences(plan, new(source.Instance, new()), verifyContent: true));
+        var mapping = frozen.Android.Mapping!.InfoEvidence;
+        var actual = ExecutionTargetInputs.MappingReferences(plan, new(source.Instance, new()), verifyContent: true);
+        var plans = actual.Where(reference => reference.RelativePath.StartsWith("blobs/plans/", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(2, plans.Length);
+        var artifact = new BlobReference(mapping.RelativePath, mapping.SizeBytes, mapping.Sha256);
+        Assert.Contains(artifact, plans);
+        using var document = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(source.Instance.RuntimeRoot, artifact.RelativePath)));
+        Assert.Equal(Assert.Single(plans, reference => reference != artifact).Sha256,
+            document.RootElement.GetProperty("start").GetProperty("sha256").GetString());
+        var output = actual.Except(plans).Select(reference =>
+            File.ReadAllText(Path.Combine(source.Instance.RuntimeRoot, reference.RelativePath))).ToArray();
+        var port = new Uri("http://" + frozen.Android.Endpoint).Port;
+        Assert.Equal(new[] { "{\"3\":{\"adb_port\":" + port + "}}", "readonly-info\n" }, output.OrderDescending(StringComparer.Ordinal));
     }
 
     [Fact(DisplayName = "Both Public Schemas Reject A Paired Tool On Generic Adb Without Changing The Original Definitions")]

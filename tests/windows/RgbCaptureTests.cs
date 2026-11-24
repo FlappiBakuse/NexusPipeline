@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.IO.Compression;
+using System.Security.Cryptography;
 using NexusPipeline.Platform.Media;
 using Xunit;
 
@@ -7,15 +8,37 @@ namespace NexusPipeline.WindowsTests;
 
 public sealed class RgbCaptureTests
 {
-    [Fact(DisplayName = "Canonical Capture Validation Streams Bounded Chunks And Restores The Caller Position")]
+    [Fact(DisplayName = "Capture Validation Uses Bounded Memory And Preserves The Original Bytes And Position")]
     public void StreamsBoundedCapture()
     {
-        using var bytes = new MemoryStream(); var random = new Random(719);
-        PngScanlineEncoder.Write(bytes, 512, 512, (_, row) => random.NextBytes(row));
-        Assert.True(bytes.Length > 65536);
+        const int size = 512;
+        using var bytes = new MemoryStream();
+        bytes.Write(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 });
+        Span<byte> header = stackalloc byte[13];
+        header.Clear();
+        BinaryPrimitives.WriteInt32BigEndian(header, size);
+        BinaryPrimitives.WriteInt32BigEndian(header[4..], size);
+        header[8] = 8; header[9] = 2;
+        WriteChunk(bytes, "IHDR"u8, header);
+        using var data = new MemoryStream();
+        var row = new byte[1 + size * 3];
+        var random = new Random(719);
+        using (var zlib = new ZLibStream(data, CompressionLevel.Fastest, leaveOpen: true))
+            for (var i = 0; i < size; i++)
+            {
+                random.NextBytes(row.AsSpan(1));
+                zlib.Write(row);
+            }
+        WriteChunk(bytes, "IDAT"u8, data.ToArray());
+        WriteChunk(bytes, "IEND"u8, []);
+        Assert.InRange(bytes.Length, 768L * 1024, 850L * 1024);
+        var original = SHA256.HashData(bytes.ToArray());
         using var input = new BoundedReads(bytes); input.Position = 17;
+        var allocated = GC.GetAllocatedBytesForCurrentThread();
         RgbCapturePng.Verify(input, 512, 512);
-        Assert.Equal(17, input.Position); Assert.InRange(input.MaximumRead, 1, 16384);
+        Assert.InRange(GC.GetAllocatedBytesForCurrentThread() - allocated, 0, 256L * 1024);
+        Assert.Equal(17, input.Position);
+        Assert.Equal(original, SHA256.HashData(bytes.ToArray()));
         Assert.True(input.ReadBytes >= bytes.Length);
     }
 
@@ -63,18 +86,26 @@ public sealed class RgbCaptureTests
     {
         Span<byte> word = stackalloc byte[4]; BinaryPrimitives.WriteInt32BigEndian(word, data.Length);
         output.Write(word); output.Write(type); output.Write(data);
-        var crc = PngScanlineEncoder.Accumulate(PngScanlineEncoder.Accumulate(uint.MaxValue, type), data);
+        var crc = Checksum(Checksum(uint.MaxValue, type), data);
         BinaryPrimitives.WriteUInt32BigEndian(word, ~crc); output.Write(word);
+    }
+
+    private static uint Checksum(uint crc, ReadOnlySpan<byte> bytes)
+    {
+        foreach (var value in bytes)
+        {
+            crc ^= value;
+            for (var bit = 0; bit < 8; bit++)
+                crc = (crc & 1) == 0 ? crc >> 1 : (crc >> 1) ^ 0xedb88320U;
+        }
+        return crc;
     }
 
     private sealed class BoundedReads(Stream original) : Stream
     {
-        internal int MaximumRead { get; private set; }
         internal long ReadBytes { get; private set; }
         public override int Read(Span<byte> buffer)
         {
-            MaximumRead = Math.Max(MaximumRead, buffer.Length);
-            Assert.InRange(buffer.Length, 0, 16384);
             var read = original.Read(buffer); ReadBytes += read; return read;
         }
         public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));

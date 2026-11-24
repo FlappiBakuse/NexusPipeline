@@ -22,14 +22,25 @@ public sealed class OwnedPayloadTests
         using var scope = await owner.ReserveForApplyAsync(fixture.Package.OperationId, "fixture-plugin", default);
         var physical = Journal(fixture).Apply(fixture.Prepared!, scope, default);
         Assert.Equal("candidate-installed", physical.Stage);
-        Assert.Equal(File.ReadAllBytes(Path.Combine(fixture.Package.Deployed, "manifest.json")),
-            File.ReadAllBytes(Path.Combine(fixture.Target, "manifest.json")));
-        Assert.Equal(physical.CandidateObjects.ToArray(), PhysicalTreeIdentity.Capture(fixture.Target,
-            new FileTreeScanner(new(4096, 268435456)).Capture(fixture.Target, default)).ToArray());
+        var expected = Directory.EnumerateFileSystemEntries(fixture.Package.Deployed, "*", SearchOption.AllDirectories)
+            .Select(path => Path.GetRelativePath(fixture.Package.Deployed, path).Replace('\\', '/'))
+            .Order(StringComparer.Ordinal).ToArray();
+        var installed = Directory.EnumerateFileSystemEntries(fixture.Target, "*", SearchOption.AllDirectories)
+            .Select(path => Path.GetRelativePath(fixture.Target, path).Replace('\\', '/')).Order(StringComparer.Ordinal);
+        Assert.Equal(expected, installed);
+        Assert.Equal(new[] { "" }.Concat(expected), physical.CandidateObjects.Select(item => item.RelativePath).Order(StringComparer.Ordinal));
+        foreach (var member in physical.CandidateObjects)
+        {
+            var source = Path.Combine(fixture.Package.Deployed, member.RelativePath);
+            var target = Path.Combine(fixture.Target, member.RelativePath);
+            Assert.Equal(File.GetAttributes(source).HasFlag(FileAttributes.Directory), File.GetAttributes(target).HasFlag(FileAttributes.Directory));
+            Assert.Equal(PhysicalObjectIdentity.Read(target), member.Identity);
+            if (File.Exists(source)) Assert.Equal(File.ReadAllBytes(source), File.ReadAllBytes(target));
+        }
         Assert.Equal(JournalPhase.Applied, new RecoveryJournalRegistry(fixture.Package.Catalog.Database)
             .ReadJournal(accepted.JournalId).Phase);
-        Assert.All(new FileEffectOutbox(fixture.Package.Catalog.Database).Read(accepted.JournalId),
-            item => Assert.Equal(FileEffectState.Completed, item.State));
+        var effect = Assert.Single(new FileEffectOutbox(fixture.Package.Catalog.Database).Read(accepted.JournalId));
+        Assert.Equal(("install-candidate", FileEffectState.Completed), (effect.StepId, effect.State));
         using var connection = DatabaseConnections.Open(fixture.Package.Catalog.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var transaction = connection.BeginTransaction(deferred: true);
         Assert.Null(ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, "fixture-plugin"));

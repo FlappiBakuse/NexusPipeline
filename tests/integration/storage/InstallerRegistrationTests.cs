@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using System.Text.Json;
 using Microsoft.Win32;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Installation;
@@ -57,14 +58,24 @@ public sealed class InstallerRegistrationTests
         if (fault == "payload") File.WriteAllText(file, "Retained changed payload");
         if (fault == "runtime") { Directory.CreateDirectory(Path.Combine(fixture.Application, "runtime")); file = Path.Combine(fixture.Application, "runtime/user.json"); File.WriteAllText(file, "Retained unknown runtime"); }
         if (fault == "manager") { file = Path.Combine(fixture.Paths.ManagerRoot, "foreign.txt"); File.WriteAllText(file, "Retained unknown manager data"); }
+        var foreignLocation = Path.Combine(fixture.Root, "foreign");
         if (fault == "native")
         {
             using var key = Registry.CurrentUser.OpenSubKey(fixture.Paths.UninstallRegistryKey, writable: true);
-            key!.SetValue("InstallLocation", Path.Combine(fixture.Root, "foreign"));
+            key!.SetValue("InstallLocation", foreignLocation, RegistryValueKind.String);
         }
         var bytes = File.ReadAllBytes(file); var original = PhysicalObjectIdentity.Read(file);
+        var registration = JsonSerializer.Serialize(InstallerMetadataInventory.CaptureRegistry(fixture.Paths.UninstallRegistryKey));
         Assert.Throws<IOException>(() => fixture.Owner.Register(fixture.Application, fixture.Transaction));
         Assert.Equal(bytes, File.ReadAllBytes(file)); Assert.Equal(original, PhysicalObjectIdentity.Read(file));
+        Assert.Equal(registration, JsonSerializer.Serialize(InstallerMetadataInventory.CaptureRegistry(fixture.Paths.UninstallRegistryKey)));
+        if (fault == "native")
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(fixture.Paths.UninstallRegistryKey);
+            Assert.NotNull(key);
+            Assert.Equal(RegistryValueKind.String, key.GetValueKind("InstallLocation"));
+            Assert.Equal(foreignLocation, Assert.IsType<string>(key.GetValue("InstallLocation")));
+        }
         Assert.False(InstallerMetadataInventory.CaptureRegistry(fixture.Paths.RegistryKey).Exists);
         Assert.False(File.Exists(Path.Combine(fixture.Paths.ManagerRoot, InstallationAnchor.IdentityFile)));
         Assert.True(File.Exists(Path.Combine(fixture.Checkpoint, "prepared.protected")));

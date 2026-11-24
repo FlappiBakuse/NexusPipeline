@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Diagnostics;
 using System.Text.Json;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
@@ -9,10 +10,11 @@ using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace NexusPipeline.StorageTests;
 
-public sealed class CleanupJournalTests
+public sealed class CleanupJournalTests(ITestOutputHelper output)
 {
     [Fact(DisplayName = "A Real Cleanup Journal Deletes Only Its Unreferenced Items And Closes Every Primary Effect")]
     public void ClosesPrimaryEffects()
@@ -32,6 +34,62 @@ public sealed class CleanupJournalTests
         Assert.Contains(snapshot.FileEffects, effect => effect.State == FileEffectState.Completed);
         Assert.Contains(snapshot.FileEffects, effect => effect.State == FileEffectState.NotExecuted);
         Assert.Equal(FileCleanupResult.AlreadyCompleted, new FileCleanupRecovery(Open(fixture)).Recover());
+    }
+
+    [Theory(DisplayName = "A Complete Cleanup Retains Its Verified First Journal File Beyond Two Hundred Fifty Six Revisions")]
+    [InlineData(128)]
+    [InlineData(CleanupPlanCodec.MaximumItems)]
+    public void RetainsLargeCleanupHistory(int items)
+    {
+        var fixture = Create(items);
+        Accept(fixture);
+        var journal = Path.Combine(fixture.Instance.RuntimeRoot, "journals", fixture.Plan.JournalId.ToString("D"));
+        var original = Path.Combine(journal, "0000000001.json");
+        var session = Open(fixture);
+        var started = Stopwatch.GetTimestamp();
+        using (session.ProtectReadHistory())
+        {
+            Assert.Equal(FileCleanupResult.Cleaned, new FileCleanupRecovery(session).Execute());
+            var elapsed = Stopwatch.GetElapsedTime(started);
+            var registry = new RecoveryJournalRegistry(fixture.Database).ReadSnapshot();
+            var committed = Assert.Single(registry.Journals);
+            Assert.Equal(JournalPhase.Committed, committed.Phase);
+            Assert.Equal(2 * items + 4, committed.Revision);
+            Assert.All(registry.FileEffects, effect => Assert.Equal(FileEffectState.Completed, effect.State));
+            Assert.All(fixture.Plan.Items, item => Assert.False(File.Exists(Path.Combine(fixture.Instance.RuntimeRoot, item.Blob.RelativePath))));
+            var bytes = new DirectoryInfo(journal).EnumerateFiles().Sum(file => file.Length);
+            output.WriteLine($"cleanup: {items} blobs, {committed.Revision} revisions, {bytes} journal bytes, {elapsed.TotalMilliseconds:F0} ms");
+            Assert.Throws<IOException>(() => File.Open(original, FileMode.Open, FileAccess.Write, FileShare.Read).Dispose());
+        }
+        using var released = File.Open(original, FileMode.Open, FileAccess.Write, FileShare.Read);
+    }
+
+    [Fact(DisplayName = "A Live Cleanup Projects Appended Durable Revisions Without Rebuilding Every History View")]
+    public void ProjectsProtectedRevisionDirectly()
+    {
+        var fixture = Create(2);
+        Accept(fixture);
+        var session = Open(fixture);
+        using var guard = session.ProtectReadHistory();
+        using var text = new StringWriter();
+        var stderr = Console.Error;
+        try
+        {
+            Console.SetError(text);
+            using var profile = StartupProfile.Begin("cleanup-append-history");
+            Assert.Equal(FileCleanupResult.Cleaned, new FileCleanupRecovery(session).Execute());
+        }
+        finally { Console.SetError(stderr); }
+        var snapshot = new RecoveryJournalRegistry(fixture.Database).ReadSnapshot();
+        Assert.Equal(8, Assert.Single(snapshot.Journals).Revision);
+        Assert.Equal(2, snapshot.FileEffects.Count);
+        Assert.All(snapshot.FileEffects, effect => Assert.Equal(FileEffectState.Completed, effect.State));
+        using var report = JsonDocument.Parse(text.ToString());
+        var views = report.RootElement.GetProperty("steps").EnumerateArray()
+            .Where(step => step.GetProperty("name").GetString() == "history.protected-view")
+            .Sum(step => step.GetProperty("count").GetInt64());
+        output.WriteLine($"cleanup projection: eight durable revisions, {views} full protected history views");
+        Assert.InRange(views, 1, 2);
     }
 
     public static IEnumerable<object[]> PersistenceBoundaries()

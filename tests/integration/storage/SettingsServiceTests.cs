@@ -46,10 +46,19 @@ public sealed class SettingsServiceTests
         if (fault == "closing") fixture.Lifecycle.RequestClose(Guid.NewGuid(), Guid.NewGuid());
         if (fault == "expired-instance") fixture.Lease.Dispose();
         var change = new HostSettingsChange(0, HostSettings.Default with { HistoryRetentionDays = 30 });
-        var error = Record.Exception(() => fixture.Service.Save(Identity(change), change, DateTimeOffset.UtcNow));
-        Assert.NotNull(error);
-        if (fault != "expired-instance") Assert.Equal(fault == "conflict" ? "settings_resource_conflict" : "settings_host_unavailable", error.Message);
-        Assert.Equal(0, new HostSettingsStore(fixture.Database).Read().Revision);
+        var operation = Identity(change);
+        var path = fixture.Database.DatabasePath;
+        var before = RuntimeFingerprint.CaptureDatabaseFiles(path, DatabaseDomain.Runtime | DatabaseDomain.System);
+        if (fault == "expired-instance")
+            Assert.Equal("runtime_exclusive_lease_required", Assert.Throws<IOException>(() =>
+                fixture.Service.Save(operation, change, DateTimeOffset.UtcNow)).Message);
+        else
+            Assert.Equal(fault == "conflict" ? "settings_resource_conflict" : "settings_host_unavailable",
+                Assert.Throws<HostSettingsException>(() => fixture.Service.Save(operation, change, DateTimeOffset.UtcNow)).Message);
+        Assert.Equal(before, RuntimeFingerprint.CaptureDatabaseFiles(path, DatabaseDomain.Runtime | DatabaseDomain.System));
+        var store = new HostSettingsStore(fixture.Database);
+        Assert.Null(store.Lookup(operation, change));
+        Assert.Equal(0, store.Read().Revision);
         Assert.Equal(0, fixture.Service.Read().Saved.Revision);
     }
 
@@ -94,7 +103,12 @@ public sealed class SettingsServiceTests
         var values = HostSettings.Default with { Extensions = [new("live-screenshot", false)] };
         if (fault == "mixed") values = values with { HistoryRetentionDays = 30 };
         var change = new HostSettingsChange(0, values);
-        Assert.Throws<HostSettingsException>(() => fixture.Service.Save(Identity(change), change, DateTimeOffset.UtcNow));
+        var operation = Identity(change);
+        var before = RuntimeFingerprint.CaptureDatabaseFiles(fixture.Database.DatabasePath, DatabaseDomain.Runtime | DatabaseDomain.System);
+        Assert.Equal(fault == "mixed" ? "settings_resource_conflict" : "settings_host_unavailable",
+            Assert.Throws<HostSettingsException>(() => fixture.Service.Save(operation, change, DateTimeOffset.UtcNow)).Message);
+        Assert.Null(new HostSettingsStore(fixture.Database).Lookup(operation, change));
+        Assert.Equal(before, RuntimeFingerprint.CaptureDatabaseFiles(fixture.Database.DatabasePath, DatabaseDomain.Runtime | DatabaseDomain.System));
         Assert.Equal(0, fixture.Service.Read().Saved.Revision);
     }
 

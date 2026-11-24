@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { pluginIndex, matchesPlugin, comparePlugins } from '../../apps/web/src/pages/plugin-list';
+import { pluginIndex, matchesPlugin, comparePlugins } from '../../apps/web/src/pages/plugin-catalog';
 import { extensionMetadata, metadataText, taskTitle } from '../../apps/web/src/control/extension-metadata';
 export async function run(): Promise<string[]> {
   const row = { extensionId: 'sample', name: '截图工具', kind: 'managed-code', summary: '' };
@@ -31,5 +31,18 @@ export async function run(): Promise<string[]> {
   const changedIndex = pluginIndex(changed);
   assert(matchesPlugin(changedIndex, 'xin ming cheng')); assert(!matchesPlugin(changedIndex, 'Zenless'));
   cases.push('search follows replacement metadata');
+  const names = Array.from({ length: 128 }, (_, index) => ({ ...row, extensionId: 'sort-' + index, name: '脚本 ' + (128 - index) }));
+  let collators = 0;
+  const original = Intl.Collator;
+  try {
+    Intl.Collator = new Proxy(original, { construct(target, args, receiver) {
+      collators++;
+      return Reflect.construct(target, args, receiver);
+    } });
+    names.sort((left, right) => comparePlugins(left, right, 'name', false));
+  } finally { Intl.Collator = original; }
+  assert.deepEqual(names.map(item => item.name), Array.from({ length: 128 }, (_, index) => '脚本 ' + (index + 1)));
+  assert.equal(collators, 0, `sorting 128 localized names constructs ${collators} collators`);
+  cases.push('name ordering reuses one pinyin collator while preserving numeric order for 128 localized names');
   return cases;
 }

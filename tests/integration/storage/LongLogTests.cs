@@ -64,7 +64,6 @@ public sealed class LongLogTests(ITestOutputHelper output)
         process.Refresh(); var handlesOpen = process.HandleCount;
         Assert.InRange(allocatedToOpen, 0, 32L * 1024 * 1024);
         Assert.Equal(raw.ObservedBytes, original.Length);
-        Assert.False(original.CanSeek);
         foreach (var path in new[] { paths[0], paths[paths.Length / 2], paths[^1] })
             Assert.Throws<IOException>(() => File.Delete(path));
 

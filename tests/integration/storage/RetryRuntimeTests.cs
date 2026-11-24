@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
+using System.Text.Json;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Storage;
@@ -104,7 +105,8 @@ public sealed class RetryRuntimeTests
         using var pending = Assert.IsType<PreparedExecutionRetry>(retries.Prepare(first.Facts.RunId, first.Facts.AttemptId, DateTimeOffset.UtcNow));
         retries.CancelWaiting(first.Facts.RunId, "provider-runtime-fixture", DateTimeOffset.UtcNow);
         var counts = fixture.Base.Counts(); var before = Plans(fixture);
-        Assert.ThrowsAny<Exception>(() => retries.Start(pending, DateTimeOffset.UtcNow));
+        var rejected = Assert.Throws<IOException>(() => retries.Start(pending, DateTimeOffset.UtcNow));
+        Assert.Equal("execution_retry_budget_continuity_unknown", rejected.Message);
         Assert.Equal(counts, fixture.Base.Counts()); Assert.Equal(before, Plans(fixture));
         var decision = new ExecutionRunFinality(fixture.Source.Instance, fixture.Source.Database, new()).ReadDecision(first);
         Assert.True(decision.IsFinal); Assert.Equal("retry_run_cancelled", decision.DeclineReasonCode);
@@ -119,8 +121,9 @@ public sealed class RetryRuntimeTests
         var first = await fixture.RunInterruptedAsync();
         using var pending = Assert.IsType<PreparedExecutionRetry>(Retry(fixture).Prepare(first.Facts.RunId, first.Facts.AttemptId, DateTimeOffset.UtcNow));
         var counts = fixture.Base.Counts(); var before = Plans(fixture);
-        Assert.ThrowsAny<Exception>(() => fixture.Service.Start(pending.Frozen.NextOperationId, pending.Intent.SubjectId,
+        var rejected = Assert.Throws<IOException>(() => fixture.Service.Start(pending.Frozen.NextOperationId, pending.Intent.SubjectId,
             pending.Request, DateTimeOffset.UtcNow));
+        Assert.Equal("execution_retry_source_unbound", rejected.Message);
         Assert.Equal(counts, fixture.Base.Counts()); Assert.Equal(before, Plans(fixture));
     }
 
@@ -174,13 +177,11 @@ public sealed class RetryRuntimeTests
             "subject" => "UPDATE main.execution_retry_intents SET document_json=json_set(document_json,'$.subjectId','foreign');",
             _ => "UPDATE main.execution_retry_intents SET document_json=json_set(document_json,'$.totalPlan.sha256','" + new string('b', 64) + "');"
         });
-        var before = File.ReadAllBytes(fixture.Source.Database.DatabasePath);
-        var wal = fixture.Source.Database.DatabasePath + "-wal";
-        var originalWal = File.Exists(wal) ? File.ReadAllBytes(wal) : null;
-        Assert.ThrowsAny<Exception>(() => StateDatabase.OpenExisting(fixture.Source.Instance,
-            Path.Combine(fixture.Source.Root, "retry-diagnostic"), new JournalStartupAdmission(fixture.Source.Instance, new())));
-        Assert.Equal(before, File.ReadAllBytes(fixture.Source.Database.DatabasePath));
-        Assert.Equal(originalWal, File.Exists(wal) ? File.ReadAllBytes(wal) : null);
+        var before = RuntimeFingerprint.CaptureDatabaseFiles(fixture.Source.Database.DatabasePath, DatabaseDomain.All);
+        var rejected = Assert.Throws<IOException>(() => StateDatabase.OpenExisting(fixture.Source.Instance,
+            Path.Combine(fixture.Source.Root, "retry-diagnostic"), new JournalStartupAdmission(fixture.Source.Instance, new()), fixture.Source.Lease));
+        Assert.Equal("execution_retry_source_unbound", rejected.Message);
+        Assert.Equal(before, RuntimeFingerprint.CaptureDatabaseFiles(fixture.Source.Database.DatabasePath, DatabaseDomain.All));
         Assert.Equal(first, new AttemptReceiptStore(fixture.Source.Database).Read(first.Facts.AttemptId));
     }
 
@@ -239,42 +240,50 @@ public sealed class RetryRuntimeTests
     {
         var history = new JournalStore(instance, new()).ReadAllRevisions(state.Journal.JournalId);
         var root = history[^1].Root;
-        var expected = ExecutionInvocationCodec.Views(root).Select(view => string.Join(',', view.Participants.Select(item => item.GetRawText()))).ToArray();
-        var jobs = WriterIntentCodec.ReadAllJobs(root, state.Total);
-        var coverage = StepResultCodec.Coverage(root, state.Total);
-        for (var pass = 0; pass < 3; pass++)
-        {
-            Assert.Equal<StepWriterState>(jobs, state.AllJobs);
-            Assert.Equal<ExecutionStepCompletion>(coverage, state.Coverage);
-        }
-        var previous = state with { Latest = history[0] };
-        Assert.Equal<StepWriterState>(WriterIntentCodec.ReadAllJobs(previous.Latest.Root, previous.Total), previous.AllJobs);
-        Assert.Equal<ExecutionStepCompletion>(StepResultCodec.Coverage(previous.Latest.Root, previous.Total), previous.Coverage);
-        var changed = state with { Total = state.Total with { Steps = [] } };
-        Assert.ThrowsAny<Exception>(() => changed.AllJobs);
-        Assert.Equal<StepWriterState>(jobs, state.AllJobs);
+        var participants = root.GetProperty("participants").EnumerateArray().ToArray();
+        var step = Assert.Single(state.Total.Steps);
+        var dispatch = Assert.Single(participants.Select((item, index) => (Identity: item.GetProperty("identity"), Index: index)),
+            item => Format(item.Identity) == "nexus.execution.invocation");
+        Assert.Equal(2, dispatch.Identity.GetProperty("ordinal").GetInt32());
+        Assert.Equal(step.StepId, dispatch.Identity.GetProperty("stepId").GetString());
+        var previousName = dispatch.Identity.GetProperty("previousJobName").GetString();
+        var beforeDispatch = Assert.Single(history, item => item.Revision == dispatch.Identity.GetProperty("beforeRevision").GetInt64());
+        var beforeIds = participants.Take(dispatch.Index).Select(Id).ToArray();
+        Assert.Equal(beforeIds, beforeDispatch.Root.GetProperty("participants").EnumerateArray().Select(Id));
+        var allIds = participants.Select(Id).ToArray();
+        var registered = participants.Select(item => item.GetProperty("identity")).Where(identity =>
+            Format(identity) == "nexus.execution.step-writer" && identity.GetProperty("stage").GetString() == "registered").ToArray();
+        Assert.Equal(2, registered.Length);
+        Assert.Equal(previousName, registered[0].GetProperty("jobName").GetString());
+        var expectedJobs = registered.Select(identity =>
+            (Assert.IsType<string>(identity.GetProperty("jobName").GetString()), identity.GetProperty("writerId").GetGuid())).ToArray();
+        Assert.NotEqual(expectedJobs[0], expectedJobs[1]);
         using var memo = new AttemptReadMemo(state.Total);
         using var scope = new AttemptReadScope(history, state.Total, memo);
-        var previousViews = ExecutionInvocationCodec.Views(history[^2].Root).Select(view => string.Join(',', view.Participants.Select(item => item.GetRawText()))).ToArray();
-        for (var pass = 0; pass < 3; pass++)
-        {
-            Assert.Equal(previousViews, ExecutionInvocationCodec.Views(history[^2].Root).Select(view => string.Join(',', view.Participants.Select(item => item.GetRawText()))));
-            Assert.Equal(expected, ExecutionInvocationCodec.Views(root).Select(view => string.Join(',', view.Participants.Select(item => item.GetRawText()))));
-            Assert.Equal(state.AllJobs.Length, WriterIntentCodec.ReadAllJobs(root, state.Total).Length);
-            Assert.Single(ExecutionInvocationCodec.Read(root, state.Total));
-        }
+        Assert.Collection(ExecutionInvocationCodec.Views(root),
+            prior => Assert.Equal(beforeIds, prior.Participants.Select(Id)),
+            current => Assert.Equal(allIds, current.Participants.Select(Id)));
+        var old = state with { Latest = beforeDispatch };
+        var oldJob = Assert.Single(old.AllJobs);
+        Assert.Equal(expectedJobs[0], (oldJob.JobName, oldJob.WriterId));
+        Assert.Equal(StepCompletionKind.Collected, Assert.Single(old.Coverage).Kind);
+        Assert.Equal(expectedJobs, state.AllJobs.Select(job => (job.JobName, job.WriterId)));
+        var currentJob = Assert.Single(state.Jobs);
+        Assert.Equal(expectedJobs[1], (currentJob.JobName, currentJob.WriterId));
+        Assert.Equal(StepCompletionKind.Collected, Assert.Single(state.Coverage).Kind);
         var damaged = System.Text.Json.Nodes.JsonNode.Parse(history[^1].Export())!.AsObject();
-        var participant = damaged["participants"]!.AsArray().First(item =>
-            item!["identity"]!["format"]!.GetValue<string>() == ExecutionInvocationCodec.Format)!;
+        var participant = damaged["participants"]!.AsArray()[dispatch.Index]!;
         participant["identity"]!["version"] = 999;
-        using var foreign = System.Text.Json.JsonDocument.Parse(damaged.ToJsonString());
-        Assert.Throws<IOException>(() => ExecutionInvocationCodec.Current(foreign.RootElement));
-        Assert.Equal(expected, ExecutionInvocationCodec.Views(root).Select(view => string.Join(',', view.Participants.Select(item => item.GetRawText()))));
+        using var foreign = JsonDocument.Parse(damaged.ToJsonString());
+        Assert.Equal("execution_invocation_unbound", Assert.Throws<IOException>(() => ExecutionInvocationCodec.Current(foreign.RootElement)).Message);
         scope.Dispose();
         using var following = new AttemptReadScope(history, state.Total, memo);
-        Assert.Equal(expected, ExecutionInvocationCodec.Views(root).Select(view => string.Join(',', view.Participants.Select(item => item.GetRawText()))));
-        Assert.Equal<StepWriterState>(jobs, WriterIntentCodec.ReadAllJobs(root, state.Total));
-        Assert.Throws<IOException>(() => ExecutionInvocationCodec.Current(foreign.RootElement));
+        Assert.Equal(beforeIds, Assert.Single(ExecutionInvocationCodec.Views(beforeDispatch.Root)).Participants.Select(Id));
+        Assert.Equal(expectedJobs, WriterIntentCodec.ReadAllJobs(root, state.Total).Select(job => (job.JobName, job.WriterId)));
+        Assert.Equal("execution_invocation_unbound", Assert.Throws<IOException>(() => ExecutionInvocationCodec.Current(foreign.RootElement)).Message);
+
+        static string? Format(JsonElement identity) => identity.TryGetProperty("format", out var value) ? value.GetString() : null;
+        static Guid Id(JsonElement participant) => participant.GetProperty("participantId").GetGuid();
     }
 
     private static async Task AttemptsWritten(string marker, int expected)

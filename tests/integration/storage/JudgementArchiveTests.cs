@@ -22,9 +22,11 @@ public sealed class JudgementArchiveTests
         var held = new List<IDisposable>();
         try
         {
-            var restored = JudgementInvocationArchive.Decode(blobs, JudgementInvocationArchive.Write(blobs, invocation, Hold));
+            using var frame = new JudgementInvocationFrame(invocation);
+            var restored = JudgementInvocationArchive.Decode(blobs, JudgementInvocationArchive.Write(blobs, frame, Hold));
             var exchange = Exchange(invocation);
-            var probe = JudgementProbeArchive.Write(blobs, exchange, Hold);
+            using var probeFrame = new JudgementProbeFrame(exchange);
+            var probe = JudgementProbeArchive.Write(blobs, probeFrame, Hold);
             var decoded = JudgementProbeArchive.Decode(blobs, probe);
             Assert.True(JsonElement.DeepEquals(invocation.Input, restored.Input));
             Assert.Equal(invocation.ProbeEvidenceAllowance, restored.ProbeEvidenceAllowance);
@@ -52,8 +54,10 @@ public sealed class JudgementArchiveTests
         try
         {
             var isInput = fault == "allowance-mismatch";
-            var reference = isInput ? JudgementInvocationArchive.Write(blobs, invocation, Hold) :
-                JudgementProbeArchive.Write(blobs, Exchange(invocation), Hold);
+            using var frame = new JudgementInvocationFrame(invocation);
+            using var probe = isInput ? null : new JudgementProbeFrame(Exchange(invocation));
+            var reference = probe is null ? JudgementInvocationArchive.Write(blobs, frame, Hold) :
+                JudgementProbeArchive.Write(blobs, probe, Hold);
             var node = JsonNode.Parse(JudgementEvidenceCodec.ReadBytes(blobs, reference))!.AsObject();
             switch (fault)
             {

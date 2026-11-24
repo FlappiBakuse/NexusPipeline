@@ -4,6 +4,7 @@ using NexusPipeline.Core.Notifications;
 using NexusPipeline.Core.Secrets;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Notifications;
+using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
 
 namespace NexusPipeline.StorageTests;
@@ -156,6 +157,57 @@ public sealed class NotificationRuntimeTests
         fixture.Base.Execute("DELETE FROM notifications.notification_delivery_pending;");
         Assert.Throws<IOException>(() => fixture.Runtime.TryReleaseSettled());
         Assert.True(fixture.Runtime.HasPendingActivity); Assert.Empty(sink.Requests);
+        Assert.Null(fixture.Base.Lifecycle.RequestClose(Guid.NewGuid(), Guid.NewGuid()).Permit);
+    }
+
+    [Fact(DisplayName = "Notification Activity Stays Held When A Waiting Row Is Restored Before The Release Snapshot")]
+    public async Task KeepsWaitingWhenProjectionRecovers()
+    {
+        await using var sink = new NotificationHttpSink((_, _) => Task.FromResult(new NotificationSinkReply(200, "")));
+        await using var fixture = new RuntimeFixture();
+        await fixture.Save(sink.Address);
+        _ = fixture.Enqueue();
+        var source = fixture.Base.Source;
+        source.Lease.BindDatabase(source.Database);
+        var path = source.Database.DatabasePath;
+        const DatabaseDomain domains = DatabaseDomain.Runtime | DatabaseDomain.Notifications;
+        var saved = new object[3];
+        SQLitePCL.sqlite3 handle;
+        using (var connection = DatabaseConnections.Open(path, readOnly: true, domains: domains))
+        using (var command = DatabaseConnections.Command(connection, null,
+            "SELECT operation_id,source_operation_id,state FROM notifications.notification_delivery_pending;"))
+        using (var row = command.ExecuteReader())
+        {
+            Assert.True(row.Read());
+            Assert.Equal(3, row.GetValues(saved));
+            Assert.False(row.Read());
+        }
+        fixture.Base.Execute("DELETE FROM notifications.notification_delivery_pending;");
+        using (var connection = DatabaseConnections.Open(path)) handle = connection.Handle!;
+
+        var restored = false;
+        Exception? restoreError = null;
+        SQLitePCL.strdelegate_trace restore = (_, sql) =>
+        {
+            if (restored || restoreError is not null || !sql.StartsWith("BEGIN", StringComparison.Ordinal)) return;
+            try
+            {
+                using var writer = DatabaseConnections.Open(path, allowPooling: false, domains: domains);
+                using var insert = DatabaseConnections.Command(writer, null,
+                    "INSERT INTO notifications.notification_delivery_pending VALUES($0,$1,$2);", saved);
+                restored = insert.ExecuteNonQuery() == 1;
+            }
+            catch (Exception error) { restoreError = error; }
+        };
+        SQLitePCL.raw.sqlite3_trace(handle, restore, null);
+        bool released;
+        try { released = fixture.Runtime.TryReleaseSettled(); }
+        finally { SQLitePCL.raw.sqlite3_trace(handle, (SQLitePCL.strdelegate_trace?)null, null); }
+        Assert.Null(restoreError);
+        Assert.True(restored);
+        Assert.False(released);
+        Assert.True(fixture.Runtime.HasPendingActivity);
+        Assert.Empty(sink.Requests);
         Assert.Null(fixture.Base.Lifecycle.RequestClose(Guid.NewGuid(), Guid.NewGuid()).Permit);
     }
 

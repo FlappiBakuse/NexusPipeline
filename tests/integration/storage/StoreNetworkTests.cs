@@ -63,7 +63,11 @@ public sealed class StoreNetworkTests
     public async Task RequiresNetworkClaims()
     {
         using var fixture = new ExtensionCatalogFixture(); var settings = Settings(fixture); var secrets = Secrets(fixture);
-        Save(settings, new(ProxyMode.Http, "http://127.0.0.1:49151/", "fixture"));
+        var authorization = Authorization("fixture", "store-unreadable-canary");
+        await using var proxy = new NativeHttpFixture(request =>
+            request.Headers.TryGetValue("Proxy-Authorization", out var value) && value == authorization
+                ? new NativeHttpReply(200, "original-secret-restored"u8.ToArray()) : Challenge());
+        Save(settings, new(ProxyMode.Http, proxy.Address.AbsoluteUri, "fixture"));
         using (var value = new SecretValue("store-unreadable-canary"))
             await secrets.ApplyAsync(Guid.NewGuid(), SecretFieldKey.HostProxyPassword(fixture.Instance.InstanceId), 0, SecretDisposition.Set, value, default);
         var reads = 0;
@@ -80,7 +84,11 @@ public sealed class StoreNetworkTests
         File.WriteAllBytes(path, changed);
         try { Assert.Equal("secret_unavailable", Assert.Throws<IOException>(() => network.CreateClient()).Message); }
         finally { File.WriteAllBytes(path, original); }
-        using var client = network.CreateClient(); Assert.Equal(2, reads);
+        Assert.Empty(proxy.Requests);
+        using var client = network.CreateClient();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        Assert.Equal("original-secret-restored", await client.GetStringAsync("http://nexus-store-proxy-fixture.invalid/probe", timeout.Token));
+        Assert.Contains(proxy.Requests, request => request.Headers.TryGetValue("Proxy-Authorization", out var value) && value == authorization);
     }
 
     private static HostSettingsService Settings(ExtensionCatalogFixture fixture)

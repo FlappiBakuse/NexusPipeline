@@ -10,7 +10,6 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
     <ProjectReference Include="../../src/platform/NexusPipeline.Platform.csproj" />
     <Compile Include="../../tooling/boundaries/PublicSdkSurface.cs" Link="SdkMetadata/PublicSdkSurface.cs" />
-    <Compile Include="../../tooling/boundaries/PublicSdkSignatures.cs" Link="SdkMetadata/PublicSdkSignatures.cs" />
     <EmbeddedResource Include="../../contracts/sdk-public-api.json" LogicalName="Contracts.SdkPublicApi.json" />
     <EmbeddedResource Include="../../contracts/examples/*.json" LogicalName="Examples.%(Filename)%(Extension)" />
   </ItemGroup>

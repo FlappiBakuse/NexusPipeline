@@ -1,7 +1,9 @@
 using System.Runtime.Versioning;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Win32;
+using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Installation;
 using Xunit;
 
@@ -14,13 +16,47 @@ public sealed class InstallerSnapshotTests
     public void RoundtripsNativeSnapshot()
     {
         using var fixture = new InstallerMetadataFixture();
+        var expectedFiles = fixture.ReadOriginalMetadata().Select(file => new InstallerMetadataFile(file.Role, file.Name,
+            file.ParentIdentity, file.Identity, file.Bytes.LongLength, Convert.ToHexStringLower(SHA256.HashData(file.Bytes)))).ToArray();
+        var rootIdentity = PhysicalObjectIdentity.Read(fixture.Application);
+        var manager = PhysicalObjectIdentity.Read(fixture.Paths.ManagerRoot);
+        var uninstall = PhysicalObjectIdentity.Read(Path.GetDirectoryName(fixture.Engine)!);
+        var expected = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            format = "nexus.installer.snapshot", version = 1,
+            snapshot = new
+            {
+                root = fixture.Application, rootIdentity = WireIdentity(rootIdentity),
+                uninstall = new { exists = true, values = new[] { StringValue("InstallLocation", fixture.Application),
+                    StringValue("UninstallString", '"' + fixture.Engine + '"') } },
+                ownership = new { exists = false, values = Array.Empty<object>() },
+                files = expectedFiles.Select(file => new { role = file.Role, name = file.Name,
+                    parentIdentity = WireIdentity(file.ParentIdentity), identity = WireIdentity(file.Identity),
+                    sizeBytes = file.SizeBytes, sha256 = file.Sha256 }),
+                directories = new[] { new { role = "desktop", identity = (object?)null }, new { role = "group", identity = (object?)null },
+                    new { role = "manager", identity = WireIdentity(manager) }, new { role = "uninstall", identity = WireIdentity(uninstall) } }
+            }
+        });
         var snapshot = InstallerMetadataInventory.Capture(fixture.Application, fixture.Paths);
         var bytes = InstallerSnapshotCodec.Encode(snapshot);
-        var decoded = InstallerSnapshotCodec.Decode(bytes, fixture.Application);
-        Assert.True(InstallerMetadataInventory.Equal(snapshot, decoded));
-        Assert.Equal(new[] { "desktop", "group", "manager", "uninstall" }, decoded.Directories.Select(directory => directory.Role));
-        Assert.Null(decoded.Directories.Single(directory => directory.Role == "desktop").Identity);
-        Assert.NotNull(decoded.Directories.Single(directory => directory.Role == "manager").Identity);
+        using var expectedWire = JsonDocument.Parse(expected);
+        using var encoded = JsonDocument.Parse(bytes);
+        Assert.True(JsonElement.DeepEquals(expectedWire.RootElement, encoded.RootElement));
+        var decoded = InstallerSnapshotCodec.Decode(expected, fixture.Application);
+        Assert.Equal(fixture.Application, decoded.Root);
+        Assert.Equal(rootIdentity, decoded.RootIdentity);
+        Assert.Equal(expectedFiles, decoded.Files);
+        Assert.Equal(new[] { new InstallerMetadataDirectory("desktop", null), new("group", null),
+            new("manager", manager), new("uninstall", uninstall) }, decoded.Directories);
+        Assert.True(decoded.Uninstall.Exists);
+        Assert.Equal(new[] { new InstallerRegistryValue("InstallLocation", RegistryValueKind.String, fixture.Application, null, null, null),
+            new("UninstallString", RegistryValueKind.String, '"' + fixture.Engine + '"', null, null, null) }, decoded.Uninstall.Values);
+        Assert.False(decoded.Ownership.Exists);
+        Assert.Empty(decoded.Ownership.Values);
+
+        static object? WireIdentity(PhysicalObjectIdentity? value) => value is null ? null : new { volumeSerial = value.VolumeSerial, fileId = value.FileId };
+        static object StringValue(string name, string text) => new { name, kind = 1, text,
+            lines = (string[]?)null, binary = (string?)null, number = (long?)null };
     }
 
     [Theory(DisplayName = "Unknown Or Inconsistent Installer Snapshot Wire Data Is Rejected Without Rewriting Native Metadata")]
@@ -72,11 +108,21 @@ public sealed class InstallerSnapshotTests
     public void RoundtripsRegistryText()
     {
         using var fixture = new InstallerMetadataFixture();
+        var text = new string('中', 15000);
         using (var key = Registry.CurrentUser.CreateSubKey(fixture.Paths.RegistryKey))
-            key.SetValue("Text", new string('中', 15000), RegistryValueKind.String);
+            key.SetValue("Text", text, RegistryValueKind.String);
         var snapshot = InstallerMetadataInventory.Capture(fixture.Application, fixture.Paths);
-        Assert.True(InstallerMetadataInventory.Equal(snapshot,
-            InstallerSnapshotCodec.Decode(InstallerSnapshotCodec.Encode(snapshot), fixture.Application)));
+        var bytes = InstallerSnapshotCodec.Encode(snapshot);
+        Assert.InRange(bytes.Length, 1, 131_072);
+        using var wire = JsonDocument.Parse(bytes);
+        var value = Assert.Single(wire.RootElement.GetProperty("snapshot").GetProperty("ownership").GetProperty("values").EnumerateArray());
+        Assert.Equal("Text", value.GetProperty("name").GetString());
+        Assert.Equal(1, value.GetProperty("kind").GetInt32());
+        Assert.Equal(text, value.GetProperty("text").GetString());
+        var decoded = InstallerSnapshotCodec.Decode(bytes, fixture.Application);
+        Assert.True(decoded.Ownership.Exists);
+        Assert.Equal(new InstallerRegistryValue("Text", RegistryValueKind.String, text, null, null, null),
+            Assert.Single(decoded.Ownership.Values));
     }
 
     [Theory(DisplayName = "Empty Installer Metadata Directories Retain Their Existence And Native Identity Across Compensation Planning")]

@@ -27,6 +27,29 @@ public sealed class RunBindingTests
         var state = new RunStateCodec(fixture.Attempt.Instance, new(), fixture.Attempt.Source.Blobs).Read(child.RunState!);
         Assert.Equal(fixture.State.Source.Address, state.Source.Address);
         Assert.Equal(fixture.Attempt.Source.Plan.Steps[0].UserId, state.Source.UserId.ToString("D"));
+        var blobs = fixture.Attempt.Source.Blobs;
+        byte[] Content(FileTreeSnapshot tree, string name)
+        {
+            var file = Assert.Single(tree.Entries, entry => entry.RelativePath == name);
+            using var stored = blobs.OpenVerified(new($"blobs/content/{file.Sha256}.bin", file.SizeBytes, file.Sha256!));
+            using var output = new MemoryStream();
+            stored.CopyTo(output);
+            return output.ToArray();
+        }
+        if (tasks)
+        {
+            var rule = Assert.Single(state.Tasks);
+            Assert.Equal("one", Assert.Single(rule.Rule.SelectedIds));
+            Assert.False(Assert.Single(rule.Initial.Values).Value);
+            Assert.Equal("""{"tasks":{"one":false,"foreign":false},"count":17}"""u8.ToArray(), Content(state.Source.Tree, "tasks.json"));
+            Assert.Equal("""{"tasks":{"one":true,"foreign":false},"count":17}"""u8.ToArray(), Content(child.Candidate.Snapshot, "tasks.json"));
+        }
+        else
+        {
+            Assert.Empty(state.Tasks);
+            Assert.Equal(new byte[] { 9, 10, 11 }, Content(state.Source.Tree, "settings.bin"));
+            Assert.Equal(new byte[] { 9, 10, 11 }, Content(child.Candidate.Snapshot, "settings.bin"));
+        }
         Assert.Equal(fixture.OriginalTarget, Fingerprints(fixture.Attempt.Configuration.TargetPath));
     }
 

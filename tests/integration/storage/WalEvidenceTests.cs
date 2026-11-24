@@ -21,13 +21,31 @@ public sealed class WalEvidenceTests
         File.WriteAllText(Path.Combine(Path.GetDirectoryName(database.DatabasePath)!, name), "unknown SQLite evidence");
         var before = Fingerprints(instance.RuntimeRoot);
         using var job = new OwnedWorkerJob();
+        using var output = new OwnedProcessOutput();
         var identity = job.Start(Environment.GetEnvironmentVariable("NEXUS_TEST_HOST_EXE")!,
             ["serve", "--runtime-root", instance.RuntimeRoot, "--port", "0"], root, instance.InstanceId, Guid.NewGuid(),
-            observed => File.WriteAllBytes(Path.Combine(root, "actual-host.launch.json"), System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(observed)));
+            observed => File.WriteAllBytes(Path.Combine(root, "actual-host.launch.json"), System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(observed)), output);
         using var process = System.Diagnostics.Process.GetProcessById(identity.ProcessId);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var stderr = new StreamReader(output.StandardError);
+        using var stdout = new StreamReader(output.StandardOutput);
+        var error = stderr.ReadToEndAsync(timeout.Token);
+        var ready = stdout.ReadToEndAsync(timeout.Token);
         await process.WaitForExitAsync(timeout.Token);
         Assert.Equal(1, process.ExitCode);
+        Assert.Empty(await ready);
+        var errorText = await error;
+        File.WriteAllText(Path.Combine(root, "actual-host.stderr.log"), errorText);
+        var diagnostic = errorText.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(line))
+            .Single(line => line.TryGetProperty("kind", out var kind) && kind.GetString() == "host.startup.failed");
+        var expected = name switch
+        {
+            "runtime.db-journal" => "database_rollback_journal_unrecognized",
+            "unknown.db" => "database_group_unknown_entry",
+            _ => "database_set_journal_unrecognized"
+        };
+        Assert.Equal(expected, diagnostic.GetProperty("reason").GetString());
         for (var count = 0; count < 250 && job.GetAccounting().ActiveProcesses != 0; count++) await Task.Delay(20);
         Assert.Equal(0u, job.GetAccounting().ActiveProcesses);
         Assert.Empty(job.ActiveProcessIds());

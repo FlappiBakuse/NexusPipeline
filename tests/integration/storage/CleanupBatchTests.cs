@@ -25,7 +25,11 @@ public sealed class CleanupBatchTests
         var cleanup = new BlobCleanup(instance, blobs, new(instance, new(), database, blobs));
         using (cleanup.ProtectCandidates(plan.Items))
         {
-            Assert.All(cleanup.Inspect(plan.Items).Values, state => Assert.Equal(CleanupItemState.VerifiedUnreferenced, state));
+            Assert.Equal(candidates.OrderBy(blob => blob.Sha256, StringComparer.Ordinal),
+                plan.Items.Select(item => item.Blob).OrderBy(blob => blob.Sha256, StringComparer.Ordinal));
+            var inspection = cleanup.Inspect(plan.Items);
+            Assert.Equal(plan.Items.Select(item => item.StepId).Order(StringComparer.Ordinal), inspection.Keys.Order(StringComparer.Ordinal));
+            Assert.All(inspection.Values, state => Assert.Equal(CleanupItemState.VerifiedUnreferenced, state));
             foreach (var blob in candidates) Assert.Throws<IOException>(() => assets.AttachVerified(Asset(blob)));
         }
         foreach (var blob in candidates) assets.AttachVerified(Asset(blob));

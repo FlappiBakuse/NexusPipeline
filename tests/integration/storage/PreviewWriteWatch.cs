@@ -26,7 +26,7 @@ internal sealed class PreviewWriteWatch : IDisposable
         if (entry.Name == _fence) { _observed.TrySetResult(); return; }
         if (Path.GetFileName(entry.FullPath).StartsWith(".capture-", StringComparison.Ordinal) ||
             entry.FullPath.EndsWith(".bin", StringComparison.Ordinal) || entry.FullPath.EndsWith(".json", StringComparison.Ordinal) ||
-            entry.FullPath.EndsWith(".staging", StringComparison.Ordinal))
+            entry.FullPath.EndsWith(".staging", StringComparison.Ordinal) || IsPngName(entry.FullPath))
             _writes.Enqueue(entry.FullPath);
     }
 
@@ -49,11 +49,13 @@ internal sealed class PreviewWriteWatch : IDisposable
         {
             File.WriteAllBytes(fence, []);
             await _observed.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            Assert.DoesNotContain(_writes, path => Path.GetFileName(path).StartsWith(".capture-", StringComparison.Ordinal));
+            Assert.DoesNotContain(_writes, path => IsPngName(path) || Path.GetFileName(path).StartsWith(".capture-", StringComparison.Ordinal));
             Assert.DoesNotContain(_writes, path => File.Exists(path) && IsPng(path));
         }
         finally { File.Delete(fence); }
     }
+
+    private static bool IsPngName(string path) => path.EndsWith(".png", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsPng(string path)
     {

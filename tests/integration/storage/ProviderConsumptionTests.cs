@@ -4,6 +4,7 @@ using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Core.Settings;
 using NexusPipeline.Platform.Processes;
+using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Extensions;
 using NexusPipeline.Platform.Storage.Journals;
@@ -58,8 +59,15 @@ public sealed class ProviderConsumptionTests
         await fixture.PublishAsync();
         var archive = fixture.ArchivePath;
         var before = fixture.Execution.Count("attempt_receipts");
-        Assert.ThrowsAny<IOException>(() => fixture.Providers.Acquire("fixture-plugin"));
-        Assert.ThrowsAny<Exception>(() => fixture.Start());
+        Assert.Equal("extension_installation_consumption_unavailable",
+            Assert.Throws<IOException>(() => fixture.Providers.Acquire("fixture-plugin")).Message);
+        using (var draft = fixture.Service.DryRun(fixture.Source.Request(new BindingTarget(fixture.Source.OtherBinding)),
+            DateTimeOffset.UtcNow))
+        {
+            Assert.Null(draft.PlanDigest);
+            Assert.Equal("execution_input_unavailable", Assert.Single(draft.Explanation.Items).ReasonCode);
+        }
+        Assert.Equal("execution_no_runnable_targets", Assert.Throws<ExecutionSelectionException>(() => fixture.Start()).Message);
         Assert.Null(fixture.Execution.Resources.TryAcquire(Guid.NewGuid(),
             [new("extension:fixture-plugin", ResourceClaimMode.Reference)]).Lease);
         Assert.Equal(before, fixture.Execution.Count("attempt_receipts"));
@@ -100,9 +108,17 @@ public sealed class ProviderConsumptionTests
                 before.Values with { Extensions = [new("fixture-plugin", false)] });
             store.Commit(HostSettingsStore.Identity(root.OperationId, "local", change), change, DateTimeOffset.UtcNow);
         }
-        Assert.ThrowsAny<IOException>(() => provider.Use(package => package.Manifest.ExtensionId));
-        Assert.ThrowsAny<IOException>(() => fixture.Providers.Acquire("fixture-plugin"));
-        Assert.ThrowsAny<Exception>(() => fixture.Start());
+        Assert.Equal("extension_installation_consumption_unavailable",
+            Assert.Throws<IOException>(() => provider.Use(package => package.Manifest.ExtensionId)).Message);
+        Assert.Equal("extension_installation_consumption_unavailable",
+            Assert.Throws<IOException>(() => fixture.Providers.Acquire("fixture-plugin")).Message);
+        using (var draft = fixture.Service.DryRun(fixture.Source.Request(new BindingTarget(fixture.Source.OtherBinding)),
+            DateTimeOffset.UtcNow))
+        {
+            Assert.Null(draft.PlanDigest);
+            Assert.Equal("execution_extension_disabled", Assert.Single(draft.Explanation.Items).ReasonCode);
+        }
+        Assert.Equal("execution_no_enabled_bindings", Assert.Throws<ExecutionSelectionException>(() => fixture.Start()).Message);
         Assert.Equal(0, fixture.Execution.Inbox.PendingCount); Assert.False(File.Exists(fixture.Marker));
         Assert.Equal(JournalPhase.Committed, new RecoveryJournalRegistry(fixture.Source.Database)
             .ReadJournal(fixture.Accepted.JournalId).Phase);
@@ -119,14 +135,15 @@ public sealed class ProviderConsumptionTests
         using var cancellation = new CancellationTokenSource();
         var running = fixture.PublishAsync(cancellation.Token);
         var release = Path.Combine(fixture.ActivationDirectory, "release");
-        string? archive = null, unexpected = null;
+        string? archive = null, unexpected = null, worker = null;
+        Exception? error = null;
         Task? stopping = null;
         try
         {
             _ = await OwnedCrashProcess.ReadReportAsync(Path.Combine(fixture.ActivationDirectory, "activated.json"));
             var protectedArchive = fixture.ArchivePath; archive = protectedArchive;
             var workerDirectory = Path.Combine(fixture.TargetPath, "worker");
-            var worker = Path.Combine(workerDirectory, Path.GetFileName(Environment.GetEnvironmentVariable("NEXUS_PROCESS_FIXTURE_EXE")!));
+            worker = Path.Combine(workerDirectory, Path.GetFileName(Environment.GetEnvironmentVariable("NEXUS_PROCESS_FIXTURE_EXE")!));
             Assert.Throws<IOException>(() => { using var writer = File.Open(protectedArchive, FileMode.Open, FileAccess.Write, FileShare.Read); });
             Assert.Throws<IOException>(() => File.Delete(worker));
             Assert.Throws<IOException>(() => Directory.Move(workerDirectory, workerDirectory + "-moved"));
@@ -136,22 +153,48 @@ public sealed class ProviderConsumptionTests
                 File.WriteAllText(unexpected, "preserve");
             }
             if (failure == "cancel") cancellation.Cancel();
-            if (failure == "stop") stopping = fixture.Activator.StopAllAsync(TimeSpan.FromSeconds(5));
+            if (failure == "stop")
+            {
+                stopping = fixture.Activator.StopAllAsync(TimeSpan.FromSeconds(5));
+                Assert.False(stopping.IsCompleted);
+            }
             Assert.False(running.IsCompleted);
             Assert.Throws<IOException>(() => { using var writer = File.Open(protectedArchive, FileMode.Open, FileAccess.Write, FileShare.Read); });
         }
         finally
         {
             File.WriteAllText(release, "release");
-            try { await running; } catch { }
+            error = await Record.ExceptionAsync(() => running.WaitAsync(TimeSpan.FromSeconds(10)));
         }
-        var error = await Assert.ThrowsAnyAsync<Exception>(async () => await running);
-        if (failure == "namespace") Assert.Equal("execution_provider_package_changed", error.Message);
-        if (failure == "callback") Assert.Equal("controlled_activation_failure", error.Message);
+        Assert.True(running.IsCompleted);
+        switch (failure)
+        {
+            case "namespace":
+                Assert.Equal("execution_provider_package_changed", Assert.IsType<IOException>(error).Message);
+                break;
+            case "callback":
+                Assert.Equal("controlled_activation_failure", Assert.IsType<InvalidOperationException>(error).Message);
+                break;
+            case "cancel":
+                Assert.Equal(cancellation.Token, Assert.IsAssignableFrom<OperationCanceledException>(error).CancellationToken);
+                break;
+            case "stop":
+                Assert.False(cancellation.IsCancellationRequested);
+                Assert.True(Assert.IsAssignableFrom<OperationCanceledException>(error).CancellationToken.IsCancellationRequested);
+                break;
+        }
         if (stopping is not null) await stopping;
         Assert.Empty(fixture.Activator.ReadPublishedScopes());
         Assert.Throws<IOException>(() => fixture.Providers.Acquire("fixture-plugin"));
         if (unexpected is not null) { Assert.Equal("preserve", File.ReadAllText(unexpected)); File.Delete(unexpected); }
-        using var released = File.Open(archive!, FileMode.Open, FileAccess.Write, FileShare.Read);
+        using (File.Open(archive!, FileMode.Open, FileAccess.Write, FileShare.Read)) { }
+        using (File.Open(worker!, FileMode.Open, FileAccess.Write, FileShare.Read)) { }
+        var releasedDirectory = Path.GetDirectoryName(worker!)!;
+        var identity = PhysicalObjectIdentity.Read(releasedDirectory);
+        var relocated = releasedDirectory + "-release-check";
+        Directory.Move(releasedDirectory, relocated);
+        try { Assert.Equal(identity, PhysicalObjectIdentity.Read(relocated)); }
+        finally { Directory.Move(relocated, releasedDirectory); }
+        Assert.Equal(identity, PhysicalObjectIdentity.Read(releasedDirectory));
     }
 }

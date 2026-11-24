@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Security.Principal;
 using NexusPipeline.Platform.Processes;
 using Xunit;
 
@@ -18,16 +21,28 @@ public sealed class ImageIdentityTests
     [Fact(DisplayName = "Activation Identity Protection Retains The Current Process Identity And Rejects Reads After Release")]
     public void PreservesCurrentIdentity()
     {
-        var expected = ProcessIdentityReader.Read(Environment.ProcessId);
+        using var process = Process.GetCurrentProcess();
+        using var user = WindowsIdentity.GetCurrent();
+        var imagePath = process.MainModule!.FileName;
+        using var image = File.OpenRead(imagePath);
+        var digest = Convert.ToHexStringLower(SHA256.HashData(image));
+        void RequireCurrent(ProcessIdentity actual)
+        {
+            Assert.Equal(process.Id, actual.ProcessId);
+            Assert.Equal(process.StartTime.ToUniversalTime(), actual.CreatedAtUtc);
+            Assert.Equal(imagePath, actual.ImagePath, ignoreCase: true);
+            Assert.Equal(user.User!.Value, actual.UserSid);
+            Assert.Equal(digest, actual.ImageSha256);
+        }
         var held = ProcessIdentityLease.HoldCurrent();
         try
         {
-            Assert.Equal(expected, held.ReadCurrent());
+            RequireCurrent(held.ReadCurrent());
         }
         finally { held.Dispose(); }
         Assert.Throws<ObjectDisposedException>(() => held.ReadCurrent());
         using var reopened = ProcessIdentityLease.HoldCurrent();
-        Assert.Equal(expected, reopened.ReadCurrent());
+        RequireCurrent(reopened.ReadCurrent());
     }
 
     [Fact(DisplayName = "Activation Image Bytes And Parent Names Remain Protected Until Release And A Different Image Cannot Identify The Executor")]

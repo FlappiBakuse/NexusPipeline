@@ -1,6 +1,9 @@
 using System.Runtime.Versioning;
+using System.Text;
+using System.Text.Json;
 using NexusPipeline.Extensibility.Lifecycle;
 using NexusPipeline.Platform.Extensions;
+using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Extensions;
 using Xunit;
 
@@ -9,7 +12,7 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class ScopeShutdownTests
 {
-    [Fact(DisplayName = "Only The Actually Committed Formal Scope Is Reported And Shutdown Closes Its Real Managed Resources Once")]
+    [Fact(DisplayName = "Shutdown Releases Committed Managed Resources And Repeating Shutdown Preserves The Recorded Cleanup")]
     public async Task ClosesCommittedScopes()
     {
         using var fixture = new InstallRuntimeFixture(managedMode: "return");
@@ -24,13 +27,22 @@ public sealed class ScopeShutdownTests
         var committed = store.Commit(fixture.Prepared, inventory, activation, default); _ = activation.CompleteCommitted();
         var current = Assert.Single(fixture.Activator.ReadPublishedScopes());
         Assert.Equal("fixture-plugin", current.ExtensionId); Assert.Equal(activation.ActivationId, current.ActivationId);
+        var cleanedPath = Path.Combine(fixture.ActivationDirectory, "cleaned.json");
+        Assert.False(File.Exists(cleanedPath));
         await fixture.Activator.StopAllAsync(TimeSpan.FromSeconds(5));
+        var cleaned = File.ReadAllBytes(cleanedPath);
+        using var cleanup = JsonDocument.Parse(cleaned);
+        Assert.Equal(fixture.ActivationNonce, cleanup.RootElement.GetProperty("Nonce").GetString());
+        var cleanupIdentity = PhysicalObjectIdentity.Read(cleanedPath);
         await fixture.Activator.StopAllAsync(TimeSpan.FromSeconds(5));
         Assert.Empty(fixture.Activator.ReadPublishedScopes());
-        Assert.True(File.Exists(Path.Combine(fixture.ActivationDirectory, "cleaned.json")));
+        Assert.Equal(cleaned, File.ReadAllBytes(cleanedPath));
+        Assert.Equal(cleanupIdentity, PhysicalObjectIdentity.Read(cleanedPath));
         using var resource = File.Open(Path.Combine(fixture.ActivationDirectory, "resource.bin"),
             FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-        Assert.True(resource.Length > 0);
+        using var data = new MemoryStream();
+        resource.CopyTo(data);
+        Assert.Equal(Encoding.UTF8.GetBytes(fixture.ActivationNonce), data.ToArray());
         Assert.Equal(committed.Latest.Export(), fixture.Binding().Read(fixture.Accepted.JournalId, fixture.Accepted.Plan).Latest.Export());
         var called = false;
         var failure = await Assert.ThrowsAsync<IOException>(async () => await fixture.Activator.ActivateManagedAsync(
@@ -43,12 +55,14 @@ public sealed class ScopeShutdownTests
     {
         using var fixture = new InstallRuntimeFixture(managedMode: "late");
         var running = fixture.Session().ApplyAsync(fixture.Prepared, default).AsTask();
+        var cleanedPath = Path.Combine(fixture.ActivationDirectory, "cleaned.json");
         try
         {
             _ = await OwnedCrashProcess.ReadReportAsync(Path.Combine(fixture.ActivationDirectory, "activated.json"),
                 TimeSpan.FromSeconds(15));
             await Assert.ThrowsAsync<TimeoutException>(() => fixture.Activator.StopAllAsync(TimeSpan.FromMilliseconds(100)));
             Assert.False(running.IsCompleted);
+            Assert.False(File.Exists(cleanedPath));
             fixture.Prepared.Dispose(); fixture.Verified.Dispose(); fixture.Root.Dispose();
             Assert.Null(fixture.Package.Catalog.Resources.TryAcquire(Guid.NewGuid(),
                 [new("extension:fixture-plugin", NexusPipeline.Core.Maintenance.ResourceClaimMode.Reference)]).Lease);
@@ -57,9 +71,14 @@ public sealed class ScopeShutdownTests
         {
             File.WriteAllText(Path.Combine(fixture.ActivationDirectory, "release"), "release");
             await fixture.Activator.StopAllAsync(TimeSpan.FromSeconds(5));
-            await Assert.ThrowsAnyAsync<Exception>(async () => await running);
+            var rejected = await Assert.ThrowsAsync<AggregateException>(async () => await running);
+            Assert.StartsWith("extension_activation_restoration_pending", rejected.Message, StringComparison.Ordinal);
+            Assert.Collection(rejected.InnerExceptions,
+                callback => Assert.Equal("extension_activation_source_unbound", Assert.IsType<IOException>(callback).Message),
+                restoration => Assert.Equal("extension_candidate_activation_unbound", Assert.IsType<IOException>(restoration).Message));
         }
-        Assert.True(File.Exists(Path.Combine(fixture.ActivationDirectory, "cleaned.json")));
+        using var cleanup = JsonDocument.Parse(File.ReadAllBytes(cleanedPath));
+        Assert.Equal(fixture.ActivationNonce, cleanup.RootElement.GetProperty("Nonce").GetString());
         Assert.Empty(fixture.Activator.ReadPublishedScopes());
         using var released = fixture.Package.Catalog.Resources.TryAcquire(Guid.NewGuid(),
             [new("extension:fixture-plugin", NexusPipeline.Core.Maintenance.ResourceClaimMode.Reference)]).Lease;

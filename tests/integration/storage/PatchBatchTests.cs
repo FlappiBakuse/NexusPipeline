@@ -42,6 +42,26 @@ public sealed class PatchBatchTests
         AssertReplay(result, replay);
     }
 
+    [Fact(DisplayName = "A Preview Must Still Match The Published Revision Even When The File Bytes Are Unchanged")]
+    public void RejectsReplacedPreviewSource()
+    {
+        using var fixture = new PatchBatchFixture();
+        var revisions = fixture.Base.Revisions;
+        var observed = Assert.IsType<StoredConfigurationRevision>(revisions.ReadStored(fixture.Main));
+        revisions.RequirePatchPreviewCurrent(observed);
+        var saved = observed.Revision;
+        var update = new ConfigurationRevisionChange(saved.Address, saved.Revision, 1, saved.Contract, saved.Tree,
+            ConfigurationUpdateKind.Manual);
+        var published = Assert.Single(fixture.Base.Save(new([update])).Items).Saved;
+        Assert.Equal(saved.Revision + 1, published.Revision);
+        Assert.Equal(saved.Tree.Entries.ToArray(), published.Tree.Entries.ToArray());
+
+        Assert.Equal("configuration_patch_batch_source_invalid", Assert.Throws<ConfigurationException>(() =>
+            revisions.RequirePatchPreviewCurrent(observed)).Message);
+        revisions.RequirePatchPreviewCurrent(Assert.IsType<StoredConfigurationRevision>(revisions.ReadStored(fixture.Main)));
+        fixture.VerifyOriginal();
+    }
+
     [Theory(DisplayName = "Any Invalid Document Rejects The Whole Patch Batch Before Persistent Preparation")]
     [InlineData("expected")]
     [InlineData("protected")]

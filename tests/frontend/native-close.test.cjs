@@ -57,7 +57,7 @@ for (const scenario of [
     setTimeout: (callback, delay) => { timers.set(++timerId, { callback, delay }); return timerId; },
     clearTimeout: id => timers.delete(id),
     require(name) {
-      if (name === './native-frontend.cjs') return { installFrontendBridge: () => ({ invalidate() {}, dispose() {} }) };
+      if (name === './diagnostics.cjs') return require('../../apps/desktop/diagnostics.cjs');
       if (name === './native-login.cjs') return { installLoginBridge: () => ({ start: async () => {}, invalidate() {}, dispose: async () => {} }) };
       if (name === 'electron') return {
         ipcMain: { handle: (key, callback) => handlers.set(key, callback), removeHandler: key => handlers.delete(key) }
@@ -153,7 +153,7 @@ function exitFixture() {
     require(name) {
       if (name === 'electron') return { ipcMain: {
         handle: (key, value) => handlers.set(key, value), removeHandler: key => handlers.delete(key) } };
-      if (name === './native-frontend.cjs') return { installFrontendBridge: () => ({ invalidate() {}, dispose() {} }) };
+      if (name === './diagnostics.cjs') return require('../../apps/desktop/diagnostics.cjs');
       if (name === './native-login.cjs') return { installLoginBridge: () => ({ start: async () => {}, invalidate() {}, dispose: async () => {} }) };
       if (name === './proof-reader.cjs') return {
         readSession: () => ({ instanceId: 'fixture', clientId: 'client', sessionId: 'session' }),
@@ -237,13 +237,13 @@ test('replacing the document cancels preparation and rejects its old reply', asy
   } finally { await fixture.bridge.dispose(); }
 });
 
-test('preload suppresses the retired callback reply without keeping a user-wait stage', async () => {
-  const listeners = new Map(), calls = [], stages = [];
+test('preload drops the retired callback reply and accepts a new close request', async () => {
+  const listeners = new Map(), calls = [];
   let api, release, started;
   const pending = new Promise(resolve => { release = resolve; });
   const waiting = new Promise(resolve => { started = resolve; });
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../apps/desktop/preload.cjs'), 'utf8'), {
-    process: { isMainFrame: true }, console: { info: value => stages.push(JSON.parse(value).stage) },
+    process: { isMainFrame: true }, console: { info: () => {} },
     require: () => ({ contextBridge: { exposeInMainWorld: (_name, value) => { api = value; } },
       ipcRenderer: { on: (name, callback) => listeners.set(name, callback),
         invoke: async (...args) => { calls.push(args); return true; } } })
@@ -252,19 +252,26 @@ test('preload suppresses the retired callback reply without keeping a user-wait 
   const work = listeners.get('desktop.prepare-exit')({}, 'nonce', 'close'); await waiting;
   listeners.get('desktop.cancel-exit')({}, 'nonce'); release('ready'); await work;
   assert.equal(calls.filter(call => call[0] === 'desktop.prepared').length, 0);
-  assert(stages.includes('cancelled') && !stages.includes('waiting-user'));
+  await listeners.get('desktop.prepare-exit')({}, 'current', 'close');
+  assert.deepEqual(calls.filter(call => call[0] === 'desktop.prepared'), [['desktop.prepared', 'current', 'ready']]);
 });
 
 test('a rejected late IPC reply settles in preload without an unhandled rejection', async () => {
-  const listeners = new Map(), stages = [];
+  const listeners = new Map(), calls = [];
   let api;
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../apps/desktop/preload.cjs'), 'utf8'), {
-    process: { isMainFrame: true }, console: { info: value => stages.push(JSON.parse(value).stage) },
+    process: { isMainFrame: true }, console: { info: () => {} },
     require: () => ({ contextBridge: { exposeInMainWorld: (_name, value) => { api = value; } },
       ipcRenderer: { on: (name, callback) => listeners.set(name, callback),
-        invoke: async () => { throw new Error('retired'); } } })
+        invoke: async (...args) => {
+          calls.push(args);
+          if (args[1] === 'nonce') throw new Error('retired');
+          return true;
+        } } })
   });
   api.prepareExit(async () => 'ready');
   await listeners.get('desktop.prepare-exit')({}, 'nonce', 'close');
-  assert(stages.includes('reply-unavailable'));
+  await new Promise(setImmediate);
+  await listeners.get('desktop.prepare-exit')({}, 'current', 'close');
+  assert.deepEqual(calls, [['desktop.prepared', 'nonce', 'ready'], ['desktop.prepared', 'current', 'ready']]);
 });

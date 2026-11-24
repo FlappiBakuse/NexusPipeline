@@ -148,8 +148,23 @@ public sealed class AttemptScopeTests
             using var scope = new AttemptReadScope(state.RequireValidatedRead().History, total, memo);
             var jobs = WriterIntentCodec.ReadJobs(root, total);
             Assert.NotEmpty(jobs);
-            Assert.NotEmpty(StepResultCodec.Read(root, total));
+            var results = StepResultCodec.Read(root, total);
+            Assert.NotEmpty(results);
             Assert.NotEmpty(StepResultCodec.Coverage(root, total));
+            var resultFrames = JsonNode.Parse(state.Latest.Export())!.AsObject();
+            var frames = resultFrames["participants"]!.AsArray();
+            var collected = frames.Last(item => item?["identity"]?["format"]?.GetValue<string>() == StepResultCodec.Format)!;
+            var unrelated = collected.DeepClone();
+            unrelated["participantId"] = Guid.NewGuid().ToString("D");
+            unrelated["identity"]!["format"] = "test.unrelated";
+            frames.Add(unrelated);
+            var mixed = JsonSerializer.SerializeToElement(resultFrames);
+            Assert.Equal(results.ToArray(), StepResultCodec.Read(mixed, total).ToArray());
+            Assert.Equal(StepResultCodec.ReadAll(root).ToArray(), StepResultCodec.ReadAll(mixed).ToArray());
+            collected["kind"] = "directory";
+            var malformed = JsonSerializer.SerializeToElement(resultFrames);
+            Assert.Throws<JsonException>(() => StepResultCodec.Read(malformed, total));
+            Assert.Throws<JsonException>(() => StepResultCodec.ReadAll(malformed));
             var changed = JsonNode.Parse(state.Latest.Export())!.AsObject();
             var participant = changed["participants"]!.AsArray().Single(item => item!["identity"]!["format"]!.GetValue<string>() ==
                 WriterIntentCodec.Format && item["identity"]!["stage"]!.GetValue<string>() == "registered");

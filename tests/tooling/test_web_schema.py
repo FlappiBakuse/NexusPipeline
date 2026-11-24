@@ -8,8 +8,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tooling"))
 from contract_codegen import ProtocolGenerator
-from contract_exports import resolve
-from web_schema import schema_closure, web_outputs
+from schema_exports import resolve, schema_closure, web_outputs
 
 
 class WebSchemaTests(unittest.TestCase):

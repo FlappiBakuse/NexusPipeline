@@ -48,8 +48,9 @@ internal static class HistoryReadBenchmark
                 p95Milliseconds = warm[18], maximumMilliseconds = warm[^1], samplesMilliseconds = samples,
                 maximumResponseBytes = sizes.Max() });
         }
+        var size = HistoryReadSeed.MeasureDatabase(server.Database);
         var report = new { records = HistoryReadSeed.Count, users = 10001, pageLimit = 200,
-            databaseBytes = new FileInfo(server.Database.DatabasePath).Length,
+            size.DatabaseBytes, size.SidecarBytes, size.DatabaseFiles,
             sqlite = server.Database.ReadSettings().NativeVersion,
             method = "Actual loopback HTTP authentication, production routes and SQLite queries; first request plus 20 repeated requests per query; OS caches retained",
             scope = "Synthetic persisted read-model rows; execution journals and full Host startup are measured separately", results };

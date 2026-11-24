@@ -73,10 +73,27 @@ public sealed class ActionRuntimeTests
         var exitWait = Stopwatch.StartNew();
         while (fixture.Exit.Requests == 0 && exitWait.Elapsed < TimeSpan.FromSeconds(3)) await Task.Delay(10);
         Assert.Equal(1, fixture.Exit.Requests);
+        await WaitForCompletionIdle(fixture.Completion);
+        var beforeReplay = fixture.Source.Snapshot();
+        var pendingBeforeReplay = fixture.Completion.PendingOperationId;
         fixture.Completion.OnCommitted(receipt);
-        await Task.Delay(100);
+        await WaitForCompletionIdle(fixture.Completion);
+        Assert.Null(fixture.Completion.FailureCode);
+        Assert.Equal(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(accepted),
+            System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(fixture.Completion.Read(countdown.OperationId)));
+        Assert.Equal(pendingBeforeReplay, fixture.Completion.PendingOperationId);
+        var afterReplay = fixture.Source.Snapshot();
+        Assert.Equal(beforeReplay.Rows, afterReplay.Rows);
+        Assert.Equal(beforeReplay.Files, afterReplay.Files);
         Assert.Equal(1, fixture.Power.Calls);
+        Assert.Equal(1, fixture.Exit.Requests);
         Assert.Equal(receipt, new AttemptReceiptStore(fixture.Source.Database).Read(receipt.Facts.AttemptId));
+    }
+
+    internal static async Task WaitForCompletionIdle(CompletionActionService service)
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (service.HasQueuedOrRunningPulse) await Task.Delay(10, deadline.Token);
     }
 
     private sealed class CopiedReservation(CompletionActionSnapshot snapshot) : IPreparedCompletionAction

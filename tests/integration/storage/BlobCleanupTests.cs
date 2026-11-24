@@ -24,18 +24,35 @@ public sealed class BlobCleanupTests
         Assert.False(File.Exists(fixture.Path));
     }
 
-    [Fact(DisplayName = "One Exact Deletion Guard Reuses Reference Discovery While Preventing New Publication")]
+    [Fact(DisplayName = "Exact Deletion Guards Prevent Reference Publication Until The Guard Is Released")]
     public void ReusesGuardedReferences()
     {
-        var fixture = Create(); var reads = 0;
-        var index = new BlobReferenceIndex(fixture.Instance, new(), fixture.Database, fixture.Blobs) { InventoryRead = () => reads++ };
-        var cleanup = new BlobCleanup(fixture.Instance, fixture.Blobs, index);
-        using var held = PhysicalObjectDeletion.HoldFile(BlobCleanup.Intent(fixture.Item, PhysicalPathPolicy.NormalizeWithoutLinks(fixture.Path)));
-        Assert.Equal(CleanupItemState.VerifiedUnreferenced, cleanup.Inspect([fixture.Item], held)[fixture.Item.StepId]);
-        Assert.Equal(CleanupItemState.VerifiedUnreferenced, cleanup.Inspect([fixture.Item], held)[fixture.Item.StepId]);
-        Assert.Throws<IOException>(() => Attach(fixture));
-        Assert.Equal(CleanupStepResult.Deleted, cleanup.RemoveVerified(fixture.Item, held));
-        Assert.Equal(1, reads); Assert.False(File.Exists(fixture.Path));
+        var fixture = Create();
+        var content = fixture.Blobs.PersistContent(new byte[] { 7, 2, 5 }, default);
+        var removal = Assert.Single(new CleanupPlanCodec(fixture.Instance, new(), fixture.Blobs)
+            .Capture(Guid.NewGuid(), Guid.NewGuid(), [content]).Items);
+        var removalPath = Path.Combine(fixture.Instance.RuntimeRoot, content.RelativePath);
+        var record = RecordStoreFixture.Record(1, Guid.NewGuid());
+        new RunRecordStore(fixture.Database).AppendCompleted([record]);
+        var asset = new RecordAsset(record.FinalAttempt.RunId, fixture.Item.Blob.Sha256, fixture.Item.Blob.SizeBytes, RecordAssetKind.Screenshot);
+        var assets = new RecordAssetStore(fixture.Database, fixture.Blobs);
+        using (var held = PhysicalObjectDeletion.HoldFile(BlobCleanup.Intent(fixture.Item, PhysicalPathPolicy.NormalizeWithoutLinks(fixture.Path))))
+        {
+            Assert.Equal(CleanupItemState.VerifiedUnreferenced, fixture.Cleanup.Inspect([fixture.Item], held)[fixture.Item.StepId]);
+            Assert.Throws<IOException>(() => assets.AttachVerified(asset));
+            Assert.Empty(assets.ReadForRun(asset.RunId).Items);
+        }
+        assets.AttachVerified(asset);
+        Assert.Equal(asset, Assert.Single(assets.ReadForRun(asset.RunId).Items));
+        Assert.Equal(CleanupItemState.Referenced, fixture.Cleanup.Inspect(fixture.Item));
+        using (var held = PhysicalObjectDeletion.HoldFile(BlobCleanup.Intent(removal, PhysicalPathPolicy.NormalizeWithoutLinks(removalPath))))
+        {
+            Assert.Equal(CleanupItemState.VerifiedUnreferenced, fixture.Cleanup.Inspect([removal], held)[removal.StepId]);
+            Assert.Equal(CleanupStepResult.Deleted, fixture.Cleanup.RemoveVerified(removal, held));
+        }
+        Assert.False(File.Exists(removalPath));
+        Assert.Equal(fixture.Item.Identity, PhysicalObjectIdentity.Read(fixture.Path));
+        Assert.Equal(new byte[] { 0, 1, 255, 3, 0 }, File.ReadAllBytes(fixture.Path));
     }
 
     [Fact(DisplayName = "An Unreferenced Exact Content Object Can Be Removed Without Touching Other Bytes")]

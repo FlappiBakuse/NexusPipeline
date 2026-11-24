@@ -97,6 +97,14 @@ class ControlMcpTests(unittest.TestCase):
         names = [tool["name"] for tool in listed["result"]["tools"]]
         self.assertEqual(29, len(names))
         self.assertNotIn("shell", names)
+        before = self.host.durable_state(runtime)
+        _, finish_denied, _ = self.rpc("tools/call", dict(name="project_result", arguments=dict(finish=True)), session)
+        self.assertEqual(dict(content=[dict(type="text", text="access_denied")], isError=True),
+                         finish_denied.get("result"), finish_denied)
+        _, malformed, _ = self.rpc("tools/call", dict(name="project_result", arguments=dict(finish=False)), session)
+        self.assertEqual(-32602, malformed["error"]["code"])
+        self.assertEqual("request_invalid", malformed["error"]["message"])
+        self.assertEqual(before, self.host.durable_state(runtime))
         _, changed, _ = self.rpc("tools/call", dict(name="notifications_save", arguments=command), session)
         self.assertFalse(changed["result"]["isError"])
         self.assertEqual(1, changed["result"]["structuredContent"]["revision"])

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { locale, t } from '../../apps/web/src/app/locale';
-import * as history from '../../apps/web/src/pages/history-row';
+import * as history from '../../apps/web/src/pages/history-format';
 import '../../apps/web/src/pages/history-messages';
-import { historyDuration, historyTime, historyReason, startedInvocations } from '../../apps/web/src/pages/history-detail';
+import { historyDuration, historyTime, historyReason, startedInvocations } from '../../apps/web/src/pages/history-format';
 import { runAttempt, invocationAttempt } from '../../apps/web/src/pages/execution-text';
 import type { ActiveRun, RunTask } from '../../apps/web/src/control/execution';
 

@@ -8,6 +8,42 @@ namespace NexusPipeline.CoreTests;
 
 public sealed class ExecutionSelectionTests
 {
+    [Theory(DisplayName = "Exhausted Run Days And The Actual Daily Success Quota Skip Before Input Preparation")]
+    [InlineData(0, -1, 0, "execution_run_days_exhausted")]
+    [InlineData(-1, 2, 2, "execution_daily_success_limit")]
+    public void SkipsExhaustedBindings(int days, int limit, int successes, string reason)
+    {
+        var fixture = new ExecutionSelectionFixture(); var first = fixture.Catalog.Bindings[0] with
+            { RunDays = days, MaximumSuccessfulRunsPerDay = limit };
+        var catalog = fixture.Catalog with { Bindings = fixture.Catalog.Bindings.Select(item => item.Id == first.Id ? first : item).ToImmutableArray() };
+        var selection = ExecutionSelectionPolicy.Select(catalog, fixture.Settings,
+            new(new BindingTarget(first.Id), catalog.Revision, fixture.Settings.Revision), new Dictionary<Guid, int> { [first.Id] = successes });
+        Assert.Equal(ExecutionSelectionDisposition.Skipped, Assert.Single(selection.Items).Disposition);
+        Assert.Equal(reason, selection.Items[0].ReasonCode);
+        if (reason == "execution_daily_success_limit")
+        {
+            Assert.Equal(reason, selection.ReasonCode);
+            Assert.Equal(reason, ExecutionSelectionPolicy.Explain(selection, []).ReasonCode);
+        }
+    }
+
+    [Fact]
+    public void EnforcesGroupDependencies()
+    {
+        var fixture = new ExecutionSelectionFixture();
+        var third = fixture.Catalog.Scripts[1] with { Id = Guid.NewGuid(), Name = "Independent" };
+        var participant = new AutomationBinding(Guid.NewGuid(), 1, fixture.UserA, third.Id, true, 0);
+        var queue = fixture.Catalog.Queues[0] with { ScriptIds = [fixture.ScriptId, fixture.OtherScriptId, third.Id],
+            SuccessDependencies = [new(fixture.OtherScriptId, [fixture.ScriptId])] };
+        var catalog = fixture.Catalog with { Queues = [queue], Scripts = fixture.Catalog.Scripts.Add(third), Bindings = fixture.Catalog.Bindings
+            .Select(item => item.ScriptId == fixture.ScriptId ? item with { RunDays = 0 } : item).Append(participant).ToImmutableArray() };
+        var selection = fixture.Select(new QueueTarget(queue.Id), catalog);
+        Assert.Equal("execution_queue_dependency_not_successful", selection.Items.Single(item => item.Script.Id == fixture.OtherScriptId).ReasonCode);
+        Assert.Equal(ExecutionSelectionDisposition.Candidate, selection.Items.Single(item => item.Script.Id == third.Id).Disposition);
+        Assert.Throws<AutomationDefinitionException>(() => AutomationCatalogPolicy.Validate(catalog with
+            { Queues = [queue with { SuccessDependencies = [new(fixture.ScriptId, [fixture.OtherScriptId])] }] }));
+    }
+
     [Theory(DisplayName = "Explicit Initialization Ignores Business Quotas But Requires An Enabled Exact Binding")]
     [InlineData(true, ExecutionSelectionDisposition.Candidate)]
     [InlineData(false, ExecutionSelectionDisposition.Skipped)]
@@ -96,6 +132,34 @@ public sealed class ExecutionSelectionTests
         var expanded = fixture.Select(new QueueTarget(fixture.QueueId), catalog with { Users = catalog.Users.Add(newcomer), Bindings = catalog.Bindings.Add(added) });
         Assert.Equal(4, expanded.Items.Length); Assert.Equal(newcomer.Id, expanded.Items[0].User.Id);
         Assert.Equal(3, selection.Items.Length);
+    }
+
+    [Fact(DisplayName = "Repeated Queue Groups Use Only Earlier Outcomes For Each Dependency")]
+    public void PreservesRepeatedGroupDependencies()
+    {
+        var fixture = new ExecutionSelectionFixture();
+        var queue = Assert.Single(fixture.Catalog.Queues) with
+        {
+            ScriptIds = [fixture.ScriptId, fixture.OtherScriptId, fixture.ScriptId, fixture.OtherScriptId],
+            SuccessDependencies = [new(fixture.OtherScriptId, [fixture.ScriptId])]
+        };
+        var catalog = fixture.Catalog with { Queues = [queue] };
+        var selection = fixture.Select(new QueueTarget(queue.Id), catalog);
+        Assert.Equal(new[] { fixture.BindingB, fixture.BindingC, fixture.BindingA, fixture.OtherBinding,
+            fixture.BindingB, fixture.BindingC, fixture.BindingA, fixture.OtherBinding }, selection.Items.Select(item => item.Binding.Id));
+        var readiness = selection.Items.Select(item => item.Ordinal == 4
+            ? new ExecutionItemReadiness(item, false, "execution_fixture_not_ready")
+            : new(item, true, ExecutionSelectionPolicy.InputsVerified)).ToImmutableArray();
+        var explanation = ExecutionSelectionPolicy.Explain(selection, readiness);
+        Assert.Equal(ExecutionExplanationDisposition.Runnable, explanation.Items[3].Disposition);
+        Assert.Equal(ExecutionExplanationDisposition.Skipped, explanation.Items[7].Disposition);
+        Assert.Equal(new[] { ExecutionSelectionPolicy.InputsVerified, ExecutionSelectionPolicy.InputsVerified,
+            "execution_group_partial", "execution_queue_dependency_not_successful" }, explanation.Groups.Select(group => group.ReasonCode));
+
+        catalog = catalog with { Bindings = catalog.Bindings.Select(binding => binding.Id == fixture.BindingB
+            ? binding with { RunDays = 0 } : binding).ToImmutableArray() };
+        Assert.All(fixture.Select(new QueueTarget(queue.Id), catalog).Items.Where(item => item.Script.Id == fixture.OtherScriptId),
+            item => Assert.Equal("execution_queue_dependency_not_successful", item.ReasonCode));
     }
 
     [Theory(DisplayName = "Disabled Bindings Remain Skipped And Never Produce Runnable Items")]

@@ -80,6 +80,51 @@ public sealed class ProviderInputsTests
         Assert.Equal(before.Rows, source.Snapshot().Rows); Assert.Equal(before.Files, source.Snapshot().Files);
     }
 
+    [Fact(DisplayName = "Three Real Queue Bindings Use The Same Controlled Provider Manifest In Preview Freeze And Historical Read")]
+    public async Task UsesSharedProviderManifest()
+    {
+        using var source = new PlanBuilderFixture(otherExtensionId: "provider-fixture");
+        using var package = new ProviderPackageFixture();
+        MakeSpecialized(source);
+        var catalog = source.Definitions.Read();
+        var first = Guid.NewGuid();
+        var last = Guid.NewGuid();
+        var changes = new AutomationChanges(catalog.Revision, [], [], [],
+            [new(first, 0, source.UserA, source.OtherScriptId, true, 0), new(last, 0, source.UserC, source.OtherScriptId, true, 0)],
+            [catalog.Queues.Single() with { ScriptIds = [source.OtherScriptId] }], [], []);
+        source.Definitions.Commit(AutomationDefinitionStore.Identity(Guid.NewGuid(), "provider-shared-manifest", changes),
+            changes, PlanBuilderFixture.CreatedAt);
+        var registry = new ExecutionProviderRegistry();
+        await using var scope = new ExtensionScope("provider-fixture");
+        await new ExecutionRegistrationPort(scope, package.Verify(), registry).RegisterAsync(default);
+        scope.Publish();
+        var builder = Builder(source, registry);
+        var before = source.Snapshot();
+        using var draft = builder.Prepare(source.Request(new QueueTarget(source.QueueId)), PlanBuilderFixture.CreatedAt);
+        var preview = Assert.IsType<FrozenExecutionPlan>(draft.ReadPlan()).ReadWire();
+        Assert.Equal(3, preview.Steps.Count);
+        Assert.All(preview.Steps, step => Assert.NotNull(step.Provider));
+        var previewProviders = preview.Steps.Select(step => step.Provider!).ToArray();
+        Assert.All(previewProviders, provider => Assert.Equal(scope.ActivationId.ToString("D"), provider.ActivationId));
+        Assert.Single(previewProviders.Select(provider => provider.Manifest).Distinct());
+        Assert.Equal(before.Rows, source.Snapshot().Rows);
+        Assert.Equal(before.Files, source.Snapshot().Files);
+        using var saved = builder.Freeze(draft);
+        var contracts = new NexusPipeline.Platform.Serialization.ContractReader();
+        var blobs = new ImmutableBlobStore(source.Instance, contracts);
+        var codec = new ExecutionPlanCodec(source.Instance, contracts, blobs);
+        var stored = codec.Read(saved.Reference).ReadWire();
+        Assert.Equal(preview.Steps.Select(step => step.StepId), stored.Steps.Select(step => step.StepId));
+        Assert.All(stored.Steps, step => Assert.Equal(previewProviders[0].Manifest, step.Provider!.Manifest));
+        Assert.Equal(before.Rows, source.Snapshot().Rows);
+
+        var end = stored.Steps[^1];
+        var changed = end with { ImageSha256 = new string('0', 64) };
+        var bad = stored with { Steps = [stored.Steps[0], stored.Steps[1], changed] };
+        var error = Assert.Throws<IOException>(() => codec.Freeze(bad).Dispose());
+        Assert.Equal("execution_provider_worker_unbound", error.Message);
+    }
+
     private static ExecutionPlanBuilder Builder(PlanBuilderFixture source, ExecutionProviderRegistry registry) =>
         new(source.Instance, source.Database, new(), source.Lease, new(5, 6, 7), null, registry);
 

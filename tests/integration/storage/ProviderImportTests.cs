@@ -4,11 +4,12 @@ using NexusPipeline.Core.Configuration;
 using NexusPipeline.Platform.Storage.Automation;
 using NexusPipeline.Platform.Storage.Configuration;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace NexusPipeline.StorageTests;
 
 [SupportedOSPlatform("windows")]
-public sealed class ProviderImportTests
+public sealed class ProviderImportTests(ITestOutputHelper output)
 {
     [Fact]
     public async Task CapturesCurrentProvider()
@@ -16,7 +17,7 @@ public sealed class ProviderImportTests
         await using var fixture = await ProviderRuntimeFixture.PrepareAsync("configuration", configuration: true, saveConfigurations: false);
         var source = fixture.Source;
         var overview = new ConfigurationOverviewReader(source.Instance, source.Database, source.Lease, new(), fixture.Registry);
-        var before = overview.Read(source.OtherBinding);
+        var (before, missingQueries) = ConfigurationOverviewTests.ObserveRevisionReads("provider-missing", () => overview.Read(source.OtherBinding), output);
         var resource = Assert.Single(before.Resources);
         Assert.Equal("provider-main", resource.ResourceId);
         Assert.False(resource.IsSaved);
@@ -27,7 +28,8 @@ public sealed class ProviderImportTests
         var saved = Assert.Single(result.Items).Saved;
         Assert.Equal(ProviderConfigurationPolicy.Contract("provider-fixture", "main", new("provider-main", 0, 1)), saved.Contract);
         Assert.Equal(original, File.ReadAllBytes(source.Configuration));
-        var after = Assert.Single(overview.Read(source.OtherBinding).Resources);
+        var (current, savedQueries) = ConfigurationOverviewTests.ObserveRevisionReads("provider-saved", () => overview.Read(source.OtherBinding), output);
+        var after = Assert.Single(current.Resources);
         Assert.True(after.IsSaved); Assert.Equal(1, after.Revision);
         Assert.Equal(FileObjectKind.File, after.Shape);
         Assert.Equal(1, after.FileCount);
@@ -35,6 +37,28 @@ public sealed class ProviderImportTests
         await fixture.Scope.DisposeAsync();
         Assert.False(service.Import("provider-import", request, DateTimeOffset.UtcNow).IsNew);
         Assert.Throws<IOException>(() => overview.Read(source.OtherBinding));
+        Assert.Equal(3, missingQueries);
+        Assert.Equal(4, savedQueries);
+    }
+
+    [Fact(DisplayName = "A Provider Import Uses Its Saved Revision And Publishes Only Against The Current Revision")]
+    public async Task RefreshesSavedProvider()
+    {
+        await using var fixture = await ProviderRuntimeFixture.PrepareAsync("configuration", configuration: true);
+        var source = fixture.Source;
+        var overview = new ConfigurationOverviewReader(source.Instance, source.Database, source.Lease, new(), fixture.Registry);
+        var before = overview.Read(source.OtherBinding);
+        var resource = Assert.Single(before.Resources);
+        Assert.Equal(1, resource.Revision);
+        var original = File.ReadAllBytes(source.Configuration);
+        var request = Request(before) with { Resources = [new(resource.ResourceId, resource.Revision)] };
+        var service = Service(fixture);
+        var committed = service.Import("provider-import", request, DateTimeOffset.UtcNow);
+        Assert.Equal(2, Assert.Single(committed.Items).Saved.Revision);
+        Assert.Equal(original, File.ReadAllBytes(source.Configuration));
+        Assert.Equal(2, Assert.Single(overview.Read(source.OtherBinding).Resources).Revision);
+        Assert.Equal("configuration_revision_conflict", Assert.Throws<ConfigurationException>(() =>
+            service.Import("provider-import", request with { OperationId = Guid.NewGuid() }, DateTimeOffset.UtcNow)).Message);
     }
 
     [Theory]

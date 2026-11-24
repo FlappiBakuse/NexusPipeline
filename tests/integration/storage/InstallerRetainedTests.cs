@@ -61,14 +61,17 @@ public sealed class InstallerRetainedTests
     {
         using var fixture = new InstallerRetainedFixture();
         var product = fixture.Product;
-        if (fault == "database") File.WriteAllText(Path.Combine(fixture.Runtime.RuntimeRoot, "state/runtime.db"), "Retained unknown database");
-        if (fault == "manager") File.WriteAllText(Path.Combine(product.Paths.ManagerRoot, "foreign.txt"), "Retained unknown manager");
+        var database = Path.Combine(fixture.Runtime.RuntimeRoot, "state/runtime.db");
+        var manager = Path.Combine(product.Paths.ManagerRoot, "foreign.txt");
+        var entry = Path.Combine(product.Application, ApplicationTree.HostEntry);
+        if (fault == "database") File.WriteAllText(database, "Retained unknown database");
+        if (fault == "manager") File.WriteAllText(manager, "Retained unknown manager");
         if (fault == "ownership")
         {
             using var key = Registry.CurrentUser.OpenSubKey(product.Paths.RegistryKey, writable: true);
             key!.SetValue("Unknown", "Retained foreign value");
         }
-        if (fault == "application") File.WriteAllText(Path.Combine(product.Application, ApplicationTree.HostEntry), "Retained application");
+        if (fault == "application") File.WriteAllText(entry, "Retained application");
         if (fault == "native")
         {
             using var key = Registry.CurrentUser.CreateSubKey(product.Paths.UninstallRegistryKey);
@@ -78,10 +81,16 @@ public sealed class InstallerRetainedTests
         using var guard = fault == "guard" ? null : InstallerRuntimeGate.Acquire(product.Application);
         var runtime = File.ReadAllBytes(fixture.Marker);
         var identity = File.ReadAllBytes(Path.Combine(product.Paths.ManagerRoot, InstallationAnchor.IdentityFile));
+        var evidence = RuntimeFingerprint.CaptureFileEvidence(database, manager, entry);
+        var ownership = JsonSerializer.Serialize(InstallerMetadataInventory.CaptureRegistry(product.Paths.RegistryKey));
+        var native = JsonSerializer.Serialize(InstallerMetadataInventory.CaptureRegistry(product.Paths.UninstallRegistryKey));
         Assert.ThrowsAny<IOException>(() => product.Owner.Begin(product.Application, fixture.Transaction, product.Target,
             InstallerRetainedFixture.Parent(), fault == "inspection" ? null : fixture.WorkRoot));
         Assert.Equal(runtime, File.ReadAllBytes(fixture.Marker));
         Assert.Equal(identity, File.ReadAllBytes(Path.Combine(product.Paths.ManagerRoot, InstallationAnchor.IdentityFile)));
+        Assert.Equal(evidence, RuntimeFingerprint.CaptureFileEvidence(database, manager, entry));
+        Assert.Equal(ownership, JsonSerializer.Serialize(InstallerMetadataInventory.CaptureRegistry(product.Paths.RegistryKey)));
+        Assert.Equal(native, JsonSerializer.Serialize(InstallerMetadataInventory.CaptureRegistry(product.Paths.UninstallRegistryKey)));
         Assert.False(Directory.Exists(product.Checkpoint));
     }
 
@@ -122,23 +131,29 @@ public sealed class InstallerRetainedTests
         using var fixture = new InstallerRetainedFixture(); var product = fixture.Product;
         using var guard = InstallerRuntimeGate.Acquire(product.Application);
         fixture.Begin(); product.InstallPayload();
+        var instanceFile = Path.Combine(fixture.Runtime.RuntimeRoot, "instance.json");
+        var pending = fault == "worker" ? Path.Combine(product.Checkpoint, "worker.pending") : null;
         if (fault == "ownership")
         {
             using var key = Registry.CurrentUser.OpenSubKey(product.Paths.RegistryKey, writable: true);
             key!.SetValue("IdentitySha256", new string('b', 64));
         }
-        if (fault == "runtime") File.WriteAllText(Path.Combine(fixture.Runtime.RuntimeRoot, "instance.json"), "Retained unknown identity");
-        if (fault == "worker")
+        if (fault == "runtime") File.WriteAllText(instanceFile, "Retained unknown identity");
+        if (pending is not null)
         {
             product.Owner.PrepareRegistration(product.Application, fixture.Transaction);
-            File.WriteAllText(Path.Combine(product.Checkpoint, "worker.pending"), "Retained unknown worker");
+            File.WriteAllText(pending, "Retained unknown worker");
         }
         var marker = File.ReadAllBytes(fixture.Marker);
         var identity = File.ReadAllBytes(Path.Combine(product.Paths.ManagerRoot, InstallationAnchor.IdentityFile));
+        var files = RuntimeFingerprint.CaptureFileEvidence(instanceFile, pending);
+        var ownership = JsonSerializer.Serialize(InstallerMetadataInventory.CaptureRegistry(product.Paths.RegistryKey));
         var error = Record.Exception(() => product.Owner.Register(product.Application, fixture.Transaction));
         Assert.True(error is IOException or JsonException);
         Assert.Equal(marker, File.ReadAllBytes(fixture.Marker));
         Assert.Equal(identity, File.ReadAllBytes(Path.Combine(product.Paths.ManagerRoot, InstallationAnchor.IdentityFile)));
+        Assert.Equal(files, RuntimeFingerprint.CaptureFileEvidence(instanceFile, pending));
+        Assert.Equal(ownership, JsonSerializer.Serialize(InstallerMetadataInventory.CaptureRegistry(product.Paths.RegistryKey)));
         Assert.True(Directory.Exists(product.Checkpoint));
     }
 

@@ -49,6 +49,30 @@ public sealed class ApplicationTreeTests
         proof.Require(fixture.Plan, fixture.Saved);
     }
 
+    [Fact(DisplayName = "Application Recovery Distinguishes Candidate And Original Objects With Identical Content")]
+    public void RestoresOriginalIdentityWhenBytesMatch()
+    {
+        var fixture = new ApplicationTreeFixture(sameContent: true);
+        var host = Path.Combine(fixture.Target, ApplicationTree.HostEntry);
+        var original = PhysicalObjectIdentity.Read(host);
+        Assert.Equal(fixture.Plan.Before.Snapshot.Entries, fixture.Plan.Candidate.Snapshot.Entries);
+        fixture.Materialize();
+        var candidate = fixture.Saved.CandidateObjects.Single(item => item.RelativePath == ApplicationTree.HostEntry).Identity;
+        Assert.NotEqual(original, candidate);
+        fixture.Preserve();
+        fixture.Install();
+        Assert.Equal(candidate, PhysicalObjectIdentity.Read(host));
+        Assert.Equal((true, true), fixture.Effects.ObserveRestoration(fixture.Plan, fixture.Saved));
+        fixture.Effects.RetireCandidate(fixture.Plan, fixture.Saved);
+        fixture.Effects.RestoreOriginal(fixture.Plan, fixture.Saved);
+        Assert.Equal(original, PhysicalObjectIdentity.Read(host));
+        Assert.Equal(candidate, PhysicalObjectIdentity.Read(Path.Combine(fixture.Work, "spent-" + ApplicationTree.HostEntry)));
+        Assert.Equal("original-host", File.ReadAllText(host));
+        AssertProtected(fixture);
+        using var proof = fixture.Effects.HoldRestored(fixture.Plan, fixture.Saved);
+        proof.Require(fixture.Plan, fixture.Saved);
+    }
+
     [Theory]
     [InlineData(false, 1)]
     [InlineData(false, 3)]

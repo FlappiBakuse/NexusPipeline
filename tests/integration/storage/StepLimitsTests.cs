@@ -80,7 +80,7 @@ public sealed class StepLimitsTests
         Assert.Equal(LifecycleOutcome.Completed, receipt.Facts.Lifecycle); Assert.Equal(EngineOutcome.Failed, receipt.Facts.Engine);
         Assert.Equal(BusinessOutcome.Succeeded, receipt.Facts.Business); Assert.Equal(3, fixture.Base.Count("journal_writer_job_roots"));
         var source = fixture.Source;
-        foreach (var result in StepResultCodec.Read(fixture.State.Latest.Root, fixture.State.Total))
+        foreach (var result in RequireAllStepResults(fixture))
         {
             var document = StepEvidenceCodec.Read(new(source.Instance, new()), result.Binding, result.Latest.Artifact);
             Assert.Null(document.Stop); Assert.Equal(37, document.ExitCode); Assert.Equal(BusinessOutcome.Succeeded, document.Business);
@@ -94,7 +94,7 @@ public sealed class StepLimitsTests
         var receipt = Assert.IsType<AttemptReceipt>(await fixture.Consumer.RunNextAsync());
         Assert.Equal(LifecycleOutcome.Completed, receipt.Facts.Lifecycle); Assert.Equal(BusinessOutcome.Failed, receipt.Facts.Business);
         Assert.Equal(EngineOutcome.Unknown, receipt.Facts.Engine); Assert.Equal(3, fixture.Base.Count("journal_writer_job_roots"));
-        foreach (var result in StepResultCodec.Read(fixture.State.Latest.Root, fixture.State.Total))
+        foreach (var result in RequireAllStepResults(fixture))
         {
             var document = StepEvidenceCodec.Read(new(fixture.Source.Instance, new()), result.Binding, result.Latest.Artifact);
             Assert.Equal("execution_business_failed", document.Stop!.ReasonCode); Assert.Equal(BusinessOutcome.Failed, document.Business);
@@ -111,7 +111,22 @@ public sealed class StepLimitsTests
         var result = Assert.Single(StepResultCodec.Read(fixture.State.Latest.Root, fixture.State.Total));
         var document = StepEvidenceCodec.Read(new(fixture.Source.Instance, new()), result.Binding, result.Latest.Artifact);
         Assert.Null(document.Stop); Assert.Equal(BusinessOutcome.Unverified, document.Business);
-        Assert.All(fixture.State.Coverage.Skip(1), item => Assert.Equal(StepCompletionKind.NotDispatched, item.Kind));
+        var expected = fixture.State.Total.Steps.Select(step => step.StepId).ToArray();
+        Assert.Equal(3, expected.Length);
+        Assert.Equal(expected[0], result.Binding.StepId);
+        var suffix = fixture.State.Coverage.Skip(1).ToArray();
+        Assert.Equal(expected.Skip(1), suffix.Select(item => item.StepId));
+        Assert.All(suffix, item => Assert.Equal(StepCompletionKind.NotDispatched, item.Kind));
+    }
+
+    private static StepResultState[] RequireAllStepResults(ExecutionRuntimeFixture fixture)
+    {
+        var state = fixture.State;
+        var results = StepResultCodec.Read(state.Latest.Root, state.Total).ToArray();
+        var expected = state.Total.Steps.Select(step => step.StepId).ToArray();
+        Assert.Equal(3, expected.Length);
+        Assert.Equal(expected, results.Select(result => result.Binding.StepId));
+        return results;
     }
 
     [Theory(DisplayName = "A Collected Timeout Cannot Be Rewritten Past Its Native Closure Or To A Different Frozen Limit")]

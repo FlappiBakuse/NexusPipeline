@@ -34,7 +34,8 @@ public sealed class JournalTextTests
     [InlineData("comment")]
     public void RejectsChangedFields(string fault)
     {
-        var bytes = Example(); _ = JournalDocument.Read(bytes, new());
+        var bytes = Example();
+        var original = JournalDocument.Read(bytes, new());
         var node = JsonNode.Parse(bytes)!.AsObject();
         switch (fault)
         {
@@ -45,9 +46,21 @@ public sealed class JournalTextTests
         }
         var invalid = JsonSerializer.SerializeToUtf8Bytes(node);
         if (fault == "duplicate") invalid = Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(bytes).TrimEnd()[..^1] + ",\"version\":1}");
-        if (fault == "size") invalid = new byte[StrictJson.MaximumBytes + 1];
+        if (fault == "size")
+        {
+            invalid = new byte[2097153];
+            Array.Fill(invalid, (byte)' ');
+            bytes.CopyTo(invalid, 0);
+            var valid = invalid.AsMemory(0, 2097152);
+            var accepted = JournalDocument.Read(valid, new());
+            Assert.Equal(original.JournalId, accepted.JournalId);
+            Assert.Equal(original.Revision, accepted.Revision);
+        }
         if (fault == "comment") invalid = Encoding.UTF8.GetBytes("/*invalid*/" + Encoding.UTF8.GetString(bytes));
-        Assert.Throws<JsonException>(() => JournalDocument.Read(invalid, new()));
+        var before = invalid.ToArray();
+        var error = Assert.Throws<JsonException>(() => JournalDocument.Read(invalid, new()));
+        if (fault == "size") Assert.Equal("invalid_json_size", error.Message);
+        Assert.Equal(before, invalid);
         Assert.Equal(bytes, JournalDocument.Read(bytes, new()).Export());
     }
 

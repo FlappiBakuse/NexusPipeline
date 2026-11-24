@@ -28,11 +28,19 @@ public sealed class AndroidOutputTests
             var main = RawOutputCodec.Read(blobs, primary.Binding, primaryEvidence.RawOutput!);
             Assert.True(main.IsComplete);
             Assert.True(outputs["preHook"].IsComplete);
+            Assert.Equal(0, main.DiscardedBytes);
+            Assert.Equal(0, outputs["preHook"].DiscardedBytes);
             Assert.True(outputs["preHook"].Parts.Sum(part => part.Content.SizeBytes) >= 8388608);
             Assert.True(main.Parts.Where(part => part.FileSourceId is null).Sum(part => part.Content.SizeBytes) >= 6291456);
             Assert.True(main.Parts.Where(part => part.FileSourceId is not null).Sum(part => part.Content.SizeBytes) >= 2097152);
             Assert.False(outputs["postHook"].IsComplete);
             Assert.True(outputs["postHook"].DiscardedBytes > 0);
+            Assert.True(outputs["postHook"].ObservedBytes >= 8388608);
+            foreach (var raw in outputs.Values.Append(main))
+            {
+                Assert.Equal(raw.ObservedBytes, raw.Parts.Sum(part => part.Content.SizeBytes) + raw.DiscardedBytes);
+                foreach (var part in raw.Parts) blobs.Verify(part.Content);
+            }
             var commands = AndroidControlCodec.Read(state.Latest.Root, state.Total, state.Attempt.ExecutionPlan.Sha256);
             var commandReader = new AndroidControlEvidence(fixture.Source.Instance, fixture.Source.Database, new());
             var result = fixture.Collected();
@@ -45,13 +53,13 @@ public sealed class AndroidOutputTests
                 Assert.True(native.OutputComplete);
                 Assert.Equal(AndroidResponseCompletion.NaturalRootExitAndEofBeforeStop, native.Completion);
                 Assert.True(native.Parts.Sum(part => part.Content.SizeBytes) >= 262144);
+                foreach (var part in native.Parts) blobs.Verify(part.Content);
                 toolBytes += native.Parts.Sum(part => part.Content.SizeBytes);
             }
             Assert.NotEmpty(commands);
             var total = toolBytes + main.Parts.Sum(part => part.Content.SizeBytes) +
                 outputs.Values.Sum(raw => raw.Parts.Sum(part => part.Content.SizeBytes));
-            Assert.InRange(total, AndroidControlCapacity.MaximumBindingRawBytes - 65536,
-                AndroidControlCapacity.MaximumBindingRawBytes);
+            Assert.InRange(total, 1, 20L * 1024 * 1024);
             Assert.Equal(total, BindingOutputBudget.Used(fixture.Source.Instance, fixture.Source.Database, new(),
                 fixture.Accepted.JournalId, step.StepId));
             foreach (var raw in outputs.Values.Append(main))

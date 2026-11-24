@@ -78,9 +78,20 @@ public sealed class SavedTaskTests
         }
         else
         {
-            fixture.Base.Execute("UPDATE notifications.notification_saved_tests SET sha256='" + new string('0', 64) + "';");
-            Assert.ThrowsAny<Exception>(() => new NotificationDeliveryEvidence(fixture.Base.Source.Instance, fixture.Base.Source.Database, new())
-                .Read(accepted.Delivery));
+            var source = fixture.Base.Source;
+            var evidence = new NotificationDeliveryEvidence(source.Instance, source.Database, new());
+            Assert.Equal(accepted.Delivery, evidence.Read(accepted.Delivery).Reference);
+            using (var connection = DatabaseConnections.Open(source.Database.DatabasePath, domains: DatabaseDomain.Notifications))
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "UPDATE notifications.notification_saved_tests SET sha256=$changed;";
+                command.Parameters.AddWithValue("$changed", new string('0', 64));
+                Assert.Equal(1, command.ExecuteNonQuery());
+            }
+            var beforeGroup = RuntimeFingerprint.CaptureDatabaseFiles(source.Database.DatabasePath, DatabaseDomain.All);
+            Assert.Equal("notification_saved_test_unbound", Assert.Throws<IOException>(() => evidence.Read(accepted.Delivery)).Message);
+            Assert.Equal(beforeGroup, RuntimeFingerprint.CaptureDatabaseFiles(source.Database.DatabasePath, DatabaseDomain.All));
+            Assert.Equal(before, fixture.Base.Count("operations"));
         }
         Assert.Empty(sink.Requests);
         Assert.Equal(0, fixture.Base.Count("attempt_receipts"));

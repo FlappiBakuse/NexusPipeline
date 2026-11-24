@@ -25,9 +25,10 @@ public sealed class StoreMirrorTests
         var owner = fixture.Owner; var runtime = fixture.Runtime; var service = fixture.Service;
         var settings = fixture.Settings; var roots = fixture.Roots;
         using var original = JsonDocument.Parse(inputs.Catalog);
-        var ids = original.RootElement.GetProperty("entries").EnumerateArray()
-            .Select(item => item.GetProperty("extensionId").GetString()!).Order().ToArray();
-        Assert.Equal(14, ids.Length);
+        string[] ids = ["baah", "bettergi", "custom-wallpaper", "emulator-support", "game-activities", "game-checkin", "live-screenshot",
+            "maa-framework", "maaend", "maas", "march7th", "oknte", "okww", "zzzonedragon"];
+        Assert.Equal(ids, original.RootElement.GetProperty("entries").EnumerateArray()
+            .Select(item => item.GetProperty("extensionId").GetString()!).Order(StringComparer.Ordinal));
         var parent = Path.GetDirectoryName(owner.Instance.RuntimeRoot)!;
         await runtime.StartAsync(default);
         var catalog = await service.RefreshAsync("local", ExtensionStoreChannel.Stable, default);
@@ -55,7 +56,10 @@ public sealed class StoreMirrorTests
             await CompleteAsync(owner, roots, operation, accepted.JournalId, state.ExtensionId);
         }
         Assert.All(runtime.ReadStates(), item => Assert.False(item.IsInstalled));
-        Assert.Equal(14, mirror.Requests.Count(uri => uri.EndsWith(".zip", StringComparison.Ordinal)));
+        var expectedDownloads = original.RootElement.GetProperty("entries").EnumerateArray()
+            .Select(item => item.GetProperty("artifact").GetProperty("url").GetString()!).Order(StringComparer.Ordinal).ToArray();
+        Assert.Equal(14, expectedDownloads.Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(expectedDownloads, mirror.Requests.Where(uri => uri.EndsWith(".zip", StringComparison.Ordinal)).Order(StringComparer.Ordinal));
         inputs.VerifyUnchanged();
         File.WriteAllBytes(Path.Combine(parent, "store-mirror-evidence.json"), JsonSerializer.SerializeToUtf8Bytes(new
             { catalog.Identity, Installed = ids, Removed = ids, Requests = mirror.Requests.ToArray(), OfflineCatalogPreserved = true }));

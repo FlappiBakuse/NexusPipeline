@@ -154,7 +154,7 @@ public sealed class MaaWorkerTests
                 using var command = connection.CreateCommand(); command.CommandText = "SELECT count(*) FROM records.run_records;";
                 Assert.Equal(0L, command.ExecuteScalar());
             }
-            else AssertNativeFacts(catalog, state, blocked, android);
+            else await AssertNativeFacts(catalog, state, blocked, android, !agent && !android && !preparation);
             if (preparation) MaaPreparationSource.Verify(catalog, state, marker);
             Assert.Equal(original, File.ReadAllBytes(project.ConfigurationFile!));
             Assert.DoesNotContain(Process.GetCurrentProcess().Modules.Cast<ProcessModule>(), module => module.ModuleName == "MaaFramework.dll");
@@ -163,7 +163,8 @@ public sealed class MaaWorkerTests
         finally { await provider.Activator.StopAllAsync(TimeSpan.FromSeconds(10)); }
     }
 
-    private static void AssertNativeFacts(ExtensionCatalogFixture catalog, AttemptWriterState state, bool blocked, bool android)
+    private static async Task AssertNativeFacts(ExtensionCatalogFixture catalog, AttemptWriterState state, bool blocked, bool android,
+        bool controlledPc)
     {
         var result = Assert.Single(StepResultCodec.Read(state.Latest.Root, state.Total));
         var blobs = new ImmutableBlobStore(catalog.Instance, new());
@@ -175,6 +176,9 @@ public sealed class MaaWorkerTests
         var facts = events.Where(item => item.SourceId == "stdout" && item.Text.StartsWith("{\"format\":\"nexus.maa.native-fact\",", StringComparison.Ordinal))
             .Select(item => JsonSerializer.Deserialize<JsonElement>(item.Text)).ToArray();
         Assert.Equal(blocked ? 0 : 2, facts.Length);
+        if (controlledPc && !blocked)
+            Assert.Equal(new[] { "consumer:c9f8645a-cedf-89d7-9c73-78f392613b49", "consumer:e6653447-7372-833a-8a66-fa6831e33bb4" },
+                facts.Select(fact => fact.GetProperty("taskId").GetString()).Order(StringComparer.Ordinal).ToArray());
         var step = Assert.Single(state.Total.Steps);
         foreach (var fact in facts)
         {
@@ -188,10 +192,11 @@ public sealed class MaaWorkerTests
             Assert.Equal(task.ExecutionTaskId, fact.GetProperty("executionTaskId").GetString());
         }
         Assert.Equal(facts.Length, facts.Select(fact => fact.GetProperty("nativeTaskId").GetInt64()).Distinct().Count());
-        if (!blocked) AssertScreenshots(catalog, blobs, result, evidence, android);
+        if (!blocked) await AssertScreenshots(catalog, blobs, result, evidence, android, controlledPc);
     }
 
-    private static void AssertScreenshots(ExtensionCatalogFixture catalog, ImmutableBlobStore blobs, StepResultState result, StepEvidenceDocument evidence, bool android)
+    private static async Task AssertScreenshots(ExtensionCatalogFixture catalog, ImmutableBlobStore blobs, StepResultState result,
+        StepEvidenceDocument evidence, bool android, bool controlledPc)
     {
         ProviderOutputArchive archive;
         using (var input = blobs.OpenVerified(evidence.WorkspaceOutput!))
@@ -203,9 +208,21 @@ public sealed class MaaWorkerTests
         foreach (var image in images)
         {
             var content = archive.Tree.Contents.Single(item => item.Sha256 == image.Sha256); Assert.Contains(content, references);
-            using var input = blobs.OpenVerified(content); var header = new byte[24]; input.ReadExactly(header);
-            Assert.Equal(android ? 3 : 640, System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(header.AsSpan(16)));
-            Assert.Equal(android ? 2 : 480, System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(header.AsSpan(20)));
+            using var input = blobs.OpenVerified(content);
+            if (controlledPc)
+            {
+                using var png = new MemoryStream();
+                await input.CopyToAsync(png);
+                var pixels = await CaptureWorkerTests.DecodePng(png.ToArray(), 640, 480);
+                Assert.Equal(0xff0000ffu, CaptureWorkerTests.Pixel(pixels, 640, 160, 240));
+                Assert.Equal(0xffff0000u, CaptureWorkerTests.Pixel(pixels, 640, 480, 240));
+            }
+            else
+            {
+                var header = new byte[24]; input.ReadExactly(header);
+                Assert.Equal(android ? 3 : 640, System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(header.AsSpan(16)));
+                Assert.Equal(android ? 2 : 480, System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(header.AsSpan(20)));
+            }
         }
         var grant = new ProviderControlReader(catalog.Instance, catalog.Database, new()).Bootstrap(result.Binding, evidence.ProviderControl!).Workspace!;
         Directory.Move(Path.Combine(grant.Path, "outputs"), Path.Combine(grant.Path, "retired-output"));

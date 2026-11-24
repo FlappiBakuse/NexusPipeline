@@ -94,16 +94,29 @@ internal sealed class JudgementOwnedStep : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        try
+        var errors = new List<Exception>();
+        if (!_completed)
         {
-            if (!_completed)
+            Attempt(() => Owner?.Cancel());
+            try { await StopPrimary(); }
+            catch (Exception error) { errors.Add(error); }
+            if (Worker is not null)
             {
-                Owner?.Cancel(); await StopPrimary();
-                if (Worker is not null) await Worker.StopAsync(TimeSpan.FromSeconds(10));
+                try { await Worker.StopAsync(TimeSpan.FromSeconds(10)); }
+                catch (Exception error) { errors.Add(error); }
             }
-            if (_collected) Collector.Dispose();
-            Worker?.Dispose(); Writer?.Dispose(); if (_completed) Controller?.Dispose();
         }
-        finally { _accepted.Dispose(); }
+        if (_collected) Attempt(Collector.Dispose);
+        Attempt(() => Worker?.Dispose());
+        Attempt(() => Writer?.Dispose());
+        if (_completed) Attempt(() => Controller?.Dispose());
+        Attempt(_accepted.Dispose);
+        if (errors.Count > 0) throw new AggregateException(errors);
+
+        void Attempt(Action release)
+        {
+            try { release(); }
+            catch (Exception error) { errors.Add(error); }
+        }
     }
 }

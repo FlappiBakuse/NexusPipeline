@@ -83,11 +83,13 @@ public sealed class PatchServiceTests
         using var fixture = new Fixture();
         var original = fixture.Store.Read(fixture.Address)!;
         var before = Directory.EnumerateFiles(fixture.Content).ToDictionary(path => path, PhysicalObjectIdentity.Read);
+        var persisted = RuntimeFingerprint.Capture(fixture.Instance.RuntimeRoot);
         var bytes = fixture.Request(Guid.NewGuid(), ["flag"], true, false);
         using var preview = fixture.Preview(bytes);
         Assert.True(preview.HasChanges);
         Assert.Equal(1, fixture.Store.Read(fixture.Address)!.Revision);
         Assert.Equal(before.Keys, Directory.EnumerateFiles(fixture.Content));
+        Assert.Equal(persisted, RuntimeFingerprint.Capture(fixture.Instance.RuntimeRoot));
         Assert.DoesNotContain("fixture-private", JsonSerializer.Serialize(preview));
         var result = fixture.Service.Commit(preview, DateTimeOffset.UtcNow);
         Assert.Equal(2, result.Saved.Revision);

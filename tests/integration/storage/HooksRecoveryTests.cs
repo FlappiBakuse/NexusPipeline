@@ -29,7 +29,7 @@ public sealed class HooksRecoveryTests
         owner.Start(["execution-hooks-recovery", input, reportPath], source.Root, source.Instance.InstanceId, operation,
             Path.Combine(source.Root, "hooks-owner.json"));
         var report = await OwnedCrashProcess.ReadReportAsync(reportPath, TimeSpan.FromMinutes(3));
-        Assert.Equal("faultReady", report.GetProperty("status").GetString());
+        Assert.True(report.GetProperty("status").GetString() == "faultReady", report.GetRawText());
         var stopped = await owner.StopAsync(); Assert.True(stopped.CompleteJobStopped);
         Assert.All(stopped.Family, member => Assert.Equal(WriterState.Stopped, WriterStopEvidence.ObserveProcess(member)));
         var workspace = Assert.Single(Directory.GetDirectories(Path.GetDirectoryName(source.Configuration)!, ".nexus-*"));
@@ -41,14 +41,22 @@ public sealed class HooksRecoveryTests
         using var lease = InstanceLease.Acquire(instance, new());
         var database = StateDatabase.OpenExisting(instance, Path.Combine(source.Root, "restart-diagnostics"),
             new JournalStartupAdmission(instance, new()), lease);
-        Assert.ThrowsAny<IOException>(() => new StartupJournalRecovery(instance, new(), database,
-            new(Path.Combine(source.Root, "host"), Path.Combine(instance.RuntimeRoot, "extensions"))).Recover(lease));
+        var index = new StartupJournalRecovery(instance, new(), database,
+            new(Path.Combine(source.Root, "host"), Path.Combine(instance.RuntimeRoot, "extensions"))).Recover(lease);
         Assert.Equal(installed, File.ReadAllBytes(source.Configuration));
         Assert.Equal(installedIdentity, PhysicalObjectIdentity.Read(source.Configuration));
         Assert.Equal(backupBytes, File.ReadAllBytes(backup)); Assert.Equal(backupIdentity, PhysicalObjectIdentity.Read(backup));
-        Assert.NotEmpty(new RecoveryJournalRegistry(database).ReadSnapshot().Isolations);
-        var child = new RecoveryJournalRegistry(database).ReadSnapshot().Journals.Single(item => item.Kind == JournalKind.ConfigExchange);
-        Assert.Equal(1, new JournalStore(instance, new()).Read(child.JournalId).Root.GetProperty("participants").GetArrayLength());
+        var registry = new RecoveryJournalRegistry(database);
+        var child = Assert.Single(registry.ReadSnapshot().Journals, item => item.Kind == JournalKind.ConfigExchange);
+        Assert.Equal(JournalPhase.Quarantined, child.Phase);
+        Assert.Contains(index.Current.Isolations, item => item.JournalId == child.JournalId &&
+            item.ResourceKey.StartsWith("configuration:", StringComparison.Ordinal) && item.ReasonCode == "recovery_quarantined");
+        var physical = new JournalStore(instance, new()).Read(child.JournalId);
+        Assert.Equal(child.Phase, physical.Phase);
+        Assert.Equal(child.Revision, physical.Revision);
+        Assert.Equal(1, physical.Root.GetProperty("participants").GetArrayLength());
+        Assert.Equal(JournalPhase.Applied, registry.ReadJournal(report.GetProperty("journalId").GetGuid()).Phase);
+        Assert.Null(new AttemptReceiptStore(database).Read(report.GetProperty("attemptId").GetGuid()));
     }
 
     [Theory(DisplayName = "Actual Owner Kill Replays Hook Facts And Restores The Installed Group Without Inventing A Main Clock")]
@@ -68,7 +76,11 @@ public sealed class HooksRecoveryTests
         var actual = owner.Start(["execution-hooks-recovery", input, reportPath], source.Root, source.Instance.InstanceId, operation,
             Path.Combine(source.Root, "hooks-owner.json"));
         var report = await OwnedCrashProcess.ReadReportAsync(reportPath, TimeSpan.FromMinutes(3));
-        Assert.Equal("faultReady", report.GetProperty("status").GetString()); Assert.Equal(actual.ProcessId, report.GetProperty("ownerProcessId").GetInt32());
+        Assert.True(report.GetProperty("status").GetString() == "faultReady", report.GetRawText());
+        Assert.Equal(actual.ProcessId, report.GetProperty("ownerProcessId").GetInt32());
+        Assert.Equal(point, report.GetProperty("point").GetString());
+        var beforeRecovery = report.GetProperty("hookRoles").EnumerateArray().Select(role => role.GetString()).Order(StringComparer.Ordinal);
+        Assert.Equal(point == "collected" ? new[] { "postHook", "preHook" } : new[] { "preHook" }, beforeRecovery);
         if (point == "hook-result-ahead") Assert.True(report.GetProperty("physicalRevision").GetInt64() > report.GetProperty("sqlRevision").GetInt64());
         var parent = report.GetProperty("journalId").GetGuid(); var attempt = report.GetProperty("attemptId").GetGuid();
         var killed = await owner.StopAsync();

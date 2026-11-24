@@ -1,7 +1,6 @@
 using System.Runtime.Versioning;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
-using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Journals;
@@ -67,14 +66,12 @@ public sealed class ProviderInterruptionTests
     private static void RequireStopped(ProviderRuntimeFixture fixture, AttemptReceipt receipt)
     {
         var state = AttemptWriterState.Read(fixture.Source.Instance, fixture.Source.Database, new(), receipt.JournalId);
-        foreach (var job in state.AllJobs)
-        {
-            var closure = new JobClosureStore(fixture.Source.Instance, fixture.Source.Database, new())
-                .ReadForExecutionEvidence(receipt.JournalId, job.WriterId, job.JobName, job.SessionId);
-            Assert.NotNull(closure);
-            Assert.True(closure.WasExecuted);
-            Assert.NotEmpty(closure.Family);
-            Assert.All(closure.Family, member => Assert.Equal(WriterState.Stopped, WriterStopEvidence.ObserveProcess(member)));
-        }
+        var step = Assert.Single(state.Total.Steps);
+        var job = Assert.Single(state.AllJobs);
+        Assert.Equal("process", job.Role);
+        Assert.Equal(step.StepId, job.StepId);
+        var observed = OwnedWorkerRoot.Read(fixture.Marker + ".root-" + receipt.Facts.AttemptId.ToString("D"));
+        _ = observed.RequireStopped(new JobClosureStore(fixture.Source.Instance, fixture.Source.Database, new()),
+            receipt.JournalId, job);
     }
 }

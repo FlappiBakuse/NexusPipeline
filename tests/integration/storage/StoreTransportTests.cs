@@ -1,5 +1,8 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Runtime.Versioning;
+using System.Security.Cryptography;
+using System.Text.Json;
 using NexusPipeline.Core.Extensions;
 using NexusPipeline.Platform.Extensions;
 using Xunit;
@@ -16,11 +19,19 @@ public sealed class StoreTransportTests
         using var handler = Metadata(signed);
         using var transport = Transport(fixture, handler);
         var verified = await transport.Catalog(ExtensionStoreChannel.Stable, default);
-        Assert.Equal(fixture.Catalog.Verify(signed).Identity, verified.Identity);
+        using var pointer = JsonDocument.Parse(signed.Pointer);
+        using var data = JsonDocument.Parse(signed.Catalog);
+        Assert.Equal(ExtensionStoreChannel.Stable, verified.Identity.Channel);
+        Assert.Equal(pointer.RootElement.GetProperty("generationId").GetGuid(), verified.Identity.GenerationId);
+        Assert.Equal(data.RootElement.GetProperty("generationId").GetGuid(), verified.Identity.GenerationId);
+        Assert.Equal(pointer.RootElement.GetProperty("sequence").GetInt64(), verified.Identity.Sequence);
+        Assert.Equal(data.RootElement.GetProperty("sequence").GetInt64(), verified.Identity.Sequence);
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(signed.Catalog)), verified.Identity.Sha256);
         Assert.Equal(signed.Pointer, verified.PointerBytes()); Assert.Equal(signed.Catalog, verified.CatalogBytes());
         Assert.Equal(signed.Signature, verified.SignatureBytes());
-        Assert.Equal(new[] { new Uri(ExtensionCatalogFixture.MetadataRoot, "stable/index.json").AbsoluteUri,
-            CatalogAddress(signed, "catalog.json"), CatalogAddress(signed, "catalog.sig.json") }, handler.Requests);
+        var observed = handler.Requests.ToArray();
+        Assert.Equal(PointerUri, observed[0]);
+        Assert.Equal(MetadataUris(signed).Keys.Order(StringComparer.Ordinal), observed.Distinct().Order(StringComparer.Ordinal));
         Assert.Equal(0, fixture.Catalog.Count("extension_catalog_acceptances"));
     }
 
@@ -48,8 +59,13 @@ public sealed class StoreTransportTests
         using var fixture = new BoundPackageFixture(); var signed = fixture.Signed();
         var changed = signed with { Catalog = signed.Catalog.Concat(" "u8.ToArray()).ToArray() };
         using var handler = Metadata(changed); using var transport = Transport(fixture, handler);
-        await Assert.ThrowsAsync<IOException>(() => transport.Catalog(ExtensionStoreChannel.Stable, default));
-        Assert.Equal(3, handler.Requests.Count); Assert.Equal(0, fixture.Catalog.Count("extension_catalog_acceptances"));
+        var failure = await Assert.ThrowsAsync<IOException>(() => transport.Catalog(ExtensionStoreChannel.Stable, default));
+        Assert.Equal("extension_catalog_signature_invalid", failure.Message);
+        var allowed = MetadataUris(signed);
+        Assert.Equal(PointerUri, handler.Requests.First());
+        Assert.Contains(CatalogAddress(signed, "catalog.json"), handler.Requests);
+        Assert.All(handler.Requests, uri => Assert.Contains(uri, allowed.Keys));
+        Assert.Equal(0, fixture.Catalog.Count("extension_catalog_acceptances"));
     }
 
     [Theory(DisplayName = "The Shared Artifact Transport Follows Only The Bounded Approved Chain Then Verifies The Original Payload")]
@@ -107,32 +123,45 @@ public sealed class StoreTransportTests
         Assert.Single(handler.Requests); Assert.Empty(output.ToArray());
     }
 
-    [Fact(DisplayName = "Each New Store Work Freezes One Client Across All Metadata Responses And Artifact Redirects")]
+    [Fact(DisplayName = "Each Store Work Freezes Network Settings Across Metadata Responses And Artifact Redirects")]
     public async Task FreezesWorkClient()
     {
         using var fixture = new BoundPackageFixture(); var signed = fixture.Signed();
-        var archive = File.ReadAllBytes(fixture.Archive); var epoch = 1; var created = 0; var disposed = 0;
-        var observed = new List<int>();
+        var archive = File.ReadAllBytes(fixture.Archive); var epoch = 1; var nextClient = 0;
+        var open = new ConcurrentDictionary<int, byte>();
+        var observed = new ConcurrentQueue<(string Uri, int Epoch)>();
+        var routes = MetadataUris(signed);
+        var artifactUri = new Uri(ExtensionCatalogFixture.Artifacts, "v0.5.0/FixturePlugin.zip").AbsoluteUri;
+        var redirectUri = new Uri(ExtensionCatalogFixture.Artifacts, "next.zip").AbsoluteUri;
         using var transport = new StoreHttpTransport(fixture.Catalog.Contracts, new StoreTrustPolicy(
             new Dictionary<string, byte[]> { ["fixture-only"] = fixture.Catalog.Signer.ExportSubjectPublicKeyInfo() },
             ExtensionCatalogFixture.MetadataRoot, [ExtensionCatalogFixture.Artifacts], 1, 1, new(0, 18, 0), "0.1.0"), () =>
         {
-            var captured = epoch; created++; var requests = 0;
+            var captured = Volatile.Read(ref epoch);
+            var clientId = Interlocked.Increment(ref nextClient);
+            Assert.True(open.TryAdd(clientId, 0));
             return new HttpClient(new WorkHandler(request =>
             {
-                observed.Add(captured); requests++;
-                var path = request.RequestUri!.AbsolutePath;
-                if (path.EndsWith("index.json", StringComparison.Ordinal)) { epoch = 2; return Reply(request, signed.Pointer); }
-                if (path.EndsWith("catalog.json", StringComparison.Ordinal)) return Reply(request, signed.Catalog);
-                if (path.EndsWith("catalog.sig.json", StringComparison.Ordinal)) return Reply(request, signed.Signature);
-                return requests == 1 ? Redirect(request, new Uri(ExtensionCatalogFixture.Artifacts, "next.zip").AbsoluteUri) : Reply(request, archive);
-            }, () => disposed++));
+                var uri = request.RequestUri!.AbsoluteUri;
+                observed.Enqueue((uri, captured));
+                if (uri == PointerUri) Volatile.Write(ref epoch, 2);
+                if (routes.TryGetValue(uri, out var bytes)) return Reply(request, bytes);
+                if (uri == artifactUri) return Redirect(request, redirectUri);
+                if (uri == redirectUri) return Reply(request, archive);
+                throw new IOException("fixture_unexpected_work_request");
+            }, () => Assert.True(open.TryRemove(clientId, out _))));
         });
         var catalog = await transport.Catalog(ExtensionStoreChannel.Stable, default);
-        Assert.Equal(new[] { 1, 1, 1 }, observed); Assert.Equal(1, created); Assert.Equal(1, disposed);
+        var metadata = observed.ToArray();
+        Assert.Equal(routes.Keys.Order(StringComparer.Ordinal), metadata.Select(item => item.Uri).Distinct().Order(StringComparer.Ordinal));
+        Assert.All(metadata, item => Assert.Equal(1, item.Epoch));
+        Assert.Empty(open);
         using var output = new MemoryStream(); await transport.Artifact(catalog, "fixture-plugin", output, default);
-        Assert.Equal(new[] { 1, 1, 1, 2, 2 }, observed); Assert.Equal(archive, output.ToArray());
-        Assert.Equal(2, created); Assert.Equal(2, disposed);
+        var downloads = observed.Skip(metadata.Length).ToArray();
+        Assert.Equal(new[] { artifactUri, redirectUri }, downloads.Select(item => item.Uri));
+        Assert.All(downloads, item => Assert.Equal(2, item.Epoch));
+        Assert.Equal(archive, output.ToArray());
+        Assert.Empty(open);
     }
 
     private sealed class WorkHandler(Func<HttpRequestMessage, HttpResponseMessage> reply, Action disposed) : HttpMessageHandler
@@ -148,9 +177,21 @@ public sealed class StoreTransportTests
             ExtensionCatalogFixture.MetadataRoot, [ExtensionCatalogFixture.Artifacts], 1, 1, new(0, 18, 0), "0.1.0"),
             () => new HttpClient(handler, disposeHandler: false));
 
-    private static Handler Metadata(SignedCatalogBytes signed) => new((request, index) =>
-        Reply(request, index switch { 0 => signed.Pointer, 1 => signed.Catalog, 2 => signed.Signature,
-            _ => throw new IOException("fixture_unexpected_request") }));
+    private static string PointerUri => new Uri(ExtensionCatalogFixture.MetadataRoot, "stable/index.json").AbsoluteUri;
+
+    private static Dictionary<string, byte[]> MetadataUris(SignedCatalogBytes signed) => new(StringComparer.Ordinal)
+    {
+        [PointerUri] = signed.Pointer,
+        [CatalogAddress(signed, "catalog.json")] = signed.Catalog,
+        [CatalogAddress(signed, "catalog.sig.json")] = signed.Signature
+    };
+
+    private static Handler Metadata(SignedCatalogBytes signed)
+    {
+        var allowed = MetadataUris(signed);
+        return new((request, _) => allowed.TryGetValue(request.RequestUri!.AbsoluteUri, out var body)
+            ? Reply(request, body) : throw new IOException("fixture_unexpected_request"));
+    }
 
     private static string CatalogAddress(SignedCatalogBytes signed, string file)
     {
@@ -169,11 +210,14 @@ public sealed class StoreTransportTests
 
     private sealed class Handler(Func<HttpRequestMessage, int, HttpResponseMessage> reply) : HttpMessageHandler
     {
-        internal List<string> Requests { get; } = [];
+        private int _requests;
+        internal ConcurrentQueue<string> Requests { get; } = [];
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            cancellationToken.ThrowIfCancellationRequested(); var index = Requests.Count;
-            Requests.Add(request.RequestUri!.AbsoluteUri); return Task.FromResult(reply(request, index));
+            cancellationToken.ThrowIfCancellationRequested();
+            var index = Interlocked.Increment(ref _requests) - 1;
+            Requests.Enqueue(request.RequestUri!.AbsoluteUri);
+            return Task.FromResult(reply(request, index));
         }
     }
 }

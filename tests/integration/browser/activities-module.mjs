@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { setTimeout } from 'node:timers/promises';
+import { hostControlFixture, hostControlFixtureSha256 } from './host-control-fixture.mjs';
 
 const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const token = process.env[input.tokenEnvironment];
@@ -13,21 +14,12 @@ const { chromium } = await import(pathToFileURL(path.join(input.modules, 'playwr
 const executable = input.browser;
 if (!path.isAbsolute(executable || '') || !fs.statSync(executable).isFile()) throw new Error('explicit_browser_required');
 const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-const source = { script: hash(process.argv[1]), browser: hash(executable) };
+const fingerprint = () => ({ script: hash(process.argv[1]), browser: hash(executable), hostControlFixture: hostControlFixtureSha256() });
+const source = fingerprint();
 const checks = [], requests = [], errors = [];
 let browser, page, base;
 
-async function request(route, body, authenticated = true) {
-  return fetch(new URL(route, input.address), { method: body === undefined ? 'GET' : 'POST', redirect: 'error',
-    headers: { ...(authenticated ? { Authorization: 'Bearer ' + token } : {}),
-      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(15000) });
-}
-async function json(route, body) {
-  const result = await request(route, body);
-  assert.equal(result.ok, true, route + ':' + result.status);
-  return result.json();
-}
+const { request, json, enable } = hostControlFixture(input.address, token, 'game-activities');
 const state = () => json(base + '/invoke/read-state', { input: {} });
 async function awaitState(predicate) {
   const deadline = Date.now() + 35000;
@@ -37,17 +29,6 @@ async function awaitState(predicate) {
     await setTimeout(100);
   }
   throw new Error('activities_state_timeout');
-}
-async function enable(enabled) {
-  const settings = await json('/control/v1/settings');
-  settings.saved.values.extensions = settings.saved.values.extensions.map(item => ({ ...item,
-    enabled: item.extensionId === 'game-activities' ? enabled : item.enabled }));
-  await json('/control/v1/settings', { format: 'nexus.control.host-settings', version: 1,
-    operationId: crypto.randomUUID(), expectedRevision: settings.saved.revision, values: settings.saved.values });
-  const installed = (await json('/control/v1/extensions')).items.find(item => item.extensionId === 'game-activities');
-  const current = await json('/control/v1/settings');
-  await json('/control/v1/extensions/reconcile', { extensionId: 'game-activities',
-    expectedInstalledRevision: installed.installedRevision, expectedSettingsRevision: current.saved.revision });
 }
 
 try {
@@ -100,8 +81,8 @@ try {
   await page.locator('.activity-hit').first().click();
   await page.locator('.activity-details').waitFor();
   assert.ok(await page.locator('.activity-details').getByText('数据来源：SRA', { exact: true }).isVisible());
-  assert.equal(await page.locator('.activity-event').count(), detail.feed.events.length);
   await page.locator('.activity-details').getByText(detail.feed.events[0].title, { exact: true }).waitFor();
+  assert.equal(await page.locator('.activity-details .activity-event').count(), detail.feed.events.length);
   assert.match(await page.locator('.activity-details .activity-help').first().textContent(), /未核验时间保留来源原值/);
   await page.screenshot({ path: path.join(input.output, 'activity-details.png') });
   checks.push('the actual details modal shows the saved source events and explicit time uncertainty');
@@ -137,7 +118,7 @@ try {
   assert.ok(requests.length > 0 && (localOnly || requests.every(item => item.authenticated)));
   assert.equal(errors.length, 0);
   checks.push('reactivation uses one new module owner and retains the saved feed');
-  assert.deepEqual({ script: hash(process.argv[1]), browser: hash(executable) }, source);
+  assert.deepEqual(fingerprint(), source);
   fs.writeFileSync(path.join(input.output, 'result.json'), JSON.stringify({ status: 'PASS', checks, requests, errors,
     source, browserVersion: browser.version(), scope: 'Actual Test Host original Activities ZIP and production Web; public feed GET only', network: localOnly ? 'loopback; LAN authorization excluded' : 'authenticated LAN' }, null, 2));
 } catch (error) {

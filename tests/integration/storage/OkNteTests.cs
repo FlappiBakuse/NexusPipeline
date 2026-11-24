@@ -29,14 +29,29 @@ public sealed class OkNteTests
         Assert.True(File.Exists(fixture.Log + ".restart-verified"));
         var state = AttemptWriterState.Read(fixture.Source.Instance, fixture.Source.Database, new(), accepted.JournalId);
         var invocation = Assert.Single(ExecutionInvocationCodec.Read(state.Latest.Root, state.Total));
-        Assert.Equal(new[] { "oknte:daily_claim" }, invocation.TaskRetry!.Selection.Targets);
-        Assert.Equal(new[] { "oknte:daily_claim" }, invocation.TaskRetry.Selection.SelectedIds);
+        var retry = Assert.IsType<ExecutionTaskRetry>(invocation.TaskRetry);
+        Assert.Equal(new[] { "oknte:daily_claim" }, retry.Selection.Targets);
+        Assert.Equal(new[] { "oknte:daily_claim" }, retry.Selection.SelectedIds);
         var result = Assert.Single(StepResultCodec.Read(state.Latest.Root, state.Total));
         var blobs = new ImmutableBlobStore(fixture.Source.Instance, new());
         var evidence = StepEvidenceCodec.Read(blobs, result.Binding, result.Latest.Artifact);
-        var observed = AdapterObservationCodec.Read(blobs, result.Binding, evidence.RawOutput!, Assert.Single(state.Total.Steps), evidence.TaskAdapter!);
-        Assert.All(observed.Observations.Where(item => item.TaskId is "oknte:coffee" or "oknte:daily_claim"),
-            item => Assert.Equal(AdapterObservationState.Succeeded, item.State));
+        var step = Assert.Single(state.Total.Steps);
+        var observed = AdapterObservationCodec.Read(blobs, result.Binding, evidence.RawOutput!, step, evidence.TaskAdapter!);
+        Assert.NotEqual(retry.PreviousBinding.JobName, result.Binding.JobName);
+        var first = AdapterObservationCodec.Read(blobs, retry.PreviousBinding, retry.PreviousRaw, step, retry.PreviousObservation);
+        var second = observed.CurrentObservations.GetValueOrDefault();
+        Assert.False(second.IsDefault);
+        string[] ids = ["oknte:coffee", "oknte:daily_claim"];
+        Assert.Equal(ids, first.Observations.Select(item => item.TaskId).Order(StringComparer.Ordinal));
+        Assert.Equal(ids, second.Select(item => item.TaskId).Order(StringComparer.Ordinal));
+        Assert.Equal(AdapterObservationState.Succeeded, Assert.Single(first.Observations, item => item.TaskId == "oknte:coffee").State);
+        Assert.Equal(AdapterObservationState.Failed, Assert.Single(first.Observations, item => item.TaskId == "oknte:daily_claim").State);
+        Assert.Equal(AdapterObservationState.Succeeded, Assert.Single(second, item => item.TaskId == "oknte:daily_claim").State);
+        Assert.Equal(AdapterObservationState.Unknown, Assert.Single(second, item => item.TaskId == "oknte:coffee").State);
+        Assert.Collection(observed.Observations
+            .OrderBy(item => item.TaskId, StringComparer.Ordinal),
+            coffee => { Assert.Equal("oknte:coffee", coffee.TaskId); Assert.Equal(AdapterObservationState.Succeeded, coffee.State); },
+            daily => { Assert.Equal("oknte:daily_claim", daily.TaskId); Assert.Equal(AdapterObservationState.Succeeded, daily.State); });
         ConfigurationRunInventory.VerifyReadOnly(fixture.Source.Instance, fixture.Source.Database, new());
         fixture.Inputs.VerifyUnchanged();
     }

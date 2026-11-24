@@ -70,8 +70,27 @@ public sealed class AndroidCaptureTests
             var bound = JournalCapacityPolicy.Measure(state.Total);
             Assert.True(history.Count <= bound.Revisions);
             Assert.True(history.Sum(value => value.Export().LongLength) <= bound.HistoryBytes);
-            Assert.Equal(state.Jobs.Length + AndroidControlCapacity.Derive(Assert.Single(state.Total.Steps)).MaximumCommands + 2,
-                bound.Jobs);
+            var digest = state.Attempt.ExecutionPlan.Sha256;
+            var jobs = state.AllJobs.Select(item => (item.JobName, item.SessionId))
+                .Concat(TargetJobCodec.Read(state.Latest.Root, state.Total, digest)
+                    .Select(item => (item.Binding.JobName, item.Binding.SessionId)))
+                .Concat(AndroidControlCodec.Read(state.Latest.Root, state.Total, digest)
+                    .Select(item => (item.Binding.JobName, item.Binding.SessionId)))
+                .Append((JobName: saved.State.Binding.HelperJobName, saved.State.Binding.Primary.SessionId))
+                .Distinct().ToArray();
+            Assert.InRange(jobs.Length, 1, Math.Min(bound.Jobs, launch ? 12 : 6));
+            var source = fixture.Source;
+            var closures = new JobClosureStore(source.Instance, source.Database, new());
+            Assert.All(state.AllJobs, job =>
+            {
+                var closure = Assert.IsType<FrozenJobClosure>(closures.ReadForExecutionEvidence(state.Journal.JournalId,
+                    job.WriterId, job.JobName, job.SessionId));
+                Assert.NotEmpty(closure.Family);
+                Assert.All(closure.Family, member => Assert.Equal(WriterState.Stopped, WriterStopEvidence.ObserveProcess(member)));
+            });
+            new TargetJobEvidence(source.Instance, source.Database, new()).RequireResolved(state.Latest.Root, state.Total, digest);
+            new AndroidControlEvidence(source.Instance, source.Database, new())
+                .RequireStopped(state.Latest.Root, state.Total, digest, Assert.Single(state.Total.Steps).StepId);
         });
     }
 

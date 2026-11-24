@@ -74,22 +74,40 @@ public sealed class QueueRuntimeTests
     [Fact(DisplayName = "Startup Preference Round Trips And Failure To Commit The Batch Starts Nothing")]
     public void RequiresCommittedStartup()
     {
-        using var fixture = new ScheduleNativeFixture(); Enable(fixture);
-        var catalog = fixture.Source.Definitions.Read(); Assert.True(catalog.Queues.Single().RunOnStartup);
+        using var fixture = new ScheduleNativeFixture();
+        Assert.False(Assert.Single(fixture.Source.Definitions.Read().Queues).RunOnStartup);
+        Enable(fixture);
+        var catalog = fixture.Source.Definitions.Read();
+        var queue = Assert.Single(catalog.Queues);
+        Assert.True(queue.RunOnStartup);
         var codec = new AutomationBundleCodec(new());
-        var imported = codec.Decode(codec.Encode(catalog, DateTimeOffset.UtcNow), catalog.Roots.ToDictionary(item => item.Id, item => item.Path), 0);
-        Assert.True(imported.Definitions.Queues.Single().RunOnStartup);
+        var exported = codec.Encode(catalog, PlanBuilderFixture.CreatedAt);
+        using var wire = System.Text.Json.JsonDocument.Parse(exported);
+        var exportedQueue = Assert.Single(wire.RootElement.GetProperty("queues").EnumerateArray());
+        Assert.Equal(fixture.Source.QueueId, exportedQueue.GetProperty("id").GetGuid());
+        Assert.True(exportedQueue.GetProperty("runOnStartup").GetBoolean());
+        var imported = codec.Decode(exported, catalog.Roots.ToDictionary(root => root.Id, root => root.Path), 0);
+        Assert.True(Assert.Single(imported.Definitions.Queues).RunOnStartup);
+        var settingsRevision = fixture.Source.Settings.Read().Revision;
         var store = new StartupQueueStore(fixture.Source.Instance, fixture.Source.Database, fixture.Source.Lease, fixture.Base.Resources, TimeProvider.System);
         var before = fixture.Base.Counts();
         fixture.Sql("CREATE TRIGGER main.fail_startup_occurrence BEFORE INSERT ON startup_queue_occurrences BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
         try
         {
-            Assert.Throws<SqliteException>(() => store.Commit());
+            Assert.Contains("fixture_failure", Assert.Throws<SqliteException>(() => store.Commit()).Message, StringComparison.Ordinal);
             Assert.Equal(before, fixture.Base.Counts()); Assert.Equal(0, fixture.Count("startup_queue_batches"));
+            Assert.Empty(store.ReadWaiting());
             Assert.Equal(0, fixture.Base.Inbox.PendingCount); Assert.Equal(0, fixture.Count("journal_writer_job_roots"));
         }
         finally { fixture.Sql("DROP TRIGGER main.fail_startup_occurrence;"); }
-        Assert.Single(store.Commit().Occurrences);
+        var batch = store.Commit();
+        Assert.Equal(fixture.Source.Lease.StartupGeneration, batch.Generation);
+        var committed = Assert.Single(batch.Occurrences);
+        Assert.Equal((fixture.Source.QueueId, queue.Revision, catalog.Revision, settingsRevision),
+            (committed.QueueId, committed.QueueRevision, committed.CatalogRevision, committed.SettingsRevision));
+        var waiting = Assert.Single(store.ReadWaiting()).Occurrence;
+        Assert.Equal(committed, waiting);
+        Assert.Equal(0, fixture.Base.Inbox.PendingCount); Assert.Equal(0, fixture.Count("journal_writer_job_roots"));
     }
 
     [Fact(DisplayName = "A New Exclusive Owner Retires Only Unstarted Old Startup Occurrences And Creates A New Generation")]

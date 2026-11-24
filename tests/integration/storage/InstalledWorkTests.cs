@@ -3,6 +3,7 @@ using System.Text.Json;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Platform.Storage.Extensions;
 using NexusPipeline.Platform.Storage.Scheduling;
+using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
 
 namespace NexusPipeline.StorageTests;
@@ -10,6 +11,102 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class InstalledWorkTests
 {
+    [Fact(DisplayName = "An Installed Task Shows Its Newest Sixteen Runs And Its Actual Current Callback Across Other Task History")]
+    public async Task ReadsRecentTaskHistory()
+    {
+        using var execution = new ExecutionAdmissionFixture();
+        using var catalog = execution.CreateCatalog();
+        var source = execution.Source;
+        var schedules = new PersistentScheduleService(source.Instance, source.Database, source.Lease, execution.Resources,
+            execution.Lifecycle, execution.Index, execution.Service);
+        using var installed = new InstallRuntimeFixture(managedMode: "frontend", catalog: catalog,
+            portDependencies: new(schedules, null, null, null, null, null),
+            managedManifestEdit: manifest => manifest["capabilities"]!.AsArray().Add("schedule.register"));
+        var task = Guid.NewGuid();
+        var other = Guid.NewGuid();
+        var client = Guid.NewGuid();
+        var input = Path.Combine(installed.ActivationDirectory, "manual-task.json");
+        var history = new List<Guid>();
+        var invocations = new Dictionary<Guid, (Guid RunId, Guid AttemptId)>();
+        Write(task, hold: false);
+        var frontend = await FrontendInstalledTests.OpenAsync(installed);
+        try
+        {
+            for (var index = 0; index < 23; index++)
+            {
+                var selected = index % 8 == 7 || index == 22 ? other : task;
+                Write(selected, hold: false);
+                var operation = await Start(selected);
+                if (selected == task) history.Add(operation);
+                await WaitFor(operation, "completed");
+            }
+            Assert.Equal(20, history.Count);
+            Write(task, hold: false);
+            await CheckHistory(false, history, "returned");
+
+            File.Delete(Path.Combine(installed.ActivationDirectory, "manual-entered.json"));
+            Write(task, hold: true, previous: invocations[history[0]]);
+            var active = await Start(task);
+            await WaitFileAsync(Path.Combine(installed.ActivationDirectory, "manual-entered.json"));
+            await WaitFor(active, "accepted");
+            using (var proof = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(installed.ActivationDirectory, "writer-proof.json"))))
+            {
+                Assert.True(proof.RootElement.GetProperty("stopped").GetBoolean());
+                Assert.False(proof.RootElement.GetProperty("unknown").GetBoolean());
+            }
+            await CheckHistory(true, history.Append(active).ToArray(), "running");
+
+            var newer = new List<Guid>();
+            for (var index = 0; index < 16; index++)
+            {
+                var operation = await Start(task);
+                await WaitFor(operation, "completed");
+                newer.Add(operation);
+            }
+            await CheckHistory(true, newer, "unknown");
+        }
+        finally { await schedules.StopAsync(); await installed.Activator.StopAllAsync(TimeSpan.FromSeconds(10)); }
+
+        void Write(Guid taskId, bool hold, (Guid RunId, Guid AttemptId)? previous = null) => File.WriteAllBytes(input,
+            JsonSerializer.SerializeToUtf8Bytes(new { TaskId = taskId, Revision = 7, Hold = hold,
+                PreviousRunId = previous?.RunId, PreviousAttemptId = previous?.AttemptId }));
+
+        async Task<Guid> Start(Guid taskId)
+        {
+            var id = Guid.NewGuid();
+            var reply = await frontend.InvokeAsync("manual-run", id, "remote:work", false,
+                JsonSerializer.SerializeToUtf8Bytes(new { taskId, revision = 7 }), () => { }, default, clientId: client);
+            using var receipt = JsonDocument.Parse(reply.Content);
+            Assert.True(receipt.RootElement.GetProperty("IsNew").GetBoolean());
+            invocations.Add(id, (receipt.RootElement.GetProperty("RunId").GetGuid(), receipt.RootElement.GetProperty("AttemptId").GetGuid()));
+            return id;
+        }
+
+        async Task WaitFor(Guid id, string status)
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            while (true)
+            {
+                using (var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime))
+                using (var check = DatabaseConnections.Command(connection, null, "SELECT status FROM main.operations WHERE operation_id=$0;", id.ToString("D")))
+                    if ((string?)check.ExecuteScalar() == status) return;
+                await Task.Delay(20, timeout.Token);
+            }
+        }
+
+        async Task CheckHistory(bool running, IReadOnlyList<Guid> accepted, string newestCompletion)
+        {
+            var reply = await frontend.InvokeAsync("manual-state", null, "remote:work", false,
+                JsonSerializer.SerializeToUtf8Bytes(new { taskId = task, revision = 7 }), () => { }, default, clientId: client);
+            using var state = JsonDocument.Parse(reply.Content);
+            var result = Assert.Single(state.RootElement.GetProperty("Tasks").EnumerateArray());
+            Assert.Equal(running, result.GetProperty("IsRunning").GetBoolean());
+            var runs = result.GetProperty("Runs").EnumerateArray().ToArray();
+            Assert.Equal(accepted.Reverse().Take(16).Select(id => invocations[id].RunId), runs.Select(value => value.GetProperty("RunId").GetGuid()));
+            Assert.Equal(newestCompletion, runs[0].GetProperty("Completion").GetString());
+        }
+    }
+
     [Theory(DisplayName = "An Actual Installed SDK Handler Runs A Manual Only Task Under Frozen Host Identity And Survives Its Accepting Frontend Closing")]
     [InlineData(false)]
     [InlineData(true)]

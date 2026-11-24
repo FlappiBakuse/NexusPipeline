@@ -41,9 +41,13 @@ public sealed class ScheduleLifetimeTests
         fixture.Base.Execute("CREATE TRIGGER main.fixture_schedule_failure BEFORE INSERT ON schedule_minute_claims BEGIN SELECT RAISE(ABORT,'fixture_schedule_failure'); END;");
         var service = new PersistentScheduleService(source.Instance, source.Database, source.Lease,
             fixture.Base.Resources, fixture.Base.Lifecycle, fixture.Base.Index, fixture.Base.Service, clock);
-        service.Start(); await service.Completion.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.False(service.IsRunning); Assert.Equal("schedule_reconciliation_required:SqliteException", service.FailureCode);
-        Assert.False(fixture.Base.Index.Current.IsReady); await service.StopAsync();
+        try
+        {
+            service.Start(); await service.Completion.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(service.IsRunning); Assert.Equal("schedule_reconciliation_required:SqliteException", service.FailureCode);
+            Assert.False(fixture.Base.Index.Current.IsReady);
+        }
+        finally { await service.StopAsync(); }
     }
 
     [Fact(DisplayName = "Empty Runtime Minutes Leave Persistent State Untouched Across Ticks And Restart")]

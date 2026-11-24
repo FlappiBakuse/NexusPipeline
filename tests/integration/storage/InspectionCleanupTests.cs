@@ -39,14 +39,30 @@ public sealed class InspectionCleanupTests(ITestOutputHelper output)
             command.CommandText = "DROP TABLE inspection_fixture;"; command.ExecuteNonQuery();
         }
         Assert.True(new FileInfo(database.DatabasePath).Length > 1_073_741_824);
-        var identity = PhysicalObjectIdentity.Read(database.DatabasePath);
+        var stateDirectory = Path.GetDirectoryName(database.DatabasePath)!;
+        var original = Inventory(stateDirectory);
+        Assert.Contains(original, entry => entry.Path == "runtime.db" && entry.Bytes > 1_073_741_824);
+        Assert.Contains(original, entry => entry.Path == "records.db");
+        Assert.Contains(original, entry => entry.Path == "system.db");
         var diagnostic = Path.Combine(root, "diagnostic");
         for (var attempt = 0; attempt < 2; attempt++)
         {
             _ = Reopen(instance, diagnostic, attempt);
-            Assert.Equal(identity, PhysicalObjectIdentity.Read(database.DatabasePath));
-            Assert.Empty(Directory.EnumerateDirectories(diagnostic));
+            Assert.Equal(original, Inventory(stateDirectory));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(diagnostic));
         }
+    }
+
+    private static (string Path, bool IsDirectory, long Bytes, string? Sha256, PhysicalObjectIdentity Identity)[] Inventory(string root)
+    {
+        return Directory.EnumerateFileSystemEntries(root, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal).Select(path =>
+        {
+            var relative = Path.GetRelativePath(root, path);
+            var identity = PhysicalObjectIdentity.Read(path);
+            if (Directory.Exists(path)) return (relative, true, 0L, (string?)null, identity);
+            using var input = File.OpenRead(path);
+            return (relative, false, input.Length, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(input)), identity);
+        }).ToArray();
     }
     private StateDatabase Reopen(RuntimeInstance instance, string diagnostic, int repeat)
     {

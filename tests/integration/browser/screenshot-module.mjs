@@ -3,6 +3,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { executionFixtureHttp, executionFixtureInputs, finishFixtureRuns, startFixtureRun } from './execution-fixture-http.mjs';
+import { waitForRecovery } from './runtime-ready.mjs';
 
 const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const token = process.env[input.tokenEnvironment];
@@ -10,10 +12,14 @@ if (!token || input.context?.bindings?.length !== 2 || !path.isAbsolute(input.ou
 const { chromium } = await import(pathToFileURL(path.join(input.modules, 'playwright-core/index.mjs')).href);
 const executable = input.browser;
 if (!path.isAbsolute(executable || '') || !fs.statSync(executable).isFile()) throw new Error('explicit_browser_required');
-const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-const sources = { script: hash(process.argv[1]), browser: hash(executable) };
+const sources = executionFixtureInputs(process.argv[1], executable);
 const checks = [], errors = [], frames = [], grants = new Map(), runs = [], requests = [], calls = [];
+const admissions = [], starts = [];
+const { call: readControl, until: waitForReady } = executionFixtureHttp(input.address, token, 30000);
 let browser, page, slow = false;
+let failure, activeAtFailure;
+const cleanupErrors = [];
+const describeError = error => String(error?.stack || error).replaceAll(token, '[redacted]');
 const heldFrames = [];
 let fault; const faults = [], observerFailures = [], httpFailures = [];
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -86,13 +92,17 @@ try {
   await page.goto(input.address);
   await page.waitForFunction(() => document.querySelector('style[data-extension-id="live-screenshot"]'));
   await page.locator('a[href="#/dispatch"]').first().click();
+  await waitForRecovery(readControl, waitForReady);
   for (const bindingId of input.context.bindings) {
     const definitions = await json('/control/v1/automation'), settings = await json('/control/v1/settings');
     const operationId = crypto.randomUUID();
-    const result = await json('/control/v1/execution/start/' + operationId, { format: 'nexus.control.execution-selection', version: 1,
+    const selection = { format: 'nexus.control.execution-selection', version: 1,
       expectedCatalogRevision: definitions.catalogRevision, expectedSettingsRevision: settings.saved.revision,
-      target: { kind: 'binding', bindingId } });
-    runs.push({ operationId, runId: result.runId, attemptId: result.attemptId });
+      target: { kind: 'binding', bindingId } };
+    const preview = await json('/control/v1/execution/preview', selection);
+    admissions.push({ operationId, bindingId, preview });
+    assert.equal(preview.hasRunnable, true, 'native_capture_admission:' + preview.reasonCode);
+    runs.push(await startFixtureRun(starts, operationId, () => json('/control/v1/execution/start/' + operationId, selection)));
   }
   await until(() => page.locator('.running-item .screenshot-image:visible').count().then(count => count === 2), 'two_native_previews_missing');
   for (const [index, run] of runs.entries()) {
@@ -155,23 +165,31 @@ try {
   await delay(1000); const finished = requests.length; await delay(5500); assert.equal(requests.length, finished);
   checks.push('cancel removes both run surfaces and stops preview requests');
   assert.equal(errors.length, 0);
-  assert.deepEqual({ script: hash(process.argv[1]), browser: hash(executable) }, sources);
+  assert.deepEqual(executionFixtureInputs(process.argv[1], executable), sources);
   await page.screenshot({ path: path.join(input.output, 'completed.png') });
   checks.push('production browser closes without unhandled errors and source bytes remain unchanged');
-  fs.writeFileSync(path.join(input.output, 'result.json'), JSON.stringify({ status: 'PASS', checks, frames,
-    requests, grants: [...grants.values()], runs, sources, errors, calls, faults, observerFailures, httpFailures,
-    scope: 'Original plugin ZIP, actual loopback Test Host and production browser with controlled native window/Android sources; no vendor installation claim' }, null, 2));
 } catch (error) {
-  let activeAtFailure;
-  try { activeAtFailure = await json('/control/v1/execution/active'); } catch {}
-  await page?.screenshot({ path: path.join(input.output, 'failure.png') }).catch(() => {});
-  fs.writeFileSync(path.join(input.output, 'result.json'), JSON.stringify({ status: 'FAIL', checks, frames, requests,
-    runs, sources, errors, calls, faults, observerFailures, httpFailures, activeAtFailure, failure: String(error).replaceAll(token, '[redacted]') }, null, 2));
-  process.exitCode = 1;
+  failure = describeError(error);
+  try { activeAtFailure = await json('/control/v1/execution/active'); }
+  catch (error) { cleanupErrors.push({ stage: 'activeAtFailure', reason: describeError(error) }); }
+  try { await page?.screenshot({ path: path.join(input.output, 'failure.png') }); }
+  catch (error) { cleanupErrors.push({ stage: 'failureScreenshot', reason: describeError(error) }); }
 } finally {
   for (const release of heldFrames.splice(0)) release();
-  for (const run of runs) { try { await cancel(run); } catch {} }
-  for (const marker of input.context.markers) fs.writeFileSync(marker + '.main.release', 'release');
-  await browser?.close();
+  const cleanup = await finishFixtureRuns(starts, () => json('/control/v1/execution/active'), cancel,
+    (check, reason) => until(check, reason, 12000), describeError);
+  let ownerCleanupFailed = false;
+  for (const marker of input.context.markers) {
+    try { fs.writeFileSync(marker + '.main.release', 'release'); }
+    catch (error) { ownerCleanupFailed = true; cleanupErrors.push({ stage: 'releaseMarker', reason: describeError(error) }); }
+  }
+  try { await browser?.close(); }
+  catch (error) { ownerCleanupFailed = true; cleanupErrors.push({ stage: 'browserClose', reason: describeError(error) }); }
+  const status = failure || cleanup.cleanupUnknown || ownerCleanupFailed ? 'FAIL' : 'PASS';
+  fs.writeFileSync(path.join(input.output, 'result.json'), JSON.stringify({ status, failure, checks, frames,
+    requests, grants: [...grants.values()], runs, sources, errors, calls, faults, observerFailures, httpFailures, admissions,
+    activeAtFailure, cleanup, cleanupErrors,
+    scope: 'Original plugin ZIP, actual loopback Test Host and production browser with controlled native window/Android sources' }, null, 2));
+  if (status === 'FAIL') process.exitCode = 1;
 }
 function hashBytes(bytes) { return crypto.createHash('sha256').update(bytes).digest('hex'); }

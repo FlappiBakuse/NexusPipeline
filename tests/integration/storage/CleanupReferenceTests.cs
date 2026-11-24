@@ -74,7 +74,10 @@ public sealed class CleanupReferenceTests(ITestOutputHelper output)
         Assert.Equal(FileCleanupResult.Cleaned, result);
         Assert.False(File.Exists(Path.Combine(instance.RuntimeRoot, content.RelativePath)));
         Assert.Equal(JournalPhase.Committed, registry.ReadJournal(accepted.JournalId).Phase);
-        Assert.All(new FileEffectOutbox(database).Read(accepted.JournalId), item => Assert.Equal(FileEffectState.Completed, item.State));
+        var effect = Assert.Single(new FileEffectOutbox(database).Read(accepted.JournalId));
+        Assert.Equal(accepted.JournalId, effect.JournalId);
+        Assert.Equal(Assert.Single(cleanup.Items).StepId, effect.StepId);
+        Assert.Equal(FileEffectState.Completed, effect.State);
         Assert.Equal("{\"value\":7}", File.ReadAllText(sourcePath));
         Assert.Equal("{\"value\":1}", File.ReadAllText(target));
         Assert.InRange(readBytes, 0UL, 4320948UL);

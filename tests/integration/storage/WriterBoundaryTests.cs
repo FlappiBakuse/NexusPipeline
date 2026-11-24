@@ -15,12 +15,12 @@ public sealed class WriterBoundaryTests
     public async Task RejectsSecondJobs()
     {
         await using var fixture = new RunWriterFixture(install: false);
-        var count = fixture.Base.Count("journal_writer_jobs");
-        Assert.Equal(2, count);
+        var jobs = ReadJobs(fixture);
+        Assert.Equal(fixture.Session.Resources.Select(resource => resource.JournalId).Order(), jobs.Select(job => job.Journal).Order());
         Assert.Equal("writer_job_registration_unbound", Assert.Throws<IOException>(() => new RunWriterProcess(
             fixture.Base.Source.Instance, fixture.Base.Source.Database, new(), fixture.Base.Lease,
             fixture.Session.SessionId, ConfigurationRunFixture.Subject)).Message);
-        Assert.Equal(count, fixture.Base.Count("journal_writer_jobs"));
+        Assert.Equal(jobs, ReadJobs(fixture));
         Assert.False(Current(fixture).IsWriterAdmissionClosed);
         var stopped = await fixture.StopAsync(); Assert.False(stopped.WasExecuted);
         Assert.Equal(0, Current(fixture).ClosedElapsedMilliseconds);
@@ -49,7 +49,11 @@ public sealed class WriterBoundaryTests
         fixture.Seal(stopped);
         using (var sample = new RunProgressCapture(fixture.Base.Source.Instance, fixture.Base.Source.Database, new())
             .Read(Current(fixture), fixture.Writer, sealedOutput: true))
+        {
+            Assert.Equal(fixture.Session.Resources.Select(resource => resource.JournalId).Order(),
+                sample.Items.Select(item => item.Resource.JournalId).Order());
             Assert.All(sample.Items, item => { Assert.Equal("configuration_sync_allowed", item.ReasonCode); Assert.NotNull(item.Candidate); });
+        }
         fixture.Restore();
         foreach (var resource in fixture.Session.Resources)
             Assert.Equal(1, new ConfigurationRevisionStore(fixture.Base.Source.Instance, fixture.Base.Source.Database, new()).Read(resource.Address)!.Revision);
@@ -63,17 +67,29 @@ public sealed class WriterBoundaryTests
         var frozen = Current(fixture).ClosedElapsedMilliseconds!.Value;
         fixture.Base.Execute("UPDATE configuration.configuration_run_sessions SET closed_elapsed_milliseconds=closed_elapsed_milliseconds+1;");
         var path = fixture.Base.Source.Database.DatabasePath;
-        var suffixes = new[] { "", "-wal", "-shm", "-journal" };
-        var before = suffixes.Where(suffix => File.Exists(path + suffix)).ToDictionary(suffix => suffix, suffix => File.ReadAllBytes(path + suffix));
+        Assert.Equal(frozen + 1, Current(fixture).ClosedElapsedMilliseconds);
+        var before = RuntimeFingerprint.CaptureDatabaseFiles(path, DatabaseDomain.Configuration);
+        Assert.Contains(before, member => member.StartsWith("configuration.db:", StringComparison.Ordinal));
         try
         {
             Assert.Equal("writer_job_closure_gate_unbound", Assert.Throws<IOException>(() => StateDatabase.OpenExisting(fixture.Base.Source.Instance,
                 Path.Combine(fixture.Base.Source.Root, "duration-diagnostic"), new JournalStartupAdmission(fixture.Base.Source.Instance, new()))).Message);
-            Assert.Equal(before.Keys.Order(), suffixes.Where(suffix => File.Exists(path + suffix)).Order());
-            foreach (var pair in before) Assert.Equal(pair.Value, File.ReadAllBytes(path + pair.Key));
+            Assert.Equal(before, RuntimeFingerprint.CaptureDatabaseFiles(path, DatabaseDomain.Configuration));
+            Assert.Equal(frozen + 1, Current(fixture).ClosedElapsedMilliseconds);
         }
         finally { fixture.Base.Execute($"UPDATE configuration.configuration_run_sessions SET closed_elapsed_milliseconds={frozen};"); }
         fixture.Base.VerifyOriginal();
+    }
+
+    private static (Guid Journal, Guid Writer, string JobName, long Session)[] ReadJobs(RunWriterFixture fixture)
+    {
+        using var connection = DatabaseConnections.Open(fixture.Base.Source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT journal_id,writer_id,job_name,session_id FROM main.journal_writer_jobs ORDER BY journal_id,writer_id,job_name;";
+        using var rows = command.ExecuteReader();
+        var jobs = new List<(Guid, Guid, string, long)>();
+        while (rows.Read()) jobs.Add((Guid.Parse(rows.GetString(0)), Guid.Parse(rows.GetString(1)), rows.GetString(2), rows.GetInt64(3)));
+        return jobs.ToArray();
     }
 
     private static NexusPipeline.Core.Configuration.ConfigurationRunStatus Current(RunWriterFixture fixture) =>

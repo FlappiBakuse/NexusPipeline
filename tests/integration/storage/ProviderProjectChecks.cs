@@ -9,6 +9,13 @@ namespace NexusPipeline.StorageTests;
 
 internal static class ProviderProjectChecks
 {
+    private static void TryChangeFirst(IReadOnlyList<string> ids)
+    {
+        if (ids is not IList<string> assignable) return;
+        try { assignable[0] = "changed-again"; }
+        catch (NotSupportedException) { }
+    }
+
     internal static void Verify(ImmutableBlobStore blobs, CompiledProjectSnapshot snapshot)
     {
         using var input = new ProviderProjectInput(blobs, snapshot);
@@ -24,16 +31,16 @@ internal static class ProviderProjectChecks
         Assert.Equal(snapshot.Value.Consumer.Installed.ExtensionId, firstSelection.ConsumerExtensionId);
         Assert.Equal(snapshot.Value.BindingId.ToString("D"), firstSelection.BindingId);
         Assert.Equal(new[] { "occurrence-a", "occurrence-b" }, firstSelection.SelectedTaskIds);
-        Assert.IsType<string[]>(firstSelection.SelectedTaskIds)[0] = "changed-again";
-        Assert.Equal("occurrence-a", selectionInput.Read(Request("manifest")).Selection!.SelectedTaskIds[0]);
+        TryChangeFirst(firstSelection.SelectedTaskIds);
+        Assert.Equal(new[] { "occurrence-a", "occurrence-b" }, selectionInput.Read(Request("manifest")).Selection!.SelectedTaskIds);
         var executionIds = new[] { "native-a", "native-b" };
         using var mapped = new ProviderProjectInput(blobs, snapshot, ["business-a", "business-b"], executionIds);
         executionIds[0] = "changed";
         var mapping = mapped.Read(Request("manifest")).Selection!;
         Assert.Equal(new[] { "business-a", "business-b" }, mapping.SelectedTaskIds);
         Assert.Equal(new[] { "native-a", "native-b" }, mapping.ExecutionTaskIds);
-        Assert.IsType<string[]>(mapping.ExecutionTaskIds)[0] = "changed-again";
-        Assert.Equal("native-a", mapped.Read(Request("manifest")).Selection!.ExecutionTaskIds![0]);
+        TryChangeFirst(mapping.ExecutionTaskIds!);
+        Assert.Equal(new[] { "native-a", "native-b" }, mapped.Read(Request("manifest")).Selection!.ExecutionTaskIds!);
         Assert.Throws<IOException>(() => new ProviderProjectInput(blobs, snapshot, ["a"], ["x", "y"]));
         Assert.Throws<IOException>(() => new ProviderProjectInput(blobs, snapshot, ["a", "b"], ["x", "x"]));
         Assert.Throws<IOException>(() => new ProviderProjectInput(blobs, snapshot, executionTaskIds: ["x"]));

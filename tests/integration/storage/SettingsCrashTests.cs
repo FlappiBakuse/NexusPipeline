@@ -69,6 +69,7 @@ public sealed class SettingsCrashTests
     [InlineData("version")]
     [InlineData("creator")]
     [InlineData("extra")]
+    [InlineData("digest")]
     public async Task PreservesUnknownIntents(string fault)
     {
         using var fixture = await Start(StartupEffectBoundary.NativeReturned, true);
@@ -82,10 +83,10 @@ public sealed class SettingsCrashTests
             command.CommandText = "SELECT document FROM system.startup_registration_intents WHERE operation_id=$id;";
             command.Parameters.AddWithValue("$id", fixture.OperationId.ToString("D"));
             var source = (byte[])command.ExecuteScalar()!;
-            var bytes = FaultedIntent(source, fault);
+            var bytes = fault == "digest" ? source : FaultedIntent(source, fault);
             command.CommandText = "UPDATE system.startup_registration_intents SET document=$document,document_digest=$digest WHERE operation_id=$id;";
             command.Parameters.AddWithValue("$document", bytes);
-            command.Parameters.AddWithValue("$digest", Convert.ToHexStringLower(SHA256.HashData(bytes)));
+            command.Parameters.AddWithValue("$digest", fault == "digest" ? new string('0', 64) : Convert.ToHexStringLower(SHA256.HashData(bytes)));
             command.ExecuteNonQuery();
         }
         var before = Fingerprint(fixture.Instance.RuntimeRoot);
@@ -93,6 +94,7 @@ public sealed class SettingsCrashTests
         {
             "version" => "startup_intent_identity_invalid",
             "creator" => "startup_intent_creator_unbound",
+            "digest" => "startup_intent_digest_changed",
             _ => "startup_intent_document_unknown"
         };
         Assert.Equal(reason, Assert.Throws<IOException>(() => StateDatabase.OpenExisting(fixture.Instance,

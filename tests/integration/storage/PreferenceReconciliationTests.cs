@@ -77,19 +77,38 @@ public sealed class PreferenceReconciliationTests
         using var reader = fixture.Package.Catalog.Resources.TryAcquire(Guid.NewGuid(),
             [new("extension:fixture-plugin", ResourceClaimMode.Reference)]).Lease!;
         Assert.NotNull(reader); var disabled = SavePreference(fixture, false);
-        using var cancellation = new CancellationTokenSource();
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var waiting = fixture.Runtime.ReconcileAsync(new("fixture-plugin", 1, disabled), cancellation.Token);
-        Assert.False(waiting.IsCompleted);
-        Assert.Equal(active.ActivationId, Assert.Single(fixture.Runtime.ReadStates()).ActivationId);
-        if (scenario == "revision") _ = SavePreference(fixture, true);
-        if (scenario == "cancelled") cancellation.Cancel();
-        reader.Dispose();
-        if (scenario == "released") Assert.Null((await waiting).ActivationId);
-        else
+        Exception? failure = null;
+        try
         {
-            if (scenario == "cancelled") await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waiting);
-            else Assert.Equal("extension_runtime_revision_conflict", (await Assert.ThrowsAsync<IOException>(() => waiting)).Message);
+            Assert.False(waiting.IsCompleted);
             Assert.Equal(active.ActivationId, Assert.Single(fixture.Runtime.ReadStates()).ActivationId);
+            if (scenario == "revision") _ = SavePreference(fixture, true);
+            if (scenario == "cancelled") cancellation.Cancel();
+            reader.Dispose();
+            if (scenario == "released") Assert.Null((await waiting.WaitAsync(TimeSpan.FromSeconds(15))).ActivationId);
+            else
+            {
+                if (scenario == "cancelled") await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waiting.WaitAsync(TimeSpan.FromSeconds(15)));
+                else Assert.Equal("extension_runtime_revision_conflict",
+                    (await Assert.ThrowsAsync<IOException>(() => waiting.WaitAsync(TimeSpan.FromSeconds(15)))).Message);
+                Assert.Equal(active.ActivationId, Assert.Single(fixture.Runtime.ReadStates()).ActivationId);
+            }
+        }
+        catch (Exception error) { failure = error; throw; }
+        finally
+        {
+            if (!waiting.IsCompleted)
+            {
+                try
+                {
+                    await cancellation.CancelAsync();
+                    await waiting.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+                catch (Exception cleanup) when (failure is not null) { failure.Data["reconcile-cleanup"] = cleanup; }
+            }
         }
     }
 

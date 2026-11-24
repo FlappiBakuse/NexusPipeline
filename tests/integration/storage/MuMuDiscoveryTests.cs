@@ -48,7 +48,11 @@ public sealed class MuMuDiscoveryTests
             Assert.Contains(document.Family, process => process.ProcessId.ToString() == File.ReadAllText(fixture.Marker + ".child"));
             Assert.All(document.Family, process => Assert.Equal(WriterState.Stopped, WriterStopEvidence.ObserveProcess(process)));
             Assert.Equal(WriterState.Stopped, WriterStopEvidence.ObserveJob(document.JobName, document.SessionId));
-            Assert.NotEmpty(MuMuDiscoveryEvidence.ReadReferences(blobs, mapping.InfoEvidence));
+            using var verified = MuMuDiscoveryEvidence.VerifiedMuMuDiscovery.Open(blobs, mapping.InfoEvidence);
+            var references = verified.References();
+            Assert.Equal(mapping.InfoEvidence, references[0]);
+            Assert.Contains(document.Start, references);
+            Assert.All(document.Parts, part => Assert.Contains(part.Content, references));
             return true;
         });
         using var next = fixture.Base.Resources.TryAcquire(Guid.NewGuid(), TargetResourceKeys.Android(endpoint, ResourceClaimMode.Mutation)).Lease;

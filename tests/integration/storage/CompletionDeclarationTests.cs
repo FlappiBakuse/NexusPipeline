@@ -1,6 +1,7 @@
 using System.Runtime.Versioning;
 using System.Text.Json;
 using NexusPipeline.Core.Automation;
+using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Control;
 using NexusPipeline.Host.Control.Automation;
 using NexusPipeline.Host.Control.Http;
@@ -12,6 +13,40 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class CompletionDeclarationTests
 {
+    [Theory(DisplayName = "Remote Declaration Authority Uses Ordered Configuration Selectors And Grants")]
+    [InlineData("same", true)]
+    [InlineData("selector", false)]
+    [InlineData("order", false)]
+    [InlineData("descendants", false)]
+    [InlineData("protected", false)]
+    [InlineData("syntax", false)]
+    public void PreservesResourceAuthority(string change, bool allowed)
+    {
+        using var fixture = new ExecutionAdmissionFixture(); var source = fixture.Source;
+        var catalog = source.Definitions.Read();
+        var script = catalog.Scripts.Single(item => item.Id == source.OtherScriptId);
+        static ConfigurationDocumentAccess Access(string account)
+        {
+            var selected = new ConfigurationSelector([new ConfigurationProperty("accounts"), new ConfigurationMatch("name", account)]);
+            var status = new ConfigurationSelector([new ConfigurationProperty("status")]);
+            return new([new(selected, true), new(status, false)], [new(selected, false)], [status]);
+        }
+        var original = new AutomationAdapterResource("settings", 0, "", 1, ConfigurationSyntax.Json, Access("north"));
+        script = script with { AdapterResources = [original] };
+        catalog = catalog with { Scripts = [script] };
+        var access = Access(change == "selector" ? "south" : "north");
+        if (change == "order") access = access with { Read = [access.Read[1], access.Read[0]] };
+        if (change == "descendants") access = access with { Write = [access.Write[0] with { Descendants = true }] };
+        if (change == "protected") access = access with { Protected = [] };
+        var updated = original with { Access = access, Syntax = change == "syntax" ? ConfigurationSyntax.Yaml : original.Syntax };
+        var command = new AutomationChanges(catalog.Revision, [], [script with { AdapterResources = [updated] }], [], [], [], [], []);
+        var remote = new AuthenticatedControlRequest(ControlOrigin.Remote, "declaration-fixture", null, () => new(true, true));
+        var local = new AuthenticatedControlRequest(ControlOrigin.Local, "declaration-fixture", null, () => new(true, true));
+        if (allowed) AutomationUseCases.RequireLocalDeclarations(remote, catalog, command);
+        else Assert.Throws<UnauthorizedAccessException>(() => AutomationUseCases.RequireLocalDeclarations(remote, catalog, command));
+        AutomationUseCases.RequireLocalDeclarations(local, catalog, command);
+    }
+
     [Theory(DisplayName = "Real Automation Changes Require Local Authority Only To Introduce Or Change A Non None Completion Action")]
     [InlineData(ControlOrigin.Remote, "create", false)]
     [InlineData(ControlOrigin.Remote, "change", false)]

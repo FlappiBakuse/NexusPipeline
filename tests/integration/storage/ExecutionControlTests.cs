@@ -29,7 +29,8 @@ public sealed class ExecutionControlTests
         var state = fixture.State;
         var run = Guid.Parse(state.Attempt.RunId); var attempt = Guid.Parse(state.Attempt.AttemptId);
         var operation = Guid.NewGuid(); var counts = fixture.Base.Counts();
-        Assert.ThrowsAny<Exception>(() => control.Cancel(operation, "foreign", state.Journal.OperationId, run, attempt, DateTimeOffset.UtcNow));
+        var denied = Assert.Throws<IOException>(() => control.Cancel(operation, "foreign", state.Journal.OperationId, run, attempt, DateTimeOffset.UtcNow));
+        Assert.Equal("execution_control_source_unavailable", denied.Message);
         Assert.Equal(counts, fixture.Base.Counts());
         var originalReceipt = new AttemptReceiptStore(fixture.Source.Database).Read(attempt);
         var accepted = control.Cancel(operation, "provider-runtime-fixture", state.Journal.OperationId, run, attempt, DateTimeOffset.UtcNow);
@@ -77,8 +78,15 @@ public sealed class ExecutionControlTests
             (failure == "ABORT" ? ",'fixture_failure'" : "") + "); END;");
         try
         {
-            Assert.ThrowsAny<Exception>(() => control.Cancel(operation, "provider-runtime-fixture", receipt.OperationId,
-                receipt.Facts.RunId, receipt.Facts.AttemptId, DateTimeOffset.UtcNow));
+            void Cancel() => _ = control.Cancel(operation, "provider-runtime-fixture", receipt.OperationId,
+                receipt.Facts.RunId, receipt.Facts.AttemptId, DateTimeOffset.UtcNow);
+            if (failure == "ABORT")
+            {
+                var error = Assert.Throws<SqliteException>(Cancel);
+                Assert.Equal(1811, error.SqliteExtendedErrorCode);
+                Assert.Contains("fixture_failure", error.Message, StringComparison.Ordinal);
+            }
+            else Assert.Equal("execution_retry_source_unbound", Assert.Throws<IOException>(Cancel).Message);
             Assert.Equal(counts, fixture.Base.Counts());
             Assert.Equal(0, fixture.Base.Count("execution_retry_outcomes"));
             Assert.False(new ExecutionRunFinality(fixture.Source.Instance, fixture.Source.Database, new()).IsFinal(receipt));

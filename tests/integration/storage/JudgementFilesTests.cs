@@ -12,6 +12,25 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class JudgementFilesTests
 {
+    [Fact(DisplayName = "A Judgement Write Failure After Real Truncation Is Recorded As An Unconfirmed Effect")]
+    public async Task DiagnosesFailureAfterTruncation()
+    {
+        await using var fixture = new JudgementWorkerFixture("javascript", "globalThis.nexusJudge = () => ({outcome:'succeeded',reason:''});");
+        await fixture.StartAsync();
+        using var input = JsonDocument.Parse(Input(fixture, [], "", []));
+        var diagnostics = new JudgementDiagnostics();
+        var access = new JudgementFileAccess(fixture.Initialization, input.RootElement, diagnostics, CancellationToken.None);
+        var path = Path.Combine(fixture.DirectoryPath, "target.txt");
+        File.WriteAllText(path, "original target bytes");
+        Assert.False(access.WriteText("target.txt", "replacement", () => throw new IOException("private-test-path")));
+        Assert.Empty(File.ReadAllBytes(path));
+        var failure = Assert.Single(diagnostics.Failures!);
+        Assert.Equal("write", failure.Stage);
+        Assert.Equal("partial-or-unknown", failure.Effect);
+        Assert.Equal("IOException", failure.Type);
+        Assert.DoesNotContain("private-test-path", JsonSerializer.Serialize(failure));
+    }
+
     [Fact(DisplayName = "An Opened Directory Capability Rejects A Real Junction Introduced Before Its Next Relative Open")]
     public void RejectsIntroducedJunctions()
     {

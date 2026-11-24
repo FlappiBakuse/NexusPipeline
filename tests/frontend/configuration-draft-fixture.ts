@@ -1,7 +1,6 @@
 import { createApp, h, nextTick, ref } from 'vue';
 import BindingEditorDialog from '../../apps/web/src/pages/BindingEditorDialog.vue';
-import { FrontendRegistry } from '../../apps/web/src/extensions/frontend-registry';
-import { registryKey } from '../../apps/web/src/extensions/registry-context';
+import { FrontendRegistry, registryKey } from '../../apps/web/src/extensions/frontend-registry';
 import { ControlClient } from '../../apps/web/src/control/client';
 import { createStore } from '../../apps/web/src/app/store';
 import { prepareAppExit } from '../../apps/web/src/app/exit-preparation';

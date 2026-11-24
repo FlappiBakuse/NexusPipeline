@@ -1,8 +1,10 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
+using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Maintenance;
+using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
@@ -57,10 +59,15 @@ public sealed class RetryFaultTests
         using var pending = Assert.IsType<PreparedExecutionRetry>(retries.Prepare(first.Facts.RunId, first.Facts.AttemptId, DateTimeOffset.UtcNow));
         var accepted = Assert.IsType<AttemptAcceptanceResult>(retries.Start(pending, DateTimeOffset.UtcNow));
         var running = fixture.Consumer.RunNextAsync();
-        AttemptReceipt? second = null;
+        OwnedWorkerRoot observed;
+        AttemptReceipt second;
         try
         {
             await AwaitSecondWorker(fixture.Marker);
+            observed = OwnedWorkerRoot.Read(fixture.Marker + ".root-" + pending.Frozen.NextAttemptId.ToString("D"));
+            var live = ProcessIdentityReader.Read(observed.ProcessId);
+            Assert.Equal(observed, OwnedWorkerRoot.From(live));
+            Assert.Equal(WriterState.Running, WriterStopEvidence.ObserveProcess(live));
         }
         finally
         {
@@ -68,10 +75,10 @@ public sealed class RetryFaultTests
             var cancellation = new ExecutionCancellationStore(fixture.Source.Instance, fixture.Source.Database, new(), fixture.Source.Lease);
             cancellation.Cancel(ExecutionCancellationStore.Identity(Guid.NewGuid(), "provider-runtime-fixture", accepted.JournalId,
                 state.Journal.OperationId, Guid.Parse(state.Attempt.RunId), Guid.Parse(state.Attempt.AttemptId)), accepted.JournalId, DateTimeOffset.UtcNow);
-            second = Assert.IsType<AttemptReceipt>(await running);
+            second = Assert.IsType<AttemptReceipt>(await running.WaitAsync(TimeSpan.FromSeconds(30)));
         }
-        Assert.NotNull(second);
         Assert.Equal(LifecycleOutcome.Cancelled, second.Facts.Lifecycle);
+        Assert.Equal(pending.Frozen.NextAttemptId, second.Facts.AttemptId);
         Assert.Equal(first.Facts.RunId, second.Facts.RunId); Assert.Equal(2, second.Facts.Ordinal);
         Assert.Equal(LifecycleOutcome.Interrupted, first.Facts.Lifecycle);
         Assert.Equal(first, new AttemptReceiptStore(fixture.Source.Database).Read(first.Facts.AttemptId));
@@ -80,8 +87,8 @@ public sealed class RetryFaultTests
         Assert.Equal(2, File.ReadAllLines(fixture.Marker + ".attempts").Length);
         var stateAfter = AttemptWriterState.Read(fixture.Source.Instance, fixture.Source.Database, new(), second.JournalId);
         var writer = Assert.Single(stateAfter.Steps);
-        Assert.NotNull(new JobClosureStore(fixture.Source.Instance, fixture.Source.Database, new())
-            .ReadForExecutionEvidence(second.JournalId, writer.WriterId, writer.JobName, writer.SessionId));
+        Assert.Equal(Assert.Single(stateAfter.Total.Steps).StepId, writer.StepId);
+        _ = observed.RequireStopped(new JobClosureStore(fixture.Source.Instance, fixture.Source.Database, new()), second.JournalId, writer);
         Assert.True(new ExecutionRunFinality(fixture.Source.Instance, fixture.Source.Database, new()).IsFinal(second));
     }
 
@@ -95,7 +102,17 @@ public sealed class RetryFaultTests
         var triggerName = NexusPipeline.Platform.Storage.Sqlite.DatabaseTables.Name(table).Split('.')[0] + ".fail_retry_terminal";
         fixture.Base.Execute("CREATE TRIGGER " + triggerName + " BEFORE INSERT ON " + table +
             " BEGIN SELECT RAISE(ABORT,'retry_terminal_fixture_fault'); END;");
-        await Assert.ThrowsAnyAsync<Exception>(() => fixture.RunInterruptedAsync());
+        var failure = await Assert.ThrowsAsync<AggregateException>(() => fixture.RunInterruptedAsync());
+        Assert.Equal("execution_recovery_failed", failure.Message.Split(" (", 2, StringSplitOptions.None)[0]);
+        Assert.Collection(failure.InnerExceptions,
+            error =>
+            {
+                var failedWrite = Assert.IsType<SqliteException>(error);
+                Assert.Equal(19, failedWrite.SqliteErrorCode);
+                Assert.Equal(1811, failedWrite.SqliteExtendedErrorCode);
+                Assert.Contains("retry_terminal_fixture_fault", failedWrite.Message, StringComparison.Ordinal);
+            },
+            error => Assert.StartsWith("execution_isolation_failed", Assert.IsType<AggregateException>(error).Message, StringComparison.Ordinal));
         Assert.Equal(0, fixture.Base.Count("attempt_receipts"));
         Assert.Equal(0, fixture.Base.Count("execution_retry_intents"));
         Assert.Equal(0, fixture.Base.Inbox.PendingCount);
@@ -116,7 +133,8 @@ public sealed class RetryFaultTests
         }
         Retry(fixture).Tick(DateTimeOffset.UtcNow);
         Assert.Single(File.ReadAllLines(fixture.Marker + ".attempts"));
-        await Assert.ThrowsAnyAsync<Exception>(() => fixture.Consumer.RunNextAsync());
+        var blocked = await Assert.ThrowsAsync<IOException>(() => fixture.Consumer.RunNextAsync());
+        Assert.Equal("execution_runtime_reconciliation_required", blocked.Message);
         Assert.Equal(physical.Export(), new JournalStore(fixture.Source.Instance, new()).Read(fixture.Accepted.JournalId).Export());
         Assert.Equal(0, fixture.Base.Count("attempt_receipts"));
         Assert.Equal(0, fixture.Base.Count("execution_retry_intents"));

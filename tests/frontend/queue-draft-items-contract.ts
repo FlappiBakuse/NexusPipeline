@@ -1,9 +1,10 @@
-import { createApp, h } from 'vue';
-import { AutomationEditor } from '../../apps/web/src/pages/automation-editor';
-import { automationSession } from '../../apps/web/src/pages/automation-session';
+import { createApp, h, ref } from 'vue';
+import { AutomationEditor, automationSession } from '../../apps/web/src/pages/automation-editor';
 import AutomationEditorDialog from '../../apps/web/src/pages/AutomationEditorDialog.vue';
 import theme from '../../apps/web/src/styles/theme.css?inline';
 import { draftFixture, settle } from './configuration-draft-fixture';
+import QueueTasks from '../../apps/web/src/pages/QueueTasks.vue';
+import type { AutomationBundle } from '../../apps/web/src/control/wire.generated';
 
 export async function queueDraftItemsContract(parent: HTMLElement, check: (value: unknown, name: string) => void) {
   const { store } = draftFixture(), session = automationSession(store, 'queues');
@@ -67,4 +68,40 @@ export async function queueDraftItemsContract(parent: HTMLElement, check: (value
     if (originalTheme === undefined) delete document.body.dataset.theme;
     else document.body.dataset.theme = originalTheme;
   }
+  await indexedQueueItems(parent, check);
+}
+
+async function indexedQueueItems(parent: HTMLElement, check: (value: unknown, name: string) => void) {
+  const holder = document.createElement('section'); parent.append(holder);
+  type Queue = AutomationBundle['queues'][number];
+  const queue = ref<Queue>({ id: 'indexed-queue', name: 'Indexed queue', order: 0, completionAction: 'none',
+    notifyEnabled: false, notificationTaskIds: [], scriptIds: Array.from({ length: 12 }, (_, index) => 'script-' + index),
+    successDependencies: [{ scriptId: 'script-1', requiredScriptIds: ['script-0'] }] });
+  let labelReads = 0, updates = 0;
+  const scripts = Array.from({ length: 48 }, (_, index) => ({ id: 'script-' + index,
+    get name() { labelReads++; return 'Script ' + index; } })) as AutomationBundle['scripts'];
+  const app = createApp({ render: () => h(QueueTasks, { scripts, modelValue: queue.value,
+    'onUpdate:modelValue': value => { queue.value = value; updates++; } }) });
+  app.mount(holder);
+  const ids = () => Array.from(holder.querySelectorAll<HTMLElement>('.task-row')).map(row => row.dataset.itemId!);
+  const reorder = (next: string[]) => holder.querySelector('nexus-sortable-list')!.dispatchEvent(new CustomEvent('nexus-reorder', { detail: { ids: next } }));
+  try {
+    await settle();
+    check(ids().length === 12, 'the queue renders one task control for each declared script');
+    check(labelReads === 48, `all task controls in one queue share the computed script options (${labelReads} label reads)`);
+    const original = ids();
+    reorder([original[0]!, ...original.slice(0, -1)]);
+    await settle();
+    check(!updates && ids().join(',') === original.join(','), 'a repeated task identity cannot reorder the queue');
+    const moved = [original[1]!, original[0]!, ...original.slice(2)];
+    reorder(moved);
+    await settle();
+    check(ids().join(',') === moved.join(',') && queue.value.scriptIds[0] === 'script-1' &&
+      !queue.value.successDependencies?.[0]?.requiredScriptIds.length, 'queue reorder preserves row identity and removes a now-later prerequisite');
+    queue.value = { ...queue.value, scriptIds: ['script-0', ...queue.value.scriptIds, 'script-0'] };
+    await settle();
+    const withDuplicates = ids();
+    check(withDuplicates[0] === original[0] && withDuplicates[1] === original[1] &&
+      new Set(withDuplicates).size === withDuplicates.length, 'external updates retain the first matching task and allocate independent duplicate drafts');
+  } finally { app.unmount(); holder.remove(); }
 }

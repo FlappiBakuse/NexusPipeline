@@ -84,34 +84,35 @@ public sealed class DatabaseSnapshotTests
         var (database, records) = RecordStoreFixture.NewStore();
         var record = RecordStoreFixture.Record(0, Guid.NewGuid());
         var sequence = database.CommitSequence;
-        var pinned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var writing = new ManualResetEventSlim();
-        var reader = Task.Run(() =>
+        var operation = new OperationIdentity(Guid.NewGuid(), "snapshot-fixture", new string('c', 64), "fixture.snapshot");
+        using var busyEntered = new ManualResetEventSlim();
+        using var snapshotClosed = new ManualResetEventSlim();
+        BusyCallback busy = (_, _) =>
         {
-            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Records);
-            using var snapshot = connection.BeginTransaction(deferred: true);
-            using var query = connection.CreateCommand(); query.Transaction = snapshot;
-            query.CommandText = "SELECT count(*) FROM records.run_records;";
-            Assert.Equal(0L, query.ExecuteScalar());
-            pinned.SetResult();
-            Assert.True(writing.Wait(TimeSpan.FromSeconds(10)));
-            Thread.Sleep(TimeSpan.FromMilliseconds(2500));
-            snapshot.Commit();
-        });
+            busyEntered.Set();
+            return snapshotClosed.Wait(TimeSpan.FromSeconds(10)) ? 1 : 0;
+        };
+        Task<bool>? writer = null;
         var calls = 0;
         try
         {
-            await pinned.Task.WaitAsync(TimeSpan.FromSeconds(10));
-            Assert.True(database.Write((connection, transaction) =>
-            {
-                calls++;
-                RunRecordStore.PublishInside(connection, transaction, record);
-                writing.Set();
-                return true;
-            }));
+            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Records);
+            using var snapshot = connection.BeginTransaction(deferred: true);
+            Assert.Equal(0L, Count(connection, snapshot, "records.run_records"));
+            writer = CommitBoth(database, operation, record, busy, () => calls++);
+            Assert.True(busyEntered.Wait(TimeSpan.FromSeconds(10)));
+            Assert.False(writer.IsCompleted);
+            Assert.Equal(0L, Count(connection, snapshot, "records.run_records"));
+            snapshot.Commit();
         }
-        finally { writing.Set(); await reader.WaitAsync(TimeSpan.FromSeconds(10)); }
+        finally
+        {
+            snapshotClosed.Set();
+            if (writer is not null) Assert.True(await writer.WaitAsync(TimeSpan.FromSeconds(10)));
+            GC.KeepAlive(busy);
+        }
         Assert.Equal(1, calls);
+        Assert.False(database.Accept(operation, DateTimeOffset.UtcNow).IsNew);
         Assert.Equal(sequence + 1, database.CommitSequence);
         Assert.Equal(record, Assert.Single(records.ReadPage(new()).Items));
     }

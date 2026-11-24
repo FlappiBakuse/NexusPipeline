@@ -4,12 +4,117 @@ using NexusPipeline.Core.Execution;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Automation;
 using NexusPipeline.Platform.Storage.Sqlite;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Xunit;
 
 namespace NexusPipeline.StorageTests;
 
 public sealed class AssetPreparationTests
 {
+    [Theory(DisplayName = "Attachment Publication And Recovery Use The Same Approved Revisions To Update Existing Definitions")]
+    [InlineData(null)]
+    [InlineData(AssetPreparationPoint.CompletedReceipt)]
+    [InlineData(AssetPreparationPoint.CommittedJournal)]
+    public void PublishesExistingRevisions(AssetPreparationPoint? interruption)
+    {
+        using var fixture = AssetPreparationFixture.Create(updateExisting: true);
+        var store = new AutomationDefinitionStore(fixture.Database);
+        var original = store.Read();
+        var source = Assert.Single(original.Scripts);
+        var root = Assert.Single(original.Roots);
+        Assert.Equal(1L, source.Revision);
+        Assert.Equal(1L, root.Revision);
+        var plan = fixture.Prepared.Plan.ReadWire();
+        var revisions = plan.DefinitionRevisions;
+        Assert.NotNull(revisions);
+        Assert.Contains(revisions, item => item.Kind == "root" && item.Id == root.Id.ToString("D") && item.Revision == root.Revision);
+        Assert.Contains(revisions, item => item.Kind == "script" && item.Id == source.Id.ToString("D") && item.Revision == source.Revision);
+        var asset = Assert.Single(plan.Assets);
+        var path = Path.Combine(fixture.Instance.RuntimeRoot, asset.Content.RelativePath);
+        if (interruption is { } stop)
+        {
+            Assert.Throws<Interrupted>(() => fixture.Execute(new Observer((point, _, _) =>
+            {
+                if (point == stop) throw new Interrupted();
+            })));
+            var beforeRecovery = Assert.Single(store.Read().Scripts);
+            Assert.Equal((source.Id, source.Revision, source.Name), (beforeRecovery.Id, beforeRecovery.Revision, beforeRecovery.Name));
+            var identity = PhysicalObjectIdentity.Read(path);
+            var journal = Assert.Single(new RecoveryJournalRegistry(fixture.Database).ReadSnapshot().Journals);
+            var handler = new AssetRecoveryHandler(fixture.Instance, new(), fixture.Database, _ => new(true, WriterState.Stopped));
+            using var work = handler.Prepare(journal);
+            Assert.Equal(stop == AssetPreparationPoint.CommittedJournal ? JournalRecoveryResult.AlreadyCompleted : JournalRecoveryResult.Completed,
+                work.Execute());
+            Assert.Equal(identity, PhysicalObjectIdentity.Read(path));
+        }
+        else Assert.True(fixture.Execute().IsNew);
+
+        var applied = store.Read();
+        var script = Assert.Single(applied.Scripts);
+        Assert.Equal(2L, applied.Revision);
+        Assert.Equal(source.Id, script.Id);
+        Assert.Equal(root.Id, Assert.Single(applied.Roots).Id);
+        Assert.Equal("Imported Script", script.Name);
+        Assert.Equal("Imported root", Assert.Single(applied.Roots).Name);
+        Assert.Equal(2L, script.Revision);
+        Assert.Equal(2L, Assert.Single(applied.Roots).Revision);
+        Assert.Equal(original.Users.Select(user => user.Id), applied.Users.Select(user => user.Id));
+        Assert.Equal(original.Bindings.Select(binding => binding.Id), applied.Bindings.Select(binding => binding.Id));
+        Assert.Equal(new byte[] { 5, 7, 0 }, File.ReadAllBytes(path));
+        var replay = fixture.Execute();
+        Assert.False(replay.IsNew);
+        Assert.Equal(AutomationImportState.Published, replay.State);
+        Assert.Equal(2L, replay.CatalogRevision);
+        Assert.Equal(script.Id, Assert.Single(store.Read().Scripts).Id);
+    }
+
+    [Fact(DisplayName = "Asset Recovery Retains The Approved Revision And Does Not Overwrite A Newer Catalog")]
+    public void RecoveryRejectsChangedCatalog()
+    {
+        using var fixture = AssetPreparationFixture.Create(updateExisting: true);
+        Assert.Throws<Interrupted>(() => fixture.Execute(new Observer((point, _, _) =>
+        {
+            if (point == AssetPreparationPoint.CompletedReceipt) throw new Interrupted();
+        })));
+        var plan = fixture.Prepared.Plan.ReadWire();
+        var asset = Assert.Single(plan.Assets);
+        var path = Path.Combine(fixture.Instance.RuntimeRoot, asset.Content.RelativePath);
+        var identity = PhysicalObjectIdentity.Read(path);
+        var store = new AutomationDefinitionStore(fixture.Database);
+        var current = store.Read();
+        var source = Assert.Single(current.Scripts);
+        var changes = new AutomationChanges(current.Revision, [], [source with { Name = "Newer script" }], [], [], [], [], []);
+        store.Commit(AutomationDefinitionStore.Identity(Guid.NewGuid(), "newer-edit", changes), changes, DateTimeOffset.UtcNow);
+        var journal = Assert.Single(new RecoveryJournalRegistry(fixture.Database).ReadSnapshot().Journals);
+        var handler = new AssetRecoveryHandler(fixture.Instance, new(), fixture.Database, _ => new(true, WriterState.Stopped));
+        var before = Fingerprints(fixture.Instance.RuntimeRoot);
+        Assert.Throws<AutomationConflictException>(() => handler.Prepare(journal));
+        Assert.Equal(before, Fingerprints(fixture.Instance.RuntimeRoot));
+        Assert.Equal(identity, PhysicalObjectIdentity.Read(path));
+        Assert.Equal("Newer script", Assert.Single(store.Read().Scripts).Name);
+        var after = Assert.Single(new RecoveryJournalRegistry(fixture.Database).ReadSnapshot().Journals);
+        Assert.Equal((journal.Revision, journal.Phase, journal.PlanDigest, journal.OperationId),
+            (after.Revision, after.Phase, after.PlanDigest, after.OperationId));
+    }
+
+    [Theory(DisplayName = "An Asset Plan Rejects Revisions Outside Its Portable Definitions")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RejectsUnboundDefinitionRevisions(bool duplicate)
+    {
+        using var fixture = AssetPreparationFixture.Create(updateExisting: true);
+        var document = JsonNode.Parse(fixture.Prepared.Plan.Export())!;
+        var revisions = document["definitionRevisions"]!.AsArray();
+        if (duplicate) revisions.Add(revisions[0]!.DeepClone());
+        else revisions[0]!["id"] = Guid.NewGuid().ToString("D");
+        var blobs = new ImmutableBlobStore(fixture.Instance, new());
+        var unbound = blobs.PersistPlan(JsonSerializer.SerializeToUtf8Bytes(document));
+        Assert.Equal("asset_preparation_definition_revision_unbound", Assert.Throws<IOException>(() =>
+            new AssetPlanCodec(fixture.Instance, new(), blobs).Read(unbound)).Message);
+        Assert.Empty(new RecoveryJournalRegistry(fixture.Database).ReadSnapshot().Journals);
+    }
+
     [Theory(DisplayName = "Accepted And Published Asset References Are Rechecked Under The Actual Native Deletion Guard")]
     [InlineData(false)]
     [InlineData(true)]
@@ -32,13 +137,16 @@ public sealed class AssetPreparationTests
         blobs.Verify(reference);
     }
 
-    [Fact(DisplayName = "A Rejected Catalog Revision Leaves The Runtime Writable Without Accepting An Asset Operation Or Creating Content")]
-    public void RejectsStaleCatalogs()
+    [Theory(DisplayName = "A Rejected Catalog Revision Leaves The Runtime Writable Without Accepting An Asset Operation Or Creating Content")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RejectsStaleCatalogs(bool updateExisting)
     {
-        using var fixture = AssetPreparationFixture.Create();
-        var changes = AutomationDefinitionSeed.Create(Path.Combine(fixture.Root, "other"));
+        using var fixture = AssetPreparationFixture.Create(updateExisting: updateExisting);
+        var store = new AutomationDefinitionStore(fixture.Database);
+        var changes = AutomationDefinitionSeed.Create(Path.Combine(fixture.Root, "other")) with { ExpectedCatalogRevision = store.Read().Revision };
         var operation = AutomationDefinitionStore.Identity(Guid.NewGuid(), "other", changes);
-        new AutomationDefinitionStore(fixture.Database).Commit(operation, changes, DateTimeOffset.UtcNow);
+        store.Commit(operation, changes, DateTimeOffset.UtcNow);
         Assert.Throws<AutomationConflictException>(() => fixture.Execute());
         Assert.True(fixture.Index.Current.IsReady);
         Assert.Empty(new RecoveryJournalRegistry(fixture.Database).ReadSnapshot().Journals);
@@ -119,6 +227,55 @@ public sealed class AssetPreparationTests
         Assert.Equal(replacement, PhysicalObjectIdentity.Read(path));
         Assert.Equal(bytes, File.ReadAllBytes(path));
         Assert.Empty(new AutomationDefinitionStore(fixture.Database).Read().Scripts);
+    }
+
+    [Theory(DisplayName = "An Asset Completion Requires Its Active Preparation Its Current Gate And The Started Receipt Writer")]
+    [InlineData("gate", "asset_evidence_execution_unbound")]
+    [InlineData("writer", "asset_started_receipt_unbound")]
+    [InlineData("owner", null)]
+    public void RechecksCompletionAuthority(string fault, string? reason)
+    {
+        using var fixture = AssetPreparationFixture.Create();
+        var plan = fixture.Prepared.Plan.ReadWire();
+        var asset = Assert.Single(plan.Assets);
+        var workspace = Path.Combine(fixture.Instance.RuntimeRoot, "asset-preparations", plan.JournalId);
+        var content = Path.Combine(fixture.Instance.RuntimeRoot, asset.Content.RelativePath);
+        PhysicalObjectIdentity? identity = null;
+        var error = Record.Exception(() => fixture.Execute(new Observer((point, journalId, _) =>
+        {
+            if (point != AssetPreparationPoint.ContentFlushed) return;
+            identity = PhysicalObjectIdentity.Read(content);
+            if (fault == "gate")
+            {
+                fixture.Database.Write((connection, transaction) =>
+                {
+                    using var command = connection.CreateCommand();
+                    command.Transaction = transaction;
+                    command.CommandText = "UPDATE main.journal_effect_gates SET state='sealed' WHERE journal_id=$journal AND state='entered';";
+                    command.Parameters.AddWithValue("$journal", journalId.ToString("D"));
+                    Assert.Equal(1, command.ExecuteNonQuery());
+                    return true;
+                });
+            }
+            else if (fault == "writer")
+            {
+                var started = Path.Combine(workspace, asset.Content.Sha256 + ".started.json");
+                var receipt = JsonNode.Parse(File.ReadAllBytes(started))!;
+                receipt["writerId"] = Guid.NewGuid().ToString("D");
+                File.WriteAllBytes(started, JsonSerializer.SerializeToUtf8Bytes(receipt));
+            }
+            else fixture.Prepared.Dispose();
+        })));
+        if (fault == "owner") Assert.IsType<ObjectDisposedException>(error);
+        else Assert.Equal(reason, Assert.IsType<IOException>(error).Message);
+        Assert.NotNull(identity);
+        Assert.Equal(identity, PhysicalObjectIdentity.Read(content));
+        Assert.Equal(new byte[] { 5, 7, 0 }, File.ReadAllBytes(content));
+        Assert.False(File.Exists(Path.Combine(workspace, asset.Content.Sha256 + ".completed.json")));
+        Assert.Empty(new AutomationDefinitionStore(fixture.Database).Read().Scripts);
+        var journal = Assert.Single(new RecoveryJournalRegistry(fixture.Database).ReadSnapshot().Journals);
+        Assert.Equal(JournalPhase.Applying, journal.Phase);
+        Assert.Equal(FileEffectState.Started, Assert.Single(new FileEffectOutbox(fixture.Database).Read(journal.JournalId)).State);
     }
 
     [Fact(DisplayName = "Every Attachment Completes Before One Transaction Publishes The Whole Definition Graph And Its Asset Owners")]

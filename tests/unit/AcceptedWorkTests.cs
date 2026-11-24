@@ -1,10 +1,127 @@
 using NexusPipeline.Core.Configuration;
-using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Maintenance;
-using NexusPipeline.Core.Operations;
 using Xunit;
+using NexusPipeline.Core.Execution;
+using NexusPipeline.Core.Operations;
 
 namespace NexusPipeline.CoreTests;
+
+public sealed class AcceptedRunTests
+{
+    [Fact(DisplayName = "An Accepted Run Keeps Completion Waiting Without Pinning Its Attempt Resources And Can Readmit Only Its Original Scope")]
+    public void PreservesAcceptedClaims()
+    {
+        var index = Ready(); var lifecycle = new HostLifecycle(index, TimeProvider.System);
+        var resources = new ResourceLeaseManager(lifecycle); var first = Guid.NewGuid();
+        using var original = resources.TryAcquire(first,
+            [new("config", ResourceClaimMode.Mutation), new("package", ResourceClaimMode.Reference)]).Lease!;
+        using var run = original.AcceptRun(resources, first, Guid.NewGuid());
+        original.Dispose();
+        using (var unrelated = resources.TryAcquire(Guid.NewGuid(), [new("config", ResourceClaimMode.Mutation)]).Lease)
+            Assert.NotNull(unrelated);
+        using var drain = lifecycle.BeginCompletionDrain(Guid.NewGuid()); Assert.NotNull(drain);
+        Assert.False(drain.TryReserve());
+        Assert.Null(resources.TryAcquire(Guid.NewGuid(), [new("unrelated", ResourceClaimMode.Mutation)]).Lease);
+        Assert.Null(resources.TryContinueRun(run, Guid.NewGuid(), [new("outside", ResourceClaimMode.Mutation)]).Lease);
+        Assert.Null(resources.TryContinueRun(run, Guid.NewGuid(), [new("package", ResourceClaimMode.Mutation)]).Lease);
+        using var next = resources.TryContinueRun(run, Guid.NewGuid(),
+            [new("config", ResourceClaimMode.Mutation), new("package", ResourceClaimMode.Reference)]).Lease;
+        Assert.NotNull(next); Assert.False(drain.TryReserve());
+        next.Dispose(); run.Dispose(); Assert.False(run.IsActive);
+        Assert.True(drain.TryReserve());
+        Assert.Null(resources.TryContinueRun(run, Guid.NewGuid(), [new("config", ResourceClaimMode.Mutation)]).Lease);
+    }
+
+    [Fact(DisplayName = "A Run Permit Cannot Cross Its Real Coordinator Or Override Current Recovery Isolation")]
+    public void RejectsForeignPermits()
+    {
+        var index = Ready(); var lifecycle = new HostLifecycle(index, TimeProvider.System);
+        var resources = new ResourceLeaseManager(lifecycle); var foreign = new ResourceLeaseManager(lifecycle);
+        var operation = Guid.NewGuid();
+        using var original = resources.TryAcquire(operation, [new("config", ResourceClaimMode.Mutation)]).Lease!;
+        Assert.Throws<InvalidOperationException>(() => original.AcceptRun(foreign, operation, Guid.NewGuid()));
+        using var run = original.AcceptRun(resources, operation, Guid.NewGuid()); original.Dispose();
+        Assert.Null(foreign.TryContinueRun(run, Guid.NewGuid(), [new("config", ResourceClaimMode.Mutation)]).Lease);
+        index.PublishVerified(1, 2, [new("config", Guid.NewGuid(), "writer_unknown")]);
+        Assert.Null(resources.TryContinueRun(run, Guid.NewGuid(), [new("config", ResourceClaimMode.Mutation)]).Lease);
+        index.PublishVerified(2, 3, []);
+        using var current = resources.TryContinueRun(run, Guid.NewGuid(), [new("config", ResourceClaimMode.Mutation)]).Lease;
+        Assert.NotNull(current);
+    }
+
+    private static RecoveryIndex Ready()
+    { var value = new RecoveryIndex(); value.PublishVerified(0, 1, []); return value; }
+}
+
+public sealed class AcceptedQueueTests
+{
+    [Fact(DisplayName = "An Already Accepted Run Can Publish Notification Work During Drain Without Retaining Execution Resources")]
+    public void PublishesDuringDrain()
+    {
+        var index = Ready(); var lifecycle = new HostLifecycle(index, TimeProvider.System);
+        var resources = new ResourceLeaseManager(lifecycle);
+        var operation = Guid.NewGuid();
+        using var root = resources.TryAcquire(operation, [new("execution:fixture", ResourceClaimMode.Mutation)]).Lease!;
+        using var run = root.AcceptRun(resources, operation, Guid.NewGuid()); root.Dispose();
+        using (var editable = resources.TryAcquire(Guid.NewGuid(), [new("execution:fixture", ResourceClaimMode.Mutation)]).Lease)
+            Assert.NotNull(editable);
+        using var drain = lifecycle.BeginCompletionDrain(Guid.NewGuid()); Assert.NotNull(drain);
+        using var queue = resources.RegisterNotificationQueue(run, Guid.NewGuid());
+        run.Dispose(); Assert.False(drain.TryReserve());
+        Assert.Null(resources.TryAcquire(Guid.NewGuid(), [new("notifications:catalog", ResourceClaimMode.Reference)]).Lease);
+        using var sender = resources.TryContinueQueue(queue, Guid.NewGuid()).Lease;
+        Assert.NotNull(sender);
+        foreach (var resource in new[] { "notifications:catalog", "secrets:fields", "settings:host", "blobs:content" })
+            Assert.Contains(sender.Claims, claim => claim.ResourceKey == resource);
+        Assert.All(sender.Claims, claim => Assert.Equal(ResourceClaimMode.Reference, claim.Mode));
+        queue.Dispose(); Assert.False(drain.TryReserve());
+        sender.Dispose(); Assert.True(drain.TryReserve());
+        Assert.Null(resources.TryContinueQueue(queue, Guid.NewGuid()).Lease);
+    }
+
+    [Fact(DisplayName = "A Startup Queue Requires Its Real Metadata Root And Does Not Pin Catalog Edits Between Sends")]
+    public void PinsStartupMetadata()
+    {
+        var index = Ready(); var lifecycle = new HostLifecycle(index, TimeProvider.System);
+        var resources = new ResourceLeaseManager(lifecycle); var foreign = new ResourceLeaseManager(lifecycle);
+        using var unrelated = resources.TryAcquire(Guid.NewGuid(), [new("other", ResourceClaimMode.Mutation)]).Lease!;
+        Assert.Throws<InvalidOperationException>(() => resources.RegisterNotificationQueue(unrelated));
+        var operation = Guid.NewGuid();
+        using var root = resources.TryAcquire(operation, [new("notifications:queue", ResourceClaimMode.Mutation)]).Lease!;
+        Assert.Throws<InvalidOperationException>(() => foreign.RegisterNotificationQueue(root));
+        using var queue = resources.RegisterNotificationQueue(root); root.Dispose();
+        using var edit = resources.TryAcquire(Guid.NewGuid(), [new("notifications:catalog", ResourceClaimMode.Mutation)]).Lease;
+        Assert.NotNull(edit);
+        Assert.Equal(ResourceLeaseDenial.Conflict, resources.TryContinueQueue(queue, Guid.NewGuid()).Denial);
+        Assert.Null(foreign.TryContinueQueue(queue, Guid.NewGuid()).Lease);
+        edit.Dispose();
+        using var sender = resources.TryContinueQueue(queue, Guid.NewGuid()).Lease;
+        Assert.NotNull(sender);
+    }
+
+    [Fact(DisplayName = "Notification Continuation Cannot Override Recovery Or Reactivate A Released Run Or Queue")]
+    public void RejectsReleasedContinuations()
+    {
+        var index = Ready(); var lifecycle = new HostLifecycle(index, TimeProvider.System);
+        var resources = new ResourceLeaseManager(lifecycle);
+        var operation = Guid.NewGuid();
+        using var root = resources.TryAcquire(operation, [new("execution:fixture", ResourceClaimMode.Mutation)]).Lease!;
+        using var run = root.AcceptRun(resources, operation, Guid.NewGuid()); root.Dispose();
+        using var queue = resources.RegisterNotificationQueue(run, Guid.NewGuid()); run.Dispose();
+        Assert.Throws<InvalidOperationException>(() => resources.RegisterNotificationQueue(run, Guid.NewGuid()));
+        index.PublishVerified(1, 2, [new("secrets:fields", Guid.NewGuid(), "unknown_cipher_writer")]);
+        Assert.Null(resources.TryContinueQueue(queue, Guid.NewGuid()).Lease);
+        index.PublishVerified(2, 3, []);
+        using var sender = resources.TryContinueQueue(queue, Guid.NewGuid()).Lease;
+        Assert.NotNull(sender); sender.Dispose();
+        index.BlockUnknown("metadata_unknown");
+        Assert.Null(resources.TryContinueQueue(queue, Guid.NewGuid()).Lease);
+        queue.Dispose(); Assert.False(queue.IsActive);
+    }
+
+    private static RecoveryIndex Ready()
+    { var index = new RecoveryIndex(); index.PublishVerified(0, 1, []); return index; }
+}
 
 public sealed class QueuedRunTests
 {

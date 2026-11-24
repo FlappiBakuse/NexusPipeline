@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Microsoft.Win32;
+using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Installation;
 
 namespace NexusPipeline.StorageTests;
@@ -13,6 +14,27 @@ internal sealed class InstallerMetadataFixture : IDisposable
     internal InstallerPaths Paths { get; }
     internal string Engine => Path.Combine(Application, "uninstall", "unins000.exe");
     internal string Shortcut => Path.Combine(Paths.DesktopRoot, "NexusPipeline v0.18.0.lnk");
+
+    internal OriginalMetadata[] ReadOriginalMetadata(bool includeShortcut = false)
+    {
+        var files = new List<(string Role, string Source)>
+        {
+            ("manager", Path.Combine(Paths.ManagerRoot, "identity.protected")),
+            ("manager", Path.Combine(Paths.ManagerRoot, "nexus-installer-worker.exe")),
+            ("uninstall", Path.ChangeExtension(Engine, "dat")),
+            ("uninstall", Engine)
+        };
+        if (includeShortcut) files.Insert(0, ("desktop", Shortcut));
+        return files.Select(file => new OriginalMetadata(file.Role, file.Source, File.ReadAllBytes(file.Source),
+            PhysicalObjectIdentity.Read(file.Source), PhysicalObjectIdentity.Read(Path.GetDirectoryName(file.Source)!))).ToArray();
+    }
+
+    internal sealed record OriginalMetadata(string Role, string Source, byte[] Bytes, PhysicalObjectIdentity Identity,
+        PhysicalObjectIdentity ParentIdentity)
+    {
+        internal string Name => Path.GetFileName(Source);
+        internal string BackupName => $"{Role}--{Name}";
+    }
 
     internal InstallerMetadataFixture(bool seed = true)
     {

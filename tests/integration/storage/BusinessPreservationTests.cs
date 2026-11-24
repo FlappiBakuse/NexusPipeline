@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Runtime.Versioning;
+using System.Text.Json;
 using NexusPipeline.Core.Automation;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Platform.Storage.Automation;
@@ -41,7 +42,19 @@ public sealed class BusinessPreservationTests
         new RunDaysMaintenance(source.Instance, source.Database, source.Lease, fixture.Resources, clock).Tick();
         Assert.Equal(saved.Revision, source.Definitions.Read().Revision);
         var codec = new AutomationBundleCodec(new());
-        var imported = codec.Decode(codec.Encode(saved, clock.Now), saved.Roots.ToDictionary(root => root.Id, root => root.Path), 0).Definitions;
+        var bytes = codec.Encode(saved, clock.Now);
+        using var wire = JsonDocument.Parse(bytes);
+        var core = wire.RootElement;
+        var profile = Assert.Single(core.GetProperty("users").EnumerateArray(), item => item.GetProperty("id").GetGuid() == source.UserA);
+        var daily = profile.GetProperty("bindingOverrides").GetProperty("general");
+        Assert.Equal(2, daily.GetProperty("runDays").GetInt32());
+        Assert.Equal(2, daily.GetProperty("maximumSuccessfulRunsPerDay").GetInt32());
+        var bindingA = Assert.Single(core.GetProperty("bindings").EnumerateArray(), item => item.GetProperty("id").GetGuid() == source.BindingA);
+        var bindingB = Assert.Single(core.GetProperty("bindings").EnumerateArray(), item => item.GetProperty("id").GetGuid() == source.BindingB);
+        Assert.Equal(7, bindingA.GetProperty("runDays").GetInt32());
+        Assert.Equal(6, bindingB.GetProperty("runDays").GetInt32());
+        Assert.Equal(3, bindingA.GetProperty("maximumSuccessfulRunsPerDay").GetInt32());
+        var imported = codec.Decode(bytes, saved.Roots.ToDictionary(root => root.Id, root => root.Path), 0).Definitions;
         Assert.Equal(2, imported.Users.Single(item => item.Id == source.UserA).BindingOverrides.General.RunDays);
         Assert.Equal(3, imported.Bindings.Single(item => item.Id == source.BindingA).MaximumSuccessfulRunsPerDay);
     }

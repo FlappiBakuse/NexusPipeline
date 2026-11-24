@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { isTemporaryReadFailure, waitForBrowserContent, waitForRecovery } from './runtime-ready.mjs';
 
 const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const token = process.env[input.tokenEnvironment];
@@ -15,6 +16,7 @@ async function call(route, body) {
     method: body === undefined ? 'GET' : 'POST', headers: { Authorization: 'Bearer ' + token,
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(30000) });
+  if (await isTemporaryReadFailure(route, response)) return undefined;
   assert.equal(response.ok, true, route + ':' + response.status + ':' + (response.ok ? '' : await response.text()));
   return response.json();
 }
@@ -23,8 +25,9 @@ async function until(action, reason) {
   while (Date.now() < deadline) { const value = await action(); if (value) return value; await new Promise(resolve => setTimeout(resolve, 100)); }
   throw Error(reason);
 }
-const summaries = async () => (await call('automation/users/summary')).items;
+const summaries = async () => (await call('automation/users/summary'))?.items ?? [];
 async function start(bindingId) {
+  await waitForRecovery(call, until);
   const definitions = await call('automation'), settings = await call('settings'), operationId = crypto.randomUUID();
   const accepted = await call('execution/start/' + operationId, { format: 'nexus.control.execution-selection', version: 1,
     target: { kind: 'binding', bindingId }, expectedCatalogRevision: definitions.catalogRevision, expectedSettingsRevision: settings.saved.revision });
@@ -66,7 +69,7 @@ try {
   page.on('pageerror', error => errors.push(String(error)));
   await page.goto(input.address); await page.locator('a[href="#/users"]').first().click();
   const row = user => page.locator(`.automation-row[data-item-id="${user.userId}"]`);
-  await row(empty).getByText('专项任务 · 未配置专项任务', { exact: true }).waitFor();
+  await waitForBrowserContent(page, row(empty).getByText('专项任务 · 未配置专项任务', { exact: true }), token);
   await row(running).getByText('运行中 · 1', { exact: true }).waitFor();
   const future = (await summaries()).find(item => item.userId === scheduled.userId);
   assert.equal(future.queueId, input.context.queueId); assert.ok(Date.parse(future.nextRunAt) > Date.now());
@@ -85,14 +88,19 @@ try {
   for (const activation of ['click', 'Enter', 'Space']) {
     const link = row(success).locator('.summary-link');
     if (activation === 'click') await link.click(); else { await link.focus(); await link.press(activation); }
-    await page.waitForURL(url => url.hash === '#/history?run=' + records[0].runId);
+    await page.waitForURL(url => {
+      const [route, query] = url.hash.split('?');
+      const params = new URLSearchParams(query);
+      return route === '#/history' && params.get('run') === records[0].runId && params.get('user') === success.userId;
+    });
+    checks.push(`${activation} routes to the expected run and account`);
     await page.locator('.history-detail-metadata').getByText(success.name, { exact: true }).waitFor();
     await page.locator('.history-detail-content').getByText('受控每日任务', { exact: true }).first().waitFor();
     await page.locator('.history-detail-content').getByText('专项任务失败', { exact: true }).first().waitFor();
+    checks.push(`${activation} opens the older failure with the expected account and frozen task report`);
     await page.locator('nexus-modal').filter({ has: page.locator('.history-detail-content') }).locator('button[slot="footer"]').click();
     await page.locator('a[href="#/users"]').first().click(); await row(success).locator('.summary-link').waitFor();
   }
-  checks.push('mouse, Enter and Space all open the same older failure record and its frozen task report in the actual history view');
   await cancel(waiting); waiting.stopped = true;
   cancellation = (await call('records/' + waiting.runId)).finalAttempt;
   assert.equal(cancellation.lifecycle, 'cancelled'); assert.equal(cancellation.recovery, 'restored');

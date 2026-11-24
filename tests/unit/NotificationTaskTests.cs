@@ -88,7 +88,8 @@ public sealed class NotificationTaskTests
         var selection = new NotificationTaskSelection([task.Id]);
         var removed = NotificationTaskPolicy.Remove(catalog, catalog.Revision, task.Id, task.Revision);
         Assert.Equal(selection.TaskIds.ToArray(), NotificationTaskPolicy.ValidateSelection(removed, selection, selection).TaskIds.ToArray());
-        Assert.Throws<NotificationTaskException>(() => NotificationTaskPolicy.ValidateSelection(removed, selection));
+        Assert.Equal("notification_target_not_found", Assert.Throws<NotificationTaskException>(() =>
+            NotificationTaskPolicy.ValidateSelection(removed, selection)).Message);
         Assert.Throws<NotificationTaskException>(() => NotificationTaskPolicy.ValidateSelection(removed,
             new([task.Id, Guid.NewGuid()]), selection));
         Assert.Empty(NotificationTaskPolicy.ValidateSelection(removed, new([]), selection).TaskIds);

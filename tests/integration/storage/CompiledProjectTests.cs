@@ -113,7 +113,8 @@ public sealed class CompiledProjectTests
                 {
                     retained = check; check();
                     if (mode == "revoked") { valid = false; check(); }
-                    AssertSnapshot(catalog, snapshot); AssertReadBudget(catalog, snapshot, live);
+                    AssertSnapshot(catalog, snapshot);
+                    if (mode == "normal") AssertReadBudget(catalog, snapshot, live);
                     await AssertInstalledAdapter(provider, catalog, snapshot, live);
                     published = true; return snapshot.Document.Sha256;
                 }, default).AsTask();

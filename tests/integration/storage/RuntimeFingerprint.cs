@@ -1,12 +1,21 @@
+using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Sqlite;
 
 namespace NexusPipeline.StorageTests;
 
 internal static class RuntimeFingerprint
 {
+    [SupportedOSPlatform("windows")]
+    internal static (string Path, PhysicalObjectIdentity? Identity, string? Bytes)[] CaptureFileEvidence(params string?[] files) => files.OfType<string>()
+        .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.Ordinal)
+        .Select(path => File.Exists(path)
+            ? (path, (PhysicalObjectIdentity?)PhysicalObjectIdentity.Read(path), Convert.ToBase64String(File.ReadAllBytes(path)))
+            : (path, null, null)).ToArray();
+
     internal static string[] Capture(string root)
     {
         var database = Path.Combine(root, "state", "runtime.db");
@@ -36,6 +45,23 @@ internal static class RuntimeFingerprint
         }
         return result.Order(StringComparer.Ordinal).ToArray();
     }
+
+    internal static string[] CaptureDatabaseFiles(string coordinator, DatabaseDomain domains)
+    {
+        var state = Path.GetDirectoryName(coordinator)!;
+        var databases = DatabaseLayout.Domains.Where(domain => (domains & domain) != 0)
+            .Select(domain => DatabaseLayout.PathFor(coordinator, domain));
+        var sidecars = new[] { "", "-journal", "-wal", "-shm" };
+        var files = databases.SelectMany(path => sidecars.Select(suffix => path + suffix))
+            .Concat(Directory.EnumerateFiles(state, "runtime.db-mj*").Where(path => DatabaseJournals.Known(Path.GetFileName(path))));
+        return files.Where(File.Exists).Order(StringComparer.Ordinal)
+            .Select(path => Path.GetFileName(path) + ":" + Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path))))
+            .ToArray();
+    }
+
+    internal static bool IsDatabaseFile(string name) => DatabaseJournals.Known(name) ||
+        (name.EndsWith("-wal", StringComparison.Ordinal) || name.EndsWith("-shm", StringComparison.Ordinal)) &&
+        DatabaseJournals.Known(name[..^4]);
 
     private static void CaptureDatabase(SqliteCommand command, string alias, string name, List<string> result)
     {

@@ -1,5 +1,7 @@
 using System.Runtime.Versioning;
+using System.Security.Cryptography;
 using System.Text.Json;
+using NexusPipeline.Core.Configuration;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Settings;
@@ -11,6 +13,68 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class InterfacePreferenceTests
 {
+    [Fact(DisplayName = "Preference Publication Preserves A Foreign Stage And Releases Its Own Failed Stage")]
+    public void KeepsForeignStageOnCreateCollision()
+    {
+        using var fixture = new ExecutionAdmissionFixture();
+        var path = Path.Combine(fixture.Source.Instance.RuntimeRoot, "state", "interface.json");
+        var staging = path + ".pending-test";
+        File.WriteAllText(staging, "foreign data");
+        Assert.Throws<IOException>(() => InterfacePreferences.Publish(staging, path, _ => Assert.Fail("foreign file opened")));
+        Assert.Equal("foreign data", File.ReadAllText(staging));
+        File.Delete(staging);
+
+        var failure = new IOException("fixture write failed");
+        Assert.Same(failure, Assert.Throws<IOException>(() => InterfacePreferences.Publish(staging, path, _ => throw failure)));
+        Assert.False(File.Exists(staging));
+        Assert.False(File.Exists(path));
+    }
+
+    [Theory(DisplayName = "A Preference Write Failure Preserves Foreign Objects And Reports A Separate Stage Cleanup Error")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PreservesReplacedStageOnFailure(bool directory)
+    {
+        using var fixture = new ExecutionAdmissionFixture();
+        var path = Path.Combine(fixture.Source.Instance.RuntimeRoot, "state", "interface.json");
+        var staging = path + ".pending-test";
+        var displaced = path + ".displaced-test";
+        var foreign = directory ? Path.Combine(staging, "foreign") : staging;
+        File.WriteAllText(path, "existing preferences");
+        var primary = new IOException("fixture write failed after stage replacement");
+        Assert.Same(primary, Assert.Throws<IOException>(() => InterfacePreferences.Publish(staging, path, output =>
+        {
+            output.WriteByte(17);
+            output.Dispose();
+            File.Move(staging, displaced);
+            if (directory) Directory.CreateDirectory(staging);
+            File.WriteAllText(foreign, "foreign replacement");
+            throw primary;
+        })));
+        Assert.Equal("interface_stage_cleanup_unknown", Assert.Single(CleanupFailures.Read(primary)).Message);
+        Assert.Equal("existing preferences", File.ReadAllText(path));
+        Assert.Equal("foreign replacement", File.ReadAllText(foreign));
+        Assert.Equal([17], File.ReadAllBytes(displaced));
+    }
+
+    [Fact(DisplayName = "The Reopened Preference Stage Must Preserve Its Verified Bytes Even When The Object Identity Matches")]
+    public void RejectsChangedStageBytes()
+    {
+        using var fixture = new ExecutionAdmissionFixture();
+        var parent = Path.Combine(fixture.Source.Instance.RuntimeRoot, "state");
+        var staging = Path.Combine(parent, "interface.pending-test");
+        byte[] original = [0, 17]; byte[] changed = [1, 17];
+        File.WriteAllBytes(staging, original);
+        var saved = new FileObjectDeletion(staging, PhysicalObjectIdentity.Read(parent), PhysicalObjectIdentity.Read(staging),
+            FileObjectKind.File, original.Length, Convert.ToHexStringLower(SHA256.HashData(original)));
+        using (var ready = InterfacePreferences.OpenReadyStage(saved)) Assert.Equal(original[0], ready.ReadByte());
+        File.WriteAllBytes(staging, changed);
+        Assert.Equal(saved.Identity, PhysicalObjectIdentity.Read(staging));
+        Assert.Equal("interface_stage_publication_unknown", Assert.Throws<IOException>(() =>
+            InterfacePreferences.OpenReadyStage(saved).Dispose()).Message);
+        Assert.Equal(changed, File.ReadAllBytes(staging));
+    }
+
     [Fact(DisplayName = "Interface Preferences Replay Their CAS Snapshot, Reject Stale Writes, Survive Reopen And Preserve Invalid Saved Bytes")]
     public void PreservesPreferences()
     {

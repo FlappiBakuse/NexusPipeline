@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using NexusPipeline.Core.Automation;
@@ -50,7 +51,8 @@ public sealed class JudgementInputsTests
         var plan = Assert.IsType<FrozenExecutionPlan>(preview.ReadPlan()).ReadWire(); var worker = Assert.Single(plan.Steps).JudgementWorker!;
         Assert.NotNull(worker); Assert.Null(worker.Python);
         Assert.Equal(Environment.GetEnvironmentVariable("NEXUS_TEST_HOST_EXE"), worker.Broker.Path);
-        Assert.Equal(JudgementWorkerProtocol.Hash(Encoding.UTF8.GetBytes("globalThis.nexusJudge = () => ({outcome:'unverified',reason:''});")), worker.ScriptSha256);
+        var scriptBytes = "globalThis.nexusJudge = () => ({outcome:'unverified',reason:''});"u8;
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(scriptBytes)), worker.ScriptSha256);
         var after = source.Snapshot(); Assert.Equal(before.Rows, after.Rows); Assert.Equal(before.Files, after.Files);
         using var missing = source.Builder.Prepare(source.Request(new BindingTarget(source.OtherBinding)), PlanBuilderFixture.CreatedAt);
         Assert.Null(missing.ReadPlan()); Assert.True(missing.Explanation.HasBlockedItems);
@@ -111,11 +113,13 @@ public sealed class JudgementInputsTests
     [Fact(DisplayName = "Attempt Log Tail Retains Four Mi B And Never Starts Inside A Utf 8 Character")]
     public void BoundsUtf8Tail()
     {
+        const int maximumTailBytes = 4 * 1024 * 1024;
+        const int sourceLines = 512;
         var tail = new JudgementLogTail(); var line = new string('界', 4095);
-        var count = JudgementWorkerProtocol.MaximumLogBytes / Encoding.UTF8.GetByteCount(line) + 2;
-        for (var index = 0; index < count; index++) tail.AppendLine(line);
-        var text = tail.Text(); Assert.True(tail.IsTruncated); Assert.EndsWith(line + "\n", text);
-        Assert.InRange(Encoding.UTF8.GetByteCount(text), JudgementWorkerProtocol.MaximumLogBytes - 3, JudgementWorkerProtocol.MaximumLogBytes);
+        for (var index = 0; index < sourceLines; index++) tail.AppendLine(line);
+        tail.AppendLine("结束🙂");
+        var text = tail.Text(); Assert.True(tail.IsTruncated); Assert.EndsWith(line + "\n结束🙂\n", text);
+        Assert.InRange(Encoding.UTF8.GetByteCount(text), maximumTailBytes - 3, maximumTailBytes);
         Assert.DoesNotContain('\ufffd', text);
     }
 

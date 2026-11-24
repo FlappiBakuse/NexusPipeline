@@ -1,7 +1,7 @@
 import { contractFingerprint, sdkVersion, type FrontendTransport } from '@nexuspipeline/extension-sdk';
 import { FrontendLoader } from '../../apps/web/src/extensions/frontend-loader';
 import { FrontendRegistry } from '../../apps/web/src/extensions/frontend-registry';
-import type { ControlClient } from '../../apps/web/src/control/client';
+import { ControlClient } from '../../apps/web/src/control/client';
 import type { MediaPool } from '../../apps/web/src/control/media-pool';
 
 export async function loaderContract(check: (value: unknown, name: string) => void): Promise<void> {
@@ -63,4 +63,39 @@ export async function loaderContract(check: (value: unknown, name: string) => vo
     try { await transports.get('fast-fixture')!.invoke('read-state', {}, new AbortController().signal); } catch { revoked = true; }
     check(revoked, 'disconnect still revokes completed plugin transport');
   } finally { release('cancelled-card'); await loader.dispose(); delete global.loaderFixture; }
+
+  const [entry] = entries;
+  let assets = 0, identities = 0, activations = 0, revoked = false;
+  global.loaderFixture = { ...state, capture() { activations++; } };
+  const transient = new ControlClient('http://loader.test', async input => {
+    const path = new URL(String(input)).pathname;
+    if (path.endsWith('/identity')) {
+      if (++identities === 2) return Response.json({ code: 'temporarily_unavailable' }, { status: 503 });
+      return Response.json({ activationId: revoked && identities === 5 ? 'new-activation' : activationId });
+    }
+    if (path.endsWith('/assets')) {
+      if (++assets === 1) throw new TypeError('Failed to fetch');
+      return await client.response(path);
+    }
+    return Response.json({ connectionKind: 'local', extensions: [entry] });
+  });
+  const recovered = new FrontendLoader(transient, {} as MediaPool, registry, error => errors.push(error));
+  try {
+    const work = recovered.synchronize();
+    for (let attempt = 0; attempt < 400 && identities < 2; attempt++) await flush();
+    check(identities === 2 && activations === 1 && surfaces() === '',
+      'frontend contributions wait for post-activation identity confirmation');
+    await work;
+    check(assets === 2 && identities === 3 && activations === 1 && !errors.length && surfaces() === 'fast-fixture:card',
+      'recovering assets and the post-activation identity does not repeat plugin activation');
+  } finally { await recovered.dispose(); delete global.loaderFixture; }
+  global.loaderFixture = { ...state, capture() { activations++; } };
+  revoked = true;
+  const rejected = new FrontendLoader(transient, {} as MediaPool, registry, error => errors.push(error));
+  try {
+    await rejected.synchronize();
+    check(activations === 2 && surfaces() === '' && errors.length === 1 &&
+      (errors[0] as Error).message === 'extension_frontend_activation_changed',
+      'identity change rolls back the staged frontend registrations without another activation');
+  } finally { await rejected.dispose(); delete global.loaderFixture; }
 }

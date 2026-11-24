@@ -33,11 +33,10 @@ internal static class HistoryDatasetFixture
             var elapsed = Stopwatch.StartNew();
             for (var start = previous; start < size; start += 256)
                 records.AppendCompleted(Enumerable.Range(start, Math.Min(256, size - start)).Select(Record).ToArray());
-            stages.Add(new { rows = size, appended = size - previous, appendMilliseconds = elapsed.Elapsed.TotalMilliseconds,
-                queries = MeasureQueries(records, size), databaseBytes = DatabaseLayout.Domains.Sum(domain =>
-                    new FileInfo(DatabaseLayout.PathFor(database.DatabasePath, domain)).Length),
-                databaseFiles = DatabaseLayout.Domains.Select(domain => new { domain = DatabaseLayout.Name(domain),
-                    sizeBytes = new FileInfo(DatabaseLayout.PathFor(database.DatabasePath, domain)).Length }).ToArray() });
+            var appendMilliseconds = elapsed.Elapsed.TotalMilliseconds;
+            var databaseFiles = HistoryReadSeed.MeasureDatabase(database);
+            stages.Add(new { rows = size, appended = size - previous, appendMilliseconds,
+                queries = MeasureQueries(records, size), databaseFiles.DatabaseBytes, databaseFiles.SidecarBytes, databaseFiles.DatabaseFiles });
             previous = size;
             Console.WriteLine($"history rows verified: {size}");
         }
@@ -58,8 +57,19 @@ internal static class HistoryDatasetFixture
     private static object MeasureQueries(RunRecordStore records, int expectedCount)
     {
         var plans = new List<object>();
-        foreach (var query in new[] { new RecordQuery(), new(AutomationId: Id("automation", 2)), new(UserId: Id("user", 3)), new(Business: BusinessOutcome.Failed) })
+        var sortedRecords = ExpectedRecords(expectedCount);
+        var automation = Id("automation", 2);
+        var user = Id("user", 3);
+        (RecordQuery Query, Func<CompletedRunRecord, bool> Matches)[] filters =
+        [
+            (new(), _ => true),
+            (new(AutomationId: automation), record => record.AutomationId == automation),
+            (new(UserId: user), record => record.UserId == user),
+            (new(Business: BusinessOutcome.Failed), record => record.FinalAttempt.Business == BusinessOutcome.Failed)
+        ];
+        foreach (var (query, matches) in filters)
         {
+            var expected = sortedRecords.Where(matches).Take(50).ToArray();
             var plan = records.ExplainPage(query);
             var timings = new List<double>();
             for (var repetition = 0; repetition < 25; repetition++)
@@ -67,29 +77,36 @@ internal static class HistoryDatasetFixture
                 var elapsed = Stopwatch.StartNew();
                 var page = records.ReadPage(query);
                 timings.Add(elapsed.Elapsed.TotalMilliseconds);
-                if (page.Items.Count != 50) throw new IOException("Fixture first-page size differed");
+                if (expected.Length != 50 || !page.Items.SequenceEqual(expected))
+                    throw new IOException("Fixture filtered first page differs from its known records");
             }
             var sorted = timings.Order().ToArray();
             plans.Add(new { query, plan, samplesMilliseconds = timings, p50Milliseconds = sorted[12], p95Milliseconds = sorted[23], maxMilliseconds = sorted[^1] });
         }
+        var count = VerifyRecords(records, sortedRecords);
+        return new { samplesPerFilter = 25, boundedPageSize = 200, verifiedTotalRows = count, plans };
+    }
+
+    private static CompletedRunRecord[] ExpectedRecords(int count) => Enumerable.Range(0, count).Select(Record)
+        .OrderBy(record => record.EndedAt).ThenBy(record => record.FinalAttempt.RunId.ToString("D"), StringComparer.Ordinal).ToArray();
+
+    private static int VerifyRecords(RunRecordStore records, IReadOnlyList<CompletedRunRecord> expected)
+    {
         RecordCursor? cursor = null;
-        CompletedRunRecord? previous = null;
         var count = 0;
         do
         {
             var page = records.ReadPage(new(200, After: cursor));
             foreach (var record in page.Items)
             {
-                if (previous is not null && (record.EndedAt < previous.EndedAt || record.EndedAt == previous.EndedAt &&
-                    string.CompareOrdinal(record.FinalAttempt.RunId.ToString("D"), previous.FinalAttempt.RunId.ToString("D")) <= 0))
-                    throw new IOException("Fixture keyset history repeated or reordered records");
-                previous = record;
+                if (count >= expected.Count || record != expected[count])
+                    throw new IOException("Fixture keyset history differs from its ordered seed");
                 count++;
             }
             cursor = page.Next;
         } while (cursor is not null);
-        if (count != expectedCount) throw new IOException("Fixture keyset history omitted records");
-        return new { samplesPerFilter = 25, boundedPageSize = 200, verifiedTotalRows = count, plans };
+        if (count != expected.Count) throw new IOException("Fixture keyset history omitted records");
+        return count;
     }
 
     internal static int QueryExisting(string[] args)
@@ -143,7 +160,7 @@ internal static class HistoryDatasetFixture
         File.WriteAllBytes(Path.Combine(destination, "state-initialization.guard"), []);
         var restored = new InstanceRoot(contracts).OpenExisting(destination);
         var verifiedDatabase = StateDatabase.OpenExisting(restored, Path.Combine(root, "restore-diagnostics"));
-        if (new RunRecordStore(verifiedDatabase).ReadPage(new()).Items.Count != 50) throw new IOException("Restored history is unreadable");
+        var restoredRecords = VerifyRecords(new(verifiedDatabase), ExpectedRecords(100000));
         var targetBlobs = new ImmutableBlobStore(restored, contracts);
         var sourceBlobs = new ImmutableBlobStore(source, contracts);
         var restoredAssets = new RecordAssetStore(verifiedDatabase, targetBlobs);
@@ -158,7 +175,8 @@ internal static class HistoryDatasetFixture
             targetBlobs.Verify(reference);
             if (restoredAssets.ReadForRun(asset.RunId).Items.Single() != asset) throw new IOException("Restored asset reference differs");
         }
-        return new { databaseBackup = backup, restoredRoot = destination, restoredReferences = assets.Count, instanceIdentityRetained = restored.InstanceId == source.InstanceId,
+        return new { databaseBackup = backup, restoredRoot = destination, restoredRecords, restoredReferences = assets.Count,
+            instanceIdentityRetained = restored.InstanceId == source.InstanceId,
             method = "SQLite backup API plus verified immutable content; fixture-only explicit instance path rebinding; restored instance never launched" };
     }
 

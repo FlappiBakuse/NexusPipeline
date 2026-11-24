@@ -62,14 +62,15 @@ public sealed class JournalReadTests
         using var inner = JournalReadScope.Hold(second, secondId);
         Assert.Equal(firstBytes, firstReader.Read(firstId).Export());
         Assert.Equal(secondBytes, secondReader.Read(secondId).Export());
-        Assert.Equal("journal_read_scope_order", Assert.Throws<InvalidOperationException>(() => outer.Dispose()).Message);
         Assert.Throws<IOException>(() => File.WriteAllText(firstPath, "changed"));
         Assert.Throws<IOException>(() => File.WriteAllText(secondPath, "changed"));
         inner.Dispose();
         using (File.Open(secondPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
+        Assert.Equal(secondBytes, File.ReadAllBytes(secondPath));
         Assert.Throws<IOException>(() => File.WriteAllText(firstPath, "changed"));
         Assert.Equal(firstBytes, firstReader.Read(firstId).Export());
         outer.Dispose();
+        Assert.Equal(firstBytes, File.ReadAllBytes(firstPath));
         File.WriteAllText(firstPath, "changed");
         AssertTampering("history", () => firstReader.Read(firstId));
         Assert.Equal(secondBytes, secondReader.Read(secondId).Export());
@@ -110,12 +111,9 @@ public sealed class JournalReadTests
             JournalReadScope.SelectParent(store.Instance, store.Contracts, first);
             Assert.Equal(original, reader.Read(first).Export());
             JournalReadScope.SelectParent(store.Instance, store.Contracts, second);
-            using (var held = new FileStream(secondPath, FileMode.Open, FileAccess.Read, FileShare.Read))
-            {
-                held.Lock(0, held.Length);
-                try { Assert.Equal(secondBytes, reader.Read(second).Export()); }
-                finally { held.Unlock(0, held.Length); }
-            }
+            Assert.Equal(secondBytes, reader.Read(second).Export());
+            Assert.Equal(secondBytes, File.ReadAllBytes(secondPath));
+            Assert.Throws<IOException>(() => File.WriteAllText(secondPath, "changed"));
             JournalReadScope.SelectParent(store.Instance, store.Contracts, first);
             Assert.Equal(original, reader.Read(first).Export());
         }
@@ -129,6 +127,11 @@ public sealed class JournalReadTests
         Assert.Equal("changed", File.ReadAllText(firstPath));
         JournalReadScope.SelectParent(store.Instance, store.Contracts, second);
         Assert.Equal(secondBytes, reader.Read(second).Export());
+        parents.Dispose();
+        using (File.Open(secondPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
+        var cold = new JournalStore(store.Instance, store.Contracts);
+        AssertTampering("history", () => cold.Read(first));
+        Assert.Equal(secondBytes, cold.Read(second).Export());
     }
 
     private static string HistoryPath(JournalStore store, Guid journal) =>

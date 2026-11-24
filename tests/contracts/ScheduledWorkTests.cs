@@ -28,12 +28,21 @@ public sealed class ScheduledWorkTests
     public async Task RevokesFailedActivation()
     {
         var fixture = new ScheduledContractFixture();
-        await Assert.ThrowsAsync<IOException>(() => fixture.ActivateAsync(() => throw new IOException("fixture_activation_failure")));
+        var failure = await Assert.ThrowsAsync<IOException>(() => fixture.ActivateAsync(() =>
+        {
+            Assert.Empty(fixture.Registry.PublishedProviderIds("fixture"));
+            throw new IOException("fixture_activation_failure");
+        }));
+        Assert.Equal("fixture_activation_failure", failure.Message);
         Assert.Empty(fixture.Registry.PublishedProviderIds("fixture"));
         Assert.True(fixture.Scope!.Cancellation.IsCancellationRequested);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => fixture.RegisterRetainedAsync().AsTask());
         await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.DispatchAsync().AsTask());
         Assert.Equal(0, fixture.Calls);
+        await using var reactivated = await fixture.ActivateAsync();
+        Assert.Equal("daily", Assert.Single(fixture.Registry.PublishedProviderIds("fixture")));
+        Assert.Equal(BusinessOutcome.NotApplicable, (await fixture.DispatchAsync()).Business);
+        Assert.Equal(1, fixture.Calls);
     }
 
     [Fact(DisplayName = "Missing Schedule Capability Fails Before Registering Any Work Provider")]

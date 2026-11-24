@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using NexusPipeline.Platform.Storage.Sqlite;
 using System.Runtime.Versioning;
 using Microsoft.Data.Sqlite;
@@ -67,17 +68,26 @@ public sealed class FeedStoreTests
         var transport = new UpdateHttpTransport(trust, () => new HttpClient(handler, disposeHandler: false));
         var result = await transport.Feed(HostUpdateChannel.Stable, input.Verifier(), default, "https://mirror.example.test/metadata/update/1/");
         Assert.Equal(1, result.Feed.Identity.Sequence);
-        Assert.Equal(new[] { "https://mirror.example.test/metadata/update/1/stable/feed.json", "https://mirror.example.test/metadata/update/1/stable/feed.sig.json" }, handler.Requests);
-        Assert.Throws<IOException>(() => trust.RequireArtifact("https://mirror.example.test/arbitrary/Host.zip"));
-        await Assert.ThrowsAsync<IOException>(() => transport.Feed(HostUpdateChannel.Stable, input.Verifier(), default, "https://127.0.0.1/metadata/"));
+        Assert.Equal("fixture-only", result.KeyId);
+        Assert.Equal(signed.Feed, result.FeedBytes());
+        Assert.Equal(signed.Signature, result.SignatureBytes());
+        var expectedRequests = new[] { "https://mirror.example.test/metadata/update/1/stable/feed.json",
+            "https://mirror.example.test/metadata/update/1/stable/feed.sig.json" };
+        Assert.Equal(expectedRequests, handler.Requests.Order(StringComparer.Ordinal));
+        Assert.Equal("update_trust_unavailable",
+            Assert.Throws<IOException>(() => trust.RequireArtifact("https://mirror.example.test/arbitrary/Host.zip")).Message);
+        var rejection = await Assert.ThrowsAsync<IOException>(() =>
+            transport.Feed(HostUpdateChannel.Stable, input.Verifier(), default, "https://127.0.0.1/metadata/"));
+        Assert.Equal("update_trust_unavailable", rejection.Message);
+        Assert.Equal(expectedRequests, handler.Requests.Order(StringComparer.Ordinal));
     }
 
     private sealed class MirrorHandler(byte[] feed, byte[] signature) : HttpMessageHandler
     {
-        internal List<string> Requests { get; } = [];
+        internal ConcurrentQueue<string> Requests { get; } = new();
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            Requests.Add(request.RequestUri!.AbsoluteUri);
+            Requests.Enqueue(request.RequestUri!.AbsoluteUri);
             return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { RequestMessage = request,
                 Content = new ByteArrayContent(request.RequestUri.AbsolutePath.EndsWith("feed.sig.json", StringComparison.Ordinal) ? signature : feed) });
         }

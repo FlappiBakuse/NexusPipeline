@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using System.Text.Json;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Journals;
@@ -10,26 +11,51 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class BoundInputsTests
 {
-    [Fact(DisplayName = "Independent Readers Reuse The Active Protected History And Reject A New Unregistered Entry")]
-    public void ReusesActiveHistory()
+    [Fact(DisplayName = "Independent Readers Verify The Active History Bytes And Reject An Unregistered Entry")]
+    public async Task ReusesActiveHistory()
     {
         using var fixture = new AndroidRuntimeFixture(configuration: true, launch: false, forceClose: false);
         using var accepted = fixture.Base.Take(fixture.Accepted.Acceptance.OperationId);
         accepted.Prepared.Dispose();
         var source = fixture.Source;
         var registry = source.Lease.BindAttemptReads(source.Database);
-        using var active = registry.Start(source.Instance, source.Database, new(), fixture.Accepted.JournalId);
-        using var parents = JournalReadScope.HoldParents(source.Instance, new(), registry);
-        var first = new JournalStore(source.Instance, new()).ReadAllRevisions(fixture.Accepted.JournalId);
-        var second = new JournalStore(source.Instance, new()).ReadAllRevisions(fixture.Accepted.JournalId);
-        Assert.Same(first[0], second[0]);
         var directory = Path.Combine(source.Instance.RuntimeRoot, "journals", fixture.Accepted.JournalId.ToString("D"));
-        Assert.Throws<IOException>(() => File.WriteAllBytes(Path.Combine(directory, "0000000001.json"), [7]));
+        var revision = Path.Combine(directory, "0000000001.json");
+        var original = File.ReadAllBytes(revision);
+        using var expected = JsonDocument.Parse(original);
+        void ReadOriginal()
+        {
+            var history = new JournalStore(source.Instance, new()).ReadAllRevisions(fixture.Accepted.JournalId);
+            Assert.Equal(fixture.Accepted.JournalId, history[0].JournalId);
+            Assert.Equal(fixture.Accepted.Acceptance.OperationId, history[0].Root.GetProperty("operationId").GetGuid());
+            Assert.True(JsonElement.DeepEquals(expected.RootElement, history[0].Root));
+        }
         var unknown = Path.Combine(directory, "unknown.json");
-        File.WriteAllBytes(unknown, [9]);
-        try { Assert.Throws<IOException>(() => new JournalStore(source.Instance, new()).Read(fixture.Accepted.JournalId)); }
-        finally { File.Delete(unknown); }
-        Assert.Same(first[0], new JournalStore(source.Instance, new()).ReadAllRevisions(fixture.Accepted.JournalId)[0]);
+        using (registry.Start(source.Instance, source.Database, new(), fixture.Accepted.JournalId))
+        {
+            void ReadOwned()
+            {
+                using var parents = JournalReadScope.HoldParents(source.Instance, new(), registry);
+                ReadOriginal();
+            }
+            await Task.WhenAll(Task.Run(ReadOwned), Task.Run(ReadOwned));
+            Assert.Throws<IOException>(() => File.WriteAllBytes(revision, [7]));
+            await Task.Run(() => File.WriteAllBytes(unknown, [9]));
+            try
+            {
+                using var parents = JournalReadScope.HoldParents(source.Instance, new(), registry);
+                Assert.Equal("journal_protected_history_changed",
+                    Assert.Throws<IOException>(() => new JournalStore(source.Instance, new()).Read(fixture.Accepted.JournalId)).Message);
+            }
+            finally { File.Delete(unknown); }
+            ReadOwned();
+        }
+        using (var released = File.Open(revision, FileMode.Open, FileAccess.Read, FileShare.None))
+        using (var bytes = new MemoryStream())
+        {
+            released.CopyTo(bytes);
+            Assert.Equal(original, bytes.ToArray());
+        }
         fixture.VerifyOriginal();
     }
 

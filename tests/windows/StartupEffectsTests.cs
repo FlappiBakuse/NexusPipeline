@@ -5,10 +5,11 @@ using NexusPipeline.Core.Settings;
 using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Windows;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace NexusPipeline.WindowsTests;
 
-public sealed class StartupEffectsTests
+public sealed class StartupEffectsTests(ITestOutputHelper output)
 {
     [Fact(DisplayName = "The Typed Startup Port Creates Only A New Owned Definition And Removes Only Its Matching Registration")]
     public void RegistersOwnedTasks()
@@ -25,6 +26,21 @@ public sealed class StartupEffectsTests
         Assert.Equal(StartupRegistrationEffect.AlreadySatisfied, fixture.Effects.RemoveIfMatching(command.Definition));
         Assert.False(File.Exists(fixture.Path));
         Assert.Equal(1, fixture.Deletes);
+    }
+
+    [Fact(DisplayName = "Startup Removal Normalizes Expected Xml Once But Reads And Normalizes Each Actual Definition")]
+    public void ReusesExpectedNormalization()
+    {
+        var fixture = new Fixture();
+        Assert.Equal(StartupRegistrationEffect.Created, fixture.Effects.CreateIfMissing(fixture.Command));
+        fixture.Reads = fixture.Normalizes = 0;
+
+        Assert.Equal(StartupRegistrationEffect.Removed, fixture.Effects.RemoveIfMatching(fixture.Command.Definition));
+
+        output.WriteLine($"Task Scheduler remove: {fixture.Reads} port reads, {fixture.Normalizes} normalization calls");
+        Assert.False(File.Exists(fixture.Path));
+        Assert.Equal(3, fixture.Reads);
+        Assert.Equal(3, fixture.Normalizes);
     }
 
     [Theory(DisplayName = "A Foreign Startup Definition Cannot Be Replaced Or Removed")]
@@ -119,7 +135,7 @@ public sealed class StartupEffectsTests
         internal string Path { get; }
         internal StartupRegistrationCommand Command { get; }
         internal StartupRegistrationEffects Effects { get; }
-        internal int Creates, Deletes, Opens;
+        internal int Creates, Deletes, Opens, Reads, Normalizes;
         internal Action? BeforeValidation, AfterRead, BeforeCreate;
         internal string? Fault;
 
@@ -148,6 +164,7 @@ public sealed class StartupEffectsTests
         {
             public string? Read(string name)
             {
+                owner.Reads++;
                 if (owner.Fault == "query") throw new IOException("fixture_query_failure");
                 Assert.Equal(StartupTaskXml.TaskName(owner.Command.Definition), name);
                 var xml = File.Exists(owner.Path) ? File.ReadAllText(owner.Path) : null;
@@ -156,7 +173,11 @@ public sealed class StartupEffectsTests
                 afterRead?.Invoke();
                 return xml;
             }
-            public string Normalize(string xml) => StartupTaskXml.Read(xml).ToString(SaveOptions.DisableFormatting);
+            public string Normalize(string xml)
+            {
+                owner.Normalizes++;
+                return StartupTaskXml.Read(xml).ToString(SaveOptions.DisableFormatting);
+            }
             public void Validate(string name, string xml, string userSid)
             {
                 owner.BeforeValidation?.Invoke();

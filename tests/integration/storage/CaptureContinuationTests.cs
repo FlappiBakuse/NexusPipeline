@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Platform.Processes;
@@ -20,6 +21,17 @@ public sealed class CaptureContinuationTests
         var installed = false;
         BlobReference? artifact = null, png = null;
         byte[]? originalPng = null;
+        (string Name, int ProcessId)[]? originalHelpers = null;
+        (string Name, int ProcessId)[] ReadNativeHelpers()
+        {
+            var directory = Path.Combine(fixture.Directory, "observed");
+            return Directory.EnumerateFiles(directory, "*.json").Order(StringComparer.Ordinal).Select(path =>
+            {
+                using var value = JsonDocument.Parse(File.ReadAllBytes(path));
+                return (Path.GetFileName(path), Value: value.RootElement.Clone());
+            }).Where(item => item.Value.GetProperty("arguments").EnumerateArray().Any(value => value.GetString() == "exec-out"))
+                .Select(item => (item.Item1, item.Value.GetProperty("processId").GetInt32())).ToArray();
+        }
         var observer = new CaptureObserver((point, _) =>
         {
             if (point != TargetPersistencePoint.CaptureCollectedAppended || installed) return;
@@ -28,6 +40,9 @@ public sealed class CaptureContinuationTests
             artifact = saved.State.Result; png = saved.Result.Png;
             Assert.NotNull(artifact); Assert.NotNull(png);
             originalPng = File.ReadAllBytes(ContentPath(fixture, png!));
+            originalHelpers = ReadNativeHelpers();
+            var helper = Assert.Single(originalHelpers);
+            Assert.Contains(saved.Result.HelperStopped!.AllFamily, process => process.ProcessId == helper.ProcessId);
             Assert.ThrowsAny<IOException>(() => new CaptureEvidenceReader(fixture.Source.Instance, fixture.Source.Database, new())
                 .OpenCaptured(saved.State.Binding, artifact!));
             fixture.Base.Execute("CREATE TRIGGER main.fixture_capture_advance_failure BEFORE UPDATE OF revision ON operation_journals " +
@@ -77,7 +92,7 @@ public sealed class CaptureContinuationTests
             Assert.Equal(artifact, final.State.Result); Assert.Equal(png, final.Result!.Png);
             Assert.Equal("captured", final.Result.Outcome);
             Assert.Equal(originalPng, File.ReadAllBytes(ContentPath(fixture, png!)));
-            Assert.Equal(1, observer.CollectedCount);
+            Assert.Equal(originalHelpers, ReadNativeHelpers());
             RequireStoppedParent(final);
         }));
     }
@@ -131,13 +146,11 @@ public sealed class CaptureContinuationTests
     {
         internal int SourceCount { get; private set; }
         internal int RootCount { get; private set; }
-        internal int CollectedCount { get; private set; }
         public void Reached(TargetPersistencePoint point, ExecutionTargetBinding binding) { }
         public void Reached(TargetPersistencePoint point, ExecutionCaptureBinding binding)
         {
             if (point == TargetPersistencePoint.CaptureSourcePublished) SourceCount++;
             if (point == TargetPersistencePoint.CaptureRootPublished) RootCount++;
-            if (point == TargetPersistencePoint.CaptureCollectedAppended) CollectedCount++;
             observe(point, binding);
         }
     }

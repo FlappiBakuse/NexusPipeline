@@ -17,6 +17,23 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class FrontendClientTests
 {
+    [Fact(DisplayName = "Frontend Client Cancellation Attempts Every Callback And Still Retires The Grant")]
+    public void ContinuesRetirementAfterCallbackFailure()
+    {
+        using var clients = new FrontendClients(TimeProvider.System, Guid.NewGuid());
+        var caller = Caller("remote:one");
+        var first = clients.Create(caller, "http://one");
+        var second = clients.Create(caller, "http://one");
+        var accepted = clients.Resolve(first.Token, caller, "http://one");
+        var observed = false;
+        using var survivor = accepted.Lifetime.Register(() => observed = true);
+        using var failure = accepted.Lifetime.Register(() => throw new IOException("private callback detail"));
+        clients.Retire(first.Token, caller, "http://one");
+        Assert.True(observed);
+        Assert.Throws<UnauthorizedAccessException>(accepted.RequireCurrent);
+        clients.Resolve(second.Token, caller, "http://one").RequireCurrent();
+    }
+
     [Fact(DisplayName = "Independent Host Issued Clients Remain Bound To Their Original Subject Origin And Current Authority")]
     public void BindsCurrentAuthority()
     {

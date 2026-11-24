@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -10,12 +11,159 @@ using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
+using Xunit.Abstractions;
 using static NexusPipeline.StorageTests.InitialRecoveryTests;
 
 namespace NexusPipeline.StorageTests;
 
-public sealed class RecoveryRegistryTests
+public sealed class RecoveryRegistryTests(ITestOutputHelper output)
 {
+    [Theory(DisplayName = "Recovery History Fetches Each Ordered Page Without Per-Journal Queries")]
+    [InlineData(0, 1)]
+    [InlineData(1, 2)]
+    [InlineData(127, 2)]
+    [InlineData(128, 3)]
+    [InlineData(129, 4)]
+    public void ReadsHistoryPages(int count, int expectedSelects)
+    {
+        var (database, _) = RecordStoreFixture.NewStore();
+        var expected = SeedHistory(database, count);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, allowPooling: false,
+            domains: DatabaseDomain.Runtime);
+        using var transaction = DatabaseConnections.BeginRead(connection);
+        RegisteredJournal[] Read() => RecoveryJournalRegistry.ReadHistoryInside(connection, transaction).ToArray();
+        var selects = new List<string>();
+        SQLitePCL.strdelegate_trace trace = (_, sql) =>
+        {
+            if (sql.StartsWith("SELECT ", StringComparison.OrdinalIgnoreCase)) selects.Add(sql);
+        };
+        SQLitePCL.raw.sqlite3_trace(connection.Handle!, trace, null);
+        RegisteredJournal[] actual;
+        try { actual = Read(); }
+        finally { SQLitePCL.raw.sqlite3_trace(connection.Handle!, (SQLitePCL.strdelegate_trace?)null, null); }
+        Assert.Equal(expected.Length, actual.Length);
+        for (var index = 0; index < expected.Length; index++)
+        {
+            Assert.Equal(expected[index].ResourceKeys, actual[index].ResourceKeys, StringComparer.Ordinal);
+            Assert.Equal(expected[index], actual[index] with { ResourceKeys = expected[index].ResourceKeys });
+        }
+        const int iterations = 40;
+        for (var i = 0; i < 5; i++) _ = Read();
+        using var process = Process.GetCurrentProcess();
+        var cpuBefore = process.TotalProcessorTime;
+        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        var started = Stopwatch.GetTimestamp();
+        for (var i = 0; i < iterations; i++) _ = Read();
+        var elapsed = Stopwatch.GetElapsedTime(started);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+        var cpu = process.TotalProcessorTime - cpuBefore;
+        output.WriteLine($"journal-history rows={count} selects={selects.Count} repetitions={iterations} elapsed-ms={elapsed.TotalMilliseconds:F3} cpu-ms={cpu.TotalMilliseconds:F3} allocated-bytes={allocated}");
+        foreach (var sql in selects.Where(sql => !sql.Contains("journal_id=", StringComparison.Ordinal) ||
+                     sql.Contains(expected.FirstOrDefault()?.JournalId.ToString("D") ?? "none", StringComparison.Ordinal)).Distinct(StringComparer.Ordinal))
+        {
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "EXPLAIN QUERY PLAN " + sql;
+            using var planner = command.ExecuteReader();
+            while (planner.Read()) output.WriteLine(planner.GetString(3));
+        }
+        Assert.Equal(expectedSelects, selects.Count);
+    }
+
+    [Fact(DisplayName = "A Recovery History Iterator Releases Its Page And Reads Fresh Journal And Resource Facts On The Next Page")]
+    public void ReopensHistoryAtPageBoundary()
+    {
+        var (database, _) = RecordStoreFixture.NewStore();
+        var expected = SeedHistory(database, 129);
+        var registry = new RecoveryJournalRegistry(database);
+        using var history = registry.ReadHistory().GetEnumerator();
+        Assert.True(history.MoveNext());
+        Assert.Equal(expected[0].JournalId, history.Current.JournalId);
+        var changed = expected[^1] with { Revision = 2 };
+        registry.Advance(changed, 1);
+        var added = Assert.Single(SeedHistory(database, 1, offset: 129));
+        for (var index = 1; index < 128; index++)
+        {
+            Assert.True(history.MoveNext());
+            Assert.Equal(expected[index].JournalId, history.Current.JournalId);
+        }
+        Assert.True(history.MoveNext());
+        Assert.Equal(changed.JournalId, history.Current.JournalId);
+        Assert.Equal(2, history.Current.Revision);
+        Assert.True(history.MoveNext());
+        Assert.Equal(added.JournalId, history.Current.JournalId);
+        Assert.Equal(added.ResourceKeys, history.Current.ResourceKeys, StringComparer.Ordinal);
+        Assert.False(history.MoveNext());
+    }
+
+    [Fact(DisplayName = "Recovery History Rejects Missing Or Excess Resources And Unknown Journal Enums")]
+    public void RejectsDamagedHistoryRows()
+    {
+        var (database, _) = RecordStoreFixture.NewStore();
+        var journals = SeedHistory(database, 2);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, domains: DatabaseDomain.Runtime);
+        using var transaction = connection.BeginTransaction(deferred: false);
+        var id = journals[0].JournalId.ToString("D");
+        RegisteredJournal[] Read() => RecoveryJournalRegistry.ReadHistoryInside(connection, transaction).ToArray();
+        using var damage = DatabaseConnections.Command(connection, transaction,
+            "PRAGMA ignore_check_constraints=ON; UPDATE main.operation_journals SET operation_kind='unknown' WHERE journal_id=$0;",
+            journals[1].JournalId.ToString("D"));
+        Assert.Equal(1, damage.ExecuteNonQuery());
+        using var erase = DatabaseConnections.Command(connection, transaction, "DELETE FROM main.journal_resources WHERE journal_id=$0;", id);
+        Assert.Equal(2, erase.ExecuteNonQuery());
+        Assert.Equal("recovery_registry_resource_limit", Assert.Throws<IOException>(() => Read()).Message);
+        using var populate = DatabaseConnections.Command(connection, transaction,
+            "WITH RECURSIVE keys(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM keys WHERE n<4096) " +
+            "INSERT INTO main.journal_resources SELECT $0,printf('fixture:%04d',n) FROM keys;", id);
+        Assert.Equal(4096, populate.ExecuteNonQuery());
+        Assert.Equal(4096, RecoveryJournalRegistry.ReadHistoryInside(connection, transaction).First().ResourceKeys.Count);
+        Assert.Equal("recovery_registry_journal_invalid", Assert.Throws<IOException>(() => Read()).Message);
+        using var excess = DatabaseConnections.Command(connection, transaction,
+            "INSERT INTO main.journal_resources VALUES($0,'fixture:4097');", id);
+        Assert.Equal(1, excess.ExecuteNonQuery());
+        Assert.Equal("recovery_registry_resource_limit", Assert.Throws<IOException>(() => Read()).Message);
+        transaction.Rollback();
+        Assert.Equal(2, new RecoveryJournalRegistry(database).ReadHistory().Count());
+    }
+
+    [Fact(DisplayName = "Completed Recovery History Selects The Released Family Owner And Preserves The Cursor")]
+    public void KeepsCompletedHistoryFilter()
+    {
+        var (database, _) = RecordStoreFixture.NewStore();
+        var journals = SeedHistory(database, 3);
+        database.Write((connection, transaction) =>
+        {
+            using var release = DatabaseConnections.Command(connection, transaction,
+                "UPDATE main.operation_journals SET phase='committed',revision=2 WHERE journal_id=$0;", journals[1].JournalId.ToString("D"));
+            Assert.Equal(1, release.ExecuteNonQuery());
+            return true;
+        });
+        var registry = new RecoveryJournalRegistry(database);
+        var selected = Assert.Single(registry.ReadHistory(completedFamiliesOnly: true, after: journals[0].JournalId.ToString("D")));
+        Assert.Equal(journals[1].JournalId, selected.JournalId);
+        Assert.Equal(JournalPhase.Committed, selected.Phase);
+        Assert.Empty(registry.ReadHistory(completedFamiliesOnly: true, after: selected.JournalId.ToString("D")));
+    }
+
+    private static RegisteredJournal[] SeedHistory(StateDatabase database, int count, int offset = 0)
+    {
+        var digest = new string('a', 64);
+        var journals = Enumerable.Range(offset + 1, count).Select(index =>
+            new RegisteredJournal(Guid.ParseExact($"10000000-0000-4000-8000-{index:D12}", "D"), Guid.NewGuid(),
+                JournalKind.ConfigEdit, JournalPhase.Prepared, 1, $"blobs/plans/{digest}.json", digest,
+                [$"fixture:{index:D4}-a", $"fixture:{index:D4}-z"])).ToArray();
+        var writer = JournalWriterStore.CurrentWriter;
+        database.Write((connection, transaction) =>
+        {
+            foreach (var journal in journals.Reverse())
+                RecoveryJournalRegistry.AcceptPreparedInside(connection, transaction,
+                    new(journal.OperationId, "fixture:history", journal.PlanDigest, "configuration.edit"), journal, [],
+                    DateTimeOffset.UtcNow, null, writer);
+            return true;
+        });
+        return journals;
+    }
+
     [Fact(DisplayName = "History Callbacks Permit Independent Business Commits")]
     public void ReleasesHistoryReads()
     {

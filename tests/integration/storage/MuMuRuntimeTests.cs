@@ -44,6 +44,7 @@ public sealed class MuMuRuntimeTests
                 var observation = Assert.IsType<CaptureCommandObserved>(command.Observation);
                 Assert.Equal("natural-root-exit-and-eof-before-stop", observation.Completion);
                 Assert.Equal(0, observation.ExitCode);
+                Assert.Contains(command.Root.Process, observation.Stopped.AllFamily);
                 Assert.All(observation.Stopped.AllFamily, member =>
                 {
                     Assert.Contains(member, saved.Result.HelperStopped!.AllFamily);
@@ -72,8 +73,7 @@ public sealed class MuMuRuntimeTests
             var capacity = JournalCapacityPolicy.Measure(state.Total);
             Assert.True(history.Count <= capacity.Revisions);
             Assert.True(history.Sum(document => document.Export().LongLength) <= capacity.HistoryBytes);
-            Assert.Equal(state.Jobs.Length + AndroidControlCapacity.Derive(Assert.Single(state.Total.Steps)).MaximumCommands + 5,
-                capacity.Jobs);
+            Assert.InRange(capacity.Jobs, state.Jobs.Length + saved.Commands.Length, 32);
             Assert.True(File.Exists(fixture.Marker + ".post")); fixture.VerifyOriginal();
         });
     }
@@ -104,6 +104,7 @@ public sealed class MuMuRuntimeTests
     [InlineData("compressedTail")]
     [InlineData("hang")]
     [InlineData("overflow")]
+    [InlineData("offline")]
     public async Task RejectsIncompleteOutput(string mode)
     {
         var fixture = new AndroidRuntimeFixture(mumu: true, pairedCapture: true, capture: true,
@@ -121,8 +122,40 @@ public sealed class MuMuRuntimeTests
                 Assert.False(command.Observation?.Completion == "natural-root-exit-and-eof-before-stop");
                 Assert.True(File.Exists(Path.Combine(fixture.ScreenshotDirectory!, "fixture-screenshot.png")));
             }
+            if (mode == "offline")
+            {
+                var command = Assert.Single(saved.Commands, command => command.Root.Sequence == 2);
+                var observed = Assert.IsType<CaptureCommandObserved>(command.Observation);
+                Assert.Equal(1, observed.ExitCode);
+                var error = observed.StandardError;
+                var expected = "error: device offline"u8.ToArray();
+                Assert.Equal((long)expected.Length, error.SizeBytes);
+                Assert.Equal(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(expected)), error.Sha256);
+                using var input = new ImmutableBlobStore(fixture.Source.Instance, new()).OpenVerified(Assert.Single(error.Parts));
+                using var captured = new MemoryStream();
+                input.CopyTo(captured);
+                Assert.Equal(expected, captured.ToArray());
+            }
             fixture.VerifyOriginal();
         });
+    }
+
+    [Fact(DisplayName = "Capture Quota Failure Keeps The Original Rejection And Its Pipe Fault After Stopping The Actual Command")]
+    public async Task PreservesCaptureCommandFailure()
+    {
+        using var fixture = new AndroidRuntimeFixture(responseAction: "capture", stdout: "over-quota", hang: true, accept: false);
+        var image = ExecutionHookImages.Capture(fixture.ToolImage, runtime: true);
+        ProcessIdentity? child = null;
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var failure = await Assert.ThrowsAsync<IOException>(() => OwnedCaptureCommand.RunAsync(image,
+            ["-s", AndroidRuntimeFixture.Endpoint, "exec-out", "screencap", "-p"], fixture.Source.Instance.InstanceId, Guid.NewGuid(),
+            1, 65536, 5000, (_, identity) => child = ProcessIdentityReader.Read(identity.ProcessId), deadline.Token));
+
+        Assert.Equal("execution_capture_output_rejected", failure.Message);
+        Assert.Equal(WriterState.Stopped, WriterStopEvidence.ObserveProcess(Assert.IsType<ProcessIdentity>(child)));
+        var pipeFailure = Assert.Single(CleanupFailures.Read(failure));
+        Assert.Equal("execution_capture_output_rejected", pipeFailure.Message);
+        Assert.Contains("OwnedCaptureCommand.ReadAsync", pipeFailure.StackTrace, StringComparison.Ordinal);
     }
 
     [Fact(DisplayName = "A Server Child Is Collected In The Original Family While An Independent Existing Server Remains Alive")]

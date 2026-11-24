@@ -23,7 +23,8 @@ public sealed class ApplyWorkflowTests
         Assert.True(accepted.Acceptance.IsNew); Assert.False(result.WasReplay); Assert.NotNull(result.Result);
         Assert.Equal(accepted.JournalId, result.Result.JournalId); Assert.Equal(1, result.Result.InstalledRevision);
         Assert.True(result.Result.IsInstalled); Assert.Equal(enabled, result.Result.IsEnabled);
-        Assert.Equal(enabled, fixture.Activator.ReadPublishedScopes().Count == 1);
+        string[] expectedExtensions = enabled ? ["fixture-plugin"] : [];
+        Assert.Equal(expectedExtensions, fixture.Activator.ReadPublishedScopes().Select(scope => scope.ExtensionId));
         Assert.Equal(JournalPhase.Committed, fixture.Binding().Read(accepted.JournalId, accepted.Plan).Registered.Phase);
         Assert.True(new RecoveryJournalRegistry(fixture.Package.Catalog.Database).ReadSnapshot().IsReady);
         Assert.Equal(1, fixture.Handler.Requests);
@@ -98,9 +99,15 @@ public sealed class ApplyWorkflowTests
             await fixture.Handler.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
             await fixture.Coordinator.StopAsync(TimeSpan.FromSeconds(10));
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => flight.Completion.Task);
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => flight.WaitAcceptedAsync(default));
         }
-        else await Assert.ThrowsAsync<IOException>(() => flight.Completion.Task);
-        await Assert.ThrowsAnyAsync<Exception>(() => flight.WaitAcceptedAsync(default));
+        else
+        {
+            var completion = await Assert.ThrowsAsync<IOException>(() => flight.Completion.Task);
+            var acceptance = await Assert.ThrowsAsync<IOException>(() => flight.WaitAcceptedAsync(default));
+            Assert.Equal("extension_store_download_invalid", completion.Message);
+            Assert.Equal("extension_store_download_invalid", acceptance.Message);
+        }
         Assert.Equal(before, fixture.Package.Catalog.Count("operations"));
         Assert.Empty(Directory.GetFileSystemEntries(Path.Combine(fixture.Package.Catalog.Instance.RuntimeRoot, "staging")));
         Assert.Null(fixture.Workflow.ReadAccepted(id, "local", fixture.Request));

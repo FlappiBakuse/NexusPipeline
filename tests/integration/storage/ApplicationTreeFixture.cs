@@ -18,11 +18,11 @@ internal sealed class ApplicationTreeFixture
     internal PayloadTreeScene Saved { get; private set; }
     internal string Work => PayloadWorkspacePath.For(Plan);
 
-    internal ApplicationTreeFixture(bool missingReadme = false)
+    internal ApplicationTreeFixture(bool missingReadme = false, bool sameContent = false)
     {
         Root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "application-" + Guid.NewGuid().ToString("N"));
         Target = Path.Combine(Root, "installed"); Source = Path.Combine(Root, "source");
-        WritePayload(Target, "original"); WritePayload(Source, "candidate");
+        WritePayload(Target, "original"); WritePayload(Source, sameContent ? "original" : "candidate");
         if (missingReadme) File.Delete(Path.Combine(Target, "README.md"));
         var contracts = new ContractReader();
         var instance = new InstanceRoot(contracts).OpenOrCreate(Path.Combine(Target, "runtime"));

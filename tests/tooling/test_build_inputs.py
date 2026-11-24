@@ -29,8 +29,7 @@ class BuildInputTests(unittest.TestCase):
             'app/App.cs': 'class App {}', 'lib/Lib.csproj': '<Project Sdk="Microsoft.NET.Sdk" />',
             'lib/Lib.cs': 'class Lib {}', 'shared/Shared.cs': 'class Shared {}', 'assets/input.json': '{}',
             'tooling/build_product.py': 'pass\n', 'tooling/web_build.py': 'pass\n',
-            'tooling/frontend_names.mjs': 'export {};', 'tooling/frontend_boundaries.mjs': 'export {};',
-            'tooling/frontend-exceptions.json': '[]',
+            'tooling/frontend_syntax.mjs': 'export {};', 'tooling/frontend_boundaries.mjs': 'export {};',
             'tooling/generated_sources.json': '{}', 'apps/web/package.json': '{}',
             'apps/web/package-lock.json': '{}', 'apps/web/src/main.ts': 'export {};',
             'apps/desktop/startup-content.css': 'html {}', 'apps/desktop/nexuspipeline.ico': 'icon fixture bytes',
@@ -52,6 +51,25 @@ class BuildInputTests(unittest.TestCase):
 
     def inputs(self):
         return solution_inputs(self.root, 'test', self.environment)
+
+    def test_tracks_external_plugin_fixtures(self):
+        self.write('NexusPipeline.slnx', '<Solution><Project Path="app/OwnedWriter.csproj" /></Solution>')
+        self.write('app/OwnedWriter.csproj', '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup>'
+                   '<Compile Include="$(NexusPluginFixturesRoot)/owned-writer/*.cs" />'
+                   '</ItemGroup></Project>')
+        fixtures = self.root.parent / 'plugins' / 'owned-writer'
+        fixtures.mkdir(parents=True)
+        fixture = fixtures / 'Fixture.cs'
+        fixture.write_bytes(b'class Fixture {}')
+        environment = build_environment(self.root.parent / 'slot')
+        fixture_variable = 'NEXUSPLUGINFIXTURESROOT' if os.name == 'nt' else 'NexusPluginFixturesRoot'
+        environment[fixture_variable] = str(fixtures.parent)
+        inputs = solution_inputs(self.root, 'test', environment, ['OwnedWriter'])
+        self.assertEqual([{'path': str(fixture), 'sizeBytes': fixture.stat().st_size,
+                           'sha256': digest(fixture.read_bytes())}], inputs['pluginFixtureInputs'])
+        fixture.write_bytes(b'class Fixture { int value; }')
+        changed = solution_inputs(self.root, 'test', environment, ['OwnedWriter'])
+        self.assertNotEqual(inputs['sha256'], changed['sha256'])
 
     def test_scopes_projects(self):
         self.write('other/Other.csproj', '<Project Sdk="Microsoft.NET.Sdk" />')

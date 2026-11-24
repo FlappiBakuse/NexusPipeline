@@ -1,7 +1,9 @@
 using System.Runtime.Versioning;
+using System.Text.Json;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Extensions;
 using NexusPipeline.Core.Operations;
+using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Extensions;
 using NexusPipeline.Platform.Storage.Journals;
 using Xunit;
@@ -20,15 +22,20 @@ public sealed class PackageServiceTests
             File.WriteAllText(Path.Combine(path, "CHANGELOG.md"), "Verified changes");
         });
         var catalog = await fixture.Service.RefreshAsync("local", ExtensionStoreChannel.Stable, default);
+        var afterRefresh = fixture.Requests;
+        Assert.DoesNotContain(PackageServiceFixture.ArtifactUri, fixture.RequestUris);
         var missing = await fixture.Service.CatalogDetailsAsync(catalog.Identity with { Sequence = catalog.Identity.Sequence + 1 },
             "fixture-plugin", default);
-        Assert.Null(missing); Assert.Equal(3, fixture.Requests);
+        Assert.Null(missing);
+        Assert.DoesNotContain(PackageServiceFixture.ArtifactUri, fixture.RequestUris.Skip(afterRefresh));
+        var beforeDetails = fixture.Requests;
         var details = await fixture.Service.CatalogDetailsAsync(catalog.Identity, "fixture-plugin", default);
         Assert.NotNull(details); Assert.Equal(catalog.Identity, details.Identity);
         Assert.Equal("Verified readme", details.Documents["README.md"]);
         Assert.Equal("Verified changes", details.Documents["CHANGELOG.md"]);
         Assert.Equal("fixture-plugin", details.Manifest.GetProperty("extensionId").GetString());
-        Assert.Empty(fixture.Runtime.ReadStates()); Assert.Equal(4, fixture.Requests);
+        Assert.Single(fixture.RequestUris.Skip(beforeDetails), uri => uri == PackageServiceFixture.ArtifactUri);
+        Assert.Empty(fixture.Runtime.ReadStates());
     }
     [Theory(DisplayName = "The Core Facing Package Use Case Fetches Verifies Accepts And Uses The One Actual Host Inventory")]
     [InlineData(false)] [InlineData(true)]
@@ -40,6 +47,7 @@ public sealed class PackageServiceTests
         var catalog = await packages.RefreshAsync("local", ExtensionStoreChannel.Stable, default);
         Assert.Equal(catalog.Identity, packages.ReadCached(ExtensionStoreChannel.Stable)!.Identity);
         var id = Guid.NewGuid(); var command = fixture.Command(catalog);
+        var beforeApply = fixture.Requests;
         var accepted = await packages.ApplyAsync(id, "local", command, default);
         Assert.Equal(id, accepted.OperationId); Assert.NotEqual(Guid.Empty, accepted.JournalId);
         await fixture.WaitCompletedAsync(id);
@@ -52,10 +60,19 @@ public sealed class PackageServiceTests
         Assert.Equal(JournalPhase.Committed, bound.Registered.Phase); Assert.NotNull(bound.Commit);
         var state = Assert.Single(fixture.Runtime.ReadStates()); Assert.True(state.IsInstalled);
         Assert.Equal(enabled, state.DesiredEnabled); Assert.Equal(enabled, state.ActivationId.HasValue);
+        var target = Path.Combine(fixture.Package.Root, "installed", "fixture-plugin");
+        var targetIdentity = PhysicalObjectIdentity.Read(target);
+        var manifest = RuntimeFingerprint.CaptureFileEvidence(Path.Combine(target, "manifest.json"));
+        Assert.Single(fixture.RequestUris.Skip(beforeApply), uri => uri == PackageServiceFixture.ArtifactUri);
+        var beforeReplay = fixture.Requests;
         var replay = await packages.ApplyAsync(id, "local", command, default);
         Assert.Equal(accepted.JournalId, replay.JournalId); Assert.Equal("completed", replay.Status);
         await Assert.ThrowsAsync<OperationConflictException>(() => packages.ApplyAsync(id, "another-subject", command, default));
-        Assert.Equal(4, fixture.Requests);
+        Assert.DoesNotContain(PackageServiceFixture.ArtifactUri, fixture.RequestUris.Skip(beforeReplay));
+        var after = Assert.Single(fixture.Runtime.ReadStates());
+        Assert.True(JsonElement.DeepEquals(JsonSerializer.SerializeToElement(state), JsonSerializer.SerializeToElement(after)));
+        Assert.Equal(targetIdentity, PhysicalObjectIdentity.Read(target));
+        Assert.Equal(manifest, RuntimeFingerprint.CaptureFileEvidence(Path.Combine(target, "manifest.json")));
     }
 
     [Fact(DisplayName = "Public Catalog Display Metadata Cannot Replace The Original Signed Selected Entry")]
@@ -63,11 +80,13 @@ public sealed class PackageServiceTests
     {
         await using var fixture = new PackageServiceFixture();
         var catalog = await fixture.Service.RefreshAsync("local", ExtensionStoreChannel.Stable, default);
+        var beforeApply = fixture.Requests;
         var command = fixture.Command(catalog); var id = Guid.NewGuid();
         var changed = command with { Candidate = command.Candidate! with { ArtifactSha256 = new string('e', 64) } };
         var failure = await Assert.ThrowsAsync<IOException>(() => fixture.Service.ApplyAsync(id, "local", changed, default));
         Assert.Equal("extension_apply_selection_changed", failure.Message);
-        Assert.Null(fixture.Queries.Read(id, "local")); Assert.Equal(3, fixture.Requests);
+        Assert.Null(fixture.Queries.Read(id, "local"));
+        Assert.DoesNotContain(PackageServiceFixture.ArtifactUri, fixture.RequestUris.Skip(beforeApply));
         Assert.Empty(fixture.Runtime.ReadStates());
     }
 

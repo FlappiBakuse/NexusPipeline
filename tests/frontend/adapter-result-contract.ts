@@ -1,4 +1,4 @@
-import { adapterResult } from '../../apps/web/src/pages/adapter-results.js';
+import { adapterResult } from '../../apps/web/src/pages/adapter-contracts.js';
 
 export function adapterResults(): string[] {
   const checks: string[] = [];

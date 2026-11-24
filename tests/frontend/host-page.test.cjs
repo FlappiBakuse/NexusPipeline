@@ -4,7 +4,26 @@ const test = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { loadHostPage } = require('../../apps/desktop/host-page.cjs');
+const desktop = path.join(__dirname, '../../apps/desktop');
+
+function hostPageLoader(timers = { performance, setTimeout, clearTimeout }) {
+  const config = { startupPipe: 'fixture', nonce: 'fixture', locale: 'en-US', instanceId: 'fixture',
+    verificationKey: 'fixture', profilePath: desktop, visible: false, route: '/', minimizeToTray: false, mode: 'desktop' };
+  const app = { setPath() {}, setAppUserModelId() {}, on() {}, commandLine: { appendSwitch() {} },
+    whenReady: () => new Promise(() => {}) };
+  const sandbox = { Buffer, ...timers,
+    process: { argv: ['--nexus-bootstrap=' + Buffer.from(JSON.stringify(config)).toString('base64')], on() {} },
+    require: name => {
+      if (name === 'electron') return { app };
+      if (name === './startup-channel.cjs') return { connectStartup: () => ({}) };
+      if (name === 'node:path') return path;
+      if (name === './strict-json.cjs' || name === './native-text.cjs') return require(path.join(desktop, name));
+      return {};
+    } };
+  return vm.runInNewContext(fs.readFileSync(path.join(desktop, 'main.cjs'), 'utf8') + '\nloadHostPage;', sandbox);
+}
+
+const loadHostPage = hostPageLoader();
 
 test('desktop waits for its fixed Host page after transient listener startup failures', async () => {
   const urls = [];
@@ -28,11 +47,10 @@ test('desktop does not retry permanent page failures or a destroyed window', asy
 
 test('desktop bounds a page load that never settles and clears its deadline timer', async () => {
   let cleared = false;
-  const sandbox = { module: { exports: {} }, performance: { now: () => 0 },
+  const loadWithDeadline = hostPageLoader({ performance: { now: () => 0 },
     setTimeout(callback, delay) { assert.equal(delay, 30000); queueMicrotask(callback); return 1; },
-    clearTimeout(id) { assert.equal(id, 1); cleared = true; } };
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../apps/desktop/host-page.cjs'), 'utf8'), sandbox);
+    clearTimeout(id) { assert.equal(id, 1); cleared = true; } });
   const window = { isDestroyed: () => false, loadURL: () => new Promise(() => {}) };
-  await assert.rejects(sandbox.module.exports.loadHostPage(window, 'http://127.0.0.1:1234/'), /desktop_host_startup_unavailable/);
+  await assert.rejects(loadWithDeadline(window, 'http://127.0.0.1:1234/'), /desktop_host_startup_unavailable/);
   assert.equal(cleared, true);
 });

@@ -64,10 +64,26 @@ public sealed class BearerPublicationTests
         using var verifier = await Create(fixture);
         var proof = Assert.IsType<VerifiedControlBearer>(verifier.Verify(Token));
         using var request = proof.EnterRequest();
-        using var root = fixture.Resources.TryAcquire(Guid.NewGuid(), [new("secrets:fields", ResourceClaimMode.Reference)]).Lease!;
-        Assert.Throws<InvalidOperationException>(() => fixture.Service.BeginDocumentPublication(root, "fixture-extension"));
+        ResourceClaim extension = new("extension-data:fixture-extension", ResourceClaimMode.Mutation);
+        ResourceClaim fields = new("secrets:fields", ResourceClaimMode.Mutation);
+        var foreign = new ResourceLeaseManager(fixture.Lifecycle);
+        RequireRejected(foreign, [extension, fields]);
+        RequireRejected(fixture.Resources, [extension]);
+        RequireRejected(fixture.Resources, [fields]);
+        RequireRejected(fixture.Resources, [extension with { Mode = ResourceClaimMode.Reference }, fields]);
+        RequireRejected(fixture.Resources, [extension, fields with { Mode = ResourceClaimMode.Reference }]);
+        using (var root = Root(fixture))
+        using (Assert.IsType<ControlPublicationScope>(fixture.Service.BeginDocumentPublication(root, "fixture-extension")))
+            proof.RequireCurrent();
         fixture.Index.BlockUnknown("secret_document_publication_in_progress");
         Assert.Throws<IOException>(() => proof.RequireCurrent());
+
+        void RequireRejected(ResourceLeaseManager resources, ResourceClaim[] claims)
+        {
+            using var invalid = Assert.IsType<ResourceOperationLease>(resources.TryAcquire(Guid.NewGuid(), claims).Lease);
+            Assert.Equal("resource_operation_borrow_unbound", Assert.Throws<InvalidOperationException>(() =>
+                fixture.Service.BeginDocumentPublication(invalid, "fixture-extension")).Message);
+        }
     }
 
     [Theory(DisplayName = "Matching Reason Text Or A Copied Recovery Record Cannot Grant Publication Continuation")]

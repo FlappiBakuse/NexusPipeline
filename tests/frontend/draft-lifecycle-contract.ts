@@ -2,8 +2,7 @@ import { createApp, h } from 'vue';
 import { contractFingerprint, sdkVersion, type ExtensionManifest, type EditorDraftScope, type UiElement } from '@nexuspipeline/extension-sdk';
 import { FrontendRegistry } from '../../apps/web/src/extensions/frontend-registry';
 import { EditorDraftStore } from '../../apps/web/src/app/editor-drafts';
-import { AutomationEditor } from '../../apps/web/src/pages/automation-editor';
-import { automationSession } from '../../apps/web/src/pages/automation-session';
+import { AutomationEditor, automationSession } from '../../apps/web/src/pages/automation-editor';
 import AutomationEditorDialog from '../../apps/web/src/pages/AutomationEditorDialog.vue';
 import { draftFixture, exitDecision, settle } from './configuration-draft-fixture';
 import { draftPresentation } from '../../apps/web/src/app/draft-presentation';
@@ -15,9 +14,37 @@ export async function draftLifecycleContract(parent: HTMLElement, check: Check):
   await newAccount(parent, check);
   await changedFields(parent, check);
   await pathField(parent, check);
+  await normalizedScan(parent, check);
   await extensionMemory(parent, check);
   await privateDraftContract(parent, check);
   await queueDraftItemsContract(parent, check);
+}
+async function normalizedScan(parent: HTMLElement, check: Check) {
+  const memory = new EditorDraftStore(() => {});
+  const holder = document.createElement('section');
+  const json = document.createElement('textarea'), secret = document.createElement('input');
+  holder.toggleAttribute('data-draft-json', true);
+  json.setAttribute('aria-label', 'JSON field');
+  secret.setAttribute('aria-label', 'Password field');
+  secret.type = 'password';
+  let value = '{"enabled":true}', reads = 0, secretReads = 0;
+  Object.defineProperty(json, 'value', { get: () => { reads++; return value; } });
+  Object.defineProperty(secret, 'value', { get: () => { secretReads++; return 'private fixture'; } });
+  holder.append(json, secret); parent.append(holder);
+  const presentation = draftPresentation(memory.target('field-fixture', 'scripts', 'normalized'), true);
+  try {
+    presentation.attach(holder);
+    check(reads === 1 && secretReads === 0 && !presentation.modified,
+      `draft scan normalizes a JSON field once and skips passwords (${reads}/${secretReads})`);
+    value = '{"enabled":false}';
+    holder.append(document.createElement('textarea'));
+    await settle();
+    check(reads === 2 && secretReads === 0 && presentation.modified, 'draft rescans compare the current value to the saved baseline once');
+    value = '{ "enabled": true }';
+    holder.lastElementChild!.remove();
+    await settle();
+    check(reads === 3 && secretReads === 0 && !presentation.modified, 'equivalent JSON clears the draft change after a rescan');
+  } finally { memory.dispose(); holder.remove(); }
 }
 async function newAccount(parent: HTMLElement, check: Check) {
   const fixture = draftFixture(), store = fixture.store;

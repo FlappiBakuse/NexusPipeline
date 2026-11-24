@@ -1,12 +1,63 @@
 using System.Runtime.Versioning;
+using System.Text.Json;
+using NexusPipeline.Core.Execution;
+using NexusPipeline.Platform.Processes;
+using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Execution;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace NexusPipeline.StorageTests;
 
 [SupportedOSPlatform("windows")]
-public sealed class PcFreshnessTests
+public sealed class PcFreshnessTests(ITestOutputHelper output)
 {
+    [Fact(DisplayName = "Two Real Visible Targets Share One Observation And An Ended Target Invalidates The Claim")]
+    public async Task GroupsVisibleTargetWindows()
+    {
+        var root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "pc-windows-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        using var first = new OwnedCrashProcess();
+        using var second = new OwnedCrashProcess();
+        var firstWindow = Path.Combine(root, "first.json");
+        var secondWindow = Path.Combine(root, "second.json");
+        var one = first.Start(["capture-window-fixture", firstWindow], root, Guid.NewGuid(), Guid.NewGuid(), Path.Combine(root, "first-owner.json"));
+        var two = second.Start(["capture-window-fixture", secondWindow], root, Guid.NewGuid(), Guid.NewGuid(), Path.Combine(root, "second-owner.json"));
+        Assert.Equal("windowReady", (await first.ReadReportAsync(firstWindow)).GetProperty("status").GetString());
+        Assert.Equal("windowReady", (await second.ReadReportAsync(secondWindow)).GetProperty("status").GetString());
+        Assert.Equal(one.ImageSha256, two.ImageSha256);
+        var path = one.ImagePath;
+        var target = new PcTargetImage(path, new FileInfo(path).Length, one.ImageSha256, PhysicalObjectIdentity.Read(path));
+        using var ready = Measure(() => PcTargetReadiness.Capture(target, default, PcReadinessMode.VisibleWindow), out var capture);
+        Assert.Equal(ExecutionTargetReadiness.Ready, ready.State);
+        var processes = Measure(() => ready.Use(identities => identities.Select(identity => identity.ProcessId).Order().ToArray()), out var use);
+        Assert.Equal(new[] { one.ProcessId, two.ProcessId }.Order(), processes);
+        Assert.True((await first.StopAsync()).CompleteJobStopped);
+        Assert.Equal("execution_target_readiness_expired", Assert.Throws<IOException>(() => ready.Use(_ => true)).Message);
+        output.WriteLine($"two visible targets: capture process/windows={capture.Processes}/{capture.Windows}, use process/windows={use.Processes}/{use.Windows}");
+        Assert.Equal((1L, 1L), capture);
+        Assert.Equal((0L, 1L), use);
+    }
+
+    private static T Measure<T>(Func<T> action, out (long Processes, long Windows) counts)
+    {
+        var stderr = Console.Error;
+        using var text = new StringWriter();
+        T result;
+        try
+        {
+            Console.SetError(text);
+            using var profile = StartupProfile.Begin("pc-visible-readiness");
+            result = action();
+        }
+        finally { Console.SetError(stderr); }
+        using var report = JsonDocument.Parse(text.ToString());
+        var steps = report.RootElement.GetProperty("steps").EnumerateArray().ToDictionary(
+            step => step.GetProperty("name").GetString()!, step => step.GetProperty("count").GetInt64());
+        counts = (steps.GetValueOrDefault("readiness.process-snapshot"), steps.GetValueOrDefault("readiness.window-snapshot"));
+        return result;
+    }
+
     [Fact(DisplayName = "A Shared PC Evidence Reader Rechecks Actual Roots Across History And Stage Reads And Ends With Its Owner")]
     public async Task RechecksCurrentRoots()
     {

@@ -15,6 +15,7 @@ public sealed class ConfigurationPlanTests
     [InlineData("executable-action", "unsupported_or_invalid_contract")]
     [InlineData("path-escape", "unsupported_snapshot_relative_path")]
     [InlineData("missing-physical-identity", "configuration_plan_original_identity_incomplete")]
+    [InlineData("wrong-identity-spelling", "configuration_plan_original_identity_incomplete")]
     [InlineData("incomplete-tree", "file_tree_archive_shape_invalid")]
     public void PreservesInvalidPlan(string fault, string reason)
     {
@@ -35,6 +36,11 @@ public sealed class ConfigurationPlanTests
                 identity["relativePath"] = @"..\outside";
                 break;
             case "missing-physical-identity": document["originalObjects"] = new JsonArray(); break;
+            case "wrong-identity-spelling":
+                var named = document["originalObjects"]!.AsArray().Single(item =>
+                    item!["relativePath"]!.GetValue<string>().EndsWith("/data.bin", StringComparison.Ordinal))!;
+                named["relativePath"] = named["relativePath"]!.GetValue<string>().Replace("data.bin", "DATA.bin", StringComparison.Ordinal);
+                break;
             case "incomplete-tree": document["candidate"]!["entries"] = new JsonArray(); break;
         }
         var invalid = fixture.Blobs.PersistPlan(JsonSerializer.SerializeToUtf8Bytes(document));

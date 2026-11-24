@@ -86,22 +86,33 @@ public sealed class StartSourceTests
     [InlineData("source")]
     [InlineData("subject")]
     [InlineData("digest")]
-    public void PreservesChangedSources(string field)
+    public async Task PreservesChangedSources(string field)
     {
         using var fixture = new ExecutionAdmissionFixture(); var source = fixture.Source;
-        _ = fixture.Service.Start(Guid.NewGuid(), "source-diagnostic", source.Request(new BindingTarget(source.OtherBinding)), DateTimeOffset.UtcNow);
+        var accepted = fixture.Service.Start(Guid.NewGuid(), "source-diagnostic",
+            source.Request(new BindingTarget(source.OtherBinding)), DateTimeOffset.UtcNow);
+        var consumer = new ExecutionRuntimeConsumer(source.Instance, source.Database, new(), source.Lease,
+            fixture.Resources, fixture.Index, fixture.Inbox);
+        var receipt = Assert.IsType<AttemptReceipt>(await consumer.RunNextAsync());
+        Assert.Equal(accepted.JournalId, receipt.JournalId);
+        source.Lease.Dispose();
+        var admission = new JournalStartupAdmission(source.Instance, new());
+        var verified = StateDatabase.OpenExisting(source.Instance, Path.Combine(source.Root, "valid-source-copy"), admission);
+        Assert.Equal(source.Database.DatabasePath, verified.DatabasePath);
+        using (var connection = DatabaseConnections.Open(verified.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime))
+        using (var read = DatabaseConnections.BeginRead(connection))
+            Assert.Equal(accepted.JournalId, StartSourceRows.Read(connection, read, accepted.Acceptance.OperationId).JournalId);
         fixture.Execute(field switch
         {
             "source" => "DELETE FROM main.execution_start_sources;",
             "subject" => "UPDATE main.execution_start_sources SET subject_id='another-subject';",
             _ => "UPDATE main.operations SET request_digest='" + new string('a', 64) + "' WHERE operation_kind='execution.start';"
         });
-        var before = File.ReadAllBytes(source.Database.DatabasePath);
-        var wal = source.Database.DatabasePath + "-wal"; var walBefore = File.Exists(wal) ? File.ReadAllBytes(wal) : null;
-        Assert.ThrowsAny<Exception>(() => StateDatabase.OpenExisting(source.Instance, Path.Combine(source.Root, "source-diagnostic-copy"),
-            new JournalStartupAdmission(source.Instance, new())));
-        Assert.Equal(before, File.ReadAllBytes(source.Database.DatabasePath));
-        Assert.Equal(walBefore, File.Exists(wal) ? File.ReadAllBytes(wal) : null);
+        var before = RuntimeFingerprint.CaptureDatabaseFiles(source.Database.DatabasePath, DatabaseDomain.All);
+        Assert.NotEmpty(before);
+        Assert.Equal("execution_start_source_unbound", Assert.Throws<IOException>(() =>
+            StateDatabase.OpenExisting(source.Instance, Path.Combine(source.Root, "source-diagnostic-copy"), admission)).Message);
+        Assert.Equal(before, RuntimeFingerprint.CaptureDatabaseFiles(source.Database.DatabasePath, DatabaseDomain.All));
     }
 
     [Theory(DisplayName = "The Existing Identity Owner Rejects Unknown Source Request Syntax")]
@@ -121,6 +132,10 @@ public sealed class StartSourceTests
             case "revision": node["expectedCatalogRevision"] = -1; break;
             default: node["unknown"] = true; break;
         }
-        Assert.ThrowsAny<Exception>(() => ExecutionStartIdentity.Decode(JsonSerializer.SerializeToUtf8Bytes(node)));
+        var changed = JsonSerializer.SerializeToUtf8Bytes(node);
+        if (damage == "revision")
+            Assert.Equal("execution_selection_request_invalid", Assert.Throws<ExecutionSelectionException>(() => ExecutionStartIdentity.Decode(changed)).Message);
+        else
+            Assert.Equal("execution_start_source_unbound", Assert.Throws<IOException>(() => ExecutionStartIdentity.Decode(changed)).Message);
     }
 }

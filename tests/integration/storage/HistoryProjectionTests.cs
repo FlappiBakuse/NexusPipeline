@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using System.Security.Cryptography;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Execution;
@@ -94,10 +95,17 @@ public sealed class HistoryProjectionTests
             var blob = new BlobReference($"blobs/content/{image.ImageSha256}.bin", image.SizeBytes!.Value, image.ImageSha256!);
             var references = new BlobReferenceIndex(source.Instance, new(), source.Database, new(source.Instance, new()));
             Assert.True(references.IsReferenced(blob));
+            var path = Path.Combine(source.Instance.RuntimeRoot, blob.RelativePath);
+            var captured = File.ReadAllBytes(path);
+            var identity = PhysicalObjectIdentity.Read(path);
+            Assert.Equal(blob.Sha256, Convert.ToHexStringLower(SHA256.HashData(captured)));
             var projection = new HistoryProjection(source.Instance, source.Database, new(), source.Lease);
             await projection.RunAsync(default); Assert.True(projection.IsComplete);
             using var original = new ImageCatalogReader(source.Instance, source.Database, new()).OpenOriginal(image.Key, image.ResultSha256);
-            Assert.Equal(blob.SizeBytes, original.Length);
+            using var returned = new MemoryStream();
+            original.CopyTo(returned);
+            Assert.Equal(captured, returned.ToArray());
+            Assert.Equal(identity, PhysicalObjectIdentity.Read(path));
         });
     }
 }

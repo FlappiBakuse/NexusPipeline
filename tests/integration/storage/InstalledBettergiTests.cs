@@ -161,6 +161,9 @@ public sealed class InstalledBettergiTests
     public async Task RestoresUnusableOutput(string mode)
     {
         await using var fixture = new InstalledBettergiFixture(mode: mode); await fixture.InstallAsync();
+        var configuration = fixture.Source.Configuration;
+        var before = File.ReadAllBytes(configuration);
+        Assert.Equal("""{"TaskEnabledList":{"mail":true},"TaskDefinitions":{"mail":"领取邮件"},"CompletionAction":"Exit"}"""u8.ToArray(), before);
         var accepted = fixture.Start(Guid.NewGuid());
         var receipt = Assert.IsType<AttemptReceipt>(await fixture.Consumer.RunNextAsync());
         Assert.Equal(RecoveryOutcome.Restored, receipt.Facts.Recovery);
@@ -171,6 +174,8 @@ public sealed class InstalledBettergiTests
         var tasks = AdapterObservationCodec.Read(blobs, result.Binding, evidence.RawOutput!, Assert.Single(state.Total.Steps), evidence.TaskAdapter!);
         Assert.Equal(AdapterObservationState.Unknown, Assert.Single(tasks.Observations).State); Assert.Empty(tasks.ProposedRetry);
         Assert.True(fixture.Execution.Index.Current.IsReady); Assert.Equal(0, fixture.Consumer.PendingReconciliationCount);
+        Assert.Equal(before, File.ReadAllBytes(configuration));
+        fixture.Inputs.VerifyUnchanged();
     }
 
 }

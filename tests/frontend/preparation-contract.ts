@@ -9,12 +9,18 @@ import type { FrontendLoader } from '../../apps/web/src/extensions/frontend-load
 import { prepareExtensionIcons, extensionIcon, clearExtensionIcons } from '../../apps/web/src/control/extension-icons';
 
 export async function preparationContract(check: (value: unknown, name: string) => void): Promise<void> {
-  let requests = 0, value = 'prepared';
-  const client = new ControlClient(location.origin, async () => { requests++; return Response.json({ value }); });
+  const paths: string[] = [];
+  const reads = (path: string) => paths.filter(request => request === path).length;
+  let value = 'prepared';
+  const client = new ControlClient(location.origin, async input => {
+    paths.push(new URL(String(input)).pathname);
+    return Response.json({ value });
+  });
   const signal = new AbortController().signal;
   await client.prepareRead('/control/v1/notifications', signal);
   const snapshot = await client.read('/control/v1/notifications', objectValue);
-  check(snapshot.value === 'prepared' && requests === 1, 'first page entry consumes its prepared readonly snapshot');
+  check(snapshot.value === 'prepared' && reads('/control/v1/notifications') === 1,
+    'first page entry consumes its prepared readonly snapshot');
   value = 'refreshed';
   check((await client.read('/control/v1/notifications', objectValue)).value === 'refreshed',
     'later page refresh reads current state');
@@ -34,10 +40,13 @@ export async function preparationContract(check: (value: unknown, name: string) 
   await Promise.resolve();
   check(preparing.preparing.value && !preparing.surfacesReady.value, 'startup retains progress while plugins prepare');
   await new Promise(resolve => setTimeout(resolve, 0));
-  check(requests > 4, 'current page readonly data prepares while a plugin is still pending');
-  await client.read('/control/v1/execution/active', objectValue);
+  const active = '/control/v1/execution/active';
+  check(reads(active) === 1 && preparing.preparing.value, 'current page readonly data prepares while a plugin is still pending');
+  value = 'after startup';
+  check((await client.read(active, objectValue)).value === 'authenticated' && reads(active) === 1,
+    'first page use consumes the prepared response without rereading the route');
   release(); await pending;
-  check(requests === 5, 'background preparation does not reload a consumed current page snapshot');
+  check(reads(active) === 1, 'background preparation does not reload a consumed current page snapshot');
   check(!preparing.preparing.value && preparing.surfacesReady.value, 'prepared page and surfaces complete before presentation');
   store.start = async () => { throw new Error('authentication_failed'); };
   let denied = false;
@@ -72,6 +81,8 @@ export async function preparationContract(check: (value: unknown, name: string) 
   await summaryPreparation(check);
   await routePreparation(check);
   await preparationCancellation(check);
+  await preparationFailures(check);
+  await preparationRevocation(check);
   await eventRevision(check);
   await completionRefresh(check);
 }
@@ -84,7 +95,7 @@ async function iconPreparation(check: (value: unknown, name: string) => void): P
   const png = await new Promise<Blob>(resolve => canvas.toBlob(blob => resolve(blob!), 'image/png'));
   const client = new ControlClient(location.origin, async input => {
     const id = new URL(String(input)).pathname.split('/')[4]!; requests.push(id);
-    if (id === 'broken-icon') return Response.json({ code: 'unavailable' }, { status: 503 });
+    if (id === 'broken-icon') return Response.json({ code: 'icon_forbidden' }, { status: 403 });
     if (id === 'slow-icon') await wait;
 
     return new Response(png, { headers: { 'Content-Type': 'image/png' } });
@@ -98,6 +109,31 @@ async function iconPreparation(check: (value: unknown, name: string) => void): P
     check(requests.includes('last-icon') && extensionIcon('slow-icon').startsWith('blob:'),
       'icon preparation retains successful icons and attempts remaining declarations after a failure');
   } finally { release(); clearExtensionIcons(); }
+}
+
+async function preparationFailures(check: (value: unknown, name: string) => void): Promise<void> {
+  const paths: string[] = [];
+  const client = new ControlClient(location.origin, async input => {
+    const path = new URL(String(input)).pathname;
+    paths.push(path);
+    return Response.json({ code: path.endsWith('/active') ? 'foreground_denied' : 'background_denied' }, { status: 403 });
+  });
+  const store = createStore(client);
+  store.start = async () => {};
+  store.state.page = 'dispatch';
+  store.can = capability => capability === 'execution.read' || capability === 'notifications.read';
+  const registry = new FrontendRegistry({ locale: 'en', appearance: 'dark', translate: (_id, key) => key });
+  const loader = { synchronize: async () => {}, cancelPending() {} } as unknown as FrontendLoader;
+  const preparing = interfacePreparation(store, loader, registry);
+  try {
+    await preparing.prepare();
+    const marks = performance.getEntriesByName('nexus.pages.preparation-failed') as PerformanceMark[];
+    check(preparing.failed.value && preparing.surfacesReady.value && store.state.error === 'foreground_denied',
+      'the current page preparation shows its original failure and presents the interface');
+    check(paths.filter(path => path.endsWith('/active')).length === 1 &&
+      paths.filter(path => path.endsWith('/notifications')).length === 1 && marks.at(-1)?.detail?.failedReads === 1,
+      'background preparation records its failure without rerunning the settled foreground read');
+  } finally { preparing.cancel(); store.dispose(); }
 }
 
 async function revokedRead(check: (value: unknown, name: string) => void): Promise<void> {
@@ -114,6 +150,38 @@ async function revokedRead(check: (value: unknown, name: string) => void): Promi
   let revoked = false;
   try { await prepared; } catch { revoked = true; }
   check(revoked, 'revoked prepared data cannot publish after a session or write generation change');
+}
+
+async function preparationRevocation(check: (value: unknown, name: string) => void): Promise<void> {
+  let started!: () => void, requests = 0;
+  const first = new Promise<void>(resolve => { started = resolve; });
+  const client = new ControlClient(location.origin, async (_input, init) => {
+    if (++requests > 1) return Response.json({ revision: 2 });
+    started();
+    const signal = init!.signal!;
+    return await new Promise<Response>((_resolve, reject) =>
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+  });
+  const store = createStore(client);
+  store.start = async () => {};
+  store.state.page = 'dispatch';
+  store.can = capability => capability === 'execution.read';
+  const snapshots = new HostSnapshots(client, store.state, {} as never);
+  const event = { instanceId: 'instance', streamId: 'stream', sequence: 1, state: {} };
+  snapshots.observe(event);
+  const registry = new FrontendRegistry({ locale: 'en', appearance: 'dark', translate: (_id, key) => key });
+  const loader = { synchronize: async () => {}, cancelPending() {} } as unknown as FrontendLoader;
+  const preparing = interfacePreparation(store, loader, registry);
+  try {
+    const ready = preparing.prepare();
+    await first;
+    const visible = client.read('/control/v1/execution/active', objectValue);
+    snapshots.observe({ ...event, sequence: 2 });
+    check((await visible).revision === 2, 'a visible read follows the current event revision after revocation');
+    await ready;
+    check(requests === 2 && !preparing.failed.value && !store.state.error,
+      'a revoked preparation leaves no false current-page failure or background replay');
+  } finally { preparing.cancel(); store.dispose(); }
 }
 
 async function sharedReads(check: (value: unknown, name: string) => void): Promise<void> {

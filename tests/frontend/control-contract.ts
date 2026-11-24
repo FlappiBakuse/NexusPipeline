@@ -4,6 +4,7 @@ import { MediaPool, type ImageLease } from '../../apps/web/src/control/media-poo
 import { settings } from '../../apps/web/src/control/models.js';
 import { executionCommandContract } from './execution-command-contract.js';
 import { liveLogContract } from './live-log-contract.js';
+import { readRetryContract } from './read-retry-contract.js';
 import { completionCommands } from './completion-command-contract.js';
 import { adapterResults } from './adapter-result-contract.js';
 import { scriptSourceContract } from './script-source-contract.js';
@@ -419,7 +420,7 @@ export async function runControlContract(): Promise<string[]> {
 
   await mediaPoolContract(checks);
   checks.push(...await executionCommandContract());
-  checks.push(...await liveLogContract());
+  checks.push(...await readRetryContract(), ...await liveLogContract());
   checks.push(...await completionCommands());
   checks.push(...adapterResults());
 

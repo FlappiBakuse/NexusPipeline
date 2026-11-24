@@ -58,6 +58,8 @@ internal sealed class ProviderAndroidFixture(ProviderRuntimeFixture runtime, str
                 var path = Path.Combine(directory, "fixture-device.json");
                 var device = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllBytes(path))!.AsObject();
                 device["reportedPort"] = 16385;
+                device["responseAction"] = "allInfo";
+                device["responseStandardOutput"] = """{"0":{"adb_port":16385,"is_process_started":true,"is_android_started":true}}""";
                 File.WriteAllBytes(path, JsonSerializer.SerializeToUtf8Bytes(device));
             }
             return new(runtime, directory, mumu);

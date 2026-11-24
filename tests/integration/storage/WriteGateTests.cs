@@ -40,15 +40,12 @@ public sealed class WriteGateTests
     }
 
     [Fact(DisplayName = "A Queued Timeout Returns Capacity And Does Not Consume The Next Writer")]
-    public void ReleasesExpiredSlots()
+    public async Task ReleasesExpiredSlots()
     {
-        var gate = new DatabaseWriteGate(2, TimeSpan.FromMilliseconds(100));
+        var gate = new DatabaseWriteGate(2, TimeSpan.FromSeconds(1));
         using var first = gate.Enter();
         Assert.Equal("database_writer_busy", Assert.Throws<IOException>(() => gate.Enter()).Message);
-        Assert.Equal(1, gate.PendingCount);
-        first.Dispose();
-        using var next = gate.Enter();
-        Assert.Equal(1, gate.PendingCount);
+        await RequireActiveWriterAsync(gate, first);
     }
 
     [Fact(DisplayName = "A Cancelled Queued Write Returns Capacity Without Releasing The Active Writer")]
@@ -60,11 +57,28 @@ public sealed class WriteGateTests
         var waiting = Task.Run(() => gate.Enter(cancellation.Token));
         await WaitPendingAsync(gate, 2);
         cancellation.Cancel();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => { using var unexpected = await waiting; });
-        Assert.Equal(1, gate.PendingCount);
-        first.Dispose();
-        using var next = gate.Enter();
-        Assert.Equal(1, gate.PendingCount);
+        var cancelled = await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => { using var unexpected = await waiting; });
+        Assert.Equal(cancellation.Token, cancelled.CancellationToken);
+        await RequireActiveWriterAsync(gate, first);
+    }
+
+    private static async Task RequireActiveWriterAsync(DatabaseWriteGate gate, IDisposable first)
+    {
+        // A fresh admission must use the freed queue slot while the original writer still owns the gate.
+        Assert.Equal("database_writer_busy", Assert.Throws<IOException>(() => gate.Enter()).Message);
+        var successor = Task.Run(() => gate.Enter());
+        try
+        {
+            await WaitPendingAsync(gate, 2);
+            Assert.False(successor.IsCompleted);
+        }
+        finally
+        {
+            first.Dispose();
+            using var next = await successor.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(1, gate.PendingCount);
+        }
+        Assert.Equal(0, gate.PendingCount);
     }
 
     private static async Task WaitPendingAsync(DatabaseWriteGate gate, int expected)

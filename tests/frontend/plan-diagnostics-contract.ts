@@ -6,6 +6,7 @@ import { executionPreview } from '../../apps/web/src/control/execution';
 import type { AutomationBundle } from '../../apps/web/src/control/wire.generated';
 import ExecutionPlan from '../../apps/web/src/pages/ExecutionPlan.vue';
 import SettingsDiagnostics from '../../apps/web/src/pages/SettingsDiagnostics.vue';
+import ScriptActions from '../../apps/web/src/pages/ScriptActions.vue';
 import { showsDetailsMotion } from './disclosure-motion';
 
 type Check = (value: unknown, name: string) => void;
@@ -13,6 +14,80 @@ type Check = (value: unknown, name: string) => void;
 export async function planDiagnosticsContract(fixture: HTMLElement, check: Check): Promise<void> {
   await diagnosticsContract(fixture, check);
   await planContract(fixture, check);
+  await downloadOwnershipContract(fixture, check);
+}
+
+async function downloadOwnershipContract(fixture: HTMLElement, check: Check): Promise<void> {
+  const originalCreate = URL.createObjectURL, originalRevoke = URL.revokeObjectURL, originalClick = HTMLAnchorElement.prototype.click;
+  const retained = new Map<string, Blob>(), deliveries: { name: string; data: Blob }[] = [];
+  URL.createObjectURL = data => {
+    const url = originalCreate.call(URL, data);
+    if (data instanceof Blob) retained.set(url, data);
+    return url;
+  };
+  URL.revokeObjectURL = url => { retained.delete(url); originalRevoke.call(URL, url); };
+  HTMLAnchorElement.prototype.click = function () {
+    const data = retained.get(this.href);
+    if (data) deliveries.push({ name: this.download, data });
+    else originalClick.call(this);
+  };
+  const id = 'fixture-script', asset = 'fixture-attachment.txt', contents = '检验 🚀 exact content\n'.repeat(60000);
+  const script = { id, kind: 'generic' } as AutomationBundle['scripts'][number];
+  const bundle = { format: 'nexus.automation.bundle', version: 1, exportKind: 'scriptTemplate', scripts: [script] };
+  const pendingSupport = Promise.withResolvers<Response>();
+  let supports = 0, supportSignal: AbortSignal | null | undefined;
+  const store = createStore(new ControlClient(location.origin, async (input, options) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith('/doctor')) return Response.json({ admission: 'ready', capturedAtUtc: '2026-11-21T12:23:35Z',
+      details: { frameworkVersion: '.NET 10', processArchitecture: 'X64', installedExtensionCount: 1,
+        checks: [{ id: 'host.version', status: 'pass', code: 'host.current', count: null }] } });
+    if (url.pathname.endsWith('/support')) {
+      if (++supports === 1) return new Response(contents, { headers: { 'Content-Type': 'application/zip' } });
+      supportSignal = options?.signal;
+      return pendingSupport.promise;
+    }
+    if (url.pathname.endsWith('/export')) {
+      if (url.searchParams.get('revision') !== '1' || url.searchParams.get('templateScriptId') !== id) throw Error('unbound export');
+      return Response.json({ bundle, attachments: [{ id: 'attachment', packagePath: asset, sha256: 'a'.repeat(64) }] });
+    }
+    if (url.pathname.endsWith('/export/attachment/original') && url.searchParams.get('sourceSha256') === 'a'.repeat(64))
+      return new Response(contents);
+    throw new Error('Unexpected download request');
+  }));
+  store.state.capabilities = { instanceId: 'downloads', hostVersion: 'fixture', capabilities: ['control.doctor.read', 'automation.exchange'] };
+  store.state.automation = { catalogRevision: 1 } as never;
+  const holder = document.createElement('section'); fixture.append(holder);
+  const visible = ref(true);
+  const app = createApp({ render: () => h('div', [h(SettingsDiagnostics, { store, visible: visible.value }),
+    h(ScriptActions, { store, script, existing: true, locked: false })]) });
+  const click = (name: string) => [...holder.querySelectorAll('button')].find(item => item.textContent?.trim() === name)!.click();
+  const wait = async (condition: () => unknown) => {
+    for (let attempt = 0; attempt < 150 && !condition(); attempt++) await new Promise(resolve => setTimeout(resolve, 10));
+  };
+  app.mount(holder);
+  try {
+    click('导出脱敏诊断包'); click('导出');
+    await wait(() => deliveries.length === 3);
+    const delivery = (name: string) => deliveries.find(item => item.name === name)?.data;
+    check(await delivery('nexus-support.zip')?.text() === contents && await delivery(asset)?.text() === contents &&
+      await delivery(`NexusPipeline-template-${id}.json`)?.text() === JSON.stringify(bundle, null, 2),
+      'diagnostic and template download delivery retains all original content and names');
+    await wait(() => !retained.size);
+    check(!retained.size, `completed download buffers release their object URLs promptly (${retained.size} retained)`);
+    click('导出脱敏诊断包');
+    await wait(() => supports === 2);
+    visible.value = false;
+    await nextTick();
+    pendingSupport.resolve(new Response(contents));
+    await new Promise(resolve => setTimeout(resolve, 30));
+    check(supportSignal?.aborted && deliveries.length === 3 && !retained.size,
+      'hiding diagnostics aborts the old support body and refuses a late download');
+  } finally {
+    pendingSupport.resolve(new Response('unused'));
+    app.unmount(); holder.remove(); store.dispose();
+    for (const url of retained.keys()) originalRevoke.call(URL, url);
+    URL.createObjectURL = originalCreate; URL.revokeObjectURL = originalRevoke; HTMLAnchorElement.prototype.click = originalClick;
+  }
 }
 
 async function diagnosticsContract(fixture: HTMLElement, check: Check): Promise<void> {

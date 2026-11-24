@@ -29,6 +29,7 @@ internal static class HistoryUiFixture
         var summary = new RecordSummaryReader(database).Read(new RecordSummaryQuery(From, From.AddDays(1), 0));
         if (summary.Totals.Runs != count || summary.Users.Count != 200 || summary.NextUserId is null)
             throw new IOException("History UI fixture totals differ");
+        var size = HistoryReadSeed.MeasureDatabase(database);
         using var output = new FileStream(report, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
         JsonSerializer.Serialize(output, new
         {
@@ -37,9 +38,9 @@ internal static class HistoryUiFixture
             instanceId = instance.InstanceId, instance.RuntimeRoot, records = count, users = 10001,
             firstUserId = Id("20000000", 1), firstUserRuns = 90000, firstRunId = Id("10000000", 1),
             lastRunId = Id("10000000", count), fromInclusive = From, untilExclusive = From.AddDays(1),
-            elapsedMilliseconds = elapsed.Elapsed.TotalMilliseconds,
+            seedAndVerificationMilliseconds = elapsed.Elapsed.TotalMilliseconds,
             reusedExistingData = reuse, verifiedRecords = verified,
-            databaseBytes = new FileInfo(database.DatabasePath).Length
+            size.DatabaseBytes, size.SidecarBytes, size.DatabaseFiles
         }, JsonSerializerOptions.Web);
         return 0;
     }

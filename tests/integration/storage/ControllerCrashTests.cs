@@ -16,8 +16,14 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class ControllerCrashTests(ITestOutputHelper output)
 {
-    public static IEnumerable<object[]> Cases() => Enum.GetValues<ConfigurationEditBoundary>()
-        .SelectMany(point => new[] { new object[] { point, true }, [point, false] });
+    public static IEnumerable<object[]> Cases()
+    {
+        ConfigurationEditBoundary[] boundaries = [ConfigurationEditBoundary.Accepted, ConfigurationEditBoundary.Installed,
+            ConfigurationEditBoundary.Editing, ConfigurationEditBoundary.WriterStarted, ConfigurationEditBoundary.WriterStopped,
+            ConfigurationEditBoundary.OutputSealed, ConfigurationEditBoundary.Restored, ConfigurationEditBoundary.Completed];
+        Assert.Equal(Enum.GetValues<ConfigurationEditBoundary>().Order(), boundaries.Order());
+        return boundaries.SelectMany(point => new[] { new object[] { point, true }, [point, false] });
+    }
 
     [Theory(DisplayName = "Actual Controller Owner Loss At Every Lifecycle Boundary Preserves Known Output Originals And Atomic Completion")]
     [MemberData(nameof(Cases))]
@@ -52,7 +58,16 @@ public sealed class ControllerCrashTests(ITestOutputHelper output)
         var stopped = await owner.StopAsync(); Assert.True(stopped.CompleteJobStopped); Assert.Equal(0u, stopped.Accounting.ActiveProcesses);
         File.WriteAllBytes(Path.Combine(fixture.Root, "controller-family-stopped.json"), JsonSerializer.SerializeToUtf8Bytes(stopped));
         using var lease = InstanceLease.Acquire(fixture.Instance, new());
-        if (point is ConfigurationEditBoundary.Installed or ConfigurationEditBoundary.Editing or ConfigurationEditBoundary.WriterStarted)
+        var (writerRefused, isolated, open, complete) = point switch
+        {
+            ConfigurationEditBoundary.Accepted => (false, false, false, false),
+            ConfigurationEditBoundary.Installed or ConfigurationEditBoundary.Editing or ConfigurationEditBoundary.WriterStarted => (true, false, false, false),
+            ConfigurationEditBoundary.WriterStopped => (false, true, true, false),
+            ConfigurationEditBoundary.OutputSealed or ConfigurationEditBoundary.Restored => (false, false, true, false),
+            ConfigurationEditBoundary.Completed => (false, false, false, true),
+            _ => throw new ArgumentOutOfRangeException(nameof(point))
+        };
+        if (writerRefused)
         {
             VerifyWriterRefusal(fixture, sessionId, point, request, initial, originals, stopped);
             return;
@@ -65,9 +80,6 @@ public sealed class ControllerCrashTests(ITestOutputHelper output)
         var session = store.LookupBegin(ConfigurationEditStore.BeginIdentity(sessionId, "fixture", request), request);
         Assert.NotNull(session);
         Assert.Equal(sessionId, session.SessionId);
-        var isolated = point == ConfigurationEditBoundary.WriterStopped;
-        var complete = point == ConfigurationEditBoundary.Completed;
-        var open = point != ConfigurationEditBoundary.Accepted && !complete;
         var journals = new RecoveryJournalRegistry(database);
         var revisions = new ConfigurationRevisionStore(fixture.Instance, database, new());
         var blobs = new ImmutableBlobStore(fixture.Instance, new());
@@ -182,15 +194,13 @@ public sealed class ControllerCrashTests(ITestOutputHelper output)
         Assert.Equal(initial.Address, revision.Address); Assert.Equal(initial.Contract, revision.Contract);
         Assert.Equal(edited ? 2 : 1, revision.Revision); Assert.Equal(initial.Tree.Shape, revision.Tree.Shape);
         if (!edited)
-        {
             Assert.Equal(initial.Tree.Entries, revision.Tree.Entries);
-            return;
-        }
         var entry = Assert.Single(revision.Tree.Entries);
         Assert.Equal(FileObjectKind.File, entry.Kind);
         using var stream = blobs.OpenVerified(new($"blobs/content/{entry.Sha256}.bin", entry.SizeBytes, entry.Sha256!));
-        using var reader = new StreamReader(stream);
-        Assert.Equal(EditedText(initial.Address.ResourceId), reader.ReadToEnd());
+        using var bytes = new MemoryStream();
+        stream.CopyTo(bytes);
+        Assert.Equal(System.Text.Encoding.UTF8.GetBytes(edited ? EditedText(initial.Address.ResourceId) : "{\"saved\":true}"), bytes.ToArray());
     }
 
     private static string EditedText(string resource) => JsonSerializer.Serialize(new { edited = resource });

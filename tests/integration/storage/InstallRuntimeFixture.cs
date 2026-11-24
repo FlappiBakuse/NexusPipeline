@@ -35,6 +35,7 @@ internal sealed class InstallRuntimeFixture : IDisposable
             "managed-activation-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(ActivationDirectory);
         var extensionId = originalManifest?["extensionId"]?.GetValue<string>() ?? "fixture-plugin";
+        var nativeLibrary = managedMode == "native-cleanup-fail" ? "nexus-native-cleanup-fixture.dll" : "nexus-native-fixture.dll";
         Package = packageArchive is null ? new(managedMode is null ? "data-specialized" : "managed-code",
             manifestEdit: manifest =>
             {
@@ -55,7 +56,7 @@ internal sealed class InstallRuntimeFixture : IDisposable
                 }
                 if (managedMode?.StartsWith("native", StringComparison.Ordinal) == true && managedMode != "native-undeclared")
                     manifest["managed"]!["nativeLibraries"] = new System.Text.Json.Nodes.JsonArray(
-                        managedMode == "native-managed" ? "entry.dll" : "native/nexus-native-fixture.dll");
+                        managedMode == "native-managed" ? "entry.dll" : $"native/{nativeLibrary}");
                 managedManifestEdit?.Invoke(manifest);
             },
             payloadEdit: directory =>
@@ -84,7 +85,7 @@ internal sealed class InstallRuntimeFixture : IDisposable
                 if (managedMode.StartsWith("native", StringComparison.Ordinal))
                 {
                     var native = Path.Combine(directory, "native"); Directory.CreateDirectory(native);
-                    File.Copy(Path.Combine(Environment.SystemDirectory, "version.dll"), Path.Combine(native, "nexus-native-fixture.dll"));
+                    File.Copy(Path.Combine(Environment.SystemDirectory, "version.dll"), Path.Combine(native, nativeLibrary));
                 }
                 managedPayloadEdit?.Invoke(directory);
             }, catalog: catalog, originalManifest: originalManifest, originalManifestBytes: originalManifestBytes, channel: channel) :

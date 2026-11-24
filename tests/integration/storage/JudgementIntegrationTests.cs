@@ -10,6 +10,7 @@ using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
+using NexusPipeline.TestFixtures;
 using Xunit;
 
 namespace NexusPipeline.StorageTests;
@@ -89,19 +90,45 @@ public sealed class JudgementIntegrationTests
         AssertJobsStopped(fixture.Source, state);
     }
 
-    [Theory(DisplayName = "Cancellation Stops The Actual Worker Before Awaiting Its Busy Ipc And Never Publishes A Late First Success")]
+    [Theory(DisplayName = "Cancellation Stops Both Native Jobs While The Interpreter Is Busy And Publishes No Late Success")]
     [InlineData(AutomationJudgementLanguage.JavaScript)]
     [InlineData(AutomationJudgementLanguage.Python)]
     public async Task CancelsBusyWorkers(AutomationJudgementLanguage language)
     {
-        var script = language == AutomationJudgementLanguage.JavaScript ? "function nexusJudge(value) { while (true) {} }" :
-            "def nexus_judge(value):\n    import time\n    time.sleep(5)\n    return {'outcome':'succeeded','reason':'too late'}";
+        await using var server = new NativeHttpFixture();
+        var address = new Uri(server.Address, "interpreter-entered");
+        var script = language == AutomationJudgementLanguage.JavaScript ? $$"""
+            function nexusJudge(value) {
+                nexus.probes.httpGet({url:'{{address}}',timeoutMs:15000});
+                while (true) {}
+            }
+            """ : $$"""
+            def nexus_judge(value):
+                nexus.probes.httpGet({'url':'{{address}}','timeoutMs':15000})
+                return {'outcome':'succeeded','reason':'too late'}
+            """;
         using var fixture = new JudgementIntegrationFixture(language, script, mode: "wait");
         var running = fixture.Consumer.RunNextAsync();
         AttemptReceipt receipt;
+        Dictionary<string, ProcessIdentity[]> living;
         try
         {
-            await fixture.Ready(); await WaitForInvocation(fixture); fixture.Cancel();
+            await fixture.Ready();
+            var pending = await server.PendingRequest.WaitAsync(TimeSpan.FromSeconds(15));
+            Assert.Equal("/interpreter-entered", pending.Target);
+            var jobs = fixture.State.Jobs;
+            Assert.Equal(new[] { "judgement", "process" }, jobs.Select(job => job.Role).Order(StringComparer.Ordinal));
+            living = jobs.ToDictionary(job => job.JobName, job =>
+            {
+                using var handle = JobNative.OpenJobObjectW(4, false, job.JobName);
+                Assert.False(handle.IsInvalid);
+                var members = JobStateReader.ActiveProcessIds(handle).Select(ProcessIdentityReader.Read).ToArray();
+                Assert.NotEmpty(members);
+                return members;
+            });
+            Assert.False(server.PeerClosed.IsCompleted);
+            fixture.Cancel();
+            await server.PeerClosed.WaitAsync(TimeSpan.FromSeconds(5));
             receipt = Assert.IsType<AttemptReceipt>(await running.WaitAsync(TimeSpan.FromSeconds(30)));
         }
         finally
@@ -114,13 +141,65 @@ public sealed class JudgementIntegrationTests
         Assert.Equal(LifecycleOutcome.Cancelled, receipt.Facts.Lifecycle); Assert.Equal(BusinessOutcome.Unverified, receipt.Facts.Business);
         Assert.Equal(RecoveryOutcome.Restored, receipt.Facts.Recovery);
         var state = fixture.State; var result = Assert.Single(StepResultCodec.Read(state.Latest.Root, state.Total));
-        AssertJobsStopped(fixture.Source, state);
+        foreach (var closure in AssertJobsStopped(fixture.Source, state))
+            Assert.All(living[closure.JobName], member => Assert.Contains(member, closure.Family));
         var document = StepEvidenceCodec.Read(new(fixture.Source.Instance, new()), result.Binding, result.Latest.Artifact);
         Assert.Null(document.Stop); Assert.NotNull(document.Judgement);
         var transcript = JudgementEvidenceCodec.Read(new(fixture.Source.Instance, new()), result.Binding, document.Judgement!);
         Assert.NotEmpty(transcript.Exchanges);
         Assert.DoesNotContain(StepResultCodec.ReadAll(state.Latest.Root), item => item.Business == BusinessOutcome.Succeeded);
         Assert.Equal(0, fixture.Consumer.PendingReconciliationCount);
+    }
+
+    [Fact(DisplayName = "The Native Judgement Job Has Exited When A Busy Probe First Observes Parent Transport Cancellation")]
+    public async Task StopsBeforeCancellingProbe()
+    {
+        using var fixture = new JudgementIntegrationFixture(AutomationJudgementLanguage.JavaScript,
+            "function nexusJudge(value) { nexus.probes.processes({}); return {outcome:'succeeded',reason:'too late'}; }", mode: "wait");
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var activeAtCancellation = new TaskCompletionSource<int[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+        SafeKernelHandle? job = null;
+        async Task<JudgementProbeReply> Observe(JudgementProbeRequest request, CancellationToken cancellation)
+        {
+            Assert.Equal("processes", request.Method);
+            var blocked = new TaskCompletionSource<JudgementProbeReply>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var observed = cancellation.Register(() =>
+            {
+                try { activeAtCancellation.TrySetResult(JobStateReader.ActiveProcessIds(job!).ToArray()); }
+                catch (Exception error) { activeAtCancellation.TrySetException(error); }
+                finally { blocked.TrySetCanceled(cancellation); }
+            });
+            entered.TrySetResult();
+            return await blocked.Task;
+        }
+
+        await using var step = new JudgementOwnedStep(fixture, Observe);
+        step.Prepare();
+        var judgement = Assert.Single(fixture.State.Jobs, item => item.Role == "judgement");
+        using var held = JobNative.OpenJobObjectW(4, false, judgement.JobName);
+        Assert.False(held.IsInvalid);
+        job = held;
+        step.Start();
+        await fixture.Ready();
+        using var enteredDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (!entered.Task.IsCompleted)
+        {
+            step.Collector.TryRequestStop();
+            await Task.WhenAny(entered.Task, Task.Delay(20, enteredDeadline.Token));
+            enteredDeadline.Token.ThrowIfCancellationRequested();
+        }
+
+        Assert.NotEmpty(JobStateReader.ActiveProcessIds(held));
+        Assert.False(activeAtCancellation.Task.IsCompleted);
+        fixture.Cancel();
+        await step.Collect().WaitAsync(TimeSpan.FromSeconds(15));
+        var active = await activeAtCancellation.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        AssertJobsStopped(fixture.Source, fixture.State);
+        step.CompleteCollectedCancellation();
+        Assert.Empty(active);
+        var state = fixture.State;
+        Assert.Equal(JournalPhase.Committed, state.Journal.Phase);
+        Assert.Equal(BusinessOutcome.Unverified, Assert.Single(StepResultCodec.Read(state.Latest.Root, state.Total)).Latest.Business);
     }
 
     [Theory(DisplayName = "Historical Script Evidence Uses Its Frozen Inputs And Rejects A Rehashed Unbound Payload Without Repairing Any Original Bytes")]
@@ -151,7 +230,8 @@ public sealed class JudgementIntegrationTests
         }
         using var changed = JsonDocument.Parse(node.ToJsonString()); var input = changed.RootElement.Clone();
         var forgedInvocation = invocation with { Input = input, InputSha256 = JudgementWorkerProtocol.InputHash(input) };
-        var archived = JudgementInvocationArchive.Write(blobs, forgedInvocation, _ => { });
+        using var frame = new JudgementInvocationFrame(forgedInvocation);
+        var archived = JudgementInvocationArchive.Write(blobs, frame, _ => { });
         var response = JudgementWorkerProtocol.Decode<JudgementWorkerResponse>(JudgementEvidenceCodec.ReadBytes(blobs, entry.Response!));
         var forgedResponse = blobs.PersistPlan(JudgementWorkerProtocol.Encode(response with { InputSha256 = forgedInvocation.InputSha256 }));
         entries[index] = entry with { Invocation = archived, Response = forgedResponse };
@@ -180,17 +260,4 @@ public sealed class JudgementIntegrationTests
         "function nexusJudge(value) { console.info('attempt console '+value.generation); nexus.probes.processes({}); return {outcome:value.isFinal?'succeeded':'unverified',reason:'actual final'}; }" :
         "def nexus_judge(value):\n    print('attempt console '+str(value['generation']))\n    nexus.probes.processes({})\n    return {'outcome':'succeeded' if value['isFinal'] else 'unverified','reason':'actual final'}";
 
-    private static async Task WaitForInvocation(JudgementIntegrationFixture fixture)
-    {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-        var plans = Path.Combine(fixture.Source.Instance.RuntimeRoot, "blobs", "plans");
-        while (!Directory.EnumerateFiles(plans, "*.json").Any(IsInvocationArchive))
-            await Task.Delay(10, timeout.Token);
-    }
-
-    private static bool IsInvocationArchive(string path)
-    {
-        try { return File.ReadAllText(path).Contains("nexus.execution.judgement-invocation-archive", StringComparison.Ordinal); }
-        catch (IOException error) when ((error.HResult & 0xffff) is 32 or 33) { return false; }
-    }
 }

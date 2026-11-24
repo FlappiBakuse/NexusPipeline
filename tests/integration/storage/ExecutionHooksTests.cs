@@ -115,12 +115,15 @@ public sealed class ExecutionHooksTests
     public async Task CancelsBeforeConsumption(bool configuration)
     {
         using var fixture = new ExecutionHooksFixture(configuration);
+        var stepId = Assert.Single(fixture.State.Total.Steps).StepId;
         var bytes = File.ReadAllBytes(fixture.Source.Configuration); fixture.Cancel();
         var receipt = Assert.IsType<AttemptReceipt>(await fixture.Consumer.RunNextAsync());
         Assert.Equal(LifecycleOutcome.Cancelled, receipt.Facts.Lifecycle); Assert.Equal(EngineOutcome.NotStarted, receipt.Facts.Engine);
         Assert.Equal(BusinessOutcome.Unverified, receipt.Facts.Business); Assert.Equal(RecoveryOutcome.NotRequired, receipt.Facts.Recovery);
-        Assert.Empty(fixture.State.Jobs); Assert.Empty(fixture.State.Steps); Assert.Equal(0, fixture.Base.Count("journal_writer_job_roots"));
-        Assert.All(fixture.State.Coverage, item => Assert.Equal(StepCompletionKind.NotDispatched, item.Kind));
+        var state = fixture.State;
+        Assert.Empty(state.Jobs); Assert.Empty(state.Steps); Assert.Equal(0, fixture.Base.Count("journal_writer_job_roots"));
+        var coverage = Assert.Single(state.Coverage);
+        Assert.Equal(stepId, coverage.StepId); Assert.Equal(StepCompletionKind.NotDispatched, coverage.Kind); Assert.Null(coverage.Result);
         Assert.False(File.Exists(fixture.Marker + ".pre")); Assert.False(File.Exists(fixture.Marker + ".main"));
         Assert.Equal(bytes, File.ReadAllBytes(fixture.Source.Configuration)); Assert.True(fixture.Base.Index.Current.IsReady);
     }
@@ -151,17 +154,40 @@ public sealed class ExecutionHooksTests
     public async Task ReadsHistoricalHooks()
     {
         using var fixture = new ExecutionHooksFixture(configuration: true);
-        _ = await fixture.Consumer.RunNextAsync();
+        File.WriteAllBytes(fixture.Marker + ".output-fixture.json", JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            preBytes = 3, mainBytes = 0, postBytes = 5,
+            logPath = fixture.Marker + ".log", logBytes = 0
+        }));
+        var receipt = Assert.IsType<AttemptReceipt>(await fixture.Consumer.RunNextAsync());
+        Assert.Equal(EngineOutcome.Succeeded, receipt.Facts.Engine);
         var path = fixture.Source.Configuration; var moved = path + ".saved";
         File.Move(path, moved);
         try
         {
             var before = fixture.Source.Snapshot();
-            foreach (var hook in HookResultCodec.Read(fixture.State.Latest.Root, fixture.State.Total))
+            var state = fixture.State;
+            var hooks = HookResultCodec.Read(state.Latest.Root, state.Total);
+            Assert.Equal(new[] { "postHook", "preHook" }, hooks.Select(hook => hook.Role).Order(StringComparer.Ordinal));
+            var reader = new HookEvidenceReader(fixture.Source.Instance, fixture.Source.Database, new());
+            var blobs = new ImmutableBlobStore(fixture.Source.Instance, new());
+            foreach (var hook in hooks)
             {
-                var reader = new HookEvidenceReader(fixture.Source.Instance, fixture.Source.Database, new());
                 var document = reader.Read(hook.Binding, hook.Role, hook.Artifact);
-                Assert.Equal(hook.Engine, document.Engine); Assert.Contains(document.RawOutput!, reader.ReadReferences(hook.Binding, hook.Role, hook.Artifact));
+                Assert.Equal(EngineOutcome.Succeeded, document.Engine);
+                var reference = Assert.IsType<BlobReference>(document.RawOutput);
+                Assert.Contains(reference, reader.ReadReferences(hook.Binding, hook.Role, hook.Artifact));
+                var raw = RawOutputCodec.Read(blobs, hook.Binding, reference);
+                Assert.True(raw.IsComplete);
+                using var output = new MemoryStream();
+                foreach (var part in raw.Parts)
+                {
+                    Assert.Equal(ProcessOutputSource.StandardOutput, part.Source);
+                    using var bytes = blobs.OpenVerified(part.Content);
+                    bytes.CopyTo(output);
+                }
+                var expected = hook.Role == "preHook" ? "pppfailed\r\n"u8 : "pppppfailed\r\n"u8;
+                Assert.Equal(expected.ToArray(), output.ToArray());
             }
             var after = fixture.Source.Snapshot(); Assert.Equal(before.Rows, after.Rows); Assert.Equal(before.Files, after.Files);
         }

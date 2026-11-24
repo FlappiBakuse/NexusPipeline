@@ -21,15 +21,32 @@ public sealed class SecretPlanTests
         using var draft = codec.Freeze(SecretStoreIdentity(fixture, 0), Guid.NewGuid(), fixture.Key, 0, value);
         var receipts = new PreparationReceiptCodec(new());
         var writer = Guid.NewGuid();
-        var started = receipts.Encode(draft.Plan, draft.Reference, writer, "started", null);
-        Assert.Null(receipts.Decode(draft.Plan, draft.Reference, started).Identity);
+        var frozen = JsonNode.Parse(draft.Plan.Export())!;
         var parent = draft.Plan.ReadWire().PayloadParentIdentity;
+        var started = new JsonObject
+        {
+            ["format"] = "nexus.secret.preparation.receipt", ["version"] = 1,
+            ["instanceId"] = fixture.Instance.InstanceId.ToString("D"),
+            ["operationId"] = frozen["operationId"]!.DeepClone(), ["journalId"] = frozen["journalId"]!.DeepClone(),
+            ["writerId"] = writer.ToString("D"), ["stage"] = "started",
+            ["planDigest"] = Convert.ToHexStringLower(SHA256.HashData(draft.Plan.Export())),
+            ["candidate"] = frozen["candidate"]!.DeepClone(), ["parentIdentity"] = frozen["payloadParentIdentity"]!.DeepClone()
+        };
+        Assert.True(JsonNode.DeepEquals(started, JsonNode.Parse(receipts.Encode(draft.Plan, draft.Reference, writer, "started", null))));
+        var before = receipts.Decode(draft.Plan, draft.Reference, Encoding.UTF8.GetBytes(started.ToJsonString()));
+        Assert.Equal("started", before.Stage); Assert.Equal(writer.ToString("D"), before.WriterId); Assert.Null(before.Identity);
         var identity = new NexusPipeline.Platform.Storage.PhysicalObjectIdentity(parent.VolumeSerial, new string('a', 32));
-        var completed = receipts.Encode(draft.Plan, draft.Reference, writer, "completed", identity);
-        Assert.Equal(identity.FileId, receipts.Decode(draft.Plan, draft.Reference, completed).Identity!.FileId);
-        var changed = JsonNode.Parse(completed)!;
+        var completed = started.DeepClone().AsObject();
+        completed["stage"] = "completed";
+        completed["identity"] = new JsonObject { ["volumeSerial"] = identity.VolumeSerial, ["fileId"] = identity.FileId };
+        Assert.True(JsonNode.DeepEquals(completed, JsonNode.Parse(receipts.Encode(draft.Plan, draft.Reference, writer, "completed", identity))));
+        var observed = receipts.Decode(draft.Plan, draft.Reference, Encoding.UTF8.GetBytes(completed.ToJsonString()));
+        Assert.Equal("completed", observed.Stage); Assert.Equal(parent.VolumeSerial, observed.Identity!.VolumeSerial);
+        Assert.Equal(identity.FileId, observed.Identity.FileId);
+        var changed = completed.DeepClone();
         changed["candidate"]!["sha256"] = new string('b', 64);
-        Assert.Throws<IOException>(() => receipts.Decode(draft.Plan, draft.Reference, Encoding.UTF8.GetBytes(changed.ToJsonString())));
+        Assert.Equal("secret_preparation_receipt_unbound",
+            Assert.Throws<IOException>(() => receipts.Decode(draft.Plan, draft.Reference, Encoding.UTF8.GetBytes(changed.ToJsonString()))).Message);
         Assert.Throws<System.Text.Json.JsonException>(() => receipts.Encode(draft.Plan, draft.Reference, writer, "completed", null));
     }
 

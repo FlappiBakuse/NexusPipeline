@@ -128,7 +128,13 @@ public sealed class TaskSelectionTests
         var initial = TaskSelectionPolicy.Capture(source.Document, declaration);
         Assert.True(initial.Values["plugin:A"]); Assert.False(initial.Values["plugin:B"]);
         var selected = source.Document.Apply(TaskSelectionPolicy.Select(source.Document, initial, [new("plugin:A", false)]));
-        Assert.NotEqual(source.Source, selected);
+        var expected = shape switch
+        {
+            "objects" => """{"tasks":[{"id":"A","enabled":false},{"id":"B","enabled":false},{"id":"unknown","enabled":true}],"counter":17,"order":["B","A"]}""",
+            "map" => """{"tasks":{"A":false,"B":false,"unknown":true},"counter":17,"order":["B","A"]}""",
+            _ => """{"ids":["A","B","unknown"],"states":[false,false,true],"counter":17,"order":["B","A"]}"""
+        };
+        Assert.Equal(Encoding.UTF8.GetBytes(expected), selected);
         using var changed = new ConfigurationDocumentFixture(selected, ConfigurationSyntax.Json);
         var current = TaskSelectionPolicy.Capture(changed.Document, declaration);
         Assert.False(current.Values["plugin:A"]); Assert.False(current.Values["plugin:B"]);

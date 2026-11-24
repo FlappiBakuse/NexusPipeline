@@ -1,15 +1,112 @@
+using System.Diagnostics;
 using System.Runtime.Versioning;
+using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Journals;
+using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace NexusPipeline.StorageTests;
 
 [SupportedOSPlatform("windows")]
-public sealed class AndroidRuntimeTests
+public sealed class AndroidRuntimeTests(ITestOutputHelper output)
 {
+    [Fact(DisplayName = "A Real Suspended Command Root Uses One Registered Row Inside Its Publication Transaction")]
+    public async Task ReadsRegistrationOnce()
+    {
+        var fixture = new AndroidRuntimeFixture(forceClose: false);
+        var source = fixture.Source;
+        var statements = new List<string>();
+        var observer = new RootObserver(ObserveRoot);
+        await fixture.ExecuteAsync(async () =>
+        {
+            var accepted = fixture.Base.Take(fixture.Accepted.Acceptance.OperationId);
+            using var session = new AttemptRuntimeSession(source.Instance, source.Database, new(), source.Lease,
+                fixture.Base.Resources, fixture.Base.Index, accepted, observer);
+            try
+            {
+                var receipt = await new ExecutionAttemptCoordinator().RunAsync(session, CancellationToken.None);
+                Assert.Equal(LifecycleOutcome.Completed, receipt.Facts.Lifecycle);
+                Assert.Equal(BusinessOutcome.Succeeded, receipt.Facts.Business);
+                Assert.Single(statements, sql => sql.Contains(" FROM main.execution_target_command_jobs WHERE ", StringComparison.Ordinal));
+                fixture.VerifyOriginal();
+            }
+            finally { if (!session.IsTerminal) await session.QuarantineFailureAsync(); }
+        });
+
+        void ObserveRoot(ExecutionTargetBinding binding)
+        {
+            if (statements.Count != 0) return;
+            var state = AttemptWriterState.Read(source.Instance, source.Database, new(), binding.ParentJournalId);
+            var registration = Assert.Single(AndroidControlCodec.Read(state.Latest.Root, state.Total,
+                state.Attempt.ExecutionPlan.Sha256), item => item.Binding == binding);
+            var request = new AndroidControlEvidence(source.Instance, source.Database, new()).Request(state, registration);
+            var connection = Assert.IsType<SqliteConnection>(DatabaseWriteScope.Borrow(source.Database.DatabasePath));
+            using var transaction = connection.BeginTransaction(deferred: false);
+            var expected = Assert.IsType<ProcessIdentity>(TargetRootFacts.ReadCommandInside(connection, transaction, registration));
+            var journal = binding.ParentJournalId.ToString("D");
+            var target = binding.TargetId.ToString("D");
+            var now = TimeProvider.System;
+            var clock = new AndroidControlClock(new(now, now.GetTimestamp(), TimeSpan.Zero, DateTimeOffset.MaxValue), TimeSpan.FromMinutes(1));
+            var expired = new AndroidControlClock(new(now, now.GetTimestamp(), TimeSpan.FromSeconds(1),
+                now.GetUtcNow().AddSeconds(-1)), TimeSpan.FromMinutes(1));
+            void Persist() => TargetRootFacts.InsertCommandInside(connection, transaction, state, registration, request, expected, clock);
+            Assert.Equal("execution_total_budget_exhausted", Assert.Throws<IOException>(() =>
+                TargetRootFacts.InsertCommandInside(connection, transaction, state, registration, request, expected, expired)).Message);
+
+            // The real suspended process and its already published row stay intact after this trial transaction rolls back.
+            using var erase = DatabaseConnections.Command(connection, transaction,
+                "DELETE FROM main.execution_target_job_roots WHERE journal_id=$0 AND target_id=$1;", journal, target);
+            Assert.Equal(1, erase.ExecuteNonQuery());
+            SQLitePCL.strdelegate_trace trace = (_, sql) => statements.Add(sql);
+            SQLitePCL.raw.sqlite3_trace(connection.Handle!, trace, null);
+            try { Persist(); }
+            finally { SQLitePCL.raw.sqlite3_trace(connection.Handle!, (SQLitePCL.strdelegate_trace?)null, null); }
+            Assert.Equal(expected, TargetRootFacts.ReadCommandInside(connection, transaction, registration));
+            const int iterations = 80;
+            using var process = Process.GetCurrentProcess();
+            var cpuBefore = process.TotalProcessorTime;
+            long allocated = 0, elapsed = 0;
+            for (var i = 0; i < iterations; i++)
+            {
+                erase.ExecuteNonQuery();
+                var allocationsBefore = GC.GetAllocatedBytesForCurrentThread();
+                var started = Stopwatch.GetTimestamp();
+                Persist();
+                elapsed += Stopwatch.GetTimestamp() - started;
+                allocated += GC.GetAllocatedBytesForCurrentThread() - allocationsBefore;
+            }
+            var cpu = process.TotalProcessorTime - cpuBefore;
+            output.WriteLine($"android-root selects={statements.Count(sql => sql.StartsWith("SELECT ", StringComparison.OrdinalIgnoreCase))} registration-selects={statements.Count(sql => sql.Contains(" FROM main.execution_target_command_jobs WHERE ", StringComparison.Ordinal))} repetitions={iterations} elapsed-ms={Stopwatch.GetElapsedTime(0, elapsed).TotalMilliseconds:F3} process-cpu-ms={cpu.TotalMilliseconds:F3} allocated-bytes={allocated}");
+            foreach (var sql in statements.Where(sql => sql.StartsWith("SELECT ", StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.Ordinal))
+            {
+                using var command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText = "EXPLAIN QUERY PLAN " + sql;
+                using var planner = command.ExecuteReader();
+                while (planner.Read()) output.WriteLine(planner.GetString(3));
+            }
+            using var damage = DatabaseConnections.Command(connection, transaction,
+                "UPDATE main.execution_target_command_jobs SET step_id=$0 WHERE journal_id=$1 AND command_id=$2;", "fixture-wrong-step", journal, target);
+            Assert.Equal(1, damage.ExecuteNonQuery());
+            Assert.Equal("execution_android_command_sql_unbound", Assert.Throws<IOException>(() =>
+                TargetRootFacts.InsertCommandInside(connection, transaction, state, registration, request, expected, expired)).Message);
+            transaction.Rollback();
+            Assert.Equal(expected, TargetRootFacts.ReadCommandInside(connection, null, registration));
+        }
+    }
+
+    private sealed class RootObserver(Action<ExecutionTargetBinding> observe) : ITargetPersistenceObserver
+    {
+        public void Reached(TargetPersistencePoint point, ExecutionTargetBinding binding)
+        {
+            if (point == TargetPersistencePoint.RootAdmitted) observe(binding);
+        }
+    }
+
     [Theory(DisplayName = "Actual Explicit Device Commands Run Before Main And Complete Before Post And Original Configuration Restore")]
     [InlineData(false)]
     [InlineData(true)]

@@ -24,7 +24,7 @@ test('drawn window actions require the bound current main-frame session and reta
     module: { exports: {} }, URL, URLSearchParams, AbortController, AbortSignal, Date, performance,
     setTimeout: () => 1, clearTimeout() {},
     require(name) {
-      if (name === './native-frontend.cjs') return { installFrontendBridge: () => ({ invalidate() {}, dispose() {} }) };
+      if (name === './diagnostics.cjs') return require('../../apps/desktop/diagnostics.cjs');
       if (name === './native-login.cjs') return { installLoginBridge: () => ({ start: async () => {}, invalidate() {}, dispose: async () => {} }) };
       if (name === 'electron') return { ipcMain: { handle: (name, callback) => handlers.set(name, callback),
         removeHandler: name => handlers.delete(name) } };

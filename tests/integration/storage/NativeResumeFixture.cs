@@ -48,7 +48,7 @@ internal sealed class NativeResumeFixture : IAsyncDisposable
             AdapterResources = [new(extension == "okww" ? "main" : "group:01", 0, "", 1, ConfigurationSyntax.Json, new([], [], [])),
                 new("native-progress", 1, "", 1, ConfigurationSyntax.Json, new([], [], []))],
             LogPaths = [new(files.Id, "events.log")], Limits = new(2, 2, 120),
-            Judgement = new(AutomationJudgementLanguage.Keywords, [], ["NATIVE_TEST_FAILURE"], null), UpdateConfigurationAtFinish = true
+            Judgement = new(AutomationJudgementLanguage.Keywords, [], [], null), UpdateConfigurationAtFinish = true
         }], [], [], [], [], []);
         Source.Definitions.Commit(AutomationDefinitionStore.Identity(Guid.NewGuid(), "native-resume", changes), changes, DateTimeOffset.UtcNow);
         Original = ConfigurationBytes(extension);

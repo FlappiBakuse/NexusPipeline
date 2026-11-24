@@ -16,15 +16,23 @@ public sealed class AndroidDecodingTests
         using var fixture = new AndroidRuntimeFixture(launch: false, forceClose: false);
         var request = Request(fixture);
         var callerFiles = request.Tool.RuntimeFiles.ToList();
+        var original = callerFiles.ToArray();
         var caller = request with { Tool = request.Tool with { RuntimeFiles = callerFiles } };
         var bytes = JsonSerializer.SerializeToUtf8Bytes(caller, StepResultCodec.Options);
         var decoded = AndroidControlCodec.Decode<AndroidCommandRequest>(bytes);
         var digest = AndroidCommandIdentity.Digest(decoded);
         Assert.NotEmpty(decoded.Tool.RuntimeFiles);
         callerFiles.Clear();
-        Assert.Throws<NotSupportedException>(() => ((IList<ExecutionPlanRuntimeFile>)decoded.Tool.RuntimeFiles).Clear());
+        if (decoded.Tool.RuntimeFiles is IList<ExecutionPlanRuntimeFile> exposed)
+        {
+            try { exposed[0] = original[0] with { RelativePath = "changed-by-caller" }; }
+            catch (NotSupportedException) { }
+        }
+        Assert.Equal(original, decoded.Tool.RuntimeFiles);
         var first = bytes[0]; bytes[0] = 0;
         Assert.Throws<JsonException>(() => AndroidControlCodec.Decode<AndroidCommandRequest>(bytes));
+        Assert.Equal(original, decoded.Tool.RuntimeFiles);
+        Assert.Equal(digest, AndroidCommandIdentity.Digest(decoded));
         bytes[0] = first;
         Assert.Equal(digest, AndroidCommandIdentity.Digest(AndroidControlCodec.Decode<AndroidCommandRequest>(bytes)));
         Assert.Equal(0, fixture.Base.Count("execution_target_command_jobs")); fixture.VerifyOriginal();

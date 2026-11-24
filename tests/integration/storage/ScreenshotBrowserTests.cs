@@ -23,10 +23,14 @@ public sealed class ScreenshotBrowserTests
     private static async Task CaptureAsync(bool android)
     {
         using var inputs = new BuiltExtensionInputs("live-screenshot", "NEXUS_PACKAGED_SCREENSHOT_RECEIPT");
+        var application = Environment.GetEnvironmentVariable("NEXUS_ACCEPTANCE_APPLICATION")
+            ?? throw new IOException("explicit_acceptance_application_required");
+        if (!Path.IsPathFullyQualified(application) || !File.Exists(Path.Combine(application, "NexusPipeline.exe")))
+            throw new IOException("explicit_acceptance_application_required");
         object? context = null; RuntimeInstance? instance = null; StateDatabase? database = null;
         await FrontendBrowserTests.RunAsync(inputs, "NEXUS_SCREENSHOT_BROWSER_SCRIPT",
             seed: catalog => { instance = catalog.Instance; database = catalog.Database; context = Seed(catalog, android); },
-            browserContext: () => context, timeoutSeconds: 300);
+            browserContext: () => context, application: application, timeoutSeconds: 300);
         using var result = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(Path.GetDirectoryName(instance!.RuntimeRoot)!, "browser", "result.json")));
         var androidClosures = 0;
         foreach (var run in result.RootElement.GetProperty("runs").EnumerateArray())

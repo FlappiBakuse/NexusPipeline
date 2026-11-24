@@ -14,7 +14,7 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class AndroidMediaTests
 {
-    [Theory(DisplayName = "Actual Generic And Paired Mu Mu Previews Use Fresh Stopped Children Without Persisting Frames Or Replacing The Final Capture")]
+    [Theory(DisplayName = "Actual Generic And Paired Mu Mu Previews Stop Fresh Children Without Writing Png Or Capture Staging Names In Runtime Blobs")]
     [InlineData(false)]
     [InlineData(true)]
     public async Task CapturesFreshPreviews(bool mumu)
@@ -34,6 +34,14 @@ public sealed class AndroidMediaTests
             {
                 await RequireMainAsync(fixture, running);
                 await using var preview = await OpenAsync(fixture, context);
+                using (var witness = new PreviewWriteWatch(fixture.Source.Instance.RuntimeRoot))
+                {
+                    var probe = Path.Combine(fixture.Source.Instance.RuntimeRoot, "blobs", "preview-witness-" + Guid.NewGuid().ToString("N") + ".png");
+                    File.WriteAllBytes(probe, Convert.FromBase64String(
+                        "iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAIAAAASFvFNAAAAHElEQVR4nGNgZGJmYWVj5+Bk4OLm4eXjFxAUAgAEtQCszolp4wAAAABJRU5ErkJggg=="));
+                    File.Delete(probe);
+                    await Assert.ThrowsAsync<Xunit.Sdk.DoesNotContainException>(witness.RequireNoPngAsync);
+                }
                 using var writes = new PreviewWriteWatch(fixture.Source.Instance.RuntimeRoot);
                 var first = await preview.CaptureAsync();
                 var second = await preview.CaptureAsync();

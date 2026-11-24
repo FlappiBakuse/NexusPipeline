@@ -15,18 +15,16 @@ public sealed class InstallerBackupTests
     {
         using var fixture = new InstallerMetadataFixture();
         fixture.WriteShortcut(Path.Combine(fixture.Application, ApplicationTree.HostEntry));
+        var originals = fixture.ReadOriginalMetadata(includeShortcut: true);
+        var rootIdentity = PhysicalObjectIdentity.Read(fixture.Application);
         var (store, backup, frame) = Create(fixture);
-        var before = InstallerSnapshotCodec.Decode(frame.Before, fixture.Application);
         backup.Preposition(fixture.Application, frame.TransactionId);
+        RequireMovedOriginals(fixture, originals);
         backup.Preposition(fixture.Application, frame.TransactionId);
         backup.RequirePreserved(fixture.Application, frame.TransactionId);
-        foreach (var file in before.Files)
-        {
-            Assert.False(File.Exists(backup.SourcePath(fixture.Application, file)));
-            Assert.Equal(file.Identity, PhysicalObjectIdentity.Read(backup.BackupPath(file)));
-        }
+        RequireMovedOriginals(fixture, originals);
         Assert.Equal(frame.Before, store.Read(fixture.Application, frame.TransactionId).Before);
-        Assert.Equal(before.RootIdentity, PhysicalObjectIdentity.Read(fixture.Application));
+        Assert.Equal(rootIdentity, PhysicalObjectIdentity.Read(fixture.Application));
     }
 
     [Theory(DisplayName = "Installer Preposition Resumes Only Recorded Original Objects Already Moved To Its Bound Backup Directory")]
@@ -35,13 +33,37 @@ public sealed class InstallerBackupTests
     public void ResumesRecordedMoves(int count)
     {
         using var fixture = new InstallerMetadataFixture();
+        var originals = fixture.ReadOriginalMetadata();
+        var sentinel = Path.Combine(fixture.Application, "unrelated-content.bin");
+        byte[] sentinelBytes = [7, 5, 3, 0];
+        File.WriteAllBytes(sentinel, sentinelBytes);
+        var sentinelIdentity = PhysicalObjectIdentity.Read(sentinel);
         var (_, backup, frame) = Create(fixture);
-        var before = InstallerSnapshotCodec.Decode(frame.Before, fixture.Application);
-        foreach (var file in before.Files.Take(count))
-            PhysicalObjectMove.MoveVerified(new(backup.SourcePath(fixture.Application, file), file.ParentIdentity, file.Identity,
-                backup.BackupPath(file), frame.BackupIdentity, FileObjectKind.File));
+        var directory = Path.Combine(fixture.Paths.ManagerRoot, "metadata-checkpoint", "before");
+        foreach (var file in originals.Take(count))
+            PhysicalObjectMove.MoveVerified(new(file.Source, file.ParentIdentity, file.Identity,
+                Path.Combine(directory, file.BackupName), frame.BackupIdentity, FileObjectKind.File));
+        Assert.Equal(originals.Take(count).Select(file => file.BackupName).Order(StringComparer.Ordinal),
+            Directory.EnumerateFileSystemEntries(directory).Select(Path.GetFileName).Order(StringComparer.Ordinal));
         backup.Preposition(fixture.Application, frame.TransactionId);
         backup.RequirePreserved(fixture.Application, frame.TransactionId);
+        RequireMovedOriginals(fixture, originals);
+        Assert.Equal(sentinelBytes, File.ReadAllBytes(sentinel));
+        Assert.Equal(sentinelIdentity, PhysicalObjectIdentity.Read(sentinel));
+    }
+
+    private static void RequireMovedOriginals(InstallerMetadataFixture fixture, InstallerMetadataFixture.OriginalMetadata[] originals)
+    {
+        var directory = Path.Combine(fixture.Paths.ManagerRoot, "metadata-checkpoint", "before");
+        Assert.Equal(originals.Select(file => file.BackupName).Order(StringComparer.Ordinal),
+            Directory.EnumerateFileSystemEntries(directory).Select(Path.GetFileName).Order(StringComparer.Ordinal));
+        foreach (var file in originals)
+        {
+            Assert.False(Path.Exists(file.Source));
+            var preserved = Path.Combine(directory, file.BackupName);
+            Assert.Equal(file.Bytes, File.ReadAllBytes(preserved));
+            Assert.Equal(file.Identity, PhysicalObjectIdentity.Read(preserved));
+        }
     }
 
     [Fact(DisplayName = "An Unknown Backup Member Is Preserved And Stops Installer Preposition Before Original Objects Move")]

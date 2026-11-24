@@ -138,13 +138,28 @@ public sealed partial class ConfigurationSwapTests
             "foreign-instance" => fixture.Stopped with { InstanceId = Guid.NewGuid() },
             _ => fixture.Stopped with { JournalId = Guid.NewGuid() }
         };
-        Assert.Throws<IOException>(() => fixture.Swap.Prepare(fixture.Plan, writers, CancellationToken.None));
+        RejectWithoutChangingSite(() => fixture.Swap.Prepare(fixture.Plan, writers, CancellationToken.None));
         var prepared = fixture.Swap.Prepare(fixture.Plan, fixture.Stopped, CancellationToken.None);
-        Assert.Throws<IOException>(() => fixture.Swap.PreserveOriginal(prepared, writers));
-        Assert.Throws<IOException>(() => fixture.Swap.InstallCandidate(prepared, writers));
-        Assert.Throws<IOException>(() => fixture.Swap.RetireCandidate(prepared, writers));
-        Assert.Throws<IOException>(() => fixture.Swap.RestoreOriginal(prepared, writers));
-        Assert.Equal(fixture.Plan.Before.Snapshot.Entries, fixture.Scanner.Capture(fixture.Plan.TargetPath, CancellationToken.None).Entries);
+        RejectWithoutChangingSite(() => fixture.Swap.PreserveOriginal(prepared, writers));
+        fixture.Swap.PreserveOriginal(prepared, fixture.Stopped);
+        RejectWithoutChangingSite(() => fixture.Swap.InstallCandidate(prepared, writers));
+        fixture.Swap.InstallCandidate(prepared, fixture.Stopped);
+        RejectWithoutChangingSite(() => fixture.Swap.RetireCandidate(prepared, writers));
+        fixture.Swap.RetireCandidate(prepared, fixture.Stopped);
+        RejectWithoutChangingSite(() => fixture.Swap.RestoreOriginal(prepared, writers));
+        fixture.Swap.RestoreOriginal(prepared, fixture.Stopped);
+        AssertOriginal(fixture);
+
+        void RejectWithoutChangingSite(Action action)
+        {
+            var parent = Path.GetDirectoryName(fixture.Plan.TargetPath)!;
+            var before = fixture.Scanner.Capture(parent, CancellationToken.None);
+            var identities = PhysicalTreeIdentity.Capture(parent, before);
+            Assert.Equal("configuration_writer_stop_unconfirmed", Assert.Throws<IOException>(action).Message);
+            var after = fixture.Scanner.Capture(parent, CancellationToken.None);
+            Assert.Equal(before.Entries.ToArray(), after.Entries.ToArray());
+            Assert.Equal(identities, PhysicalTreeIdentity.Capture(parent, after));
+        }
     }
 
     [Theory(DisplayName = "Unexpected Bytes Or Physical Identity Changes Are Preserved Instead Of Moved Or Overwritten")]

@@ -62,7 +62,18 @@ public sealed class NativeBridgeTests
             await Task.WhenAll(child.Logs);
             using var report = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(output, "receipt.json")));
             Assert.Equal("PASS", report.RootElement.GetProperty("status").GetString());
-            Assert.NotEmpty(report.RootElement.GetProperty("checks").EnumerateArray());
+            Assert.Equal(new[] { "actual main-frame preload and native TCP binding", "actual installed SDK capture and owned draft disposal",
+                "request cancellation waits for real native cleanup and SDK continuation", "retiring original native grant revokes availability" },
+                report.RootElement.GetProperty("checks").EnumerateArray().Select(check => check.GetString()));
+            var facts = report.RootElement.GetProperty("facts");
+            Assert.True(facts.GetProperty("bound").GetBoolean());
+            var capture = facts.GetProperty("capture");
+            Assert.True(capture.GetProperty("valid").GetBoolean());
+            Assert.True(capture.GetProperty("jsonDenied").GetBoolean());
+            Assert.True(capture.GetProperty("disposed").GetBoolean());
+            Assert.Equal(1, facts.GetProperty("windowsAfterCapture").GetInt32());
+            Assert.Equal(1, facts.GetProperty("windowsAfterCancellation").GetInt32());
+            Assert.True(facts.GetProperty("retired").GetBoolean());
             Assert.Equal(0, process.ExitCode);
             await fixture.Activator.StopAllAsync(TimeSpan.FromSeconds(10));
         }

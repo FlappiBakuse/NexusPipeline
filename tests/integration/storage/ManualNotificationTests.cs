@@ -83,6 +83,10 @@ public sealed class ManualNotificationTests
             Assert.Single(sink.Requests); Assert.Null(notifications.FailureCode);
             Assert.NotNull(execution.Lifecycle.RequestClose(closeSession, Guid.NewGuid()).Permit);
             DeliveryReferenceIndex.VerifyReadOnly(source.Instance, source.Database, new());
+            new NotificationPublicationInventory(source.Instance, source.Database, new()).VerifyReadOnly();
+            execution.Execute("UPDATE operations SET operation_kind='fixture.unrelated' WHERE operation_kind='notification.manual-source';");
+            Assert.Equal("notification_publication_inventory_unknown", Assert.Throws<IOException>(() =>
+                new NotificationPublicationInventory(source.Instance, source.Database, new()).VerifyReadOnly()).Message);
         }
         finally
         {

@@ -47,7 +47,8 @@ public sealed class ActivationFailureTests
         var original = fixture.Original.Binding().Read(fixture.Original.Accepted.JournalId, fixture.Original.Accepted.Plan);
         var settings = new HostSettingsStore(owner.Database).Read();
         fixture.Prepare(PayloadAction.Upgrade); fixture.Accept();
-        await Assert.ThrowsAnyAsync<Exception>(async () => await fixture.Session().ApplyAsync(fixture.Prepared!, default));
+        var activation = await Assert.ThrowsAsync<InvalidOperationException>(async () => await fixture.Session().ApplyAsync(fixture.Prepared!, default));
+        Assert.Equal("controlled_activation_failure", activation.Message);
         var bound = fixture.Bound();
         Assert.Equal(JournalPhase.Committed, bound.Registered.Phase); Assert.Null(bound.Commit);
         Assert.Equal("committed", bound.Restoration[^1].Record.Stage);
@@ -69,9 +70,17 @@ public sealed class ActivationFailureTests
         Assert.Equal(settings.Revision, currentSettings.Revision);
         Assert.True(JsonElement.DeepEquals(JsonSerializer.SerializeToElement(settings), JsonSerializer.SerializeToElement(currentSettings)));
         Assert.Empty(fixture.Original.Activator.ReadPublishedScopes());
-        Assert.All(new FileEffectOutbox(owner.Database).Read(bound.Plan.JournalId)
-            .Where(item => item.Action is FileEffectAction.PreserveOriginal or FileEffectAction.InstallCandidate),
-            item => Assert.Equal(FileEffectState.Completed, item.State));
+        var forward = new FileEffectOutbox(owner.Database).Read(bound.Plan.JournalId)
+            .Where(item => item.Action is FileEffectAction.PreserveOriginal or FileEffectAction.InstallCandidate).ToArray();
+        Assert.Contains(forward, item => item is { StepId: "preserve-original", Action: FileEffectAction.PreserveOriginal });
+        Assert.Contains(forward, item => item is { StepId: "install-candidate", Action: FileEffectAction.InstallCandidate });
+        Assert.All(forward, item =>
+        {
+            Assert.Equal(bound.Plan.JournalId, item.JournalId);
+            Assert.Equal(bound.PlanReference.Sha256, item.IntentDigest);
+            Assert.Equal(FileEffectState.Completed, item.State);
+            Assert.False(string.IsNullOrEmpty(item.ReceiptDigest));
+        });
         var saved = bound.Latest.Export();
         fixture.Prepared!.Dispose(); fixture.Verified!.Dispose(); fixture.Root!.Dispose();
         foreach (var filename in new[] { "activated.json", "cleaned.json", "resource.bin" })
@@ -88,7 +97,10 @@ public sealed class ActivationFailureTests
     public async Task RequiresCompletedCleanup()
     {
         using var fixture = new InstallRuntimeFixture(managedMode: "throw-cleanup");
-        await Assert.ThrowsAnyAsync<Exception>(async () => await fixture.Session().ApplyAsync(fixture.Prepared, default));
+        var failed = await Assert.ThrowsAsync<AggregateException>(async () => await fixture.Session().ApplyAsync(fixture.Prepared, default));
+        Assert.StartsWith("extension_apply_cleanup_pending", failed.Message, StringComparison.Ordinal);
+        Assert.Contains(failed.Flatten().InnerExceptions, error => error is InvalidOperationException { Message: "controlled_activation_failure" });
+        Assert.Contains(failed.Flatten().InnerExceptions, error => error is IOException { Message: "controlled_cleanup_failure" });
         Assert.True(File.Exists(Path.Combine(fixture.ActivationDirectory, "activated.json")));
         Assert.True(File.Exists(Path.Combine(fixture.ActivationDirectory, "cleaned.json")));
         using (var closed = File.Open(Path.Combine(fixture.ActivationDirectory, "resource.bin"),
@@ -109,7 +121,14 @@ public sealed class ActivationFailureTests
         try
         {
             _ = await OwnedCrashProcess.ReadReportAsync(Path.Combine(fixture.ActivationDirectory, "activated.json"));
-            await Assert.ThrowsAnyAsync<Exception>(async () => await running.WaitAsync(TimeSpan.FromSeconds(25)));
+            var failed = await Assert.ThrowsAsync<AggregateException>(() => running.WaitAsync(TimeSpan.FromSeconds(25)));
+            Assert.StartsWith("extension_apply_cleanup_pending", failed.Message, StringComparison.Ordinal);
+            var activation = Assert.IsType<AggregateException>(failed.InnerExceptions[0]);
+            Assert.StartsWith("extension_activation_cleanup_pending", activation.Message, StringComparison.Ordinal);
+            Assert.Collection(activation.InnerExceptions,
+                callbackDeadline => Assert.IsType<TimeoutException>(callbackDeadline),
+                cleanupDeadline => Assert.IsType<TimeoutException>(cleanupDeadline));
+            Assert.IsType<TimeoutException>(failed.InnerExceptions[1]);
             Assert.True(running.IsCompleted);
             var pending = fixture.Binding().Read(fixture.Accepted.JournalId, fixture.Accepted.Plan);
             Assert.Equal(JournalPhase.Applied, pending.Registered.Phase); Assert.Empty(pending.Restoration);
@@ -135,7 +154,13 @@ public sealed class ActivationFailureTests
             "' AND NEW.phase='reverting' BEGIN SELECT RAISE(ABORT,'fixture'); END;");
         try
         {
-            await Assert.ThrowsAnyAsync<Exception>(async () => await fixture.Session().ApplyAsync(fixture.Prepared!, default));
+            var failed = await Assert.ThrowsAsync<AggregateException>(async () => await fixture.Session().ApplyAsync(fixture.Prepared!, default));
+            Assert.StartsWith("extension_activation_restoration_pending", failed.Message, StringComparison.Ordinal);
+            Assert.Contains(failed.Flatten().InnerExceptions, error => error is InvalidOperationException { Message: "controlled_activation_failure" });
+            var sql = Assert.Single(failed.Flatten().InnerExceptions.OfType<SqliteException>());
+            Assert.Equal(19, sql.SqliteErrorCode);
+            Assert.Equal(1811, sql.SqliteExtendedErrorCode);
+            Assert.Contains("'fixture'", sql.Message, StringComparison.Ordinal);
         }
         finally { Sql("DROP TRIGGER main.fixture_restore_fail;"); }
         var bound = fixture.Bound();

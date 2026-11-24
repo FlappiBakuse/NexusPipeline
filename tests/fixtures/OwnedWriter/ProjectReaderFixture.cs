@@ -32,6 +32,12 @@ internal static class ProjectReaderFixture
         if (entries.Count != 3 || !entries.Any(item => item.Path == "image.png" && item.Kind == "file")) throw new IOException("project_fixture_tree_invalid");
         var image = await reader.ReadFileAsync("resources", "image.png", 0, 131072, cancellation);
         if (!Convert.FromBase64String(image.ContentBase64!).AsSpan().SequenceEqual(new byte[] { 1, 2, 3, 4 })) throw new IOException("project_fixture_file_invalid");
+        var slice = await reader.ReadFileChunkAsync("resources", "image.png", 1, 2, cancellation);
+        var end = await reader.ReadFileChunkAsync("resources", "image.png", 4, 2, cancellation);
+        if (slice.Kind != "file" || slice.Fingerprint != manifest.Fingerprint || slice.Offset != 1 ||
+            slice.SizeBytes != 4 || slice.Sha256 != image.Sha256 || !slice.Content.Span.SequenceEqual(new byte[] { 2, 3 }) ||
+            end.Offset != 4 || end.SizeBytes != 4 || end.Sha256 != image.Sha256 || !end.Content.IsEmpty)
+            throw new IOException("project_fixture_binary_file_invalid");
         using var workspace = channel.OpenWorkspace();
         workspace.RequireCurrent();
         await File.WriteAllBytesAsync(Path.Combine(workspace.InputDirectory, "image.png"), Convert.FromBase64String(image.ContentBase64!), cancellation);

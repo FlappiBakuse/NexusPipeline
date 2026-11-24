@@ -31,6 +31,7 @@ if (args is ["preview-domain-owner", .. var previewDomainArgs]) return await Pre
 if (args is ["extension-work-recovery", .. var workRecoveryArgs]) return await WorkCrashFixture.RunAsync(workRecoveryArgs);
 if (args is ["extension-installation-recovery", .. var installationRecoveryArgs]) return await InstallationCrashFixture.RunAsync(installationRecoveryArgs);
 if (args is ["capture-window-fixture", .. var windowCaptureArgs]) return WindowCaptureFixture.Run(windowCaptureArgs);
+if (args is ["--window-capture-worker"]) return await PreviewCaptureGate.RunAsync();
 if (args is ["notification-scheduled-recovery", .. var notificationScheduledArgs]) return await ScheduledCrashFixture.RunAsync(notificationScheduledArgs);
 if (args is ["notification-sender-recovery", .. var notificationSenderArgs]) return await SenderCrashFixture.RunAsync(notificationSenderArgs);
 if (args is ["notification-publication-recovery", .. var notificationPublicationArgs]) return PublicationCrashFixture.Run(notificationPublicationArgs);

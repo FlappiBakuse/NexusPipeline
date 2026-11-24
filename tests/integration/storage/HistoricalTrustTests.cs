@@ -69,13 +69,28 @@ public sealed class HistoricalTrustTests
         fixture.Publish(2); var current = Saved(fixture);
         var path = Path.Combine(fixture.Catalog.Instance.RuntimeRoot, current.Catalog.RelativePath);
         var originalBytes = File.ReadAllBytes(path);
+        var changed = originalBytes.ToArray(); changed[^2] ^= 1;
         using var root = fixture.Acquire();
         if (bytes)
         {
-            var changed = originalBytes.ToArray(); changed[^2] ^= 1; File.WriteAllBytes(path, changed);
+            File.WriteAllBytes(path, changed);
         }
         else fixture.Catalog.Sql("UPDATE extensions.extension_catalog_heads SET sequence=1,catalog_sha='" + original.Identity.Sha256 + "' WHERE channel='stable';");
-        try { Assert.Throws<IOException>(() => { using var history = fixture.Catalog.Store.ProtectInstalledHistory(root, original, entry); }); }
+        try
+        {
+            Assert.Throws<IOException>(() => { using var history = fixture.Catalog.Store.ProtectInstalledHistory(root, original, entry); });
+            using var connection = DatabaseConnections.Open(fixture.Catalog.Database.DatabasePath, readOnly: true,
+                domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions);
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT sequence,catalog_sha FROM extensions.extension_catalog_heads WHERE channel='stable';";
+            using var head = command.ExecuteReader();
+            Assert.True(head.Read());
+            var expected = bytes ? current : original;
+            Assert.Equal(expected.Identity.Sequence, head.GetInt64(0));
+            Assert.Equal(expected.Identity.Sha256, head.GetString(1));
+            Assert.False(head.Read());
+            Assert.Equal(bytes ? changed : originalBytes, File.ReadAllBytes(path));
+        }
         finally
         {
             if (bytes) File.WriteAllBytes(path, originalBytes);

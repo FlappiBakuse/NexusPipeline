@@ -51,22 +51,22 @@ public sealed class BearerReuseTests
         var key = SecretFieldKey.HostControlBearer(fixture.Instance.InstanceId);
         using var material = new SecretValue(token);
         var saved = await fixture.Service.ApplyAsync(Guid.NewGuid(), key, 0, SecretDisposition.Set, material, default);
-        var reads = 0;
-        using var verifier = new ControlBearerVerifier(fixture.Instance, fixture.Database, fixture.Lease, fixture.Index, fixture.Service)
-            { ProducerRead = () => reads++ };
+        using var verifier = new ControlBearerVerifier(fixture.Instance, fixture.Database, fixture.Lease, fixture.Index, fixture.Service);
         var proofs = Enumerable.Range(0, clients).Select(_ => Assert.IsType<VerifiedControlBearer>(verifier.Verify(token))).ToArray();
-        for (var tick = 0; tick < 10; tick++) foreach (var proof in proofs) proof.RequireCurrent();
-        Assert.Equal(1, reads);
+        await Task.WhenAll(proofs.Select(proof => Task.Run(() =>
+        {
+            for (var tick = 0; tick < 10; tick++) proof.RequireCurrent();
+        })));
         fixture.Index.BlockUnknown("fixture_recovery_changed");
         foreach (var proof in proofs) Assert.Throws<IOException>(() => proof.RequireCurrent());
         var revision = fixture.Index.Current.Revision;
         fixture.Index.PublishVerified(revision, revision + 1, []);
-        Assert.IsType<VerifiedControlBearer>(verifier.Verify(token)).RequireCurrent();
-        Assert.Equal(2, reads);
+        var restored = Assert.IsType<VerifiedControlBearer>(verifier.Verify(token));
+        restored.RequireCurrent();
         await fixture.Service.ApplyAsync(Guid.NewGuid(), key, saved.Revision, SecretDisposition.Clear, null, default);
         foreach (var proof in proofs) Assert.Throws<InvalidOperationException>(() => proof.RequireCurrent());
+        Assert.Throws<InvalidOperationException>(() => restored.RequireCurrent());
         Assert.Null(verifier.Verify(token));
-        Console.WriteLine($"clients={clients}; authorizationTicks=10; producerReadsBeforeInvalidation=1");
     }
 
     [Theory]

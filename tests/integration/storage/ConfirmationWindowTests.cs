@@ -42,7 +42,7 @@ public sealed class ConfirmationWindowTests
         }
     }
 
-    [Fact(DisplayName = "An Actual Confirmation Window Times Out Without Producing An Approval Or Any System Call")]
+    [Fact(DisplayName = "An Actual Confirmation Window Times Out Without Producing An Approval")]
     public async Task ExpiresUnapprovedWindows()
     {
         Assert.True(Environment.UserInteractive);

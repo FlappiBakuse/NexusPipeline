@@ -100,8 +100,9 @@ public sealed class LivePreviewTests
             Assert.Equal(200, (int)frame.StatusCode); Assert.Equal("image/png", frame.Content.Headers.ContentType!.MediaType);
             var bytes = await frame.Content.ReadAsByteArrayAsync(deadline.Token);
             Assert.Equal("1", Assert.Single(frame.Headers.GetValues("X-Image-Width")));
+            Assert.Equal("1", Assert.Single(frame.Headers.GetValues("X-Image-Height")));
             Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(bytes)), Assert.Single(frame.Headers.GetValues("X-Content-Sha256")));
-            Assert.True(bytes.AsSpan().StartsWith(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }));
+            Assert.Equal(Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/4t8AAAAASUVORK5CYII="), bytes);
             using var closed = await remote.PostAsync($"/control/v1/media/previews/{preview:D}/close", null, deadline.Token);
             Assert.Equal(200, (int)closed.StatusCode);
             using var stale = await remote.GetAsync(framePath, deadline.Token); Assert.Equal(404, (int)stale.StatusCode);

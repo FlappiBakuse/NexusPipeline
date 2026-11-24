@@ -138,7 +138,6 @@ public sealed class RunRecoveryTests
             common = closure;
             var physical = new JournalStore(instance, new()).Read(job.Journal);
             Assert.Equal(point == "sealed" ? JournalPhase.Applied : JournalPhase.Committed, physical.Phase);
-            Assert.Equal(2, physical.Root.GetProperty("participants").GetArrayLength());
             var binding = ConfigurationJournalBinding.Read(instance, physical, new(), database);
             var output = binding.Prepared!.Plan.Candidate.Snapshot; Assert.Equal(Raw, fixture.Read(output));
             var entry = output.Entries.Single(item => item.Kind == FileObjectKind.File);

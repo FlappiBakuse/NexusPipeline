@@ -22,6 +22,7 @@
     "NexusPipeline.StorageTests.RetryFaultTests",
     "NexusPipeline.StorageTests.RetryHooksTests",
     "NexusPipeline.StorageTests.RetryRuntimeTests",
+    "NexusPipeline.StorageTests.SchedulePendingPageTests",
     "NexusPipeline.StorageTests.ScheduleWaitingTests",
     "NexusPipeline.StorageTests.SpecializedPolicyTests",
     "NexusPipeline.StorageTests.StartSourceTests",

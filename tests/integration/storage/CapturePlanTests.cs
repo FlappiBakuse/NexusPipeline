@@ -28,17 +28,27 @@ public sealed class CapturePlanTests
         if (runtimeFiles > 0) Assert.Equal(runtimeFiles, runtime.Broker.RuntimeFiles.Count);
         Assert.Equal(5000, runtime.TimeoutMilliseconds); Assert.Equal(8388608, runtime.MaximumPngBytes);
         Assert.Equal(1, runtime.MaximumFramesPerStep);
+        var folder = Path.GetDirectoryName(fixture.Broker)!;
+        var inputPaths = Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal).ToArray();
+        Assert.Equal(inputPaths, runtime.Broker.RuntimeFiles.Select(file => Path.Combine(folder, file.RelativePath.Replace('/', '\\')))
+            .Append(runtime.Broker.Path).Order(StringComparer.Ordinal));
         var claims = ExecutionPlanResources.Claims(plan);
-        foreach (var path in ExecutionCaptureInputs.Paths(plan))
+        foreach (var path in inputPaths)
             Assert.All(PhysicalResourceAdmission.Read(path, ResourceClaimMode.Reference), expected => Assert.Contains(expected, claims));
         var held = new List<IDisposable>();
         try
         {
             PlanInputLease.Acquire(plan, held);
-            foreach (var path in ExecutionCaptureInputs.Paths(plan))
+            foreach (var path in inputPaths)
                 Assert.ThrowsAny<IOException>(() => new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite).Dispose());
         }
         finally { for (var index = held.Count - 1; index >= 0; index--) held[index].Dispose(); }
+        draft.Dispose();
+        foreach (var path in inputPaths)
+        {
+            using var write = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
+            Assert.True(write.CanWrite);
+        }
     }
 
     [Fact(DisplayName = "A Capture Broker Runtime Beyond The Bounded Manifest Capacity Is Rejected Before Admission")]

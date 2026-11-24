@@ -13,6 +13,7 @@ type Check = (value: unknown, name: string) => void;
 export async function configurationDraftContract(parent: HTMLElement, check: Check): Promise<void> {
   await bindingEditor(parent, check);
   await taskPlan(parent, check);
+  await taskPlanPublication(parent, check);
   await draftTaskPlan(parent, check);
   await historyTasks(parent, check);
   await exitReadiness(check);
@@ -57,11 +58,25 @@ async function taskPlan(parent: HTMLElement, check: Check): Promise<void> {
   let mainRevision = 1;
   let isolated = false;
   let pluginEnabled = true;
+  let holdOverview = false;
+  let finishDetails: (() => void) | undefined;
+  let finishFirstProbe: (() => void) | undefined;
+  let finishOverview: ((response: Response) => void) | undefined;
   let finishStale: (() => void) | undefined;
   let staleSignal: AbortSignal | null | undefined;
   const fixture = draftFixture((route, options) => {
     if (route.endsWith('/extensions') && !pluginEnabled) return Response.json({ hasReleaseTrust: false, items: [] });
+    if (route.endsWith('/fixture/details') && !finishDetails) return new Promise(resolve => {
+      finishDetails = () => resolve(Response.json({ extensionId: 'fixture', packageVersion: '0.5.0', installedRevision: 1,
+        manifest: { extensionId: 'fixture', format: 'nexus.extension.manifest', version: 1, displayName: 'Fixture',
+          artifactName: 'Fixture', minHostVersion: '0.18.0', packageVersion: '0.5.0', kind: 'data-specialized' },
+        documents: {}, diagnosticLocales: { 'zh-CN': { fixture_secondary: '稍后到达的诊断说明' } } }));
+    });
     if (route.endsWith('/resources')) {
+      if (holdOverview) {
+        holdOverview = false;
+        return new Promise(resolve => { finishOverview = resolve; });
+      }
       const id = route.split('/').at(-2);
       return Response.json({ bindingId: id, scriptId: 'script', bindingRevision: 2, scriptRevision: 3,
         kind: 'specialized', extensionId: 'fixture', resources: ['main', 'progress', 'software'].map((resourceId, index) =>
@@ -85,7 +100,8 @@ async function taskPlan(parent: HTMLElement, check: Check): Promise<void> {
         ({ ...resource, revision: resource.expectedRevision })) }, tasks: firstTasks.map(task =>
       id === 'slow' ? { ...task, title: 'Stale probe' } : task),
     coverage: { selected: 1, projected: 1, retrySafe: 1, isComplete: true, hasBlockingDiagnostics: false },
-    gamePathCheck: 'notApplicable', diagnostics: [] });
+    gamePathCheck: 'notApplicable', diagnostics: [{ code: 'fixture_secondary', severity: 'information' }] });
+    if (calls.length === 1) return new Promise(resolve => { finishFirstProbe = () => resolve(results); });
     if (id !== 'slow') return results;
     staleSignal = options?.signal;
     return new Promise<Response>(resolve => { finishStale = () => resolve(results); });
@@ -96,11 +112,14 @@ async function taskPlan(parent: HTMLElement, check: Check): Promise<void> {
   const originalLocale = locale.value;
   try {
     await settle();
+    check(!!finishFirstProbe && !!finishDetails, 'the original task probe and plugin details can overlap');
+    fixture.store.state.events = { mutationSequence: 1 }; await settle();
+    finishFirstProbe?.(); await settle();
     check(calls.length === 1 && JSON.stringify(calls[0]) === JSON.stringify([
       { resourceId: 'main', expectedRevision: 1, relativePath: 'main.json' },
       { resourceId: 'progress', expectedRevision: 2, relativePath: 'progress.json' },
       { resourceId: 'software', expectedRevision: 3, relativePath: 'software.json' }
-    ]), 'an expanded saved binding probes each declared resource once, in declaration order');
+    ]), 'an unrelated mutation during the probe preserves one discovery of the verified resources');
     const diagnostics = holder.querySelector<HTMLDetailsElement>('.binding-task-plan details')!;
     check(!diagnostics.open && !holder.innerText.includes('main.json'), 'the task plan keeps full paths out of its initial view');
     const summary = diagnostics.querySelector('summary')!;
@@ -119,11 +138,20 @@ async function taskPlan(parent: HTMLElement, check: Check): Promise<void> {
     check(!decision.prompted && decision.accepted && fixture.store.client.pendingWrites === 0 &&
       !holder.querySelector('nexus-toast.draft-restored-toast') && !holder.querySelector('[data-unsaved=true]'),
       'automatic probing leaves the parent draft and exit readiness intact');
-    fixture.store.state.events = { mutationSequence: 1 }; await settle();
-    check(calls.length === 1, 'an unrelated mutation retains the current task discovery');
-    mainRevision++;
     fixture.store.state.events = { mutationSequence: 2 }; await settle();
-    check(calls.length === 2 && calls.at(-1)?.[0]?.expectedRevision === 2, 'a saved resource revision change triggers one fresh probe');
+    finishDetails?.(); await settle();
+    check(calls.length === 1 && holder.textContent?.includes('稍后到达的诊断说明'),
+      'an unrelated mutation retains the task discovery and its late localized plugin details');
+    holdOverview = true;
+    fixture.store.state.events = { mutationSequence: 3 }; await settle();
+    check(!!finishOverview, 'a saved task plan can have verification in flight');
+    mainRevision++;
+    fixture.store.state.events = { mutationSequence: 4 }; await settle();
+    finishOverview?.(Response.json({ code: 'configuration_recovery_pending' }, { status: 409 }));
+    await settle();
+    check(calls.length === 2 && calls.at(-1)?.[0]?.expectedRevision === 2 && holder.textContent?.includes('Login') &&
+      !holder.textContent?.includes('配置正在恢复'),
+      'newer task-plan verification supersedes an older failure and probes the current resource revision');
     bindingId.value = 'slow'; await settle();
     check(!!finishStale && fixture.store.client.pendingWrites === 0, 'a probe in flight leaves mutation tracking untouched');
     bindingId.value = 'missing'; await settle();
@@ -142,20 +170,70 @@ async function taskPlan(parent: HTMLElement, check: Check): Promise<void> {
     check(repairs === 1 && holder.textContent?.includes('无候选修复'), 'repair candidates can be looked up after discovery failure');
     bindingId.value = 'binding'; await settle();
     isolated = true;
-    fixture.store.state.events = { mutationSequence: 2, recoveryRevision: 1 }; await settle();
+    fixture.store.state.events = { mutationSequence: 4, recoveryRevision: 1 }; await settle();
     check(findRepairs().disabled && holder.textContent?.includes('配置正在恢复') && !holder.textContent?.includes('Login'),
       'an opened binding entering isolation clears cards and blocks repair even at the same resource revisions');
     isolated = false;
-    fixture.store.state.events = { mutationSequence: 2, recoveryRevision: 2 }; await settle();
+    fixture.store.state.events = { mutationSequence: 4, recoveryRevision: 2 }; await settle();
     check(!findRepairs().disabled && holder.textContent?.includes('Login'), 'finishing recovery restores the binding’s current plan and repair entry');
     locale.value = 'en-US'; await settle();
     check(holder.textContent?.includes('Localized task title'), 'changing the UI language updates task titles through the frozen locale map');
     pluginEnabled = false;
     const count = calls.length;
-    fixture.store.state.events = { mutationSequence: 2, recoveryRevision: 2, extensionGeneration: 'disabled' }; await settle();
+    fixture.store.state.events = { mutationSequence: 4, recoveryRevision: 2, extensionGeneration: 'disabled' }; await settle();
     check(calls.length === count && !holder.textContent?.includes('Login') && holder.textContent?.includes('The extension is not installed or enabled'),
       'disabling the installed plugin clears existing tasks and skips a discovery command');
   } finally { locale.value = originalLocale; app.unmount(); holder.remove(); fixture.store.dispose(); }
+}
+
+async function taskPlanPublication(parent: HTMLElement, check: Check): Promise<void> {
+  for (const failure of [false, true]) {
+    let reads = 0, probes = 0, revision = 1;
+    let firstRead: ((response: Response) => void) | undefined;
+    let firstProbe: (() => void) | undefined, verification: (() => void) | undefined;
+    const resources = () => Response.json({ bindingId: 'binding', scriptId: 'script', bindingRevision: 2, scriptRevision: 3,
+      kind: 'specialized', extensionId: 'fixture', resources: [{ resourceId: 'main', label: 'main', relativePath: 'main.json',
+        revision, declarationIndex: 0, isSaved: true, shape: 'file', fileCount: 1, syntax: 'json' }] });
+    const fixture = draftFixture((route, options) => {
+      if (route.endsWith('/resources')) {
+        reads++;
+        if (failure && reads === 1) return new Promise(resolve => { firstRead = resolve; });
+        if (!failure && reads === 2) return new Promise(resolve => { verification = () => resolve(resources()); });
+        return resources();
+      }
+      if (!route.endsWith('/discover')) return;
+      probes++;
+      const { selection } = JSON.parse(String(options?.body));
+      const source = { bindingId: selection.bindingId, bindingRevision: 2, scriptRevision: 3,
+        extensionId: 'fixture', installedRevision: 1, resources: selection.resources.map((item: { expectedRevision: number }) =>
+          ({ ...item, revision: item.expectedRevision })) };
+      const response = Response.json({ source, tasks: [{ ...firstTasks[0]!, title: revision === 1 ? 'Old plan' : 'Current plan' }],
+        coverage: { selected: 1, projected: 1, retrySafe: 1, isComplete: true, hasBlockingDiagnostics: false },
+        gamePathCheck: 'notApplicable', diagnostics: [] });
+      if (!failure && probes === 1) return new Promise(resolve => { firstProbe = () => resolve(response); });
+      return response;
+    });
+    const holder = document.createElement('section'); parent.append(holder);
+    const app = createApp({ render: () => h(BindingTaskPlan, { store: fixture.store, bindingId: 'binding', visible: true }) });
+    app.mount(holder);
+    try {
+      await settle();
+      revision = 2;
+      fixture.store.state.events = { mutationSequence: 1 }; await settle();
+      if (failure) firstRead?.(Response.json({ code: 'configuration_not_found' }, { status: 404 }));
+      else {
+        firstProbe?.(); await settle();
+        check(!!verification && holder.querySelector('.plan-result')?.getAttribute('aria-busy') === 'true' &&
+          !holder.textContent?.includes('Old plan'), 'a previous resource result stays unpublished while its replacement is being verified');
+        verification?.();
+      }
+      await settle();
+      check(reads === 2 && probes === (failure ? 1 : 2) && holder.textContent?.includes('Current plan') &&
+        !holder.textContent?.includes('Old plan') && !holder.querySelector('.plan-result [role=status]'),
+        failure ? 'a newer mutation discards the first overview failure and reads the current resources' :
+          'a changed resource is probed once and publishes only its current tasks');
+    } finally { app.unmount(); holder.remove(); fixture.store.dispose(); }
+  }
 }
 
 async function draftTaskPlan(parent: HTMLElement, check: Check): Promise<void> {

@@ -13,6 +13,7 @@ public sealed class SdkIdentityTests
     [Theory(DisplayName = "Actual Case Changed Sdk Metadata Cannot Create Another Sdk Or Activate An Installed Managed Package")]
     [InlineData("reference-and-local-sdk")]
     [InlineData("reserved-entry")]
+    [InlineData("valid")]
     public async Task RejectsDuplicateSdk(string mode)
     {
         var sdk = typeof(IExtension).Assembly;
@@ -27,6 +28,23 @@ public sealed class SdkIdentityTests
         AppDomain.CurrentDomain.AssemblyLoad += observer;
         try
         {
+            if (mode == "valid")
+            {
+                using var valid = new InstallRuntimeFixture(managedMode: "return");
+                try
+                {
+                    var installed = await valid.Session().ApplyAsync(valid.Prepared, default);
+                    Assert.Equal(1, installed.InstalledRevision);
+                    Assert.True(installed.IsInstalled);
+                    var scope = Assert.Single(valid.Activator.ReadPublishedScopes());
+                    Assert.Equal("fixture-plugin", scope.ExtensionId);
+                    Assert.Equal(scope.ActivationId, installed.ActivationId);
+                    Assert.True(File.Exists(Path.Combine(valid.ActivationDirectory, "activated.json")));
+                    Assert.Empty(duplicates);
+                    return;
+                }
+                finally { await valid.Activator.StopAllAsync(TimeSpan.FromSeconds(10)); }
+            }
             using var fixture = new InstallRuntimeFixture(managedMode: "return",
                 managedPayloadEdit: directory =>
                 {
@@ -44,7 +62,16 @@ public sealed class SdkIdentityTests
                         SdkCaseFixture.RewriteDefinition(localSdk, name);
                     }
                 });
-            await Assert.ThrowsAnyAsync<Exception>(async () => await fixture.Session().ApplyAsync(fixture.Prepared, default));
+            if (mode == "reserved-entry")
+            {
+                var conflict = await Assert.ThrowsAsync<IOException>(async () => await fixture.Session().ApplyAsync(fixture.Prepared, default));
+                Assert.Equal("extension_managed_assembly_conflict", conflict.Message);
+            }
+            else
+            {
+                var rejected = await Assert.ThrowsAsync<FileLoadException>(async () => await fixture.Session().ApplyAsync(fixture.Prepared, default));
+                Assert.Equal("extension_sdk_assembly_mismatch", Assert.IsType<FileLoadException>(rejected.InnerException).Message);
+            }
             Assert.False(File.Exists(Path.Combine(fixture.ActivationDirectory, "activated.json")));
             Assert.False(File.Exists(Path.Combine(fixture.ActivationDirectory, "resource.bin")));
             Assert.Empty(duplicates);

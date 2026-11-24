@@ -82,7 +82,10 @@ public sealed class BlobScopeTests(ITestOutputHelper output)
     public void ProtectsSnapshotValues()
     {
         var (instance, store) = Create(); var codec = new ConfigurationSnapshotCodec(store);
-        var manifest = codec.Write(new(FileObjectKind.Directory, [new("", FileObjectKind.Directory, 0, null)]));
+        FileTreeEntry[] expected = [new("", FileObjectKind.Directory, 0, null), new("nested", FileObjectKind.Directory, 0, null)];
+        var input = expected.ToArray();
+        var manifest = codec.Write(new(FileObjectKind.Directory, input));
+        input[1] = new("changed", FileObjectKind.Directory, 0, null);
         var missing = codec.Write(new(FileObjectKind.Missing, []));
         var path = Path.Combine(instance.RuntimeRoot, manifest.RelativePath); var bytes = File.ReadAllBytes(path);
         var (foreign, other) = Create(); var foreignCodec = new ConfigurationSnapshotCodec(other);
@@ -91,20 +94,24 @@ public sealed class BlobScopeTests(ITestOutputHelper output)
         {
             var tree = codec.Read(manifest);
             Assert.Equal(FileObjectKind.Directory, tree.Shape);
-            var entries = Assert.IsAssignableFrom<IList<FileTreeEntry>>(tree.Entries);
-            Assert.Throws<NotSupportedException>(() => entries[0] = new("", FileObjectKind.File, 0, new string('a', 64)));
+            Assert.Equal(expected, tree.Entries);
+            if (tree.Entries is IList<FileTreeEntry> entries)
+            {
+                try { entries[1] = input[1]; }
+                catch (NotSupportedException) { }
+            }
             Assert.Equal(FileObjectKind.Missing, codec.Read(missing).Shape);
-            Assert.Equal(FileObjectKind.Directory, codec.Read(manifest).Shape);
+            Assert.Equal(expected, codec.Read(manifest).Entries);
             Assert.Throws<IOException>(() => File.WriteAllBytes(path, [1, 2, 3]));
             Assert.Equal(FileObjectKind.Directory, foreignCodec.Read(foreignManifest).Shape);
             File.WriteAllBytes(Path.Combine(foreign.RuntimeRoot, foreignManifest.RelativePath), [1, 2, 3]);
             Assert.Throws<IOException>(() => foreignCodec.Read(foreignManifest));
-            Assert.Equal(FileObjectKind.Directory, codec.Read(manifest).Shape);
+            Assert.Equal(expected, codec.Read(manifest).Entries);
         }
         File.WriteAllBytes(path, [1, 2, 3]);
         Assert.Throws<IOException>(() => codec.Read(manifest));
         File.WriteAllBytes(path, bytes);
-        Assert.Equal(FileObjectKind.Directory, codec.Read(manifest).Shape);
+        Assert.Equal(expected, codec.Read(manifest).Entries);
     }
 
     [Theory(DisplayName = "Verified Blob Reads Reject Missing Leaves And Live Or Broken Reparse Entries Without Following Them")]
@@ -166,8 +173,10 @@ public sealed class BlobScopeTests(ITestOutputHelper output)
     [Fact(DisplayName = "A Blob Scope Bounds Write Exclusion And Releases Its Protected Files")]
     public void BoundsRetainedFiles()
     {
+        const int distinctObjects = 256;
+        const int maximumProtectedFiles = 128;
         var (instance, store) = Create();
-        var references = Enumerable.Range(0, BlobReadScope.MaximumReferences + 1)
+        var references = Enumerable.Range(0, distinctObjects)
             .Select(index => store.PersistContent(BitConverter.GetBytes(index), default)).ToArray();
         var retained = new List<string>();
         using (BlobReadScope.Hold(instance))
@@ -183,9 +192,9 @@ public sealed class BlobScopeTests(ITestOutputHelper output)
                     using var writer = File.Open(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
                     released ??= item;
                 }
-                catch (IOException) { retained.Add(path); }
+                catch (IOException sharingViolation) when ((sharingViolation.HResult & 0xffff) == 32) { retained.Add(path); }
             }
-            Assert.InRange(retained.Count, 1, BlobReadScope.MaximumReferences);
+            Assert.InRange(retained.Count, 1, maximumProtectedFiles);
             Assert.NotNull(released);
             File.WriteAllBytes(Path.Combine(instance.RuntimeRoot, released.RelativePath), [255, 255, 255, 255]);
             Assert.Equal("immutable_blob_mismatch", Assert.Throws<IOException>(() => store.OpenVerified(released)).Message);

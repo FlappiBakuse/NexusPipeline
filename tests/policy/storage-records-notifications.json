@@ -37,6 +37,8 @@
     "NexusPipeline.StorageTests.MuMuRuntimeTests",
     "NexusPipeline.StorageTests.NestedJobTests",
     "NexusPipeline.StorageTests.NotificationReceiptTests",
+    "NexusPipeline.StorageTests.NotificationProjectionTests",
+    "NexusPipeline.StorageTests.NotificationPublicationHistoryTests",
     "NexusPipeline.StorageTests.NotificationRuntimeTests",
     "NexusPipeline.StorageTests.NotificationScheduledTests",
     "NexusPipeline.StorageTests.NotificationSmtpTests",
@@ -61,11 +63,13 @@
     "NexusPipeline.StorageTests.SavedTaskTests",
     "NexusPipeline.StorageTests.ScheduleLifetimeTests",
     "NexusPipeline.StorageTests.ScheduledOwnerTests",
+    "NexusPipeline.StorageTests.ScheduledProviderRowsTests",
     "NexusPipeline.StorageTests.ScheduledReplayTests",
     "NexusPipeline.StorageTests.ScheduledResourceTests",
     "NexusPipeline.StorageTests.ScheduledRevocationTests",
     "NexusPipeline.StorageTests.SelectionStorageTests",
     "NexusPipeline.StorageTests.SenderOwnerTests",
-    "NexusPipeline.StorageTests.WindowRuntimeTests"
+    "NexusPipeline.StorageTests.WindowRuntimeTests",
+    "NexusPipeline.StorageTests.WorkDocumentCodecTests"
   ]
 }

@@ -1,5 +1,5 @@
 import type { UiElement } from '@nexuspipeline/extension-sdk';
-import { DateControl } from '../../apps/web/src/ui/date-control';
+import { DateControl } from '../../apps/web/src/ui/date-time-controls';
 
 export function calendarLocaleContract(fixture: HTMLElement, check: (condition: unknown, name: string) => void): void {
   singleDateContract(fixture, check);

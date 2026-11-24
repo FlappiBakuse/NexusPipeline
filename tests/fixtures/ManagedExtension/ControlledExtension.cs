@@ -15,7 +15,7 @@ public sealed class ManagedExtension(ExtensionActivationContext context) : IExte
     public IReadOnlyList<FrontendOperation> Operations { get; } =
     [new("read-state", FrontendAccess.Read), new("save-state", FrontendAccess.Write),
         new("reveal", FrontendAccess.RevealSecret), new("login", FrontendAccess.Desktop),
-        new("wait", FrontendAccess.Read), new("bad-json", FrontendAccess.Read),
+        new("wait", FrontendAccess.Read), new("coordinated-read", FrontendAccess.Read), new("bad-json", FrontendAccess.Read),
         new("doc-read", FrontendAccess.Read), new("doc-write", FrontendAccess.Write),
         new("doc-commit", FrontendAccess.Read), new("http-request", FrontendAccess.Write),
         new("cover", FrontendAccess.Read), new("image-read", FrontendAccess.Read),
@@ -56,6 +56,14 @@ public sealed class ManagedExtension(ExtensionActivationContext context) : IExte
             File.WriteAllText(Path.Combine(_directory!, "frontend-entered"), "entered");
             try { await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken); }
             finally { File.WriteAllText(Path.Combine(_directory!, "frontend-stopped"), "stopped"); }
+        }
+        if (call.Operation == "coordinated-read")
+        {
+            using var input = JsonDocument.Parse(call.Payload);
+            var id = input.RootElement.GetProperty("id").GetGuid();
+            var marker = Path.Combine(_directory!, "frontend-read-" + id.ToString("N"));
+            WriteNew(marker + ".json", JsonSerializer.SerializeToUtf8Bytes(new { id }));
+            while (!File.Exists(marker + "-release")) await Task.Delay(20, cancellationToken);
         }
         if (call.Operation == "cover")
         {

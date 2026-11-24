@@ -2,13 +2,15 @@ import { createApp, h, nextTick } from 'vue';
 import AttemptLogs from '../../apps/web/src/pages/AttemptLogs.vue';
 import themeCss from '../../apps/web/src/styles/theme.css?inline';
 import uiCss from '../../apps/web/src/ui/theme.css?inline';
-import settingsCss from '../../apps/web/src/pages/settings-page.css?inline';
+import settingsPage from '../../apps/web/src/pages/SettingsPage.vue?raw';
 import { createStore } from '../../apps/web/src/app/store';
 import { useAppAppearance } from '../../apps/web/src/app/app-appearance';
 import { ControlClient } from '../../apps/web/src/control/client';
 
 export async function themeConsumersContract(parent: HTMLElement, check: (value: unknown, name: string) => void) {
   const previous = document.body.dataset.theme;
+  const settingsCss = /<style scoped>([\s\S]*?)<\/style>/.exec(settingsPage)?.[1];
+  if (!settingsCss) throw Error('The settings warning style is missing');
   const style = document.createElement('style'); style.textContent = [themeCss, uiCss, settingsCss].join('\n');
   document.head.append(style);
   const store = createStore(new ControlClient());

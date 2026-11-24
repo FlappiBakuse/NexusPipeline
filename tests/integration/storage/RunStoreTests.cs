@@ -135,7 +135,22 @@ public sealed class RunStoreTests
         var input = alternate ?? prepared; var sessionId = Guid.NewGuid();
         var operation = ConfigurationRunStore.BeginIdentity(sessionId, ConfigurationRunFixture.Subject, parentId, fixture.StepId, input);
         var before = PersistentFingerprints(fixture.Source.Root); var counts = Counts(fixture);
-        Assert.ThrowsAny<Exception>(() => Store(fixture).Begin(operation, parentId, fixture.StepId, input, DateTimeOffset.UtcNow));
+        var store = Store(fixture);
+        if (fault is "missing" or "foreign")
+        {
+            var expectedDirectory = Path.Combine(fixture.Source.Instance.RuntimeRoot, "journals", parentId.ToString("D"));
+            Assert.False(Directory.Exists(expectedDirectory));
+            var denied = Assert.Throws<DirectoryNotFoundException>(() =>
+                store.Begin(operation, parentId, fixture.StepId, input, DateTimeOffset.UtcNow));
+            Assert.Contains(expectedDirectory, denied.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        else
+        {
+            var expected = fault == "changed-child" ? "configuration_run_parent_coverage_invalid" : "run_attempt_configuration_coverage_invalid";
+            Assert.Equal(expected, Assert.Throws<IOException>(() =>
+                store.Begin(operation, parentId, fixture.StepId, input, DateTimeOffset.UtcNow)).Message);
+        }
+        Assert.Null(store.Read(sessionId, ConfigurationRunFixture.Subject));
         Assert.Equal(before, PersistentFingerprints(fixture.Source.Root)); Assert.Equal(counts, Counts(fixture));
         fixture.VerifyOriginal();
     }
@@ -190,7 +205,27 @@ public sealed class RunStoreTests
         if (fault == "configuration") fixture.SaveAgain();
         if (fault == "closed-gate") fixture.Execute($"UPDATE configuration.configuration_run_sessions SET writer_gate=1 WHERE session_id='{sessionId:D}';");
         var before = PersistentFingerprints(fixture.Source.Root);
-        Assert.ThrowsAny<Exception>(() => store.MarkRunning(sessionId, ConfigurationRunFixture.Subject, fault == "revision" ? 2 : 1));
+        var revision = fault == "revision" ? 2 : 1;
+        if (fault is "not-installed" or "partial")
+        {
+            var missing = session.Resources.Select(resource =>
+                    Path.Combine(fixture.Source.Instance.RuntimeRoot, "journals", resource.JournalId.ToString("D")))
+                .Where(path => !Directory.Exists(path)).ToArray();
+            Assert.Equal(fault == "partial" ? 1 : 2, missing.Length);
+            var denied = Assert.Throws<DirectoryNotFoundException>(() => store.MarkRunning(sessionId, ConfigurationRunFixture.Subject, revision));
+            Assert.Contains(missing, path => denied.Message.Contains(path, StringComparison.OrdinalIgnoreCase));
+        }
+        else
+        {
+            var expected = fault switch
+            {
+                "binding" => "configuration_binding_revision_conflict",
+                "configuration" => "configuration_revision_conflict",
+                _ => "configuration_run_revision_conflict"
+            };
+            Assert.Equal(expected, Assert.Throws<ConfigurationException>(() =>
+                store.MarkRunning(sessionId, ConfigurationRunFixture.Subject, revision)).Message);
+        }
         Assert.Equal(before, PersistentFingerprints(fixture.Source.Root));
         var after = store.Read(sessionId, ConfigurationRunFixture.Subject)!;
         Assert.Equal(ConfigurationRunPhase.Prepared, after.Phase); Assert.Equal(1, after.Revision);

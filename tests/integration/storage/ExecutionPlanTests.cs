@@ -36,17 +36,21 @@ public sealed class ExecutionPlanTests
         try
         {
             PlanInputLease.Acquire(plan, held);
-            Assert.Equal(2, held.OfType<FileStream>().Count());
             foreach (var path in new[] { fixture.Image, runtimePath })
             {
                 Assert.Throws<IOException>(() => File.WriteAllBytes(path, [9]));
                 Assert.Throws<IOException>(() => File.Delete(path));
             }
             Assert.Throws<IOException>(() => Directory.Move(step.WorkingDirectory, step.WorkingDirectory + "-moved"));
+            Assert.Equal(new byte[] { 0, 1, 255 }, File.ReadAllBytes(fixture.Image));
+            Assert.Equal(new byte[] { 3, 2, 1 }, File.ReadAllBytes(runtimePath));
         }
         finally { for (var index = held.Count - 1; index >= 0; index--) held[index].Dispose(); }
         File.WriteAllBytes(fixture.Image, [9]); File.WriteAllBytes(runtimePath, [8]);
-        Directory.Move(step.WorkingDirectory, step.WorkingDirectory + "-moved");
+        var moved = step.WorkingDirectory + "-moved";
+        Directory.Move(step.WorkingDirectory, moved);
+        Assert.Equal(new byte[] { 9 }, File.ReadAllBytes(Path.Combine(moved, Path.GetFileName(fixture.Image))));
+        Assert.Equal(new byte[] { 8 }, File.ReadAllBytes(Path.Combine(moved, Path.GetFileName(runtimePath))));
     }
 
     [Theory(DisplayName = "Shared Plan Inputs Reject Conflicting Size Digest File Or Parent Identity And Release All Protection")]

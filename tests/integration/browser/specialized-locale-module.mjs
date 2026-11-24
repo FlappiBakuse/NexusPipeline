@@ -3,27 +3,17 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { waitForBrowserContent, waitForRecovery } from './runtime-ready.mjs';
+import { executionFixtureHttp, executionFixtureInputs } from './execution-fixture-http.mjs';
 
 const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const token = process.env[input.tokenEnvironment];
 if (!token || input.context?.cases?.length !== 8) throw Error('eight_specialized_locale_fixtures_required');
 const { chromium } = await import(pathToFileURL(path.join(input.modules, 'playwright-core/index.mjs')).href);
+const source = executionFixtureInputs(process.argv[1], input.browser);
+const { call, until } = executionFixtureHttp(input.address, token, 75000);
 const checks = [], facts = [], errors = [], runs = [];
 let browser, page;
-async function call(route, body, missing = false) {
-  const response = await fetch(new URL('/control/v1/' + route, input.address), {
-    method: body === undefined ? 'GET' : 'POST', headers: { Authorization: 'Bearer ' + token,
-      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(30000) });
-  if (missing && response.status === 404) return undefined;
-  assert.equal(response.ok, true, route + ':' + response.status + ':' + (response.ok ? '' : await response.text()));
-  return response.json();
-}
-async function until(action, reason) {
-  const deadline = Date.now() + 75000;
-  while (Date.now() < deadline) { const result = await action(); if (result) return result; await new Promise(resolve => setTimeout(resolve, 100)); }
-  throw Error(reason);
-}
 function compareTitles(actual, expected) {
   assert.equal(actual.length, expected.length);
   for (const task of expected) {
@@ -44,6 +34,7 @@ async function selection(sample) {
     resources: sample.resources.map(resourceId => ({ resourceId, expectedRevision: 1, relativePath: '' })) };
 }
 async function remove(extensionId) {
+  await waitForRecovery(call, until);
   const item = (await call('extensions')).items.find(row => row.extensionId === extensionId);
   const settings = await call('settings'), operationId = crypto.randomUUID();
   await call('extensions/apply', { format: 'nexus.control.extension-apply', version: 1, operationId,
@@ -57,7 +48,9 @@ async function remove(extensionId) {
 }
 async function locale(english) {
   await page.goto(input.address + '#/settings');
-  await page.getByRole('combobox', { name: english ? '界面语言' : 'Interface language', exact: true }).click();
+  const language = page.getByRole('combobox', { name: english ? '界面语言' : 'Interface language', exact: true });
+  await waitForBrowserContent(page, language, token);
+  await language.click();
   await page.getByRole('option', { name: english ? 'English' : '简体中文', exact: true }).click();
 }
 async function history(sample, run, language) {
@@ -76,12 +69,15 @@ try {
   page.on('pageerror', error => errors.push(String(error)));
   await page.goto(input.address);
   for (const sample of input.context.cases) {
+    await waitForRecovery(call, until);
     const selected = await selection(sample);
-    const preview = await call('adapters/discover', { format: 'nexus.control.adapter-command', version: 1, action: 'discover', selection: selected });
+    const command = { format: 'nexus.control.adapter-command', version: 1, action: 'discover', selection: selected };
+    const preview = await until(() => call('adapters/discover', command), 'discovery_resources_unavailable:' + sample.extensionId);
     compareTitles(preview.tasks, sample.tasks);
     assert.deepEqual(preview.diagnostics.map(item => item.code), sample.diagnostics.map(item => item.code));
     assert.ok(!preview.diagnostics.some(item => item.severity === 'blocking'));
     checks.push(sample.extensionId + ': original installed package previews localized titles and preserves user or unknown titles');
+    await waitForRecovery(call, until);
     const catalog = await call('automation'), settings = await call('settings'), operationId = crypto.randomUUID();
     const accepted = await call('execution/start/' + operationId, { format: 'nexus.control.execution-selection', version: 1,
       target: { kind: 'binding', bindingId: sample.bindingId }, expectedCatalogRevision: catalog.catalogRevision,
@@ -111,10 +107,11 @@ try {
   }
   assert.equal((await call('execution/active')).items.length, 0); assert.equal((await call('status')).pendingOperations, 0);
   assert.deepEqual(errors, []); checks.push('eight controlled flows and removals finish without active or pending work');
-  fs.writeFileSync(path.join(input.output, 'result.json'), JSON.stringify({ status: 'PASS', checks, facts, runs,
+  assert.deepEqual(executionFixtureInputs(process.argv[1], input.browser), source);
+  fs.writeFileSync(path.join(input.output, 'result.json'), JSON.stringify({ status: 'PASS', checks, facts, runs, source,
     scope: 'Eight original packaged adapters, actual product Host and UI, synthetic configurations and controlled executable; upstream execution NOT_RUN' }, null, 2));
 } catch (error) {
-  fs.writeFileSync(path.join(input.output, 'result.json'), JSON.stringify({ status: 'FAIL', checks, facts, runs, errors,
+  fs.writeFileSync(path.join(input.output, 'result.json'), JSON.stringify({ status: 'FAIL', checks, facts, runs, errors, source,
     active: await call('execution/active').catch(() => null), serverStatus: await call('status').catch(() => null),
     failure: String(error.stack || error).replaceAll(token, '[redacted]'),
     visibleText: page ? (await page.locator('body').innerText().catch(() => '')).slice(-5000) : '' }, null, 2));

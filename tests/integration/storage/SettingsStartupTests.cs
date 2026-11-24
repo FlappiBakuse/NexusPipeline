@@ -134,10 +134,14 @@ public sealed class SettingsStartupTests
         var taskBytes = File.ReadAllBytes(fixture.Effects.Path);
         fixture.Effects.BeforeMutation = RejectMutation;
         Assert.Equal(result with { IsNew = false }, fixture.Service.Save(operation, change, DateTimeOffset.UtcNow));
-        var before = DatabaseBytes(fixture.Database.DatabasePath);
+        var path = fixture.Database.DatabasePath;
+        var before = RuntimeFingerprint.CaptureDatabaseFiles(path, DatabaseDomain.System);
+        Assert.Contains(before, member => member.StartsWith("system.db:", StringComparison.Ordinal));
         Assert.Equal("startup_effect_creator_not_stopped", Assert.Throws<IOException>(() => StateDatabase.OpenExisting(fixture.Instance,
             System.IO.Path.Combine(fixture.Root, "diagnostics"), new JournalStartupAdmission(fixture.Instance, new()))).Message);
-        Assert.Equal(before, DatabaseBytes(fixture.Database.DatabasePath));
+        Assert.Equal(before, RuntimeFingerprint.CaptureDatabaseFiles(path, DatabaseDomain.System));
+        using var connection = DatabaseConnections.Open(path, readOnly: true, domains: DatabaseDomain.System);
+        Assert.Equal(result.StartupEffect, StartupIntentRows.Read(connection, null, operation.OperationId, fixture.Instance.InstanceId)!.Status);
         Assert.Equal(task, PhysicalObjectIdentity.Read(fixture.Effects.Path));
         Assert.Equal(taskBytes, File.ReadAllBytes(fixture.Effects.Path));
         Assert.Equal("recovery_pending", fixture.Lifecycle.RequestClose(Guid.NewGuid(), Guid.NewGuid()).ReasonCode);
@@ -167,8 +171,6 @@ public sealed class SettingsStartupTests
         new[] { "settings:host", "system:startup" }.Select(key => new RecoveryResourceHold(operationId, key, "startup_effect_pending")
             { Owner = RecoveryHoldOwner.StartupRegistration, Mode = ResourceClaimMode.Mutation }).ToArray();
 
-    private static byte[] DatabaseBytes(string path) => new[] { "", "-wal", "-shm" }
-        .Where(suffix => File.Exists(path + suffix)).SelectMany(suffix => File.ReadAllBytes(path + suffix)).ToArray();
     private static OperationIdentity Identity(HostSettingsChange change) => HostSettingsStore.Identity(Guid.NewGuid(), "fixture", change);
 
     private sealed class Fixture : IDisposable

@@ -28,7 +28,10 @@ public sealed class AndroidBudgetTests(ITestOutputHelper testOutput)
             await reads.WaitAsync(TimeSpan.FromSeconds(10));
             var inventory = job.CaptureTargetInventory();
             Assert.Equal(inventory.AllFamily.Length, budget.Count);
-            Assert.True(budget.Reservations(root.ProcessId, root.CreatedAtUtc.ToFileTimeUtc()) >= 2);
+            var identities = inventory.AllFamily.Select(member => (member.ProcessId, member.CreatedAtUtc)).ToArray();
+            Assert.Equal(identities.Length, identities.Distinct().Count());
+            Assert.Equal(observed.Values.Select(member => (member.ProcessId, member.CreatedAtUtc)).OrderBy(member => member.ProcessId),
+                identities.OrderBy(member => member.ProcessId));
             var identity = Assert.Single(inventory.AllFamily.Where(identity => identity.ProcessId == root.ProcessId));
             Assert.Equal(root.ProcessId, identity.ProcessId); Assert.Equal(root.CreatedAtUtc, identity.CreatedAtUtc);
             Assert.Equal((uint)budget.Count, inventory.TotalProcesses); Assert.Equal(0u, inventory.ActiveProcesses);

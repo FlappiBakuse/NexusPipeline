@@ -10,6 +10,25 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class InstallerExchangeTests
 {
+    [Fact(DisplayName = "A Failed Installer Copy Retains Foreign Bytes And Preserves The Original And Secondary Errors")]
+    public void PreservesForeignTargetMemberOnCopyFailure()
+    {
+        using var fixture = new InstallerOwnedTests.OwnedFixture(initialized: true);
+        var payload = Payload(fixture);
+        using var gate = InstallerRuntimeGate.Acquire(fixture.Product.Application);
+        var tree = new InstallerTargetTree(Preserve(fixture));
+        var foreign = Path.Combine(tree.DirectoryPath, "unowned.bin");
+        var primary = new IOException("test installer copy failure");
+        Assert.Same(primary, Assert.Throws<IOException>(() => tree.Stage(payload, () =>
+        {
+            File.WriteAllText(foreign, "independent bytes");
+            throw primary;
+        })));
+        Assert.Equal("independent bytes", File.ReadAllText(foreign));
+        Assert.Equal(new[] { foreign }, Directory.GetFiles(tree.DirectoryPath, "*", SearchOption.AllDirectories));
+        Assert.Contains(CleanupFailures.Read(primary), error => error.Message == "deletion_directory_not_empty");
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

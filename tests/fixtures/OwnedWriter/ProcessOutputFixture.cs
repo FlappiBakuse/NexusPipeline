@@ -26,10 +26,16 @@ internal static class ProcessOutputFixture
             if (checkpoint > 0) await Console.OpenStandardOutput().WriteAsync("done\n"u8.ToArray());
             return 0;
         }
-        if (args is ["configuration-repeat", var repeatMarker, var repeatedConfiguration])
+        if (args is [("tail" or "wait") and var observedMode, var observedMarker, var rootReport])
+        {
+            OwnedFixtureEvidence.WriteRoot(rootReport + "-" + Guid.NewGuid().ToString("N"));
+            args = [observedMode, observedMarker];
+        }
+        if (args is ["configuration-repeat", var repeatMarker, var repeatedConfiguration, var configurationReport])
         {
             OwnedFixtureEvidence.RequirePath(repeatMarker); OwnedFixtureEvidence.RequirePath(repeatedConfiguration);
             var ordinal = File.Exists(repeatMarker) ? int.Parse(File.ReadAllText(repeatMarker), System.Globalization.CultureInfo.InvariantCulture) + 1 : 1;
+            OwnedFixtureEvidence.WriteRoot(configurationReport + "-" + ordinal.ToString(System.Globalization.CultureInfo.InvariantCulture));
             File.WriteAllText(repeatMarker, ordinal.ToString(System.Globalization.CultureInfo.InvariantCulture));
             File.WriteAllBytes(repeatedConfiguration, System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new { fixture = false, occurrence = ordinal }));
             await Console.OpenStandardOutput().WriteAsync("done\n"u8.ToArray());

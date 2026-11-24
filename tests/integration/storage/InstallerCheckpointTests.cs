@@ -18,6 +18,16 @@ public sealed class InstallerCheckpointTests
     public void FreezesNativeCheckpoint()
     {
         using var fixture = new InstallerMetadataFixture();
+        fixture.WriteShortcut(Path.Combine(fixture.Application, "NexusPipeline.exe"));
+        var nativeFiles = fixture.ReadOriginalMetadata(includeShortcut: true);
+        (string Name, RegistryValueKind Kind, string? Text)[] ReadNativeRegistry()
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(fixture.Paths.UninstallRegistryKey);
+            Assert.NotNull(key);
+            return key.GetValueNames().Order(StringComparer.Ordinal)
+                .Select(name => (name, key.GetValueKind(name), key.GetValue(name) as string)).ToArray();
+        }
+        var nativeBefore = ReadNativeRegistry();
         var store = new InstallerCheckpointStore(fixture.Paths, "test"); var transaction = Guid.NewGuid();
         var created = store.Create(fixture.Application, transaction, new('a', 64), Parent());
         var prepared = store.Read(fixture.Application, transaction);
@@ -25,7 +35,8 @@ public sealed class InstallerCheckpointTests
         Assert.Equal("installation", prepared.Scope);
         Assert.Equal(created.Before, prepared.Before); Assert.Null(prepared.After);
         using (var key = Registry.CurrentUser.OpenSubKey(fixture.Paths.UninstallRegistryKey, writable: true))
-            key!.SetValue("DisplayVersion", "0.18.0");
+            key!.SetValue("DisplayVersion", "0.18.0", RegistryValueKind.String);
+        var nativeAfter = ReadNativeRegistry();
         var observed = store.Observe(fixture.Application, transaction);
         Assert.Equal("observed", observed.Stage); Assert.NotNull(observed.After);
         var path = Path.Combine(fixture.Paths.ManagerRoot, "metadata-checkpoint", "observed.protected");
@@ -33,8 +44,31 @@ public sealed class InstallerCheckpointTests
         Assert.Equal(observed.After, store.Read(fixture.Application, transaction).After);
         Assert.Equal(observed.After, store.Observe(fixture.Application, transaction).After);
         Assert.Equal(bytes, File.ReadAllBytes(path));
-        Assert.False(InstallerMetadataInventory.Equal(InstallerSnapshotCodec.Decode(observed.Before, fixture.Application),
-            InstallerSnapshotCodec.Decode(observed.After!, fixture.Application)));
+        var before = InstallerSnapshotCodec.Decode(observed.Before, fixture.Application);
+        var after = InstallerSnapshotCodec.Decode(observed.After!, fixture.Application);
+        Assert.Equal(nativeBefore, before.Uninstall.Values.Select(value => (value.Name, value.Kind, value.Text)));
+        Assert.Equal(nativeAfter, after.Uninstall.Values.Select(value => (value.Name, value.Kind, value.Text)));
+        foreach (var snapshot in new[] { before, after })
+        {
+            Assert.Equal(nativeFiles.Length, snapshot.Files.Length);
+            foreach (var native in nativeFiles)
+            {
+                var file = Assert.Single(snapshot.Files, value => value.Role == native.Role && value.Name == Path.GetFileName(native.Source));
+                Assert.Equal(native.Identity, file.Identity); Assert.Equal(native.ParentIdentity, file.ParentIdentity);
+                Assert.Equal(native.Bytes.LongLength, file.SizeBytes);
+                Assert.Equal(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(native.Bytes)), file.Sha256);
+            }
+        }
+        Assert.DoesNotContain(before.Uninstall.Values, value => value.Name == "DisplayVersion");
+        var version = Assert.Single(after.Uninstall.Values, value => value.Name == "DisplayVersion");
+        Assert.Equal(RegistryValueKind.String, version.Kind);
+        Assert.Equal("0.18.0", version.Text);
+        Assert.Equal(fixture.Application, Assert.Single(before.Uninstall.Values, value => value.Name == "InstallLocation").Text);
+        Assert.Equal('"' + fixture.Engine + '"', Assert.Single(before.Uninstall.Values, value => value.Name == "UninstallString").Text);
+        Assert.True(InstallerMetadataInventory.Equal(before, after with
+        {
+            Uninstall = after.Uninstall with { Values = after.Uninstall.Values.Where(value => value.Name != "DisplayVersion").ToArray() }
+        }));
     }
 
     [Fact(DisplayName = "A New Checkpoint Records A Missing Metadata Manager Before Creating Its Own Protected Workspace")]

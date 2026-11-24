@@ -1,9 +1,6 @@
 import { ControlClient, ControlFailure } from '../../apps/web/src/control/client';
 import { createStore } from '../../apps/web/src/app/store';
-import { automationSession } from '../../apps/web/src/pages/automation-session';
-import { AutomationEditor } from '../../apps/web/src/pages/automation-editor';
-import { AutomationCommands } from '../../apps/web/src/pages/automation-commands';
-import { AutomationSave } from '../../apps/web/src/pages/automation-save';
+import { automationSession, AutomationEditor, AutomationCommands, AutomationSave } from '../../apps/web/src/pages/automation-editor';
 
 export function fixture() {
   const store = createStore(new ControlClient('http://127.0.0.1'));
@@ -40,7 +37,7 @@ export function fixture() {
   store.client.read = (async (_path: string, decode: (value: unknown) => unknown) => decode({
     operationId: requests.at(-1).operationId, kind: 'automation.change', status: 'completed'
   })) as never;
-  store.refresh = async () => { store.state.automation = structuredClone(catalog) as never; };
+  store.refreshCatalog = async () => { store.state.automation = structuredClone(catalog) as never; };
   const session = automationSession(store, 'queues');
   const editor = new AutomationEditor(store, () => 'queues', session);
   const commands = new AutomationCommands(store, session, () => { editor.editing.value = false; });

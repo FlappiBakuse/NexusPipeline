@@ -3,8 +3,7 @@ import ScriptTypes from '../../apps/web/src/pages/ScriptTypes.vue';
 import { ControlClient } from '../../apps/web/src/control/client';
 import type { ExtensionState } from '../../apps/web/src/control/extensions';
 import { createStore } from '../../apps/web/src/app/store';
-import { AutomationEditor } from '../../apps/web/src/pages/automation-editor';
-import { automationSession } from '../../apps/web/src/pages/automation-session';
+import { AutomationEditor, automationSession } from '../../apps/web/src/pages/automation-editor';
 
 export async function scriptCreationContract(fixture: HTMLElement, check: (value: unknown, name: string) => void): Promise<void> {
   let respond: (value: Response) => void = () => {};

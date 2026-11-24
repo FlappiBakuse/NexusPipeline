@@ -299,6 +299,57 @@ public sealed class DefinitionStoreTests
         Assert.Equal(record, Assert.Single(records.ReadPage(new()).Items));
     }
 
+    [Fact(DisplayName = "Script And Queue Edits Keep Repeated Ordinals While Script Removal Updates Only Its Queue Members")]
+    public void PreservesRepeatedQueueMembersAcrossEdits()
+    {
+        var fixture = Create();
+        var initial = Definitions(fixture.Root);
+        var original = Assert.Single(initial.Scripts);
+        var removed = original with { Id = Guid.NewGuid(), Name = "Remove later" };
+        var updatedQueue = Assert.Single(initial.Queues) with
+        {
+            ScriptIds = [original.Id, removed.Id, original.Id, removed.Id, original.Id]
+        };
+        var unaffectedQueue = updatedQueue with { Id = Guid.NewGuid(), Name = "Unchanged queue", ScriptIds = [original.Id, original.Id] };
+        initial = initial with { Scripts = [original, removed], Queues = [updatedQueue, unaffectedQueue] };
+        fixture.Store.Commit(Identity(initial), initial, DateTimeOffset.UtcNow);
+
+        var current = fixture.Store.Read();
+        var script = current.Scripts.Single(item => item.Id == original.Id);
+        var queue = current.Queues.Single(item => item.Id == updatedQueue.Id);
+        var queueOrder = new[] { removed.Id, original.Id, removed.Id, original.Id };
+        File.WriteAllBytes(Path.Combine(current.Roots.Single().Path, "second.exe"), [1, 2, 3]);
+        var change = Empty(current.Revision) with
+        {
+            Scripts = [script with { Name = "Other path", Executable = new(script.RootId, "second.exe") }],
+            Queues = [queue with { ScriptIds = queueOrder.ToImmutableArray() }]
+        };
+        fixture.Store.Commit(Identity(change), change, DateTimeOffset.UtcNow);
+        var reordered = fixture.Store.Read();
+        Assert.Equal(queueOrder, reordered.Queues.Single(item => item.Id == queue.Id).ScriptIds.ToArray());
+        Assert.Equal("second.exe", reordered.Scripts.Single(item => item.Id == script.Id).Executable.RelativePath);
+        Assert.Equal(new[] { original.Id, original.Id }, reordered.Queues.Single(item => item.Id == unaffectedQueue.Id).ScriptIds.ToArray());
+
+        var deleted = reordered.Scripts.Single(item => item.Id == removed.Id);
+        var deletion = Empty(reordered.Revision) with
+        {
+            Removed = [new(AutomationDefinitionKind.Script, deleted.Id, deleted.Revision)]
+        };
+        var operation = Identity(deletion);
+        var accepted = fixture.Store.Commit(operation, deletion, DateTimeOffset.UtcNow);
+        Assert.True(accepted.IsNew);
+        Assert.Equal(accepted.CatalogRevision, fixture.Store.Commit(operation, deletion, DateTimeOffset.UtcNow).CatalogRevision);
+        var after = fixture.Store.Read();
+        Assert.Equal(original.Id, Assert.Single(after.Scripts).Id);
+        var changed = after.Queues.Single(item => item.Id == updatedQueue.Id);
+        Assert.Equal(queue.Revision + 2, changed.Revision);
+        Assert.Equal(new[] { original.Id, original.Id }, changed.ScriptIds.ToArray());
+        var unaffected = after.Queues.Single(item => item.Id == unaffectedQueue.Id);
+        Assert.Equal(1L, unaffected.Revision);
+        Assert.Equal(new[] { original.Id, original.Id }, unaffected.ScriptIds.ToArray());
+        Assert.Equal(updatedQueue.Id, Assert.Single(after.Schedules).QueueId);
+    }
+
     [Fact(DisplayName = "Unknown Persisted Queue Order Is Rejected During Copied Startup Inspection Without Repairing Original Bytes")]
     public void PreservesUnknownOrder()
     {

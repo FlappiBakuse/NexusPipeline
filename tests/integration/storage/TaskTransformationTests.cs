@@ -58,6 +58,24 @@ public sealed class TaskTransformationTests
         Assert.Equal(fixture.Source.Tree.Entries, fixture.Transform.Restore(fixture.Operation, fixture.Source, captured, selected).Entries);
     }
 
+    [Fact(DisplayName = "A Partly Completed Task Gets Its Remaining Count And Restores The Original Count Alongside Progress")]
+    public void RestoresRepetitionCounts()
+    {
+        const string original = "{\"tasks\":{\"A\":true,\"B\":true},\"counts\":{\"B\":3},\"progress\":1}";
+        const string selected = "{\"tasks\":{\"A\":false,\"B\":true},\"counts\":{\"B\":2},\"progress\":1}";
+        using var fixture = new Fixture(original);
+        var rule = Rule("map", ConfigurationSyntax.Json) with { Repetitions = [new("B", Selector("counts", "B"), 3, 2)] };
+        var captured = fixture.Transform.Capture(fixture.Operation, fixture.Source, [rule]);
+        var candidate = fixture.Transform.Select(fixture.Operation, fixture.Source, captured);
+        Assert.Equal(selected, fixture.Read(candidate));
+        fixture.Transform.ValidateSelected(fixture.Operation, fixture.Source, captured, candidate);
+        var progress = fixture.Tree(selected.Replace("\"progress\":1", "\"progress\":4", StringComparison.Ordinal));
+        Assert.Equal(original.Replace("\"progress\":1", "\"progress\":4", StringComparison.Ordinal),
+            fixture.Read(fixture.Transform.Restore(fixture.Operation, fixture.Source, captured, progress)));
+        Assert.Throws<ConfigurationException>(() => fixture.Transform.Capture(fixture.Operation, fixture.Source,
+            [rule with { Repetitions = [rule.Repetitions[0] with { OriginalCount = 4 }] }]));
+    }
+
     [Theory(DisplayName = "Normalization Reuses A Protected Validation Only When Document Bytes Match")]
     [InlineData(false, 1)]
     [InlineData(true, 2)]
@@ -126,7 +144,7 @@ public sealed class TaskTransformationTests
         var captured = fixture.Transform.Capture(fixture.Operation, fixture.Source, [Rule("map", ConfigurationSyntax.Json)]);
         var item = captured[0] with { Initial = captured[0].Initial with { Declaration = Rule("map", ConfigurationSyntax.Json).Declaration } };
         fixture.Transform.ValidateInitial(fixture.Operation, fixture.Source, [item]);
-        Assert.Contains("\"A\":false", fixture.Read(fixture.Transform.Select(fixture.Operation, fixture.Source, [item])));
+        Assert.Equal("{\"tasks\":{\"A\":false,\"B\":true}}", fixture.Read(fixture.Transform.Select(fixture.Operation, fixture.Source, [item])));
     }
 
     [Theory(DisplayName = "Selected Tree Validation Never Publishes Content When Accepting Or Rejecting A Candidate")]
@@ -262,7 +280,9 @@ public sealed class TaskTransformationTests
             using var input = Blobs.OpenVerified(new($"blobs/content/{entry.Sha256}.bin", entry.SizeBytes, entry.Sha256!));
             var bytes = new byte[checked((int)input.Length)]; input.ReadExactly(bytes); return bytes;
         }
-        internal string[] ContentFiles() => Directory.GetFiles(Path.Combine(Instance.RuntimeRoot, "blobs/content")).Order(StringComparer.Ordinal).ToArray();
+        internal string[] ContentFiles() => Directory.GetFiles(Path.Combine(Instance.RuntimeRoot, "blobs/content")).Order(StringComparer.Ordinal)
+            .Select(path => Path.GetFileName(path) + ":" + Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path))))
+            .ToArray();
         public void Dispose() { }
     }
 }

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { reactive } from 'vue';
 import { ControlClient, ControlFailure } from '../../apps/web/src/control/client';
-import { PluginOwner } from '../../apps/web/src/pages/plugin-owner';
-import { savedSettings } from '../../apps/web/src/control/settings-command';
+import { PluginOperations } from '../../apps/web/src/pages/plugin-operations';
+import { savedSettings } from '../../apps/web/src/control/settings';
 import type { AppStore } from '../../apps/web/src/app/store';
 import type { ControlHostSettingsValues } from '../../apps/web/src/control/wire.generated';
 import { upgradeAvailable, type CatalogEntry, type ExtensionCatalog, type ExtensionDetails } from '../../apps/web/src/control/extensions';
@@ -55,9 +55,11 @@ function fixture() {
   const state = reactive({ capabilities: { instanceId: 'instance-a' }, settings: { saved: { revision, values: structuredClone(saved) } },
     uncertainOperation: '', error: '' });
   const drafts = reactive(new Map()), dirty = reactive(new Set<string>());
-  const store = { client, state, drafts, dirty, can: () => true, report: () => {}, refresh: async () => {
+  const refresh = async () => {
     state.settings = { saved: { revision, values: structuredClone(saved) } };
-  } } as unknown as AppStore;
+    return state.settings.saved;
+  };
+  const store = { client, state, drafts, dirty, can: () => true, report: () => {}, refresh, refreshSettings: refresh } as unknown as AppStore;
   return { store, requests, installed, mode: (value: { malformed?: boolean; wrongProof?: boolean; wrongAction?: boolean; held?: boolean;
     reconcileUnknown?: boolean; reconcileComplete?: boolean }) => {
     malformed = value.malformed ?? malformed; wrongProof = value.wrongProof ?? wrongProof; wrongAction = value.wrongAction ?? wrongAction;
@@ -75,11 +77,11 @@ export async function run(): Promise<string[]> {
   assert.throws(() => savedSettings({ operationId: body.operationId, saved: { revision: 2, values: {} } }, body));
   check(savedSettings({ operationId: body.operationId, saved: { revision: 2, values: structuredClone(values) } }, body),
     'A settings write requires the complete original values, operation identity and next revision');
-  const first = fixture(), owner = new PluginOwner(first.store); first.mode({ malformed: true, held: true });
+  const first = fixture(), owner = new PluginOperations(first.store); first.mode({ malformed: true, held: true });
   const work = owner.apply(candidate, 'upgrade', first.installed, catalog);
   check(owner.state.pending?.apply?.command.candidate && first.store.dirty.size === 1,
     'The complete extension command and catalog identity are owned before transport');
-  const reopened = new PluginOwner(first.store);
+  const reopened = new PluginOperations(first.store);
   first.release(); await work;
   check(!!owner.state.pending && !owner.state.busy, 'Malformed acceptance retains its original operation without replay');
   await reopened.apply(candidate, 'upgrade', first.installed, catalog);
@@ -91,7 +93,7 @@ export async function run(): Promise<string[]> {
   first.mode({ wrongAction: false }); await reopened.inspect();
   check(!owner.state.pending && first.requests.length === 1 && first.store.dirty.size === 0,
     'The exact original extension completion unlocks once without resending its write');
-  const second = fixture(), settings = new PluginOwner(second.store); second.mode({ malformed: true });
+  const second = fixture(), settings = new PluginOperations(second.store); second.mode({ malformed: true });
   await settings.enable(second.installed);
   check(settings.state.pending?.kind === 'setting' && second.requests.length === 1,
     'A malformed settings success retains the original preference command before any activation');
@@ -103,14 +105,14 @@ export async function run(): Promise<string[]> {
   await settings.retry();
   check(!settings.state.pending && second.requests.length === 2 && !second.installed.activationId,
     'Explicit retry applies only the frozen current preference and confirms the disabled runtime');
-  const third = fixture(), runtime = new PluginOwner(third.store); third.mode({ reconcileUnknown: true });
+  const third = fixture(), runtime = new PluginOperations(third.store); third.mode({ reconcileUnknown: true });
   await runtime.enable(third.installed); await runtime.inspect();
   check(!runtime.state.pending && third.requests.length === 2,
     'A lost reconciliation response resolves through actual runtime state with no activation replay');
-  const fourth = fixture(), switched = new PluginOwner(fourth.store); fourth.mode({ held: true });
+  const fourth = fixture(), switched = new PluginOperations(fourth.store); fourth.mode({ held: true });
   const delayed = switched.apply(candidate, 'upgrade', fourth.installed, catalog);
   fourth.store.state.capabilities!.instanceId = 'instance-b'; fourth.release(); await delayed;
-  check(!new PluginOwner(fourth.store).state.pending, 'A late old-instance operation cannot publish pending state into another instance');
+  check(!new PluginOperations(fourth.store).state.pending, 'A late old-instance operation cannot publish pending state into another instance');
   const client = new ControlClient('http://127.0.0.1', async () => json({ operationId: body.operationId, saved: { revision: 2, values: {} } }));
   await assert.rejects(client.write('/control/v1/settings', body, value => savedSettings(value, body), body.operationId),
     (error: unknown) => error instanceof ControlFailure && error.uncertain && error.operationId === body.operationId);

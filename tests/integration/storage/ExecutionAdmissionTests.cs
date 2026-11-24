@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
+using System.Security.Cryptography;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
@@ -60,13 +62,23 @@ public sealed class ExecutionAdmissionTests
 
     [Theory(DisplayName = "Missing Saved Inputs And Undeclared Specialized Providers Cannot Become Accepted Starts")]
     [InlineData(true, true)]
+    [InlineData(false, false)]
     public void RequiresSavedInputs(bool specialized, bool saved)
     {
         using var fixture = new ExecutionAdmissionFixture(specialized, saved); var source = fixture.Source; var before = fixture.Counts();
+        if (!saved) File.Delete(source.Configuration);
         var request = source.Request(new BindingTarget(source.BindingB));
         using var preview = fixture.Service.DryRun(request, PlanBuilderFixture.CreatedAt);
         Assert.True(preview.Explanation.HasBlockedItems);
-        Assert.Throws<ExecutionSelectionException>(() => fixture.Service.Start(Guid.NewGuid(), Subject, request, PlanBuilderFixture.CreatedAt));
+        Assert.Equal(specialized ? "execution_extension_provider_unavailable" : "configuration_required",
+            Assert.Single(preview.Explanation.Items).ReasonCode);
+        var operation = Guid.NewGuid();
+        if (specialized)
+            Assert.Equal("execution_no_runnable_targets", Assert.Throws<ExecutionSelectionException>(() =>
+                fixture.Service.Start(operation, Subject, request, PlanBuilderFixture.CreatedAt)).Message);
+        else
+            Assert.Equal("configuration_import_source_missing", Assert.Throws<ConfigurationException>(() =>
+                fixture.Service.Start(operation, Subject, request, PlanBuilderFixture.CreatedAt)).Message);
         Assert.Equal(before, fixture.Counts()); Assert.Equal(0, fixture.Inbox.PendingCount);
     }
 
@@ -150,37 +162,108 @@ public sealed class ExecutionAdmissionTests
         var other = fixture.NewService(); var firstId = Guid.NewGuid(); var secondId = Guid.NewGuid();
         var first = Task.Run(() => fixture.Service.Start(firstId, Subject, source.Request(new BindingTarget(source.BindingB)), PlanBuilderFixture.CreatedAt));
         Task<AttemptAcceptanceResult>? second = null;
+        var registry = new RecoveryJournalRegistry(source.Database);
         try
         {
             Assert.True(observer.Entered.Wait(TimeSpan.FromSeconds(10)));
             second = Task.Run(() => other.Start(secondId, Subject, source.Request(new BindingTarget(source.OtherBinding)), PlanBuilderFixture.CreatedAt));
             var deadline = Stopwatch.StartNew();
-            while (fixture.Inbox.Commits.Count < 2 && !second.IsCompleted && deadline.Elapsed < TimeSpan.FromSeconds(10)) await Task.Delay(10);
-            Assert.Equal(2, fixture.Inbox.Commits.Count); Assert.False(second.IsCompleted);
+            while (!fixture.Inbox.Commits.IsWaiting(secondId) && !second.IsCompleted && deadline.Elapsed < TimeSpan.FromSeconds(10))
+                await Task.Delay(10);
+            Assert.True(fixture.Inbox.Commits.IsWaiting(secondId));
+            Assert.True(HasFrozenAttempt(source, secondId));
+            Assert.False(second.IsCompleted);
+            var committedFirst = Assert.Single(registry.ReadSnapshot().Journals, item => item.Kind == JournalKind.RunAttempt);
+            Assert.Equal(firstId, committedFirst.OperationId);
         }
         finally { observer.Release.Set(); }
-        Assert.True((await first.WaitAsync(TimeSpan.FromSeconds(15))).Acceptance.IsNew);
-        Assert.True((await second!.WaitAsync(TimeSpan.FromSeconds(15))).Acceptance.IsNew);
-        Assert.Equal(2, fixture.Inbox.PendingCount); Assert.True(fixture.Index.Current.IsReady);
-        Assert.Equal(2, new RecoveryJournalRegistry(source.Database).ReadSnapshot().Journals.Count(item => item.Kind == JournalKind.RunAttempt));
+        var firstResult = await first.WaitAsync(TimeSpan.FromSeconds(15));
+        var secondResult = await second!.WaitAsync(TimeSpan.FromSeconds(15));
+        Assert.NotEqual(firstResult.JournalId, secondResult.JournalId);
+        Assert.True(fixture.Index.Current.IsReady);
+        var firstOwner = CheckAdmission(firstId, source.BindingB, firstResult);
+        var secondOwner = CheckAdmission(secondId, source.OtherBinding, secondResult);
+        Assert.NotEqual(firstOwner.RunId, secondOwner.RunId);
+        Assert.NotEqual(firstOwner.AttemptId, secondOwner.AttemptId);
+        Assert.DoesNotContain(registry.ReadSnapshot().Journals, item => item.Kind == JournalKind.RunAttempt &&
+            item.OperationId != firstId && item.OperationId != secondId);
+
+        (string RunId, string AttemptId) CheckAdmission(Guid operation, Guid binding, AttemptAcceptanceResult result)
+        {
+            Assert.True(result.Acceptance.IsNew);
+            Assert.Equal(operation, result.Acceptance.OperationId);
+            var journal = registry.ReadJournal(result.JournalId);
+            Assert.Equal(operation, journal.OperationId);
+            Assert.Equal(JournalPhase.Prepared, journal.Phase);
+            using var owned = fixture.Take(operation);
+            var total = owned.Prepared.Total.Plan.ReadWire();
+            Assert.Equal(binding.ToString("D"), Assert.Single(total.Steps).BindingId);
+            Assert.Equal(result.Plan, owned.Prepared.Attempt.Reference);
+            Assert.Equal(total.ResourceKeys, journal.ResourceKeys);
+            Assert.Equal(ExecutionPlanResources.Claims(total).ToArray(), JournalResourceClaims.Read(source.Database, journal.JournalId)
+                .Select(item => new ResourceClaim(item.Key, item.Value)).ToArray());
+            var attempt = owned.Prepared.Attempt.Plan.ReadWire();
+            Assert.Equal(total.RunId, attempt.RunId);
+            return (attempt.RunId, attempt.AttemptId);
+        }
     }
 
     [Fact(DisplayName = "A Simultaneous Start For The Same Actual Resources Cannot Enter The Accepted Owners Preparation Or Commit Queue")]
     public async Task RejectsCompetingStarts()
     {
         using var observer = new PausingObserver();
-        using var fixture = new ExecutionAdmissionFixture(observer: observer); var source = fixture.Source;
-        var request = source.Request(new BindingTarget(source.BindingB)); var firstId = Guid.NewGuid();
-        var first = Task.Run(() => fixture.Service.Start(firstId, Subject, request, PlanBuilderFixture.CreatedAt));
+        using var execution = new ExecutionSequentialFixture(mode: "quiet", accept: false);
+        var fixture = execution.Base;
+        var source = execution.Source;
+        var service = fixture.NewService(observer);
+        var request = source.Request(new BindingTarget(source.OtherBinding));
+        var firstId = Guid.NewGuid();
+        var competingId = Guid.NewGuid();
+        var createdAt = DateTimeOffset.UtcNow;
+        var first = Task.Run(() => service.Start(firstId, Subject, request, createdAt));
+        var registry = new RecoveryJournalRegistry(source.Database);
         try
         {
             Assert.True(observer.Entered.Wait(TimeSpan.FromSeconds(10)));
-            var error = Assert.Throws<ExecutionSelectionException>(() => fixture.Service.Start(Guid.NewGuid(), Subject, request, PlanBuilderFixture.CreatedAt));
-            Assert.Equal("execution_resource_conflict", error.Message); Assert.Equal(1, fixture.Inbox.Commits.Count);
+            var error = Assert.Throws<ExecutionSelectionException>(() => fixture.Service.Start(competingId, Subject, request, createdAt));
+            Assert.Equal("execution_resource_conflict", error.Message);
+            Assert.False(HasFrozenAttempt(source, competingId));
+            Assert.False(File.Exists(execution.Marker));
         }
         finally { observer.Release.Set(); }
-        Assert.True((await first.WaitAsync(TimeSpan.FromSeconds(15))).Acceptance.IsNew);
-        Assert.Equal(1, fixture.Inbox.PendingCount);
+        var accepted = await first.WaitAsync(TimeSpan.FromSeconds(15));
+        Assert.True(accepted.Acceptance.IsNew);
+        var attempt = AttemptPreparedBinding.ReadPlan(source.Instance, new(), registry.ReadJournal(accepted.JournalId));
+        var consumer = new ExecutionRuntimeConsumer(source.Instance, source.Database, new(), source.Lease,
+            fixture.Resources, fixture.Index, fixture.Inbox);
+        var receipt = Assert.IsType<AttemptReceipt>(await consumer.RunNextAsync().WaitAsync(TimeSpan.FromSeconds(30)));
+        Assert.Equal(firstId, receipt.OperationId);
+        Assert.Equal(accepted.JournalId, receipt.JournalId);
+        Assert.Equal(Guid.Parse(attempt.AttemptId), receipt.Facts.AttemptId);
+        Assert.Equal(Guid.Parse(attempt.RunId), receipt.Facts.RunId);
+        Assert.Equal(LifecycleOutcome.Completed, receipt.Facts.Lifecycle);
+        Assert.Equal(EngineOutcome.Succeeded, receipt.Facts.Engine);
+        Assert.True(int.TryParse(File.ReadAllText(execution.Marker), out var processId) && processId > 0);
+        var completed = Assert.Single(registry.ReadSnapshot().Journals, item => item.Kind == JournalKind.RunAttempt);
+        Assert.Equal(firstId, completed.OperationId);
+        Assert.Equal(JournalPhase.Committed, completed.Phase);
+        Assert.Null(await consumer.RunNextAsync());
+    }
+
+    private static bool HasFrozenAttempt(PlanBuilderFixture source, Guid operationId)
+    {
+        var plans = Path.Combine(source.Instance.RuntimeRoot, "blobs", "plans");
+        foreach (var path in Directory.EnumerateFiles(plans, "*.json"))
+        {
+            var bytes = File.ReadAllBytes(path);
+            using var document = JsonDocument.Parse(bytes);
+            var root = document.RootElement;
+            if (!root.TryGetProperty("format", out var format) || format.GetString() != "nexus.execution.run-attempt-plan" ||
+                root.GetProperty("operationId").GetGuid() != operationId) continue;
+            Assert.Equal(Path.GetFileNameWithoutExtension(path), Convert.ToHexStringLower(SHA256.HashData(bytes)));
+            return true;
+        }
+        return false;
     }
 
     [Fact(DisplayName = "An Observed Unowned Output After Acceptance Cannot Be Reconciled As No Effect Or Automatically Replayed")]

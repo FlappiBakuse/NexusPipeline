@@ -52,6 +52,12 @@ internal static class OwnedFixtureEvidence
         output.Flush(flushToDisk: true);
     }
 
+    internal static void WriteRoot(string path)
+    {
+        using var process = Process.GetCurrentProcess();
+        WriteReport(path, new { ProcessId = process.Id, CreatedAtUtc = process.StartTime.ToUniversalTime() });
+    }
+
     private static bool Inside(string root, string full)
     {
         var relative = Path.GetRelativePath(root, full);

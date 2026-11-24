@@ -75,8 +75,11 @@ public sealed class ExecutionSequentialTests
         Assert.Equal(unstarted ? EngineOutcome.NotStarted : EngineOutcome.Unknown, receipt.Facts.Engine);
         Assert.Equal(LifecycleOutcome.Cancelled, receipt.Facts.Lifecycle); Assert.Equal(RecoveryOutcome.Restored, receipt.Facts.Recovery);
         Assert.Equal(1, fixture.Base.Count("journal_writer_jobs")); Assert.Equal(unstarted ? 0 : 1, fixture.Base.Count("journal_writer_job_roots"));
-        Assert.Equal(1, fixture.Base.Count("journal_writer_job_closures")); Assert.Single(StepResultCodec.Read(fixture.State.Latest.Root, fixture.State.Total));
-        Assert.All(fixture.State.Coverage.Skip(1), item => { Assert.Equal(StepCompletionKind.NotDispatched, item.Kind); Assert.Null(item.Result); });
+        var state = fixture.State;
+        Assert.Equal(1, fixture.Base.Count("journal_writer_job_closures")); Assert.Single(StepResultCodec.Read(state.Latest.Root, state.Total));
+        Assert.Equal(fixture.Steps.Select(step => step.StepId), state.Coverage.Select(item => item.StepId));
+        Assert.Equal(StepCompletionKind.Collected, state.Coverage[0].Kind);
+        Assert.All(state.Coverage.Skip(1), item => { Assert.Equal(StepCompletionKind.NotDispatched, item.Kind); Assert.Null(item.Result); });
         Assert.Throws<IOException>(() => fixture.Scope(1));
     }
 
@@ -158,11 +161,14 @@ public sealed class ExecutionSequentialTests
                 var observed = new JournalWriterStore(fixture.Source.Database).ObserveForCurrentExecutor(fixture.ParentId);
                 return new(fixture.Source.Instance.InstanceId, fixture.ParentId, observed.IsComplete, observed.State);
             })).Recover();
-        Assert.Equal(JournalRecoveryResult.Restored, result); Assert.Equal(JournalPhase.Committed, fixture.State.Journal.Phase);
+        var recovered = fixture.State;
+        Assert.Equal(JournalRecoveryResult.Restored, result); Assert.Equal(JournalPhase.Committed, recovered.Journal.Phase);
         Assert.Equal(1, fixture.Base.Count("journal_writer_jobs"));
-        var receipt = new AttemptReceiptStore(fixture.Source.Database).Read(Guid.Parse(fixture.State.Attempt.AttemptId))!;
+        var receipt = new AttemptReceiptStore(fixture.Source.Database).Read(Guid.Parse(recovered.Attempt.AttemptId))!;
         Assert.Equal(EngineOutcome.Failed, receipt.Facts.Engine); Assert.Equal(LifecycleOutcome.Interrupted, receipt.Facts.Lifecycle);
-        Assert.All(fixture.State.Coverage.Skip(1), item => Assert.Equal(StepCompletionKind.NotDispatched, item.Kind));
+        Assert.Equal(fixture.Steps.Select(step => step.StepId), recovered.Coverage.Select(item => item.StepId));
+        Assert.Equal(StepCompletionKind.Collected, recovered.Coverage[0].Kind);
+        Assert.All(recovered.Coverage.Skip(1), item => { Assert.Equal(StepCompletionKind.NotDispatched, item.Kind); Assert.Null(item.Result); });
     }
 
     [Theory(DisplayName = "Damaged Not Dispatched Facts Are Rejected Read Only Without Opening A New Job")]

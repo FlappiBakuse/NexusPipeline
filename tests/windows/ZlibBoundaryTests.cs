@@ -15,9 +15,15 @@ public sealed class ZlibBoundaryTests
     [InlineData(2, 6)]
     public void PreservesStreamDimensions(int block, int color)
     {
-        using var png = new MemoryStream(Png(block, color, null), writable: false);
+        var bytes = Png(block, color, null);
+        using var png = new MemoryStream(bytes, writable: false);
         Assert.Equal(new CapturePngInfo(3, 2, color), BoundedCapturePng.Verify(png, allowRgba: true));
         if (color == 2) RgbCapturePng.Verify(png, 3, 2);
+
+        // IHDR CRC follows the signature, length, type, and 13-byte header.
+        bytes[8 + 4 + 4 + 13] ^= 0x80;
+        png.Position = 0;
+        Assert.Equal("capture_png_invalid", Assert.Throws<IOException>(() => BoundedCapturePng.Verify(png, allowRgba: true)).Message);
     }
 
     [Theory(DisplayName = "A Correct Png Crc Cannot Hide Extra Compressed Members Or An Incomplete Adler Trailer")]
@@ -88,8 +94,19 @@ public sealed class ZlibBoundaryTests
     {
         Span<byte> word = stackalloc byte[4]; BinaryPrimitives.WriteInt32BigEndian(word, bytes.Length);
         output.Write(word); output.Write(kind); output.Write(bytes);
-        var crc = PngScanlineEncoder.Accumulate(PngScanlineEncoder.Accumulate(uint.MaxValue, kind), bytes);
+        var crc = UpdateCrc(UpdateCrc(uint.MaxValue, kind), bytes);
         BinaryPrimitives.WriteUInt32BigEndian(word, ~crc); output.Write(word);
+    }
+
+    private static uint UpdateCrc(uint crc, ReadOnlySpan<byte> bytes)
+    {
+        foreach (var value in bytes)
+        {
+            crc ^= value;
+            for (var bit = 0; bit < 8; bit++)
+                crc = (crc & 1) == 0 ? crc >> 1 : (crc >> 1) ^ 0xedb88320u;
+        }
+        return crc;
     }
 
     private sealed class Writer(Stream output)

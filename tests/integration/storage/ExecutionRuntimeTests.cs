@@ -60,12 +60,15 @@ public sealed class ExecutionRuntimeTests
     public async Task CancelsUnstartedSuffix(bool configuration)
     {
         using var fixture = new ExecutionRuntimeFixture(configuration, mode: "wait");
+        var stepIds = fixture.State.Total.Steps.Select(step => step.StepId).ToArray();
         var bytes = File.ReadAllBytes(fixture.Source.Configuration); fixture.Cancel();
         var receipt = Assert.IsType<AttemptReceipt>(await fixture.Consumer.RunNextAsync());
         Assert.Equal(LifecycleOutcome.Cancelled, receipt.Facts.Lifecycle); Assert.Equal(EngineOutcome.NotStarted, receipt.Facts.Engine);
         Assert.Equal(RecoveryOutcome.NotRequired, receipt.Facts.Recovery); Assert.Equal(EffectGateState.Sealed, fixture.State.Gate.State);
         Assert.Equal(0, fixture.Base.Count("journal_writer_jobs")); Assert.Equal(0, fixture.Base.Count("journal_writer_job_roots"));
-        Assert.All(fixture.State.Coverage, item => { Assert.Equal(StepCompletionKind.NotDispatched, item.Kind); Assert.Null(item.Result); });
+        var coverage = fixture.State.Coverage;
+        Assert.Equal(stepIds, coverage.Select(item => item.StepId));
+        Assert.All(coverage, item => { Assert.Equal(StepCompletionKind.NotDispatched, item.Kind); Assert.Null(item.Result); });
         Assert.False(File.Exists(fixture.Marker)); Assert.Equal(bytes, File.ReadAllBytes(fixture.Source.Configuration));
         Assert.Equal(0, fixture.Consumer.PendingReconciliationCount); Assert.True(fixture.Base.Index.Current.IsReady);
     }
@@ -112,11 +115,14 @@ public sealed class ExecutionRuntimeTests
     public async Task KeepsExpiredBudget(bool configuration)
     {
         using var fixture = new ExecutionRuntimeFixture(configuration, expired: true);
+        var stepIds = fixture.State.Total.Steps.Select(step => step.StepId).ToArray();
         var receipt = Assert.IsType<AttemptReceipt>(await fixture.Consumer.RunNextAsync());
         Assert.Equal(LifecycleOutcome.Blocked, receipt.Facts.Lifecycle); Assert.Equal(EngineOutcome.NotStarted, receipt.Facts.Engine);
         Assert.Equal("execution_total_budget_exhausted", receipt.Facts.ReasonCode);
         Assert.Equal(0, fixture.Base.Count("journal_writer_jobs")); Assert.False(File.Exists(fixture.Marker));
-        Assert.All(fixture.State.Coverage, item => Assert.Equal(StepCompletionKind.NotDispatched, item.Kind));
+        var coverage = fixture.State.Coverage;
+        Assert.Equal(stepIds, coverage.Select(item => item.StepId));
+        Assert.All(coverage, item => { Assert.Equal(StepCompletionKind.NotDispatched, item.Kind); Assert.Null(item.Result); });
         Assert.True(fixture.Base.Index.Current.IsReady); Assert.Equal(0, fixture.Base.Count("resource_isolations"));
     }
 

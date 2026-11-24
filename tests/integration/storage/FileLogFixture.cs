@@ -112,13 +112,16 @@ internal sealed class FileLogFixture : IAsyncDisposable
         Assert.Equal(37, await (Writer is not null ? Writer.AwaitRootAsync(timeout) : Controller!.AwaitRootAsync(timeout)));
         await Collector.ObserveExitAsync();
     }
+    private Exception? _collectionFailure;
+
     internal async Task<StepEvidenceDocument> Collect()
     {
         _collectionAttempted = true;
         try { return await CollectCore(); }
         catch (Exception error)
         {
-            File.WriteAllText(Path.Combine(Source.Root, "file-log-collection-failure.txt"), error.ToString());
+            _collectionFailure = error;
+            WriteFailure("file-log-collection-failure.txt", error);
             throw;
         }
     }
@@ -164,6 +167,8 @@ internal sealed class FileLogFixture : IAsyncDisposable
     }
     public async ValueTask DisposeAsync()
     {
+        var priorFailure = _collectionFailure;
+        var errors = new List<Exception>();
         try
         {
             if (!_collectionAttempted && Collector is not null && _entered) _ = await Collect();
@@ -173,19 +178,35 @@ internal sealed class FileLogFixture : IAsyncDisposable
                 if (!_collectionAttempted && Collector is not null)
                 { _ = await Collector.CollectAsync(stopped, TimeSpan.FromSeconds(10)); Collector.Dispose(); }
             }
-            if (_collected) (Collector ?? throw new InvalidOperationException("file_log_collector_missing")).Dispose();
-            if (Worker is not null)
-            {
-                try { await Worker.StopAsync(TimeSpan.FromSeconds(10)); }
-                catch (Exception error)
-                {
-                    File.WriteAllText(Path.Combine(Source.Root, "file-log-worker-stop-failure.txt"), error.ToString());
-                    throw;
-                }
-                Worker.Dispose();
-            }
-            Writer?.Dispose(); if (_completed) Controller?.Dispose();
         }
-        finally { Accepted.Dispose(); Base.Dispose(); }
+        catch (Exception error) { errors.Add(error); }
+        if (_collected) Attempt(() => (Collector ?? throw new InvalidOperationException("file_log_collector_missing")).Dispose());
+        if (Worker is not null)
+        {
+            try { await Worker.StopAsync(TimeSpan.FromSeconds(10)); }
+            catch (Exception error) { WriteFailure("file-log-worker-stop-failure.txt", error); errors.Add(error); }
+            Attempt(Worker.Dispose);
+        }
+        Attempt(() => Writer?.Dispose());
+        if (_completed) Attempt(() => Controller?.Dispose());
+        Attempt(Accepted.Dispose);
+        Attempt(Base.Dispose);
+        if (errors.Count == 0) return;
+        if (priorFailure is not null) priorFailure.Data["file-log-cleanup"] = new AggregateException(errors);
+        else if (errors.Count == 1) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(errors[0]);
+        else throw new AggregateException(errors);
+
+        void Attempt(Action release)
+        {
+            try { release(); }
+            catch (Exception error) { errors.Add(error); }
+        }
+    }
+
+    private void WriteFailure(string name, Exception error)
+    {
+        try { File.WriteAllText(Path.Combine(Source.Root, name), error.ToString()); }
+        catch (Exception diagnostic) when (diagnostic is IOException or UnauthorizedAccessException)
+        { error.Data["file-log-diagnostic"] = diagnostic; }
     }
 }

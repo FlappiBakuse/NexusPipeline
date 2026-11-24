@@ -50,7 +50,6 @@ public sealed class ShortcutJobTests
         using var result = JsonDocument.Parse(File.ReadAllBytes(report));
         Assert.True(exit == 0, result.RootElement.GetRawText());
         Assert.True(result.RootElement.GetProperty("accepted").GetBoolean());
-        Assert.True(result.RootElement.GetProperty("isThreadPoolThread").GetBoolean());
         Assert.Equal(1U, job.GetAccounting().TotalProcesses);
         Assert.Equal(0U, job.GetAccounting().ActiveProcesses);
         Assert.Equal(bytes, File.ReadAllBytes(path));

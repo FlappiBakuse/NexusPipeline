@@ -79,6 +79,8 @@ public sealed class ParticipantTextTests
         else if (fault == "kind") participant["kind"] = "directory";
         else if (fault == "extra") identity["unrecognized"] = 1;
         else Assert.True(identity.Remove("reasonCode"));
-        Assert.ThrowsAny<Exception>(() => PcStageCodec.IsParticipant(JsonSerializer.SerializeToElement(participant)));
+        var rejection = Record.Exception(() => PcStageCodec.IsParticipant(JsonSerializer.SerializeToElement(participant)));
+        if (fault == "extra") Assert.IsType<JsonException>(rejection);
+        else Assert.Equal("execution_target_stage_unrecognized", Assert.IsType<IOException>(rejection).Message);
     }
 }

@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { setTimeout } from 'node:timers/promises';
+import { hostControlFixture, hostControlFixtureSha256 } from './host-control-fixture.mjs';
 
 const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const token = process.env[input.tokenEnvironment];
@@ -13,21 +15,12 @@ const { chromium } = await import(pathToFileURL(path.join(input.modules, 'playwr
 const executable = input.browser;
 if (!path.isAbsolute(executable || '') || !fs.statSync(executable).isFile()) throw new Error('explicit_browser_required');
 const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-const source = { script: hash(process.argv[1]), browser: hash(executable) };
+const fingerprint = () => ({ script: hash(process.argv[1]), browser: hash(executable), hostControlFixture: hostControlFixtureSha256() });
+const source = fingerprint();
 const checks = [], requests = [], errors = [];
 let browser, page, base;
 
-async function request(route, body, authenticated = true) {
-  return fetch(new URL(route, input.address), { method: body === undefined ? 'GET' : 'POST', redirect: 'error',
-    headers: { ...(authenticated ? { Authorization: 'Bearer ' + token } : {}),
-      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(15000) });
-}
-async function json(route, body) {
-  const result = await request(route, body);
-  assert.equal(result.ok, true, route + ':' + result.status);
-  return result.json();
-}
+const { request, json, enable } = hostControlFixture(input.address, token, 'custom-wallpaper');
 const state = () => json(base + '/invoke/read-state', { input: {} });
 async function awaitState(predicate) {
   const deadline = Date.now() + 15000;
@@ -38,24 +31,14 @@ async function awaitState(predicate) {
   }
   throw new Error('wallpaper_state_timeout');
 }
-async function enable(enabled) {
-  const settings = await json('/control/v1/settings');
-  settings.saved.values.extensions = settings.saved.values.extensions.map(item => ({ ...item,
-    enabled: item.extensionId === 'custom-wallpaper' ? enabled : item.enabled }));
-  await json('/control/v1/settings', { format: 'nexus.control.host-settings', version: 1,
-    operationId: crypto.randomUUID(), expectedRevision: settings.saved.revision, values: settings.saved.values });
-  const installed = (await json('/control/v1/extensions')).items.find(item => item.extensionId === 'custom-wallpaper');
-  const current = await json('/control/v1/settings');
-  await json('/control/v1/extensions/reconcile', { extensionId: 'custom-wallpaper',
-    expectedInstalledRevision: installed.installedRevision, expectedSettingsRevision: current.saved.revision });
-}
 
-function boundaryPng(original) {
-  const result = Buffer.alloc(8388608);
+function boundaryPng(original, size = 8388608, marker = 0) {
+  const result = Buffer.alloc(size);
   const offset = original.length - 12;
   original.copy(result, 0, 0, offset);
   const length = result.length - original.length - 12;
   result.writeUInt32BE(length, offset); result.write('npAD', offset + 4);
+  result.writeUInt8(marker, offset + 8);
   const table = Array.from({ length: 256 }, (_, value) => {
     for (let index = 0; index < 8; index++) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
     return value >>> 0;
@@ -101,8 +84,15 @@ try {
     await page.locator('.authentication button').click();
   }
   await page.waitForFunction(() => !!document.querySelector('style[data-extension-id="custom-wallpaper"]'));
+  const wallpaperSettings = page.locator('nexus-collapsible-card.wallpaper-settings');
+  const wallpaperHeader = wallpaperSettings.getByRole('button', { name: /^自定义壁纸/ });
+  const openWallpaperSettings = async () => {
+    await wallpaperHeader.waitFor();
+    if (await wallpaperHeader.getAttribute('aria-expanded') === 'false') await wallpaperHeader.click();
+    assert.equal(await wallpaperHeader.getAttribute('aria-expanded'), 'true');
+  };
   await page.locator('a[href="#/settings"]').first().click();
-  await page.locator('.wallpaper-settings > summary').click();
+  await openWallpaperSettings();
   const formats = await page.evaluate(() => ['image/png', 'image/jpeg', 'image/webp'].map((type, index) => {
     const canvas = document.createElement('canvas'); canvas.width = 32; canvas.height = 18;
     const context = canvas.getContext('2d'); context.fillStyle = ['#224466', '#664422', '#226644'][index];
@@ -145,21 +135,55 @@ try {
   const sendImage = bytes => fetch(new URL(base + '/upload/upload-asset', input.address), {
     method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'image/png',
       'X-Nexus-Operation-Id': crypto.randomUUID(), 'X-Nexus-File-Name': 'boundary.png' },
-    body: bytes, signal: AbortSignal.timeout(15000) });
+    body: bytes, signal: AbortSignal.timeout(15000) }).catch(error => {
+    throw Error('wallpaper_upload_transport:' + bytes.length + ':' + (error.cause?.code ?? error.message), { cause: error });
+  });
   const accepted = await sendImage(boundary); assert.equal(accepted.status, 200);
   saved = await accepted.json(); assert.equal(saved.assets.length, 4);
   const largeId = crypto.createHash('sha256').update(boundary).digest('hex');
   const original = await request(base + '/images/read-asset/' + largeId);
   assert.equal(original.headers.get('content-type'), 'image/png');
   assert.equal(hashBytes(Buffer.from(await original.arrayBuffer())), largeId);
-  assert.equal((await sendImage(Buffer.concat([boundary, Buffer.from([0])]))).status, 413);
+  assert.equal(await rejectDeclaredImage(boundary.length + 1), 413);
   assert.equal((await state()).assets.length, 4);
   checks.push('exact eight MiB original PNG commits and reads while the next byte is refused without adding an asset');
+  if (localOnly) {
+    const png = Buffer.from(formats[0].content, 'base64');
+    const small = boundaryPng(png, 1024, 1);
+    const near = boundaryPng(png, 8388607, 2);
+    const first = heldImage(small, 'parallel-small.png');
+    const second = heldImage(near, 'parallel-near-limit.png');
+    try {
+      await Promise.all([first.admitted, second.admitted]);
+      const busy = await sendImage(boundaryPng(png, 1024, 3));
+      assert.equal(busy.status, 429);
+      assert.equal((await busy.json()).code, 'request_upload_busy');
+      first.release(); second.release();
+      assert.deepEqual((await Promise.all([first.result, second.result])).map(item => item.status).sort(), [200, 200]);
+      for (const image of [small, near]) await requireSavedBytes(image);
+    } finally { first.close(); second.close(); }
+    const interrupted = boundaryPng(png, 8192, 4);
+    const survivor = boundaryPng(png, 2048, 5);
+    const cancelled = heldImage(interrupted, 'body-cancelled.png');
+    const surviving = heldImage(survivor, 'body-survivor.png');
+    try {
+      await Promise.all([cancelled.admitted, surviving.admitted]);
+      cancelled.close();
+      assert.equal((await cancelled.result).error, 'ABORT_ERR');
+      surviving.release();
+      assert.equal((await surviving.result).status, 200);
+      await requireSavedBytes(survivor);
+      saved = await state();
+      assert.equal(saved.assets.length, 7);
+      assert.ok(!saved.assets.some(item => item.id === hashBytes(interrupted)));
+      assert.ok(!saved.assets.some(item => item.id === hashBytes(boundaryPng(png, 1024, 3))));
+    } finally { cancelled.close(); surviving.close(); }
+    checks.push('two real simultaneous HTTP body readers admit small and near-limit PNGs, refuse a third, and keep a surviving PNG after a separate admitted request is cancelled');
+  }
   await page.locator('a[href="#/dashboard"]').first().click();
   await page.waitForFunction(() => !document.querySelector('.wallpaper-settings')?.getClientRects().length);
   await page.locator('a[href="#/settings"]').first().click();
-  if (!await page.locator('.wallpaper-settings').evaluate(element => element.open))
-    await page.locator('.wallpaper-settings > summary').click();
+  await openWallpaperSettings();
   assert.deepEqual((await state()).order, saved.order);
   checks.push('settings surface remount preserves saved images and order');
   await page.screenshot({ path: path.join(input.output, 'wallpaper-settings.png') });
@@ -192,7 +216,7 @@ try {
   assert.deepEqual((await state()).order, saved.order);
   assert.equal((await state()).revision, beforeEmpty.revision); assert.equal(errors.length, 0);
   checks.push('reactivation has one new browser owner and preserves committed wallpaper data');
-  assert.deepEqual({ script: hash(process.argv[1]), browser: hash(executable) }, source);
+  assert.deepEqual(fingerprint(), source);
   fs.writeFileSync(path.join(input.output, 'result.json'), JSON.stringify({ status: 'PASS', checks, requests, errors,
     scope: 'Actual Test Host original wallpaper ZIP with production Web surfaces in isolated Edge',
     network: localOnly ? 'loopback; LAN authorization excluded' : 'authenticated LAN',
@@ -203,5 +227,54 @@ try {
     failure: String(error.stack ?? error).replaceAll(token, '[redacted]'), source }, null, 2));
   process.exitCode = 1;
 } finally { await browser?.close(); }
+
+function heldImage(bytes, name) {
+  const lifetime = new AbortController();
+  const request = http.request(new URL(base + '/upload/upload-asset', input.address), {
+    method: 'POST', signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(18000)]),
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'image/png', Connection: 'close',
+      Expect: '100-continue', 'Content-Length': bytes.length, 'X-Nexus-Operation-Id': crypto.randomUUID(),
+      'X-Nexus-File-Name': name }
+  });
+  const prefix = Math.min(bytes.length - 1, 65536);
+  const result = new Promise(resolve => {
+    request.once('response', response => {
+      response.once('error', error => resolve({ error: error.code }));
+      response.once('end', () => resolve({ status: response.statusCode }));
+      response.resume();
+    });
+    request.once('error', error => resolve({ error: error.code }));
+  });
+  const continuing = new Promise(resolve => request.once('continue', () => request.write(bytes.subarray(0, prefix), resolve)));
+  const admitted = Promise.race([continuing, result.then(value => { throw Error('upload_not_admitted:' + JSON.stringify(value)); })]);
+  request.flushHeaders();
+  return { admitted, result, release: () => request.end(bytes.subarray(prefix)), close: () => lifetime.abort() };
+}
+
+function rejectDeclaredImage(length) {
+  return new Promise((resolve, reject) => {
+    const request = http.request(new URL(base + '/upload/upload-asset', input.address), {
+      method: 'POST', signal: AbortSignal.timeout(15000),
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'image/png', Connection: 'close',
+        Expect: '100-continue', 'Content-Length': length, 'X-Nexus-Operation-Id': crypto.randomUUID(),
+        'X-Nexus-File-Name': 'over-limit.png' }
+    }, response => {
+      response.once('error', reject);
+      response.once('end', () => resolve(response.statusCode));
+      response.resume();
+    });
+    request.once('error', reject);
+    request.once('continue', () => request.destroy(Error('wallpaper_over_limit_body_admitted')));
+    request.flushHeaders();
+  });
+}
+
+async function requireSavedBytes(bytes) {
+  const id = hashBytes(bytes);
+  const original = await request(base + '/images/read-asset/' + id);
+  assert.equal(original.status, 200);
+  assert.equal(original.headers.get('content-type'), 'image/png');
+  assert.equal(hashBytes(Buffer.from(await original.arrayBuffer())), id);
+}
 
 function hashBytes(bytes) { return crypto.createHash('sha256').update(bytes).digest('hex'); }

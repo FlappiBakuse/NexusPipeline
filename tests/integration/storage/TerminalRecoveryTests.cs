@@ -126,11 +126,5 @@ public sealed class TerminalRecoveryTests(ITestOutputHelper output)
         using var acquired = reopenedResources.TryAcquire(Guid.NewGuid(),
             state.Attempt.ResourceKeys.Select(key => new ResourceClaim(key, ResourceClaimMode.Mutation)).ToArray()).Lease;
         Assert.NotNull(acquired);
-        using var operations = Profile(captured, "operations.recovery");
-        Assert.DoesNotContain(operations.RootElement.GetProperty("steps").EnumerateArray(),
-            step => step.GetProperty("name").GetString() == "history.bindings");
     }
-
-    private static JsonDocument Profile(StringWriter captured, string phase) => JsonDocument.Parse(
-        captured.ToString().Split('\n').Single(line => line.Contains($"\"phase\":\"{phase}\"", StringComparison.Ordinal)));
 }

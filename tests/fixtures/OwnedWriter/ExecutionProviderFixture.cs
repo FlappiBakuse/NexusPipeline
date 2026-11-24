@@ -66,6 +66,8 @@ internal static class ExecutionProviderFixture
                 await effect.WriteAsync(bytes, deadline.Token); effect.Flush(flushToDisk: true);
             }
             catch (IOException) when (File.Exists(key)) { }
+            if (mode is "retry-channel-loss" or "retry-second-hold")
+                OwnedFixtureEvidence.WriteRoot(marker + ".root-" + bootstrap.Identity.AttemptId);
             await File.AppendAllTextAsync(marker + ".attempts", bootstrap.Identity.AttemptId + "|" + bootstrap.AttemptOrdinal +
                 "|" + bootstrap.IdempotencyKey + Environment.NewLine, deadline.Token);
             var physicalOrdinal = File.ReadAllLines(marker + ".attempts").Length;

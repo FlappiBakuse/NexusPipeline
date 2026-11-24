@@ -38,8 +38,18 @@ public sealed class ActionStartupTests
             fixture.Approval, exit, power, TimeProvider.System);
         try
         {
-            _ = next.RunAsync(); next.OnCommitted(receipt); await Task.Delay(100);
-            Assert.Equal(CompletionEffectPhase.Unknown, next.Read(countdown.OperationId)!.Phase);
+            _ = next.RunAsync();
+            var original = next.Read(countdown.OperationId);
+            Assert.Equal(CompletionEffectPhase.Unknown, original!.Phase);
+            var beforeReplay = fixture.Source.Snapshot();
+            next.OnCommitted(receipt);
+            await ActionRuntimeTests.WaitForCompletionIdle(next);
+            Assert.Null(next.FailureCode);
+            Assert.Equal(JsonSerializer.SerializeToUtf8Bytes(original),
+                JsonSerializer.SerializeToUtf8Bytes(next.Read(countdown.OperationId)));
+            var afterReplay = fixture.Source.Snapshot();
+            Assert.Equal(beforeReplay.Rows, afterReplay.Rows);
+            Assert.Equal(beforeReplay.Files, afterReplay.Files);
             Assert.Equal(0, power.Calls); Assert.Equal(0, exit.Requests);
             Assert.Contains(nextIndex.Current.ResourceHolds, hold => hold.Owner == RecoveryHoldOwner.CompletionActions);
             Assert.Equal(receipt, new AttemptReceiptStore(fixture.Source.Database).Read(receipt.Facts.AttemptId));

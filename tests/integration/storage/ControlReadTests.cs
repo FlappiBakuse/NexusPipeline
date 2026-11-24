@@ -26,6 +26,34 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class ControlReadTests
 {
+    [Fact(DisplayName = "An Actual Console Host Stops If Adoption Fails After Native Creation")]
+    public async Task StopsUnadoptedConsoleHost()
+    {
+        await using var host = new FrontendHostFixture();
+        await host.StartAsync(null, interruptible: true);
+        await host.KillOwnerAsync();
+        var executable = Path.Combine(host.Root, "host", "NexusPipeline.exe");
+        var runtime = Path.Combine(host.Root, "runtime");
+        var injected = new IOException("fixture_console_adoption_failure");
+        Process? unadopted = null;
+        try
+        {
+            var failure = Assert.Throws<IOException>(() =>
+            {
+                using var startup = new ConsoleHostFixture(executable, runtime, 0, pid =>
+                {
+                    unadopted = Process.GetProcessById(pid);
+                    _ = unadopted.SafeHandle;
+                    Assert.False(unadopted.HasExited);
+                    throw injected;
+                });
+            });
+            Assert.Same(injected, failure);
+            Assert.True(Assert.IsType<Process>(unadopted).HasExited);
+        }
+        finally { unadopted?.Dispose(); }
+    }
+
     [Fact(DisplayName = "Actual Control Routes Return Effective Binding Sources And Owned Empty Extension History")]
     public async Task ReadsProjectionRoutes()
     {
@@ -170,6 +198,7 @@ public sealed class ControlReadTests
         Guid? startOperation = null;
         Guid? runId = null;
         Guid? attemptId = null;
+        Exception? failure = null;
         try
         {
             using var catalogResponse = await fixture.Client.GetAsync("control/v1/automation", deadline.Token);
@@ -219,10 +248,22 @@ public sealed class ControlReadTests
                 .Select(frame => Convert.FromBase64String(frame.GetProperty("bytes").GetString()!)).SelectMany(value => value).ToArray();
             Assert.Contains("ready\n", Encoding.UTF8.GetString(bytes), StringComparison.Ordinal);
         }
+        catch (Exception error) { failure = error; fixture.PreserveFailure(error); throw; }
         finally
         {
-            if (startOperation is { } operation && runId is { } run && attemptId is { } attempt && !fixture.Host.HasExited)
-                await Cancel(fixture.Client, operation, run, attempt, CancellationToken.None);
+            try
+            {
+                if (startOperation is { } operation && runId is { } run && attemptId is { } attempt && !fixture.Host.HasExited)
+                {
+                    using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                    await Cancel(fixture.Client, operation, run, attempt, cleanup.Token);
+                }
+            }
+            catch (Exception cleanup)
+            {
+                if (failure is not null) failure.Data["cancel-live-run"] = cleanup;
+                else { fixture.PreserveFailure(cleanup); throw; }
+            }
         }
     }
 
@@ -264,6 +305,7 @@ internal sealed class ControlHttpFixture : IAsyncDisposable
 {
     private readonly Process _host;
     private readonly Task<string> _errors;
+    private Exception? _failure;
     internal Process Host => _host;
     internal Uri Address { get; }
     internal HttpClient Client { get; }
@@ -311,29 +353,43 @@ internal sealed class ControlHttpFixture : IAsyncDisposable
         {
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(40));
             var line = await host.StandardOutput.ReadLineAsync(deadline.Token);
-            if (string.IsNullOrEmpty(line)) throw new IOException("control_http_host_not_ready: " + await errors);
+            if (string.IsNullOrEmpty(line)) throw new IOException("control_http_host_not_ready: " + await errors.WaitAsync(deadline.Token));
             using var ready = JsonDocument.Parse(line);
             if (ready.RootElement.GetProperty("kind").GetString() != "host.ready")
                 throw new IOException("control_http_host_identity_invalid");
             return new(host, errors, new Uri(ready.RootElement.GetProperty("address").GetString()!));
         }
-        catch
+        catch (Exception failure)
         {
-            if (!host.HasExited) { host.Kill(entireProcessTree: true); await host.WaitForExitAsync(); }
-            host.Dispose();
+            try
+            {
+                if (!host.HasExited) { host.Kill(entireProcessTree: true); await host.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15)); }
+            }
+            catch (Exception cleanup) { failure.Data["stop-control-host"] = cleanup; }
+            finally { host.Dispose(); }
             throw;
         }
     }
 
+    internal void PreserveFailure(Exception failure) => _failure ??= failure;
+
     public async ValueTask DisposeAsync()
     {
-        Client.Dispose();
-        if (!_host.HasExited)
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        try
         {
-            _host.Kill(entireProcessTree: true);
-            await _host.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
+            try
+            {
+                Client.Dispose();
+                if (!_host.HasExited)
+                {
+                    _host.Kill(entireProcessTree: true);
+                    await _host.WaitForExitAsync(deadline.Token);
+                }
+                _ = await _errors.WaitAsync(deadline.Token);
+            }
+            finally { _host.Dispose(); }
         }
-        _ = await _errors;
-        _host.Dispose();
+        catch (Exception cleanup) when (_failure is not null) { _failure.Data["dispose-control-host"] = cleanup; }
     }
 }

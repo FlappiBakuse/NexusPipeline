@@ -1,5 +1,5 @@
 import { formLabelContract } from './form-label-contract';
-import { DateControl } from '../../apps/web/src/ui/date-control.js';
+import { DateControl } from '../../apps/web/src/ui/date-time-controls.js';
 import { locale, t } from '../../apps/web/src/app/locale.js';
 import { errorMessages } from '../../apps/web/src/app/error-messages.js';
 import type { UiElement } from '@nexuspipeline/extension-sdk';

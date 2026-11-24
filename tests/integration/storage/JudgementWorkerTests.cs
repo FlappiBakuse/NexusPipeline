@@ -29,7 +29,7 @@ globalThis.nexusJudge = input => ({ outcome: calls === 1 && Array.isArray(input.
         Assert.Equal(new BusinessJudgementResult(BusinessOutcome.Succeeded, "last"), final.Response.Result);
         Assert.Empty(first.InterpreterChildren); Assert.Empty(final.InterpreterChildren);
         await fixture.AssertExitedAsync();
-        await Assert.ThrowsAsync<IOException>(() => fixture.Client.InvokeAsync(fixture.Invocation(3), CancellationToken.None));
+        await Assert.ThrowsAsync<IOException>(() => fixture.InvokeAsync(fixture.Invocation(3), CancellationToken.None));
     }
 
     [Fact(DisplayName = "Actual Python Worker Uses Different Admitted Native Interpreters And Does Not Keep Sys Modules Between Calls")]
@@ -86,6 +86,45 @@ def nexus_judge(value):
         await fixture.AssertExitedAsync();
     }
 
+    [Fact(DisplayName = "Physical Python Stderr Content Stays Private While The Failure Reports Its Type And Byte Count")]
+    public async Task DiagnosesPythonFailureWithoutRawStderr()
+    {
+        await using var fixture = new JudgementWorkerFixture("python", """
+def nexus_judge(value):
+    import os
+    os.write(2, b'private raw stderr')
+    raise ValueError('private exception message')
+""");
+        await fixture.StartAsync();
+        var exchange = await fixture.InvokeAsync(1, true);
+        Assert.Equal("judgement_worker_execution_failed", exchange.Response.FaultCode);
+        var failure = Assert.Single(exchange.Response.Diagnostics!);
+        Assert.Equal("python-script", failure.Stage);
+        Assert.Equal("ValueError", failure.Type);
+        Assert.Equal(18L, failure.StderrBytes);
+        Assert.DoesNotContain("private", Encoding.UTF8.GetString(JudgementWorkerProtocol.Encode(exchange.Response)));
+        await fixture.AssertExitedAsync();
+    }
+
+    [Fact(DisplayName = "The Broker Rejects Duplicate Properties In A Real Interpreter Reply")]
+    public async Task RejectsDuplicatePythonReplyProperties()
+    {
+        const string script = """
+def nexus_judge(value):
+    import os, struct
+    body = b'{"result":null,"faultCode":"judgement_worker_execution_failed","failureType":"ValueError","console":[],"console":[]}'
+    os.write(1, struct.pack('<i', len(body)) + body)
+    return {'outcome':'succeeded','reason':'a later valid reply cannot repair the invalid frame'}
+""";
+        await using var fixture = new JudgementWorkerFixture("python", script, timeoutSeconds: 10);
+        await fixture.StartAsync();
+        var result = await fixture.InvokeAsync(1, true);
+        Assert.Equal("judgement_worker_execution_failed", result.Response.FaultCode);
+        Assert.Null(result.Response.Result);
+        Assert.Contains(result.Response.Diagnostics!, failure => failure.Stage == "python-reply" && failure.Type == "JsonException");
+        await fixture.AssertExitedAsync();
+    }
+
     [Theory(DisplayName = "Actual Nonreturning Interpreters Are Bounded And Their Original Native Families Are Stopped")]
     [InlineData("javascript", "globalThis.nexusJudge = () => { while (true) {} };")]
     [InlineData("python", "def nexus_judge(value):\n    while True: pass")]
@@ -94,16 +133,17 @@ def nexus_judge(value):
         await using var fixture = new JudgementWorkerFixture(language, source, timeoutSeconds: 1);
         await fixture.StartAsync();
         using var outerDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(11));
-        JudgementWorkerExchange? exchange = null;
-        var error = await Record.ExceptionAsync(async () =>
-            exchange = await fixture.Client.InvokeAsync(fixture.Invocation(1, true), outerDeadline.Token));
+        var invocation = fixture.Invocation(1, true);
+        var response = await fixture.InvokeFinalFromBrokerAsync(invocation, outerDeadline.Token);
+        Assert.Null(response.Result);
+        Assert.Equal(invocation.Identity, response.Identity);
+        Assert.Equal(invocation.InputSha256, response.InputSha256);
+        Assert.Equal(1, response.Generation);
+        Assert.True(response.IsFinal);
+        if (language == "python") Assert.Equal("judgement_worker_timeout", response.FaultCode);
+        else Assert.Contains(response.FaultCode, new[] { "judgement_worker_timeout", "judgement_worker_execution_failed" });
+        await fixture.AssertNaturallyStoppedAsync(language == "python", outerDeadline.Token);
         Assert.False(outerDeadline.IsCancellationRequested);
-        if (error is OperationCanceledException) return;
-        Assert.Null(error);
-        Assert.NotNull(exchange);
-        Assert.Null(exchange.Response.Result);
-        Assert.Contains(exchange.Response.FaultCode, new[] { "judgement_worker_timeout", "judgement_worker_execution_failed" });
-        await fixture.AssertExitedAsync();
     }
 
     [Fact(DisplayName = "The Parent Rejects An Unbound Owner Before Admitting The Invocation")]
@@ -114,7 +154,7 @@ def nexus_judge(value):
         await fixture.StartAsync();
         var invocation = fixture.Invocation(1);
         invocation = invocation with { Identity = invocation.Identity with { OwnerId = Guid.NewGuid() } };
-        await Assert.ThrowsAsync<JsonException>(() => fixture.Client.InvokeAsync(invocation, CancellationToken.None));
+        await Assert.ThrowsAsync<JsonException>(() => fixture.InvokeAsync(invocation, CancellationToken.None));
     }
 
     [Theory(DisplayName = "The Actual Broker Also Rejects Wrong Wire Identity Without Returning A Business Response")]
@@ -146,5 +186,14 @@ def nexus_judge(value):
         using var stream = new MemoryStream(bytes);
         var error = await Assert.ThrowsAsync<IOException>(() => JudgementWorkerFraming.ReadAsync(stream, CancellationToken.None));
         Assert.Equal("judgement_worker_frame_" + fault, error.Message);
+    }
+
+    [Fact(DisplayName = "The Actual Broker Rejects An Invocation Over Thirty Two MiB Before Reading A Body")]
+    public async Task RejectsOversizedInvocation()
+    {
+        await using var fixture = new JudgementWorkerFixture("javascript",
+            "globalThis.nexusJudge = () => ({outcome:'succeeded',reason:'must not run'});");
+        await fixture.StartAsync();
+        await fixture.AssertOversizedInvocationAsync(33_554_433);
     }
 }

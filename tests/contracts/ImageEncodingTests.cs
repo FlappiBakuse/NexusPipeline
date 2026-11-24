@@ -14,11 +14,13 @@ public sealed class ImageEncodingTests
         var info = ExtensionImageBytes.Inspect("image/png", boundary);
         Assert.Equal(8388608, info.SizeBytes);
         Assert.Equal(1, info.Width);
-        Assert.Throws<IOException>(() => ExtensionImageBytes.Inspect("image/png", new byte[8388609]));
-        Assert.Throws<IOException>(() => ExtensionImageBytes.Inspect("image/jpeg", original));
+        var oversize = new byte[8388609];
+        boundary.CopyTo(oversize, 0);
+        Assert.Equal("extension_image_size_invalid", Assert.Throws<IOException>(() => ExtensionImageBytes.Inspect("image/png", oversize)).Message);
+        Assert.Equal("extension_image_format_invalid", Assert.Throws<IOException>(() => ExtensionImageBytes.Inspect("image/jpeg", original)).Message);
         boundary[18] = 0x20;
         boundary[19] = 1;
-        Assert.Throws<IOException>(() => ExtensionImageBytes.Inspect("image/png", boundary));
-        Assert.Throws<IOException>(() => ExtensionImageBytes.Inspect("image/svg+xml", original));
+        Assert.Equal("extension_image_dimensions_invalid", Assert.Throws<IOException>(() => ExtensionImageBytes.Inspect("image/png", boundary)).Message);
+        Assert.Equal("extension_image_type_invalid", Assert.Throws<IOException>(() => ExtensionImageBytes.Inspect("image/svg+xml", original)).Message);
     }
 }

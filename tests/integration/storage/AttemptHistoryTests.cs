@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Runtime.Versioning;
+using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Records;
 using NexusPipeline.Platform.Storage.Execution;
@@ -7,12 +9,124 @@ using NexusPipeline.Platform.Storage.Records;
 using NexusPipeline.Core.Automation;
 using NexusPipeline.Platform.Storage.Automation;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace NexusPipeline.StorageTests;
 
 [SupportedOSPlatform("windows")]
-public sealed class AttemptHistoryTests
+public sealed class AttemptHistoryTests(ITestOutputHelper output)
 {
+    [Theory(DisplayName = "A Full Receipt Page Reads Its Actual SQLite Snapshot With One Select")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(99)]
+    public void ReadsOneReceiptPageQuery(int count)
+    {
+        var fixture = new ConfigurationBatchFixture();
+        var runId = Guid.NewGuid();
+        var expected = SeedReceipts(fixture.Database, runId, count);
+        using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true, allowPooling: false,
+            domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
+        using var transaction = DatabaseConnections.BeginRead(connection);
+        var query = new AttemptHistoryQuery(runId, Limit: 100);
+        var selects = new List<string>();
+        SQLitePCL.strdelegate_trace record = (_, sql) =>
+        {
+            if (sql.StartsWith("SELECT ", StringComparison.OrdinalIgnoreCase)) selects.Add(sql);
+        };
+        SQLitePCL.raw.sqlite3_trace(connection.Handle!, record, null);
+        AttemptHistoryPage page;
+        try { page = AttemptHistoryReader.ReadInside(connection, transaction, query); }
+        finally { SQLitePCL.raw.sqlite3_trace(connection.Handle!, (SQLitePCL.strdelegate_trace?)null, null); }
+
+        Assert.Equal(expected, page.Items);
+        Assert.Null(page.NextOrdinal);
+        var iterations = count == 99 ? 300 : 2000;
+        for (var i = 0; i < 50; i++) _ = AttemptHistoryReader.ReadInside(connection, transaction, query);
+        using var process = Process.GetCurrentProcess();
+        var cpuStarted = process.TotalProcessorTime;
+        var allocatedStarted = GC.GetAllocatedBytesForCurrentThread();
+        var started = Stopwatch.GetTimestamp();
+        for (var i = 0; i < iterations; i++) _ = AttemptHistoryReader.ReadInside(connection, transaction, query);
+        var elapsed = Stopwatch.GetElapsedTime(started);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedStarted;
+        var cpu = process.TotalProcessorTime - cpuStarted;
+        output.WriteLine($"attempt-page rows={count} selects={selects.Count} repetitions={iterations} elapsed-ms={elapsed.TotalMilliseconds:F3} cpu-ms={cpu.TotalMilliseconds:F3} allocated-bytes={allocated}");
+        foreach (var sql in selects.Distinct(StringComparer.Ordinal).Select(Shape).Distinct(StringComparer.Ordinal))
+        {
+            using var explain = connection.CreateCommand(); explain.Transaction = transaction;
+            explain.CommandText = "EXPLAIN QUERY PLAN " + sql;
+            var parameters = new (string Name, object Value)[] { ("$run", runId.ToString("D")), ("$ordinal", 0),
+                ("$limit", 101), ("$id", (expected.FirstOrDefault()?.Facts.AttemptId ?? Guid.Empty).ToString("D")) };
+            foreach (var (name, value) in parameters)
+                if (sql.Contains(name, StringComparison.Ordinal)) explain.Parameters.AddWithValue(name, value);
+            using var planner = explain.ExecuteReader();
+            while (planner.Read()) output.WriteLine(planner.GetString(3));
+        }
+        Assert.Single(selects);
+    }
+
+    [Fact(DisplayName = "The Lookahead Checks Keys And Leaves Its Unreturned Receipt For The Next Page")]
+    public void PreservesLookaheadValidation()
+    {
+        var fixture = new ConfigurationBatchFixture();
+        var runId = Guid.NewGuid();
+        var expected = SeedReceipts(fixture.Database, runId, 3);
+        var reader = new AttemptHistoryReader(fixture.Database);
+        void Update(Guid run, string sql, object value)
+        {
+            using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath,
+                domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
+            using var command = DatabaseConnections.Command(connection, null, sql, value, run.ToString("D"));
+            Assert.Equal(1, command.ExecuteNonQuery());
+        }
+
+        Update(runId, "UPDATE records.attempt_receipts SET journal_id=$0 WHERE run_id=$1 AND ordinal=2;", "malformed-journal");
+        var first = reader.ReadPage(new(runId, Limit: 1));
+        Assert.Equal(expected[0], Assert.Single(first.Items)); Assert.Equal(1, first.NextOrdinal);
+        Assert.Throws<FormatException>(() => reader.ReadPage(new(runId, AfterOrdinal: 1, Limit: 1)));
+        Assert.Equal(expected[2], Assert.Single(reader.ReadPage(new(runId, AfterOrdinal: 2)).Items));
+        Update(runId, "UPDATE records.attempt_receipts SET journal_id=$0 WHERE run_id=$1 AND ordinal=2;", expected[1].JournalId.ToString("D"));
+        Update(runId, "UPDATE records.attempt_receipts SET reason_code=$0 WHERE run_id=$1 AND ordinal=2;", "committed_later");
+        Assert.Equal("committed_later", Assert.Single(reader.ReadPage(new(runId, AfterOrdinal: 1, Limit: 1)).Items).Facts.ReasonCode);
+
+        var corruptRun = Guid.NewGuid();
+        _ = SeedReceipts(fixture.Database, corruptRun, 2, malformedLastKey: true);
+        const string invalid = "attempt_history_metadata_unrecognized";
+        Assert.Equal(invalid, Assert.Throws<IOException>(() => reader.ReadPage(new(corruptRun, Limit: 1))).Message);
+        Update(corruptRun, "UPDATE records.attempt_receipts SET journal_id=$0 WHERE run_id=$1 AND ordinal=1;", "invalid-first-journal");
+        Assert.Equal(invalid, Assert.Throws<IOException>(() => reader.ReadPage(new(corruptRun, Limit: 1))).Message);
+    }
+
+    private static string Shape(string sql)
+    {
+        // The legacy lookup repeats this statement with a different bound attempt ID for each page row.
+        if (!sql.Contains("WHERE attempt_id=", StringComparison.Ordinal)) return sql;
+        return sql[..(sql.IndexOf("WHERE attempt_id=", StringComparison.Ordinal) + "WHERE attempt_id=".Length)] + "$id;";
+    }
+
+    private static AttemptReceipt[] SeedReceipts(StateDatabase database, Guid runId, int count, bool malformedLastKey = false)
+    {
+        var receipts = Enumerable.Range(1, count).Select(ordinal => new AttemptReceipt(Guid.NewGuid(), Guid.NewGuid(),
+            new('a', 64), new('b', 64), new(runId, Guid.NewGuid(), ordinal, EngineOutcome.Succeeded,
+                BusinessOutcome.Succeeded, LifecycleOutcome.Completed, RecoveryOutcome.NotRequired, "fixture_succeeded"))).ToArray();
+        using var connection = DatabaseConnections.Open(database.DatabasePath, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
+        using var transaction = connection.BeginTransaction();
+        foreach (var receipt in receipts.Reverse())
+        {
+            var facts = receipt.Facts;
+            var attemptId = malformedLastKey && facts.Ordinal == count ? "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF" : facts.AttemptId.ToString("D");
+            using var command = DatabaseConnections.Command(connection, transaction,
+                "INSERT INTO records.attempt_receipts VALUES($0,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11);",
+                attemptId, runId.ToString("D"), facts.Ordinal, receipt.JournalId.ToString("D"),
+                receipt.OperationId.ToString("D"), receipt.PlanDigest, receipt.SourceReceiptDigest, (int)facts.Engine,
+                (int)facts.Business, (int)facts.Lifecycle, (int)facts.Recovery, facts.ReasonCode);
+            command.ExecuteNonQuery();
+        }
+        transaction.Commit();
+        return receipts;
+    }
+
     [Fact(DisplayName = "A Proven Unentered Attempt Reconciles History Without Inventing A Measured Terminal Boundary")]
     public void ReconcilesUnenteredAttempt()
     {

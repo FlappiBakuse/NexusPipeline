@@ -30,9 +30,11 @@ public sealed class PackagedFrontendTests
             Assert.Equal(File.ReadAllBytes(Path.Combine(installed.Target, "frontend/main.js")), entry);
             var style = await frontend.ReadAssetAsync("0", default);
             Assert.Equal(File.ReadAllBytes(Path.Combine(installed.Target, "frontend/main.css")), style);
-            await Assert.ThrowsAsync<IOException>(() => frontend.CapabilityAsync("undeclared", default).AsTask());
+            Assert.Equal("extension_frontend_operation_unavailable",
+                (await Assert.ThrowsAsync<IOException>(() => frontend.CapabilityAsync("undeclared", default).AsTask())).Message);
             await installed.Activator.StopAllAsync(TimeSpan.FromSeconds(10));
-            await Assert.ThrowsAnyAsync<Exception>(() => frontend.ReadAssetAsync("entry", default).AsTask());
+            Assert.Equal("extension_activation_not_published",
+                (await Assert.ThrowsAsync<IOException>(() => frontend.ReadAssetAsync("entry", default).AsTask())).Message);
             inputs.VerifyUnchanged();
         }
         finally { await installed.Activator.StopAllAsync(TimeSpan.FromSeconds(10)); }

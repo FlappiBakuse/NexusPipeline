@@ -1,8 +1,20 @@
 using System.Runtime.Versioning;
+using System.Security.Principal;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Net;
+using System.Net.Http.Json;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using NexusPipeline.Core.Automation;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Operations;
+using NexusPipeline.Core.Settings;
+using NexusPipeline.Host.Control.Http;
 using NexusPipeline.Platform.Storage.Configuration;
 using NexusPipeline.Platform.Storage;
 using Xunit;
@@ -34,7 +46,7 @@ public sealed class ValueControlTests
     }
 
     [Fact(DisplayName = "Real Generic Saved Value Edits Keep Live Bytes And Replay The Original Operation After Later Binding Changes")]
-    public void ReplaysSavedEdits()
+    public async Task ReplaysSavedEdits()
     {
         using var fixture = new ExecutionAdmissionFixture(); var source = fixture.Source;
         var service = new ValueService(source.Instance, source.Database, new(), source.Lease, fixture.Resources);
@@ -43,9 +55,29 @@ public sealed class ValueControlTests
         var operation = Guid.NewGuid();
         var request = Bytes(operation, resource.ResourceId, file.Sha256, true, false);
         var before = fixture.Counts();
-        Assert.True(service.Preview("generic-control-fixture", source.BindingA, 1, "", ConfigurationSyntax.Json, request).HasChanges);
+        var builder = WebApplication.CreateSlimBuilder(); builder.Logging.ClearProviders();
+        builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
+        await using var app = builder.Build();
+        var authority = new ControlAuthentication(source.Instance.InstanceId, false, null, () => new(0, HostSettings.Default), null!, TimeProvider.System);
+        app.Use(ControlExceptionBoundary.InvokeAsync); app.Use(authority.InvokeAsync);
+        new ConfigurationValueControl(authority, new(service), new()).Map(app);
+        await app.StartAsync();
+        var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
+        using var http = new HttpClient(new SocketsHttpHandler { UseProxy = false }) { BaseAddress = new(address) };
+        var route = $"/control/v1/configuration/generic/{source.BindingA:D}/value/";
+        var wire = new JsonObject { ["format"] = "nexus.control.configuration-value", ["version"] = 1,
+            ["expectedBindingRevision"] = 1, ["relativePath"] = "", ["syntax"] = "json", ["patch"] = JsonNode.Parse(request) };
+        var invalid = wire.DeepClone(); invalid["patch"]!["unexpected"] = true;
+        using (var rejected = await http.PostAsJsonAsync(route + "apply", invalid)) Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        using (var preview = await http.PostAsJsonAsync(route + "preview", wire))
+        {
+            Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+            Assert.True((await preview.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("hasChanges").GetBoolean());
+        }
         Assert.Equal(before, fixture.Counts());
-        var result = service.Apply("generic-control-fixture", source.BindingA, 1, "", ConfigurationSyntax.Json, request, DateTimeOffset.UtcNow);
+        using var identity = WindowsIdentity.GetCurrent();
+        var subject = "local:" + identity.User!.Value;
+        var result = service.Apply(subject, source.BindingA, 1, "", ConfigurationSyntax.Json, request, DateTimeOffset.UtcNow);
         Assert.Equal(2, result.Saved.Revision); Assert.Equal(live, File.ReadAllBytes(source.Configuration));
         var changed = Assert.Single(result.Saved.Tree.Entries);
         using (var content = new ImmutableBlobStore(source.Instance, new()).OpenVerified(new($"blobs/content/{changed.Sha256}.bin", changed.SizeBytes, changed.Sha256!)))
@@ -54,9 +86,14 @@ public sealed class ValueControlTests
         var changes = new AutomationChanges(catalog.Revision, [], [], [], [binding with { Priority = binding.Priority + 1 }], [], [], []);
         source.Definitions.Commit(NexusPipeline.Platform.Storage.Automation.AutomationDefinitionStore.Identity(
             Guid.NewGuid(), "generic-control-fixture", changes), changes, DateTimeOffset.UtcNow);
-        var replay = service.Apply("generic-control-fixture", source.BindingA, 1, "", ConfigurationSyntax.Json, request, DateTimeOffset.UtcNow);
-        Assert.False(replay.IsNew); Assert.Equal(result.Saved.Revision, replay.Saved.Revision);
-        Assert.Equal(result.Saved.Tree.Entries.ToArray(), replay.Saved.Tree.Entries.ToArray());
+        using (var replay = await http.PostAsJsonAsync(route + "apply", wire))
+        {
+            Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+            var body = await replay.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal(operation, body.GetProperty("operationId").GetGuid());
+            Assert.False(body.GetProperty("isNew").GetBoolean());
+            Assert.Equal(result.Saved.Revision, body.GetProperty("revision").GetInt64());
+        }
         Assert.Equal(live, File.ReadAllBytes(source.Configuration));
         Assert.Throws<OperationConflictException>(() => service.Apply("foreign", source.BindingA, 1, "",
             ConfigurationSyntax.Json, request, DateTimeOffset.UtcNow));

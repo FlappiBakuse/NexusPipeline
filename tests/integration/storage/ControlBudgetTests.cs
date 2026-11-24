@@ -1,6 +1,7 @@
 using System.Runtime.Versioning;
+using System.Text;
 using NexusPipeline.Core.Execution;
-using NexusPipeline.Extensibility.Execution;
+using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Execution;
 using Xunit;
 
@@ -24,15 +25,26 @@ public sealed class ControlBudgetTests
             .Read(terminal.Binding, terminal.Artifact);
         Assert.Equal(terminal.Decision, control.Terminal);
         Assert.Null(control.Archive.FaultCode);
-        Assert.InRange(control.Archive.SizeBytes,
-            ExecutionProviderFrames.MaximumTranscriptBytes - ExecutionProviderFrames.TerminalReserveBytes - ExecutionProviderFrames.MaximumEventBytes,
-            ExecutionProviderFrames.MaximumTranscriptBytes);
-        Assert.InRange(control.EventCount, 100, ProviderProtocolState.MaximumEvents);
+        const int transcriptBudget = 2_097_152;
+        const int progressSaturationFloor = 2_064_380;
+        const int eventBudget = 10_002;
+        Assert.InRange(control.Archive.SizeBytes, progressSaturationFloor, transcriptBudget);
+        Assert.InRange(control.EventCount, 100, eventBudget);
         var result = Assert.Single(StepResultCodec.Read(state.Latest.Root, state.Total));
-        var native = StepEvidenceCodec.Read(new(fixture.Source.Instance, new()), result.Binding, result.Latest.Artifact);
-        var raw = RawOutputCodec.Read(new(fixture.Source.Instance, new()), result.Binding, native.RawOutput!);
+        var blobs = new ImmutableBlobStore(fixture.Source.Instance, new());
+        var native = StepEvidenceCodec.Read(blobs, result.Binding, result.Latest.Artifact);
+        var raw = RawOutputCodec.Read(blobs, result.Binding, native.RawOutput!);
         Assert.True(raw.IsComplete);
-        Assert.InRange(raw.ObservedBytes, 1, 1024);
+        var expected = Encoding.UTF8.GetBytes("provider-native-stdout" + Environment.NewLine);
+        Assert.Equal(expected.LongLength, raw.ObservedBytes);
+        using var output = new MemoryStream();
+        foreach (var part in raw.Parts)
+        {
+            Assert.Equal(output.Length, part.Offset);
+            using var bytes = blobs.OpenVerified(part.Content);
+            bytes.CopyTo(output);
+        }
+        Assert.Equal(expected, output.ToArray());
         Assert.Equal(0, fixture.Base.Count("resource_isolations"));
     }
 }

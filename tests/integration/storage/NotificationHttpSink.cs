@@ -6,7 +6,10 @@ using System.Text;
 
 namespace NexusPipeline.StorageTests;
 
-internal sealed record NotificationSinkRequest(string Target, IReadOnlyDictionary<string, string> Headers, long BodyBytes, string Sha256, string Prefix);
+internal sealed record NotificationSinkRequest(string Target, IReadOnlyDictionary<string, string> Headers, long BodyBytes, string Sha256, byte[] PrefixBytes)
+{
+    internal string Prefix => Encoding.UTF8.GetString(PrefixBytes);
+}
 internal sealed record NotificationSinkReply(int Status, string Body);
 
 internal sealed class NotificationHttpSink : IAsyncDisposable
@@ -69,8 +72,7 @@ internal sealed class NotificationHttpSink : IAsyncDisposable
                     hash.AppendData(buffer, 0, count); remaining -= count;
                     if (prefix.Length < 65536) prefix.Write(buffer, 0, (int)Math.Min(count, 65536 - prefix.Length));
                 }
-                var request = new NotificationSinkRequest(first[1], headers, length, Convert.ToHexStringLower(hash.GetHashAndReset()),
-                    Encoding.UTF8.GetString(prefix.GetBuffer(), 0, (int)prefix.Length));
+                var request = new NotificationSinkRequest(first[1], headers, length, Convert.ToHexStringLower(hash.GetHashAndReset()), prefix.ToArray());
                 Requests.Enqueue(request);
                 var reply = await _reply(request, _stopping.Token);
                 var body = Encoding.UTF8.GetBytes(reply.Body);

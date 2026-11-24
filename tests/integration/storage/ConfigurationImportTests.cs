@@ -21,7 +21,7 @@ namespace NexusPipeline.StorageTests;
 public sealed class ConfigurationImportTests
 {
     [Fact]
-    public void AppliesControlPermissions()
+    public async Task AppliesControlPermissions()
     {
         using var fixture = new Fixture(false);
         var imports = new ImportUseCases(fixture.Service(), new());
@@ -35,11 +35,11 @@ public sealed class ConfigurationImportTests
         } });
         var mcp = new AuthenticatedControlRequest(ControlOrigin.Mcp, "fixture", null, () => new(true, true));
         Assert.DoesNotContain(tools.List(mcp), tool => tool.Name == "configuration_import");
-        Assert.Throws<UnauthorizedAccessException>(() => tools.Call(mcp, parameters));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => tools.CallAsync(mcp, parameters, CancellationToken.None));
         AssertNoImport(fixture);
         var local = new AuthenticatedControlRequest(ControlOrigin.Local, "fixture", null, () => new(true, true));
         Assert.Contains(tools.List(local), tool => tool.Name == "configuration_import");
-        _ = tools.Call(local, parameters);
+        _ = await tools.CallAsync(local, parameters, CancellationToken.None);
         AssertImported(fixture);
     }
 

@@ -53,7 +53,8 @@ public sealed class ManagedInstallationTests
     public async Task CollectsFailedCallbacks()
     {
         using var fixture = new InstallRuntimeFixture(managedMode: "throw");
-        await Assert.ThrowsAnyAsync<Exception>(async () => await fixture.Session().ApplyAsync(fixture.Prepared, default));
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(async () => await fixture.Session().ApplyAsync(fixture.Prepared, default));
+        Assert.Equal("controlled_activation_failure", failure.Message);
         Assert.True(File.Exists(Path.Combine(fixture.ActivationDirectory, "activated.json")));
         Assert.True(File.Exists(Path.Combine(fixture.ActivationDirectory, "cleaned.json")));
         using var resource = File.Open(Path.Combine(fixture.ActivationDirectory, "resource.bin"),

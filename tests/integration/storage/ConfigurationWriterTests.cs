@@ -18,7 +18,7 @@ public sealed class ConfigurationWriterTests
 {
     private const string Subject = "execution-joint-writer";
 
-    [Fact(DisplayName = "A Combined Writer Checks The Current Parent Once At Configuration Preparation")]
+    [Fact(DisplayName = "A Combined Writer Verifies Its Actual Parent Is Open Before Configuration Preparation")]
     public void ChecksParentOnce()
     {
         using var fixture = new ExecutionAdmissionFixture();
@@ -35,39 +35,13 @@ public sealed class ConfigurationWriterTests
             receipt.JournalId, step.StepId, prepared, DateTimeOffset.UtcNow);
         var parent = new StepWriterScope(source.Instance, source.Database, new(), source.Lease, receipt.JournalId, step.StepId);
         using var writer = new ConfigurationWriterProcess(source.Instance, source.Lease, parent);
-        var observed = new CountedPreparation(parent);
-        var configuration = new RunWriterScope(source.Instance, source.Database, new(), session, Subject, observed);
-        var combined = new AttemptWriterScope(observed, configuration);
+        var configuration = new RunWriterScope(source.Instance, source.Database, new(), session, Subject, parent);
+        var combined = new AttemptWriterScope(parent, configuration);
         combined.RequirePrepared();
-        Assert.Equal(1, observed.Checks);
         parent.EnterApplying();
         combined.RequirePrepared();
-        Assert.Equal(2, observed.Checks);
-        observed.Reject = true;
-        Assert.Equal("fixture_parent_rejected", Assert.Throws<IOException>(combined.RequirePrepared).Message);
-    }
-
-    private sealed class CountedPreparation(IConfigurationWriterScope parent) : IConfigurationWriterScope
-    {
-        internal int Checks { get; private set; }
-        internal bool Reject { get; set; }
-        public Guid OperationId => parent.OperationId;
-        public Guid ProcessScopeId => parent.ProcessScopeId;
-        public ImmutableArray<Guid> JournalIds => parent.JournalIds;
-        public ConfigurationEditorCommand? Command => parent.Command;
-        public CommandLineSyntax CommandLineSyntax => parent.CommandLineSyntax;
-        public void RequirePrepared()
-        {
-            Checks++;
-            if (Reject) throw new IOException("fixture_parent_rejected");
-            parent.RequirePrepared();
-        }
-        public void RequireStart() => parent.RequireStart();
-        public void RegisterJob(OwnedWorkerJob job) => parent.RegisterJob(job);
-        public void RecordRoot(string jobName, ProcessIdentity root) => parent.RecordRoot(jobName, root);
-        public void CloseAdmission(long elapsedMilliseconds) => parent.CloseAdmission(elapsedMilliseconds);
-        public FrozenJobClosure BindClosure(FrozenJobClosure closure, long elapsedMilliseconds) => parent.BindClosure(closure, elapsedMilliseconds);
-        public NexusPipeline.Platform.Storage.BlobReference RecordClosed(FrozenJobClosure closure) => parent.RecordClosed(closure);
+        parent.CloseAdmission(0);
+        Assert.Equal("execution_writer_registration_closed", Assert.Throws<IOException>(combined.RequirePrepared).Message);
     }
 
     [Theory(DisplayName = "One Actual Job Supplies Both The Parent Attempt And Configuration Closures While Restoring Originals And Saving Real Output")]

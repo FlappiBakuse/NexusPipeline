@@ -3,6 +3,7 @@ using System.Runtime.Versioning;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Automation;
+using NexusPipeline.Core.Scheduling;
 using NexusPipeline.Platform.Storage.Automation;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Platform.Processes;
@@ -72,6 +73,208 @@ public sealed class MinuteStoreTests
         RunBudgetInventory.Verify(fixture.Source.Instance, fixture.Source.Database, new());
         var checkpoint = Assert.IsType<RunBudgetObservation>(fixture.Budget(receipt.Facts.RunId));
         Assert.Equal(receipt.SourceReceiptDigest, checkpoint.TerminalReceiptDigest);
+    }
+
+    [Fact(DisplayName = "A Repeated Local Minute Keeps And Validates Its First Persisted Occurrence")]
+    public void KeepsOriginalDstOccurrence()
+    {
+        var firstTime = new DateTimeOffset(2026, 11, 1, 5, 30, 0, TimeSpan.Zero);
+        var repeatedTime = firstTime.AddHours(1);
+        using var fixture = new ScheduleNativeFixture(new ScheduleNativeFixture.FrozenScheduleClock(firstTime));
+        var source = fixture.Source;
+        var catalog = source.Definitions.Read();
+        var schedule = Assert.Single(catalog.Schedules) with { TimeZoneId = "America/New_York", LocalMinute = 90 };
+        var changes = new AutomationChanges(catalog.Revision, [], [], [], [], [], [schedule], []);
+        source.Definitions.Commit(AutomationDefinitionStore.Identity(Guid.NewGuid(), "fixture-dst", changes), changes, firstTime);
+        var first = fixture.CommitOnly();
+        var repeatedClock = new ScheduleNativeFixture.FrozenScheduleClock(repeatedTime);
+        var store = new ScheduleOccurrenceStore(source.Instance, source.Database, source.Lease, fixture.Base.Resources, repeatedClock);
+        Assert.Equal(first, Assert.Single(store.CommitCurrentMinute()));
+        Assert.Equal(2, fixture.Count("schedule_minute_claims"));
+        Assert.Equal(1, fixture.Count("scheduled_occurrences"));
+        var originalId = ScheduleMinuteCodec.OperationId(source.Instance.InstanceId, firstTime.ToUnixTimeSeconds() / 60);
+        var repeatedId = ScheduleMinuteCodec.OperationId(source.Instance.InstanceId, repeatedTime.ToUnixTimeSeconds() / 60);
+        using var reader = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
+        using (var transaction = DatabaseConnections.BeginRead(reader))
+        {
+            var original = Assert.IsType<ScheduleMinuteDocument>(ScheduleMinuteRows.ReadMinute(reader, transaction, originalId, source.Instance.InstanceId));
+            var repeated = Assert.IsType<ScheduleMinuteDocument>(ScheduleMinuteRows.ReadMinute(reader, transaction, repeatedId, source.Instance.InstanceId));
+            Assert.Equal(first.Frozen, Assert.Single(original.Scan.Occurrences));
+            Assert.Equal(first.Frozen with { TriggerUtcMinute = repeatedTime.ToUnixTimeSeconds() / 60 }, Assert.Single(repeated.Scan.Occurrences));
+            Assert.Equal(first, ScheduleMinuteRows.ReadOccurrence(reader, transaction, first.Frozen.OccurrenceId, source.Instance.InstanceId));
+            transaction.Commit();
+        }
+
+        fixture.Sql($"UPDATE main.operations SET request_digest='{new string('0', 64)}' WHERE operation_id='{originalId:D}';");
+        using var damaged = DatabaseConnections.BeginRead(reader);
+        Assert.Equal("schedule_minute_metadata_unbound", Assert.Throws<IOException>(() =>
+            ScheduleMinuteRows.ReadMinute(reader, damaged, repeatedId, source.Instance.InstanceId)).Message);
+    }
+
+    [Fact(DisplayName = "A Mixed DST Replay Returns First And Current Occurrences In Saved Minute Order")]
+    public void PreservesMixedDstMinuteOrder()
+    {
+        var firstTime = new DateTimeOffset(2026, 11, 1, 5, 30, 0, TimeSpan.Zero);
+        var repeatedTime = firstTime.AddHours(1);
+        using var fixture = new ScheduleNativeFixture(new ScheduleNativeFixture.FrozenScheduleClock(firstTime));
+        var source = fixture.Source;
+        var catalog = source.Definitions.Read();
+        var queue = Assert.Single(catalog.Queues);
+        var replaced = Assert.Single(catalog.Schedules) with { IsEnabled = false };
+        var leftQueue = queue with { Id = Guid.NewGuid(), Revision = 0, Name = "DST left", Order = 1 };
+        var middleQueue = queue with { Id = Guid.NewGuid(), Revision = 0, Name = "DST current", Order = 2 };
+        var rightQueue = queue with { Id = Guid.NewGuid(), Revision = 0, Name = "DST right", Order = 3 };
+        AutomationSchedule At(Guid id, Guid queueId, bool enabled, int order) =>
+            new(id, 0, queueId, enabled, "America/New_York", [(int)DayOfWeek.Sunday], 90) { Order = order };
+        var left = At(Guid.Parse("00000000-0000-0000-0000-000000000001"), leftQueue.Id, true, replaced.Order + 1);
+        var middle = At(Guid.Parse("00000000-0000-0000-0000-000000000002"), middleQueue.Id, false, replaced.Order + 2);
+        var right = At(Guid.Parse("00000000-0000-0000-0000-000000000003"), rightQueue.Id, true, replaced.Order + 3);
+        var changes = new AutomationChanges(catalog.Revision, [], [], [], [], [leftQueue, middleQueue, rightQueue], [replaced, left, middle, right], []);
+        source.Definitions.Commit(AutomationDefinitionStore.Identity(Guid.NewGuid(), "mixed-dst", changes), changes, firstTime);
+        var first = fixture.Store.CommitCurrentMinute();
+        Assert.Equal(new[] { left.Id, right.Id }, first.Select(item => item.Frozen.ScheduleId));
+
+        catalog = source.Definitions.Read();
+        middle = catalog.Schedules.Single(item => item.Id == middle.Id) with { IsEnabled = true };
+        changes = new(catalog.Revision, [], [], [], [], [], [middle], []);
+        source.Definitions.Commit(AutomationDefinitionStore.Identity(Guid.NewGuid(), "mixed-dst", changes), changes, repeatedTime);
+        var store = new ScheduleOccurrenceStore(source.Instance, source.Database, source.Lease, fixture.Base.Resources,
+            new ScheduleNativeFixture.FrozenScheduleClock(repeatedTime));
+        var repeated = store.CommitCurrentMinute();
+        Assert.Equal(new[] { left.Id, middle.Id, right.Id }, repeated.Select(item => item.Frozen.ScheduleId));
+        Assert.Equal(first[0], repeated[0]);
+        Assert.Equal(first[1], repeated[2]);
+        Assert.Equal(repeatedTime.ToUnixTimeSeconds() / 60, repeated[1].Frozen.TriggerUtcMinute);
+
+        var blocked = store.BlockWaiting(first[0], "schedule_source_unavailable");
+        Assert.Equal(ScheduleOccurrencePhase.Blocked, blocked.Phase);
+        Assert.Equal(new[] { blocked, repeated[1], first[1] }, store.CommitCurrentMinute().ToArray());
+        Assert.Equal(2, fixture.Count("schedule_minute_claims"));
+        Assert.Equal(3, fixture.Count("scheduled_occurrences"));
+    }
+
+    [Fact(DisplayName = "Waiting Occurrences From Different Minutes Keep Their Own Settings And Activity Identities")]
+    public void RegistersWaitingAcrossMinutes()
+    {
+        var firstTime = PlanBuilderFixture.CreatedAt;
+        var secondTime = firstTime.AddMinutes(1);
+        using var fixture = new ScheduleNativeFixture(new ScheduleNativeFixture.FrozenScheduleClock(firstTime));
+        var source = fixture.Source;
+        var firstSettings = source.Settings.Read();
+        var first = fixture.CommitOnly();
+        var firstActivity = Activity(first, firstSettings.Revision);
+
+        var catalog = source.Definitions.Read();
+        var schedule = Assert.Single(catalog.Schedules) with { LocalMinute = secondTime.Hour * 60 + secondTime.Minute };
+        var changes = new AutomationChanges(catalog.Revision, [], [], [], [], [], [schedule], []);
+        source.Definitions.Commit(AutomationDefinitionStore.Identity(Guid.NewGuid(), "fixture", changes), changes, secondTime);
+        var settings = new NexusPipeline.Core.Settings.HostSettingsChange(firstSettings.Revision,
+            firstSettings.Values with { LogLevel = NexusPipeline.Core.Settings.HostLogLevel.Warning });
+        source.Settings.Commit(HostSettingsStore.Identity(Guid.NewGuid(), "fixture", settings), settings, secondTime);
+        var secondSettings = source.Settings.Read().Revision;
+        Assert.NotEqual(firstSettings.Revision, secondSettings);
+        var clock = new ScheduleNativeFixture.FrozenScheduleClock(secondTime);
+        var store = new ScheduleOccurrenceStore(source.Instance, source.Database, source.Lease, fixture.Base.Resources, clock);
+        var second = Assert.Single(store.CommitCurrentMinute());
+        Assert.NotEqual(first.Frozen.RunId, second.Frozen.RunId);
+        Assert.NotEqual(first.Frozen.CatalogRevision, second.Frozen.CatalogRevision);
+        var secondActivity = Activity(second, secondSettings);
+        Assert.NotSame(firstActivity, secondActivity);
+        Assert.Equal(second, Assert.Single(store.CommitCurrentMinute()));
+        Assert.Same(firstActivity, Activity(first, firstSettings.Revision));
+        Assert.Same(secondActivity, Activity(second, secondSettings));
+        Assert.Equal(2, store.ReadWaiting(64).Length);
+        Assert.Equal(0, fixture.Count("journal_writer_job_roots"));
+
+        AcceptedExecutionRun Activity(ScheduledOccurrence occurrence, long settingsRevision)
+        {
+            var request = new ExecutionSelectionRequest(new QueueTarget(occurrence.Frozen.QueueId), occurrence.Frozen.CatalogRevision, settingsRevision);
+            var operation = ExecutionStartIdentity.Create(occurrence.Frozen.StartOperationId, occurrence.SubjectId, request);
+            return Assert.IsType<AcceptedExecutionRun>(fixture.Base.Resources.FindQueuedRun(occurrence.Frozen.RunId, operation, request));
+        }
+    }
+
+    [Fact(DisplayName = "A Pending Schedule Snapshot Cannot Register After The Transaction Ends")]
+    public void RejectsExpiredPendingSnapshot()
+    {
+        var now = PlanBuilderFixture.CreatedAt;
+        using var fixture = new ScheduleNativeFixture(new ScheduleNativeFixture.FrozenScheduleClock(now));
+        var occurrence = fixture.CommitOnly();
+        var source = fixture.Source;
+        var id = occurrence.Frozen.OccurrenceId;
+        var operation = ScheduleMinuteCodec.OperationId(source.Instance.InstanceId, now.ToUnixTimeSeconds() / 60);
+        using var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
+        using var transaction = DatabaseConnections.BeginRead(connection);
+        var pending = ScheduleMinuteRows.PendingMinute.Read(connection, transaction, operation, source.Instance.InstanceId, new HashSet<Guid> { id });
+        Assert.Equal(occurrence, pending.RequireWaiting(source.Database, id));
+
+        using (var writer = DatabaseConnections.Open(source.Database.DatabasePath, domains: DatabaseDomain.Runtime))
+        using (var write = writer.BeginTransaction())
+        {
+            using var update = DatabaseConnections.Command(writer, write,
+                "UPDATE main.schedule_minute_claims SET document_json=json_set(document_json,'$.settingsRevision',100) WHERE operation_id=$0;",
+                operation.ToString("D"));
+            Assert.Equal(1, update.ExecuteNonQuery());
+            writer.DefaultTimeout = 1;
+            Assert.Equal(5, Assert.Throws<SqliteException>(write.Commit).SqliteErrorCode);
+            Assert.Equal(occurrence, pending.RequireWaiting(source.Database, id));
+            transaction.Commit();
+            write.Commit();
+        }
+
+        using var later = DatabaseConnections.BeginRead(connection);
+        Assert.Equal("execution_scheduled_origin_unbound",
+            Assert.Throws<IOException>(() => pending.RequireWaiting(source.Database, id)).Message);
+        Assert.Equal("schedule_minute_metadata_unbound", Assert.Throws<IOException>(() =>
+            ScheduleMinuteRows.PendingMinute.Read(connection, later, operation, source.Instance.InstanceId, new HashSet<Guid> { id })).Message);
+    }
+
+    [Theory(DisplayName = "Minute And Point Reads Reject A Broken Start Or Outcome Operation")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RejectsBrokenOccurrenceOperation(bool started)
+    {
+        var now = PlanBuilderFixture.CreatedAt;
+        using var fixture = new ScheduleNativeFixture(new ScheduleNativeFixture.FrozenScheduleClock(now));
+        var saved = fixture.CommitOnly();
+        if (started) await fixture.Scheduler.TickAsync();
+        else fixture.Store.BlockWaiting(saved, "schedule_source_unavailable");
+        var source = fixture.Source;
+        var minute = ScheduleMinuteCodec.OperationId(source.Instance.InstanceId, now.ToUnixTimeSeconds() / 60);
+        using var reader = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
+        using (var transaction = DatabaseConnections.BeginRead(reader))
+        {
+            Assert.NotNull(ScheduleMinuteRows.ReadMinute(reader, transaction, minute, source.Instance.InstanceId));
+            Assert.Equal(started ? ScheduleOccurrencePhase.Accepted : ScheduleOccurrencePhase.Blocked,
+                ScheduleMinuteRows.ReadOccurrence(reader, transaction, saved.Frozen.OccurrenceId, source.Instance.InstanceId).Phase);
+            transaction.Commit();
+        }
+
+        fixture.Sql(started
+            ? $"UPDATE main.operations SET subject_id='corrupt-fixture' WHERE operation_id='{saved.Frozen.StartOperationId:D}';"
+            : $"UPDATE main.operations SET request_digest='{new string('0', 64)}' WHERE operation_id IN " +
+                $"(SELECT operation_id FROM main.schedule_occurrence_outcomes WHERE occurrence_id='{saved.Frozen.OccurrenceId:D}');");
+        using var damaged = DatabaseConnections.BeginRead(reader);
+        Assert.Equal("schedule_minute_metadata_unbound", Assert.Throws<IOException>(() =>
+            ScheduleMinuteRows.ReadMinute(reader, damaged, minute, source.Instance.InstanceId)).Message);
+        Assert.Equal("schedule_minute_metadata_unbound", Assert.Throws<IOException>(() =>
+            ScheduleMinuteRows.ReadOccurrence(reader, damaged, saved.Frozen.OccurrenceId, source.Instance.InstanceId)).Message);
+    }
+
+    [Fact(DisplayName = "An Extra Minute Member With No Occurrence Is Rejected By The Minute Read")]
+    public void RejectsOrphanMinuteMember()
+    {
+        var now = PlanBuilderFixture.CreatedAt;
+        using var fixture = new ScheduleNativeFixture(new ScheduleNativeFixture.FrozenScheduleClock(now));
+        _ = fixture.CommitOnly();
+        var source = fixture.Source;
+        var minute = ScheduleMinuteCodec.OperationId(source.Instance.InstanceId, now.ToUnixTimeSeconds() / 60);
+        fixture.Sql("PRAGMA foreign_keys=OFF; INSERT INTO main.schedule_minute_occurrences(operation_id,position,occurrence_id) " +
+            $"VALUES('{minute:D}',1,'{Guid.NewGuid():D}');");
+        using var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
+        using var transaction = DatabaseConnections.BeginRead(connection);
+        Assert.Equal("schedule_minute_metadata_unbound", Assert.Throws<IOException>(() =>
+            ScheduleMinuteRows.ReadMinute(connection, transaction, minute, source.Instance.InstanceId)).Message);
     }
 
     [Fact(DisplayName = "An Ordinary Start Blocked Before Acceptance Creates No Budget Or Occurrence Metadata")]
@@ -170,6 +373,41 @@ public sealed class MinuteStoreTests
         RunBudgetInventory.Verify(fixture.Source.Instance, fixture.Source.Database, new());
     }
 
+    [Theory(DisplayName = "Appending A Budget Rejects A Changed Prefix, A Changed New Row, Or An Orphan History")]
+    [InlineData("prefix")]
+    [InlineData("new-row")]
+    [InlineData("orphan")]
+    public async Task PreservesBudgetAppendEvidence(string damage)
+    {
+        using var fixture = new ScheduleNativeFixture(new ScheduleNativeFixture.FrozenScheduleClock(DateTimeOffset.UtcNow));
+        var occurrence = fixture.CommitOnly(); await fixture.Scheduler.TickAsync();
+        var run = occurrence.Frozen.RunId;
+        var accepted = Assert.IsType<RunBudgetObservation>(fixture.Budget(run));
+        Assert.Equal(1, accepted.Ordinal);
+        var next = accepted with { Ordinal = 2, PreviousOperationId = RunBudgetRows.Identity(accepted).OperationId };
+        if (damage == "orphan")
+        {
+            fixture.Sql($"DELETE FROM main.execution_run_budget_states WHERE run_id='{run:D}'; " +
+                "DELETE FROM main.execution_run_budget_observations WHERE ordinal=0; " +
+                $"DELETE FROM main.operations WHERE operation_id='{accepted.PreviousOperationId:D}';");
+            next = accepted with { Ordinal = 0, PreviousOperationId = null, JournalId = null };
+        }
+        else
+        {
+            var ordinal = damage == "prefix" ? 0 : 2;
+            fixture.Sql("CREATE TRIGGER main.change_budget_observation AFTER INSERT ON execution_run_budget_observations " +
+                $"BEGIN UPDATE execution_run_budget_observations SET document_json='{{}}' WHERE run_id=NEW.run_id AND ordinal={ordinal}; END;");
+        }
+        var count = fixture.Count("execution_run_budget_observations");
+        var operations = fixture.Count("operations");
+        var error = Assert.Throws<IOException>(() => fixture.Source.Database.Write((connection, transaction) =>
+        { RunBudgetRows.Append(connection, transaction, next); return true; }));
+        Assert.Equal("execution_run_budget_unbound", error.Message);
+        Assert.Equal(count, fixture.Count("execution_run_budget_observations"));
+        Assert.Equal(operations, fixture.Count("operations"));
+        Assert.Equal(damage == "orphan" ? null : accepted, fixture.Budget(run));
+    }
+
     [Fact(DisplayName = "A New Real Instance Lease Preserves The Deadline But Cannot Invent Uncheckpointed Budget Continuity")]
     public async Task PreservesReopenedDeadline()
     {
@@ -202,8 +440,9 @@ public sealed class MinuteStoreTests
             _ => "UPDATE main.scheduling_watermark SET highest_utc_minute=highest_utc_minute-1 WHERE singleton=1;"
         });
         var before = fixture.Fingerprints();
-        Assert.ThrowsAny<Exception>(() => StateDatabase.OpenExisting(fixture.Source.Instance,
+        var error = Assert.Throws<IOException>(() => StateDatabase.OpenExisting(fixture.Source.Instance,
             Path.Combine(fixture.Source.Root, "schedule-diagnostic"), new JournalStartupAdmission(fixture.Source.Instance, new())));
+        Assert.Equal(damage == "header" ? "database_foreign_key_failure" : "schedule_minute_metadata_unbound", error.Message);
         Assert.Equal(before.OrderBy(pair => pair.Key), fixture.Fingerprints().OrderBy(pair => pair.Key));
     }
 
@@ -214,7 +453,9 @@ public sealed class MinuteStoreTests
         var target = fixture.TriggerUtc;
         await fixture.Scheduler.TickAsync(); Assert.Empty(fixture.Store.ReadWaiting(64)); Assert.Equal(0, fixture.Base.Inbox.PendingCount);
         var waiting = Stopwatch.StartNew();
-        await Task.Delay(target - DateTimeOffset.UtcNow + TimeSpan.FromMilliseconds(150));
+        var remaining = target - DateTimeOffset.UtcNow;
+        Assert.True(remaining > TimeSpan.Zero);
+        await Task.Delay(remaining + TimeSpan.FromMilliseconds(150));
         Assert.True(DateTimeOffset.UtcNow >= target); Assert.True(waiting.Elapsed > TimeSpan.Zero);
         await fixture.Scheduler.TickAsync();
         var receipt = Assert.IsType<AttemptReceipt>(await fixture.Consumer.RunNextAsync());

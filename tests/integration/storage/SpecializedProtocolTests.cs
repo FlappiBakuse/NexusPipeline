@@ -14,8 +14,10 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class SpecializedProtocolTests
 {
-    [Theory(DisplayName = "Original Specialized Packages Execute Four Synthetic Business Phases Through Installed Host Protocol Validation And Reject Revoked Calls")]
+    [Theory(DisplayName = "Original Specialized Packages Execute Controlled Business Phases Through Installed Host Protocol Validation And Reject Revoked Calls")]
     [InlineData("baah")]
+    [InlineData("maaend")]
+    [InlineData("maas")]
     [InlineData("march7th")]
     [InlineData("oknte")]
     [InlineData("okww")]
@@ -47,11 +49,14 @@ public sealed class SpecializedProtocolTests
             ExtensionProjectionPublication.PublishIfDirty(source.Instance, source.Database, source.Lease, new(),
                 installed.Roots, execution.Resources, execution.Index);
             var runtime = installed.Activator.RequirePublishedRuntime(extensionId);
-            var phases = new HashSet<string>();
+            var phases = new HashSet<string>(StringComparer.Ordinal);
+            var names = new HashSet<string>(StringComparer.Ordinal);
             foreach (var vector in vectors.RootElement.EnumerateArray())
             {
                 var request = JsonSerializer.Deserialize<TaskAdapter>(vector.GetProperty("input"))!;
-                Assert.True(phases.Add(request.Phase));
+                phases.Add(request.Phase);
+                Assert.True(names.Add(vector.GetProperty("name").GetString()!));
+                Assert.NotEmpty(vector.GetProperty("expect").EnumerateObject());
                 Assert.Equal(extensionId, request.ExtensionId);
                 using var root = execution.Resources.TryAcquire(Guid.NewGuid(),
                     [new("extension:" + extensionId, ResourceClaimMode.Reference)]).Lease;
@@ -60,10 +65,18 @@ public sealed class SpecializedProtocolTests
                 {
                     current();
                     Assert.Equal(input.GetProperty("adapterSha256").GetString(), Convert.ToHexStringLower(SHA256.HashData(adapter.ReadInputs().Script)));
+                    var sources = vector.TryGetProperty("sourceFiles", out var files) ? files : default;
+                    string ReadSource(string relative)
+                    {
+                        current();
+                        Assert.True(adapter.AllowsSource(relative), relative);
+                        return sources.TryGetProperty(relative, out var file) ? file.GetRawText() : "null";
+                    }
                     return ValueTask.FromResult(adapter.Execute(Encoding.UTF8.GetBytes(vector.GetProperty("input").GetRawText()),
                         new(request.ExtensionId, Guid.Parse(request.OperationId), request.Phase,
                             request.RunId is null ? null : Guid.Parse(request.RunId),
-                            request.AttemptId is null ? null : Guid.Parse(request.AttemptId), request.PlanDigest), default));
+                            request.AttemptId is null ? null : Guid.Parse(request.AttemptId), request.PlanDigest), default, null,
+                        sources.ValueKind == JsonValueKind.Object ? ReadSource : null));
                 });
                 var actual = JsonSerializer.SerializeToNode(result)!;
                 foreach (var expectation in vector.GetProperty("expect").EnumerateObject())
@@ -75,12 +88,13 @@ public sealed class SpecializedProtocolTests
                         vector.GetProperty("name").GetString() + ": " + expectation.Name);
                 }
             }
+            Assert.Equal(extensionId == "maaend" ? 6 : extensionId == "maas" ? 8 : 4, names.Count);
             Assert.Equal(new[] { "configuration", "discover", "observe", "retry" }, phases.Order().ToArray());
             await installed.Activator.StopAllAsync(TimeSpan.FromSeconds(10));
             using var retiredRoot = execution.Resources.TryAcquire(Guid.NewGuid(),
                 [new("extension:" + extensionId, ResourceClaimMode.Reference)]).Lease;
             Assert.NotNull(retiredRoot);
-            await Assert.ThrowsAnyAsync<Exception>(() => runtime.InvokeAdapterAsync(retiredRoot, () => { },
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => runtime.InvokeAdapterAsync(retiredRoot, () => { },
                 (_, _) => ValueTask.FromResult(true)).AsTask());
             inputs.VerifyUnchanged();
             Assert.Equal(vectorBytes, File.ReadAllBytes(input.GetProperty("path").GetString()!));

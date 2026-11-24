@@ -1,11 +1,14 @@
+using System.Collections.Immutable;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Automation;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Records;
 using NexusPipeline.Platform.Storage;
+using NexusPipeline.Platform.Storage.Automation;
 using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
@@ -16,6 +19,70 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class LogCatalogTests
 {
+    [Fact(DisplayName = "A Real Three Binding Queue Keeps Each Role And Original Segment Bound To Its Step")]
+    public async Task SeparatesMultiStepRoles()
+    {
+        using var fixture = new ExecutionHooksFixture(configuration: false, accept: false);
+        var source = fixture.Source;
+        var catalog = source.Definitions.Read();
+        var template = catalog.Bindings.Single(binding => binding.Id == source.BindingA);
+        var bindings = catalog.Bindings.Where(binding => binding.ScriptId == source.ScriptId)
+            .Select(binding => binding with { IsEnabled = true, PreHook = template.PreHook, PostHook = template.PostHook }).ToImmutableArray();
+        Assert.Equal(3, bindings.Length);
+        var queue = catalog.Queues.Single() with { ScriptIds = [source.ScriptId], CompletionAction = AutomationCompletionAction.None };
+        var change = new AutomationChanges(catalog.Revision, [], [], [], bindings, [queue], [], []);
+        source.Definitions.Commit(AutomationDefinitionStore.Identity(Guid.NewGuid(), ExecutionHooksFixture.Subject, change), change, DateTimeOffset.UtcNow);
+        File.WriteAllBytes(fixture.Marker + ".output-fixture.json", JsonSerializer.SerializeToUtf8Bytes(new
+        { preBytes = 13, mainBytes = 19, postBytes = 29, logBytes = 0, logPath = source.Log }));
+        fixture.Base.Service.Start(Guid.NewGuid(), ExecutionHooksFixture.Subject, source.Request(new QueueTarget(queue.Id)), DateTimeOffset.UtcNow);
+        var receipt = Assert.IsType<AttemptReceipt>(await fixture.Consumer.RunNextAsync());
+        Assert.Equal(BusinessOutcome.Succeeded, receipt.Facts.Business);
+        var run = receipt.Facts.RunId;
+        var attempt = receipt.Facts.AttemptId;
+        var state = AttemptWriterState.Read(source.Instance, source.Database, new(), receipt.JournalId);
+        Assert.Equal(3, state.Total.Steps.Count);
+        Assert.Equal(9, state.AllJobs.Count());
+        var projection = new LogCatalogProjection(source.Instance, source.Database, new(), source.Lease);
+        projection.OnCommitted(receipt);
+        var reader = new LogCatalogReader(source.Instance, source.Database, new());
+        var first = reader.ReadPage(new(run, attempt, Limit: 1));
+        var page = reader.ReadPage(new(run, attempt));
+        Assert.Equal(first.Items.Single(), page.Items[0]);
+        Assert.Equal(0, first.NextPosition);
+        Assert.Null(page.NextPosition);
+        var roles = new[] { RunLogRole.PreHook, RunLogRole.Main, RunLogRole.PostHook };
+        Assert.Equal(state.Total.Steps.SelectMany(step => roles.Select(role => new RunLogKey(run, attempt, step.StepId, role))),
+            page.Items.Select(item => item.Key));
+        Assert.Equal(9, page.Items.Select(item => item.SnapshotSha256).Distinct().Count());
+        var logs = new ExecutionLogReader(source.Instance, source.Database, new());
+        var report = logs.ReadReport(run, attempt);
+        Assert.Equal(state.Total.Steps.Select(step => step.StepId), report.Steps.Select(step => step.StepId));
+        Assert.All(report.Steps, step => Assert.Equal(1, Assert.Single(step.Invocations).Ordinal));
+        foreach (var entry in page.Items)
+        {
+            var description = logs.Describe(entry.Key);
+            using var original = logs.OpenOriginal(entry.Key, entry.SnapshotSha256);
+            using var bytes = new MemoryStream();
+            original.CopyTo(bytes);
+            using var parts = new MemoryStream();
+            foreach (var part in description.Parts)
+            {
+                using var content = logs.OpenPart(entry.Key, entry.SnapshotSha256, part.Index);
+                content.CopyTo(parts);
+            }
+            var expected = entry.Key.Role switch
+            {
+                RunLogRole.PreHook => new string('p', 13) + "failed",
+                RunLogRole.Main => new string('p', 19) + "done",
+                RunLogRole.PostHook => new string('p', 29) + "failed",
+                _ => throw new InvalidOperationException()
+            };
+            Assert.Equal(expected, Encoding.UTF8.GetString(bytes.ToArray()).TrimEnd('\r', '\n'));
+            Assert.Equal(bytes.ToArray(), parts.ToArray());
+        }
+        Assert.All(state.AllJobs, job => Assert.NotNull(job.ClosedElapsedMilliseconds));
+    }
+
     [Fact(DisplayName = "The Current Log Catalog Reopens Without Losing Real Entries")]
     public async Task ReadsCurrentLogs()
     {
@@ -103,7 +170,11 @@ public sealed class LogCatalogTests
             Assert.ThrowsAny<IOException>(() => new ExecutionLogReader(source.Instance, source.Database, new())
                 .OpenOriginal(page.Items[0].Key, page.Items[0].SnapshotSha256));
         }
-        else Assert.ThrowsAny<IOException>(() => reader.ReadPage(new(receipt.Facts.RunId, receipt.Facts.AttemptId)));
+        else
+        {
+            Assert.ThrowsAny<IOException>(() => reader.ReadPage(new(receipt.Facts.RunId, receipt.Facts.AttemptId)));
+            Assert.ThrowsAny<IOException>(() => reader.ReadPage(new(receipt.Facts.RunId, receipt.Facts.AttemptId, AfterPosition: 0, Limit: 1)));
+        }
         Assert.Equal(original, new JournalStore(source.Instance, new()).Read(receipt.JournalId).Export());
         Assert.Equal(receipt, new AttemptReceiptStore(source.Database).Read(receipt.Facts.AttemptId));
         if (fault == "raw") Assert.Equal("preserve-unknown-bytes",

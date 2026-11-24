@@ -1,13 +1,14 @@
-import { createApp, h } from 'vue';
+import { createApp, h, ref } from 'vue';
 import type { UiElement } from '@nexuspipeline/extension-sdk';
 import { createStore } from '../../apps/web/src/app/store';
 import PageActions from '../../apps/web/src/components/PageActions.vue';
+import FormSelect from '../../apps/web/src/components/FormSelect';
 import { ControlClient } from '../../apps/web/src/control/client';
 import type { AutomationBundle, ControlAutomationChange } from '../../apps/web/src/control/wire.generated';
 import AutomationPage from '../../apps/web/src/pages/AutomationPage.vue';
 import BindingEditorDialog from '../../apps/web/src/pages/BindingEditorDialog.vue';
-import { FrontendRegistry } from '../../apps/web/src/extensions/frontend-registry';
-import { registryKey } from '../../apps/web/src/extensions/registry-context';
+import EmulatorFields from '../../apps/web/src/pages/EmulatorFields.vue';
+import { FrontendRegistry, registryKey } from '../../apps/web/src/extensions/frontend-registry';
 import { clearExtensionIcons, extensionIcon, prepareExtensionIcons } from '../../apps/web/src/control/extension-icons';
 import { draftFixture, settle } from './configuration-draft-fixture';
 
@@ -42,7 +43,7 @@ async function accountSave(parent: HTMLElement, check: Check) {
   }));
   store.state.capabilities = { instanceId: 'account-save-fixture', hostVersion: '0.18.0', capabilities: ['automation.write'] };
   store.state.automation = { catalogRevision: 1, bundle: emptyBundle, roots: [], revisions: [] };
-  store.refresh = async () => {
+  store.refreshCatalog = async () => {
     const user = command!.users[0]!.value;
     store.state.automation = { catalogRevision: 2, roots: [], revisions: [{ kind: 'user', id: user.id, revision: 1 }],
       bundle: { ...emptyBundle, users: [user] } };
@@ -185,7 +186,7 @@ async function accountDelete(parent: HTMLElement, check: Check) {
   store.state.capabilities = { instanceId: 'account-delete-fixture', hostVersion: '0.18.0', capabilities: ['automation.delete'] };
   store.state.automation = { catalogRevision: 1, bundle: { ...emptyBundle, users: [account] }, roots: [],
     revisions: [{ kind: 'user', id: account.id, revision: 4 }] };
-  store.refresh = async () => {
+  store.refreshCatalog = async () => {
     store.state.automation = { ...store.state.automation!, catalogRevision: 2, bundle: emptyBundle, revisions: [] };
   };
   const { holder, dispose } = mountPage(parent, store, 'users');
@@ -216,17 +217,31 @@ async function accountDelete(parent: HTMLElement, check: Check) {
 }
 
 async function bindingEditorFailure(parent: HTMLElement, check: Check) {
-  const requests: string[] = [];
-  const store = createStore(new ControlClient(location.origin, async (_url, init) => {
-    requests.push(String(init?.body));
-    throw new TypeError('transport_lost');
+  const requests: { path: string; body: string }[] = [];
+  const bindingId = crypto.randomUUID(), userId = crypto.randomUUID(), scriptId = crypto.randomUUID();
+  const candidateId = crypto.randomUUID();
+  const revision = ref(1), candidate = ref(candidateId);
+  let sessionId = '', launches = 0;
+  const store = createStore(new ControlClient(location.origin, async (url, init) => {
+    const path = new URL(String(url)).pathname, body = String(init?.body);
+    requests.push({ path, body });
+    if (path.endsWith('/cancel')) return Response.json({ sessionId, revision: 8, phase: 'cancelled' });
+    if (requests.length === 1) {
+      sessionId = JSON.parse(body).sessionId;
+      launches++;
+      throw new TypeError('transport_lost');
+    }
+    if (path !== requests[0]!.path || body !== requests[0]!.body)
+      return Response.json({ code: 'operation_conflict' }, { status: 409 });
+    return Response.json({ session: { sessionId, revision: 7, phase: 'editing' }, options: [] });
   }));
   store.state.capabilities = { instanceId: 'binding-editor-fixture', hostVersion: '0.18.0',
     capabilities: ['configuration.native.open'] };
   const holder = document.createElement('section');
   parent.append(holder);
   const app = createApp({ render: () => h(BindingEditorDialog, {
-    store, bindingId: crypto.randomUUID(), bindingRevision: 1, scriptRevision: 1, extensionId: undefined, visible: true
+    store, bindingId, bindingRevision: 0, scriptRevision: revision.value, extensionId: undefined, visible: true,
+    draftBinding: { userId, scriptId, scriptRevision: revision.value, candidateId: candidate.value }
   }) });
   app.provide(registryKey, new FrontendRegistry({ locale: 'zh-CN', appearance: 'dark', translate: (_id, key) => key }));
   app.mount(holder);
@@ -237,10 +252,19 @@ async function bindingEditorFailure(parent: HTMLElement, check: Check) {
     check(feedback.length === 1 && (feedback[0] as HTMLElement)?.dataset.tone === 'warning' &&
       !holder.querySelector('p[role=status]') && !!retry,
       'an uncertain editor open presents one warning toast and keeps the query action');
+    revision.value = 2;
+    candidate.value = crypto.randomUUID();
+    await settle();
     retry?.click();
     await settle();
-    check(requests.length === 2 && requests[0] === requests[1],
-      'checking an uncertain editor operation keeps the original request identity');
+    check(requests.length === 2 && requests[1]?.path === requests[0]?.path && requests[1]?.body === requests[0]?.body &&
+      launches === 1 && !!sessionId && JSON.parse(requests[0]!.body).draftCandidateId === candidateId,
+      'an accepted editor open replays the same route and bytes after parent revision and draft changes');
+    const cancel = [...holder.querySelectorAll('button')].find(button => button.textContent?.trim() === '取消');
+    cancel?.click();
+    await settle();
+    check(requests[2]?.path.endsWith('/' + sessionId + '/cancel') && JSON.parse(requests[2]!.body).expectedSessionRevision === 7,
+      'the replay attaches the original result and its revision to the editor');
   } finally { app.unmount(); store.dispose(); holder.remove(); }
 }
 
@@ -330,6 +354,60 @@ async function activeBindingRemoval(parent: HTMLElement, check: Check) {
   } finally { dispose(); }
 }
 
+async function emulatorDiscovery(parent: HTMLElement, check: Check): Promise<void> {
+  const rootId = crypto.randomUUID();
+  const script = { id: crypto.randomUUID(), rootId } as Script;
+  let respond: ((response: Response) => void) | undefined, owner: AbortSignal | undefined;
+  let reads = 0;
+  const targets = (name: string) => Response.json({ catalogRevision: 2,
+    roots: [{ id: rootId, path: 'D:/fixture', name: 'Root', isDeclared: true }],
+    targets: [{ name, endpoint: '127.0.0.1:5555', adb: { rootId, relativePath: 'adb.exe' },
+      selection: { vendor: 'fixture', rootId, targetId: 'a'.repeat(64), generation: 'b'.repeat(64) } }],
+    diagnostics: [{ code: name }] });
+  const client = new ControlClient(location.origin, async (_url, init) => {
+    reads++;
+    if (reads === 1 || reads === 3) {
+      owner = init?.signal ?? undefined;
+      return new Promise(resolve => { respond = resolve; });
+    }
+    return targets(reads === 2 ? 'current_discovery' : 'current_generation');
+  });
+  const store = createStore(client);
+  store.state.capabilities = { instanceId: 'original', hostVersion: '0.18.0', capabilities: ['automation.read'] };
+  store.state.automation = { catalogRevision: 1, roots: [], revisions: [],
+    bundle: { ...emptyBundle, scripts: [script], roots: [{ id: rootId, kind: 'script', name: 'Root' }] } };
+  const holder = document.createElement('section'); parent.append(holder);
+  const app = createApp({ render: () => h(EmulatorFields, { store, modelValue: script }) }).component('FormSelect', FormSelect);
+  app.mount(holder);
+  try {
+    const discover = holder.querySelector('button')!;
+    discover.click(); await settle();
+    check(!!respond && !!owner && discover.disabled, 'emulator discovery retains its pending read');
+    store.state.automation = { ...store.state.automation, catalogRevision: 2 };
+    store.state.capabilities = { ...store.state.capabilities, instanceId: 'replacement' };
+    await settle();
+    check(owner?.aborted && !discover.disabled, 'switching emulator scope cancels the prior discovery');
+    discover.click();
+    respond?.(Response.json({ code: 'obsolete_discovery' }, { status: 500 }));
+    await settle();
+    check(!store.state.error && holder.querySelector<UiElement<'nexus-toast'>>('nexus-toast')?.message?.includes('current_discovery'),
+      'a late emulator failure cannot obscure the current discovery diagnostic');
+    const choices = () => holder.querySelectorAll<UiElement<'nexus-select'>>('nexus-select')[1]!.options;
+    check(choices().some(item => item.label.includes('current_discovery')), 'emulator discovery makes its instance selectable');
+    discover.click(); await settle();
+    store.state.events = { extensionGeneration: 'new-provider' };
+    await settle();
+    check(owner?.aborted && choices().length === 1 && !discover.disabled,
+      'changing only the emulator provider generation cancels its pending read and removes old options');
+    discover.click();
+    respond?.(targets('obsolete_generation'));
+    await settle();
+    check(reads === 4 && choices().some(item => item.label.includes('current_generation')) &&
+      !choices().some(item => item.label.includes('obsolete_generation')),
+      'a late successful reply can only publish options from the current emulator provider generation');
+  } finally { app.unmount(); store.dispose(); holder.remove(); }
+}
+
 export async function automationPageContract(parent: HTMLElement, check: Check): Promise<void> {
   await queueAvatar(parent, check);
   const failures: string[] = [];
@@ -339,6 +417,7 @@ export async function automationPageContract(parent: HTMLElement, check: Check):
   await accountFailure(parent, record);
   await accountDelete(parent, record);
   await bindingEditorFailure(parent, record);
+  await emulatorDiscovery(parent, record);
   await activeBindingRemoval(parent, record);
   if (failures.length) throw new Error(failures.join('\n'));
 }

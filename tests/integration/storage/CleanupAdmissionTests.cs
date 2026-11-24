@@ -174,6 +174,94 @@ public sealed class CleanupAdmissionTests
         Assert.All(fixture.Plan.Items, item => Assert.False(File.Exists(fixture.PathOf(item.Blob))));
     }
 
+    [Fact(DisplayName = "Unscoped Cleanup Cannot Block Admission While Another Publication Owns The Recovery Index")]
+    public async Task DefersCleanupAdmissionBlock()
+    {
+        using var fixture = new Fixture();
+        using var release = new ManualResetEventSlim();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var publication = Task.Run(() => fixture.Lease.PublishExecution(() =>
+        {
+            entered.SetResult();
+            release.Wait(deadline.Token);
+        }));
+        Task<FileCleanupResult>? cleanup = null;
+        try
+        {
+            await entered.Task.WaitAsync(deadline.Token);
+            var blobs = new BlobCleanup(fixture.Instance, fixture.Blobs,
+                new(fixture.Instance, new(), fixture.Database, fixture.Blobs, fixture.Roots));
+            cleanup = Task.Run(() => fixture.Execute(blobs, null, null));
+            while (fixture.Lease.ExecutionPublicationCount < 2) await Task.Delay(10, deadline.Token);
+            Assert.True(fixture.Index.Current.IsReady);
+        }
+        finally
+        {
+            release.Set();
+            await publication.WaitAsync(deadline.Token);
+            if (cleanup is not null) Assert.Equal(FileCleanupResult.Cleaned, await cleanup.WaitAsync(deadline.Token));
+        }
+        Assert.True(fixture.Index.Current.IsReady);
+    }
+
+    [Fact(DisplayName = "A Failed Cleanup Publication Does Not Replace A Newer Verified Recovery Index")]
+    public async Task PreservesNewerPublication()
+    {
+        using var fixture = new Fixture();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var release = new ManualResetEventSlim();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task? blocker = null;
+        var observer = new CleanupObserver(() =>
+        {
+            Sql("CREATE TRIGGER fixture_reject_cleanup_publication BEFORE UPDATE OF ready ON main.recovery_index_state " +
+                "WHEN NEW.ready=1 BEGIN SELECT RAISE(ABORT,'fixture_cleanup_publication_rejected'); END;");
+            blocker = Task.Run(() => fixture.Lease.PublishExecution(() =>
+            {
+                entered.SetResult();
+                release.Wait(deadline.Token);
+            }));
+            while (fixture.Lease.ExecutionPublicationCount < 2)
+            {
+                deadline.Token.ThrowIfCancellationRequested();
+                Thread.Sleep(10);
+            }
+        }, CleanupPersistencePoint.SqlProjectionCommitted, JournalPhase.Committed);
+        var blobs = new BlobCleanup(fixture.Instance, fixture.Blobs,
+            new(fixture.Instance, new(), fixture.Database, fixture.Blobs, fixture.Roots));
+        var cleanup = Task.Run(() => fixture.Execute(blobs, fixture.Roots, null, observer));
+        Task<RecoveryProjection>? verification = null;
+        try
+        {
+            await entered.Task.WaitAsync(deadline.Token);
+            while (fixture.Lease.ExecutionPublicationCount < 2) await Task.Delay(10, deadline.Token);
+            verification = Task.Run(() => fixture.Lease.PublishExecution(() =>
+            {
+                Sql("DROP TRIGGER main.fixture_reject_cleanup_publication;");
+                return new RecoveryCoordinator(new RecoveryJournalRegistry(fixture.Database),
+                    new AdmissionPublicationEvidence(fixture.Instance, fixture.Database, new(), fixture.Roots), fixture.Index).VerifyAndPublish();
+            }));
+            while (fixture.Lease.ExecutionPublicationCount < 3) await Task.Delay(10, deadline.Token);
+        }
+        finally
+        {
+            release.Set();
+            if (blocker is not null) await blocker.WaitAsync(deadline.Token);
+            Assert.Equal(FileCleanupResult.Cleaned, await cleanup.WaitAsync(deadline.Token));
+        }
+        Assert.NotNull(verification);
+        Assert.Same(await verification.WaitAsync(deadline.Token), fixture.Index.Current);
+        Assert.True(fixture.Index.Current.IsReady);
+
+        void Sql(string statement) => fixture.Database.Write((connection, transaction) =>
+        {
+            using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = statement;
+            return command.ExecuteNonQuery();
+        });
+    }
+
     [Fact(DisplayName = "Actual Run Registration And Initial Journal Materialization Share Their Publication Boundary")]
     public void SerializesRunAcceptance()
     {
@@ -214,12 +302,12 @@ public sealed class CleanupAdmissionTests
         Assert.All(fixture.Plan.Items, item => Assert.False(File.Exists(fixture.PathOf(item.Blob))));
     }
 
-    private sealed class CleanupObserver(Action observe, CleanupPersistencePoint selected) : ICleanupPersistenceObserver
+    private sealed class CleanupObserver(Action observe, CleanupPersistencePoint selected, JournalPhase? expected = null) : ICleanupPersistenceObserver
     {
         private int _observed;
         public void Reached(CleanupPersistencePoint point, Guid journalId, long revision, JournalPhase phase)
         {
-            if (point == selected && Interlocked.Exchange(ref _observed, 1) == 0) observe();
+            if (point == selected && (expected is null || phase == expected) && Interlocked.Exchange(ref _observed, 1) == 0) observe();
         }
     }
 

@@ -6,6 +6,7 @@ import { initialValue, schemaAt } from '../../apps/web/src/control/schema';
 import type { AutomationBundle } from '../../apps/web/src/control/wire.generated';
 import { scriptPaths } from '../../apps/web/src/pages/script-paths';
 import ScriptFields from '../../apps/web/src/pages/ScriptFields.vue';
+import NotificationSecretInput from '../../apps/web/src/pages/NotificationSecretInput.vue';
 import FormSelect from '../../apps/web/src/components/FormSelect';
 import { validateForm } from '../../apps/web/src/components/form-validation';
 
@@ -63,7 +64,34 @@ export async function formReviewContract(): Promise<string[]> {
     document.querySelector('nexus-toast')?.dispatchEvent(new CustomEvent('nexus-close'));
   }
   validationPresentation(check);
+  await notificationSecretBinding(check);
   return checks;
+}
+
+async function notificationSecretBinding(check: (value: unknown, name: string) => void): Promise<void> {
+  const value = ref('');
+  const field = 'smtp-password';
+  const draft = 'fixture-only-' + crypto.randomUUID();
+  const mount = document.createElement('div');
+  document.body.append(mount);
+  const app = createApp({ render: () => h(NotificationSecretInput, {
+    field, label: 'Authorization code', value: value.value, configured: true, disabled: false,
+    onEdit: (target, next) => { if (target === field) value.value = next; }
+  }) });
+  app.mount(mount);
+  try {
+    const input = mount.querySelector('input')!;
+    check(input.type === 'password' && !!input.placeholder && input.value === '',
+      'a configured notification credential starts with a placeholder and no saved secret');
+    input.value = draft;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await nextTick();
+    check(value.value === draft && input.value === draft && !input.hasAttribute('value') && !mount.innerHTML.includes(draft),
+      'notification credentials update only the live field and its draft');
+    value.value = '';
+    await nextTick();
+    check(!input.value && !input.hasAttribute('value'), 'clearing the notification draft empties the live field');
+  } finally { app.unmount(); mount.remove(); }
 }
 
 function validationPresentation(check: (value: unknown, name: string) => void): void {

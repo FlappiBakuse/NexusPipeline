@@ -92,9 +92,17 @@ public sealed class GenericConfigurationTests
         var root = Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
         var path = new AutomationPath(root, "configs/设置.json");
         var resource = GenericConfigurationPolicy.ResourceId(path);
-        Assert.Equal(resource, GenericConfigurationPolicy.ResourceId(new(root, path.RelativePath)));
-        Assert.NotEqual(resource, GenericConfigurationPolicy.ResourceId(path with { RootId = Guid.NewGuid() }));
+        const string expectedDigest = "b744493dec6634144a1caec2f287af6c4c938ca3d27db542447ffc3a562771db";
+        Assert.Equal("generic-" + expectedDigest, resource);
+        Assert.Equal(new ConfigurationContractStamp(1, expectedDigest, null, false), GenericConfigurationPolicy.Contract(path));
+        Assert.Equal(resource, GenericConfigurationPolicy.ResourceId(new(Guid.Parse("AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"), path.RelativePath)));
+        Assert.NotEqual(resource, GenericConfigurationPolicy.ResourceId(path with { RootId = Guid.Parse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb") }));
         Assert.NotEqual(resource, GenericConfigurationPolicy.ResourceId(path with { RelativePath = "other/设置.json" }));
+        Assert.NotEqual(resource, GenericConfigurationPolicy.ResourceId(path with { RelativePath = "Configs/设置.json" }));
+        Assert.NotEqual(GenericConfigurationPolicy.ResourceId(new(root, "configs/caf\u00e9.json")),
+            GenericConfigurationPolicy.ResourceId(new(root, "configs/cafe\u0301.json")));
+        Assert.Equal("configuration_generic_path_invalid", Assert.Throws<ConfigurationException>(() =>
+            GenericConfigurationPolicy.ResourceId(new(root, "configs\\设置.json"))).Message);
     }
 
     [Theory(DisplayName = "Invalid Portable Declarations Cannot Identify A Generic Configuration Resource")]
@@ -152,7 +160,10 @@ public sealed class GenericConfigurationTests
         using var draft = fixture.Prepare(queue ? new QueueTarget(fixture.QueueId) : new BindingTarget(fixture.BindingA));
         Assert.Equal(!queue, draft.Explanation.HasBlockedItems); Assert.Equal(queue, draft.Explanation.HasRunnable);
         if (queue) Assert.NotNull(draft.ReadPlan()); else Assert.Null(draft.ReadPlan());
-        Assert.All(draft.Explanation.Items.Where(item => item.Source.Script.Id == fixture.ScriptId),
+        var missing = draft.Explanation.Items.Where(item => item.Source.Script.Id == fixture.ScriptId).ToArray();
+        Assert.Equal(queue ? new[] { fixture.BindingA, fixture.BindingB, fixture.BindingC } : [fixture.BindingA],
+            missing.Select(item => item.Source.Binding.Id).Order());
+        Assert.All(missing,
             item => { Assert.Equal(queue ? ExecutionExplanationDisposition.Skipped : ExecutionExplanationDisposition.Blocked,
                 item.Disposition); Assert.Equal("configuration_required", item.ReasonCode); });
         if (queue) Assert.Equal(ExecutionExplanationDisposition.Runnable,

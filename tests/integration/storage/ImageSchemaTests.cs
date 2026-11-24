@@ -29,7 +29,6 @@ public sealed class ImageSchemaTests
                 .ReadPage(new(receipt.Facts.RunId, receipt.Facts.AttemptId)).Items);
             Assert.Equal(RunImageOutcome.Captured, original.Outcome);
         });
-        var path = Path.Combine(instance.RuntimeRoot, "state", "runtime.db");
         using var owner = InstanceLease.Acquire(instance, new());
         Assert.Throws<IOException>(() => InstanceLease.Acquire(instance, new()));
         var database = StateDatabase.OpenExisting(instance, Path.Combine(root, "owned-image-inspection"),
@@ -40,9 +39,12 @@ public sealed class ImageSchemaTests
         using (var png = new ImageCatalogReader(instance, database, new())
             .OpenOriginal(saved.Key, saved.ResultSha256))
             Assert.Equal(saved.ImageSha256, Convert.ToHexStringLower(SHA256.HashData(png)));
-        Assert.Equal(StateDatabase.SchemaDigest,
-            DatabaseInspector.Inspect(path, instance.InstanceId, Path.Combine(root, "migrated-image-inspection")).SchemaDigest);
-        _ = StateDatabase.OpenExisting(instance, Path.Combine(root, "reopened-image-inspection"));
+        var cold = StateDatabase.OpenExisting(instance, Path.Combine(root, "reopened-image-inspection"),
+            new JournalStartupAdmission(instance, new()), owner);
+        var coldReader = new ImageCatalogReader(instance, cold, new());
+        Assert.Equal(original, Assert.Single(coldReader.ReadPage(new(original.Key.RunId, original.Key.AttemptId)).Items));
+        using var reopened = coldReader.OpenOriginal(original.Key, original.ResultSha256);
+        Assert.Equal(original.ImageSha256, Convert.ToHexStringLower(SHA256.HashData(reopened)));
     }
 
     [Fact(DisplayName = "The Current Catalog Preserves A Real Fifty Two Mi B Log")]

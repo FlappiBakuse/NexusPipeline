@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Platform.Security;
@@ -53,7 +54,22 @@ public sealed class InstallerTargetTests
         }
         var digest = fault == "digest" ? new string('a', 64) : InstallerIdentityFixture.Digest(bytes);
         var profile = fault == "profile" ? "unknown" : fault == "production" ? "production" : "test";
-        Assert.ThrowsAny<Exception>(() => InstallerTargetManifest.Read(bytes, digest, profile));
+        var rejection = Record.Exception(() => InstallerTargetManifest.Read(bytes, digest, profile));
+        switch (fault)
+        {
+            case "digest" or "profile":
+                Assert.Equal("installer_ownership_unverified", Assert.IsType<IOException>(rejection).Message);
+                break;
+            case "production":
+                Assert.Equal("update_payload_manifest_unbound", Assert.IsType<IOException>(rejection).Message);
+                break;
+            case "json":
+                Assert.IsAssignableFrom<JsonException>(rejection);
+                break;
+            default:
+                Assert.Equal("unsupported_or_invalid_contract", Assert.IsType<JsonException>(rejection).Message);
+                break;
+        }
         Assert.False(Directory.Exists(fixture.Paths.ManagerRoot));
     }
 

@@ -25,11 +25,22 @@ public sealed class PlanAnchorTests
         var codec = new PayloadPlanCodec(instance, contracts, fixture.Package.Blobs, fixture.Roots);
         var original = codec.Read(accepted.Plan);
         var source = new PayloadSourceCodec(instance, contracts).ReadMetadata(original.ExtensionSource!);
-        var injected = false;
-        var observer = new Observer((point, journalId, revision, _) =>
+        var database = fixture.Package.Catalog.Database;
+        var registry = new RecoveryJournalRegistry(database);
+        var outbox = new FileEffectOutbox(database);
+        var directory = Path.Combine(instance.RuntimeRoot, "journals", accepted.JournalId.ToString("D"));
+        string[] ReadHistoryFiles() => Directory.EnumerateFiles(directory).Order(StringComparer.Ordinal)
+            .Select(path => Path.GetFileName(path) + ":" + Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path)))).ToArray();
+        byte[] ReadCursor() => BoundedJson.Serialize(new { Journal = registry.ReadJournal(accepted.JournalId),
+            Gate = new JournalEffectGate(database).Read(accepted.JournalId), Effects = outbox.Read(accepted.JournalId) });
+        string[]? injectedHistory = null;
+        byte[]? injectedCursor = null;
+        var observer = new Observer((point, journalId, _, phase) =>
         {
-            if (point != PayloadPersistencePoint.SqlProjectionCommitted || revision != 2) return;
+            if (injectedHistory is not null || point != PayloadPersistencePoint.SqlProjectionCommitted ||
+                phase != JournalPhase.Applying) return;
             Assert.Equal(accepted.JournalId, journalId);
+            if (!outbox.Read(journalId).Any(item => item.StepId == "install-candidate" && item.State == FileEffectState.Started)) return;
             var replacement = fixture.Package.Blobs.PersistContent(new byte[] { 11, 73, 29 }, default);
             var entry = original.Candidate.Snapshot.Entries.Single(item => item.RelativePath == "entry.dll");
             var alternative = original with
@@ -58,8 +69,10 @@ public sealed class PlanAnchorTests
                 var json = JsonNode.Parse(document.Export())!.AsObject();
                 json["planPath"] = frozen.Reference.RelativePath;
                 json["planDigest"] = frozen.Reference.Sha256;
-                if (document.Revision == 2)
-                    json["participants"]![0]!["identity"]!["artifact"] = new JsonObject
+                var participant = json["participants"]!.AsArray()
+                    .SingleOrDefault(item => item?["identity"]?["format"]?.GetValue<string>() == ExtensionPhysicalCodec.Format);
+                if (participant is not null)
+                    participant["identity"]!["artifact"] = new JsonObject
                     {
                         ["relativePath"] = reboundArtifact.RelativePath,
                         ["sizeBytes"] = reboundArtifact.SizeBytes,
@@ -98,17 +111,20 @@ public sealed class PlanAnchorTests
             Assert.Equal(FileEffectState.Started, effect.State);
             Assert.Equal(frozen.Reference.Sha256, effect.IntentDigest);
             Assert.Equal(receipt, effect.ReceiptDigest);
-            injected = true;
+            injectedHistory = ReadHistoryFiles();
+            injectedCursor = ReadCursor();
         });
         var inventory = new ExtensionActivator(contracts, fixture.Package.Catalog.Lease, fixture.Package.Catalog.Resources);
         using var scope = await inventory.ReserveForApplyAsync(fixture.Package.OperationId, "fixture-plugin", default);
         var failure = Assert.Throws<IOException>(() => new ExtensionPhysicalJournal(instance,
             fixture.Package.Catalog.Database, contracts, fixture.Roots, observer).Apply(fixture.Prepared!, scope, default));
-        Assert.True(injected);
+        Assert.NotNull(injectedHistory);
+        Assert.NotNull(injectedCursor);
         Assert.Equal("extension_payload_plan_reference_changed", failure.Message);
         Assert.False(Directory.Exists(fixture.Target));
         Assert.False(Directory.Exists(ExtensionWorkspacePath.For(original)));
-        Assert.Equal(2, new JournalStore(instance, contracts).ReadAllRevisions(accepted.JournalId).Count);
+        Assert.Equal(injectedHistory, ReadHistoryFiles());
+        Assert.Equal(injectedCursor, ReadCursor());
     }
 
     private sealed class Observer(Action<PayloadPersistencePoint, Guid, long, JournalPhase> action) : IPayloadPersistenceObserver

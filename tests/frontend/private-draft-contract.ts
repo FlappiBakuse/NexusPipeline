@@ -1,6 +1,6 @@
 import { createApp, h, ref } from 'vue';
 import NotificationEditor from '../../apps/web/src/pages/NotificationEditor.vue';
-import { notificationEditorPort } from '../../apps/web/src/pages/notification-editor-port';
+import { notificationEditorPort } from '../../apps/web/src/pages/notification-commands';
 import { newNotification, secretFields } from '../../apps/web/src/pages/notification-types';
 import { useSettingsSecrets } from '../../apps/web/src/pages/settings-secret-state';
 import { hostSecretSession } from '../../apps/web/src/pages/host-secret-session';

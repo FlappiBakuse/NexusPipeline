@@ -54,11 +54,15 @@ public sealed class AccountSummaryTests
     [Fact(DisplayName = "Summary Access Is Rechecked Before Returning And A Revoked Mcp Reader Does Not Receive An Empty Success")]
     public void RechecksSummaryAuthority()
     {
-        using var fixture = new ExecutionAdmissionFixture(); int checks = 0;
+        using var fixture = new ExecutionAdmissionFixture();
+        var allowed = true;
         var caller = new AuthenticatedControlRequest(ControlOrigin.Mcp, "summary-reader", null,
-            () => new(++checks <= 4, false));
-        Assert.Throws<UnauthorizedAccessException>(() => Service(fixture).Read(caller));
-        Assert.Equal(5, checks);
+            () => new(allowed, false));
+        var baseline = JsonSerializer.SerializeToElement(Service(fixture).Read(caller), JsonSerializerOptions.Web);
+        Assert.Equal(3, baseline.GetProperty("items").GetArrayLength());
+        var revoked = Service(fixture, clock: new SummaryClock(() => allowed = false));
+        Assert.Throws<UnauthorizedAccessException>(() => revoked.Read(caller));
+        Assert.False(allowed);
     }
 
     [Fact(DisplayName = "Generic Native Work Does Not Add An Account Task Report Activity Badge")]
@@ -104,12 +108,17 @@ public sealed class AccountSummaryTests
         source.Definitions.Commit(AutomationDefinitionStore.Identity(Guid.NewGuid(), "summary-fixture", changes), changes, DateTimeOffset.UtcNow);
         return bindings.Where(binding => binding.UserId == source.UserB).ToArray();
     }
-    private static AccountSummaries Service(ExecutionAdmissionFixture fixture, ExecutionRuntimeConsumer? active = null)
+    private sealed class SummaryClock(Action read) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() { read(); return PlanBuilderFixture.CreatedAt; }
+    }
+
+    private static AccountSummaries Service(ExecutionAdmissionFixture fixture, ExecutionRuntimeConsumer? active = null, TimeProvider? clock = null)
     {
         var source = fixture.Source;
         var definitions = new AutomationDefinitionService(source.Instance, new(), source.Database, source.Lease, fixture.Resources, fixture.Index);
         var execution = active ?? new ExecutionRuntimeConsumer(source.Instance, source.Database, new(), source.Lease, fixture.Resources, fixture.Index, fixture.Inbox);
-        return new(definitions, new(source.Database), execution, TimeProvider.System);
+        return new(definitions, new(source.Database), execution, clock ?? TimeProvider.System);
     }
     private static JsonElement Read(ExecutionAdmissionFixture fixture, ExecutionRuntimeConsumer? active = null) => JsonSerializer.SerializeToElement(
         Service(fixture, active).Read(new(ControlOrigin.Local, "summary-reader", null, () => new(true, true))), JsonSerializerOptions.Web);

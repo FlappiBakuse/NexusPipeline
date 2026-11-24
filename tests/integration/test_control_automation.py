@@ -99,6 +99,16 @@ class ControlAutomationTests(unittest.TestCase):
             self.assertLess(time.monotonic(), deadline)
             time.sleep(0.05)
         prefix = "/control/v1/records/" + accepted["runId"] + "/attempts/" + accepted["attemptId"]
+        history_path = "/control/v1/records/" + accepted["runId"] + "/attempts"
+        status, raw = self.host.request(address, history_path + "?afterOrdinal=0&limit=1")
+        self.assertEqual(200, status)
+        page = json.loads(raw)
+        self.assertIsNone(page["nextOrdinal"])
+        self.assertEqual([(accepted["attemptId"], accepted["runId"], 1)],
+                         [(row["facts"]["attemptId"], row["facts"]["runId"], row["facts"]["ordinal"]) for row in page["items"]])
+        status, raw = self.host.request(address, history_path + "?afterOrdinal=1&limit=1")
+        self.assertEqual(200, status)
+        self.assertEqual([], json.loads(raw)["items"])
         status, raw = self.host.request(address, prefix + "/logs?limit=20")
         self.assertEqual(200, status)
         entries = json.loads(raw)["items"]

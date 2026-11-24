@@ -1,7 +1,10 @@
 using System.Runtime.Versioning;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Operations;
+using NexusPipeline.Core.Records;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Journals;
@@ -13,6 +16,51 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class RetryHooksTests
 {
+    [Fact(DisplayName = "A Requested Log Invocation Keeps Its Own Original When The Other Raw Manifest Is Missing")]
+    public async Task ReadsOneProviderInvocation()
+    {
+        await using var fixture = await RetryHooksFixture.Create(mode: "ordinary-retry");
+        var provider = fixture.Provider;
+        var receipt = await provider.RunAsync();
+        var state = Read(fixture, receipt.JournalId);
+        Assert.Equal(EngineOutcome.Succeeded, receipt.Facts.Engine);
+        Assert.Equal(2, state.AllJobs.Count(job => job.Role == "process"));
+        var source = provider.Source;
+        new LogCatalogProjection(source.Instance, source.Database, new(), source.Lease).OnCommitted(receipt);
+        var logs = new ExecutionLogReader(source.Instance, source.Database, new());
+        var key = new RunLogKey(receipt.Facts.RunId, receipt.Facts.AttemptId, Assert.Single(state.Total.Steps).StepId);
+        var firstKey = key with { InvocationOrdinal = 1 };
+        var secondKey = key with { InvocationOrdinal = 2 };
+        var first = logs.Describe(firstKey);
+        var second = logs.Describe(secondKey);
+        Assert.NotEqual(first.SnapshotSha256, second.SnapshotSha256);
+        var firstBytes = Export(firstKey, first.SnapshotSha256);
+        var secondBytes = Export(secondKey, second.SnapshotSha256);
+        var aggregate = logs.Describe(key);
+        Assert.Equal(firstBytes.Concat(secondBytes).ToArray(), Export(key, aggregate.SnapshotSha256));
+        Assert.All(state.AllJobs, job => Assert.NotNull(job.ClosedElapsedMilliseconds));
+        var secondPath = Path.Combine(source.Instance.RuntimeRoot, "blobs", "plans", second.SnapshotSha256 + ".json");
+        var unavailable = secondPath + ".fixture-unavailable";
+        File.Move(secondPath, unavailable);
+        try
+        {
+            Assert.Equal(first.SnapshotSha256, logs.Describe(firstKey).SnapshotSha256);
+            Assert.Equal(firstBytes, Export(firstKey, first.SnapshotSha256));
+            Assert.ThrowsAny<IOException>(() => logs.Describe(secondKey));
+            Assert.ThrowsAny<IOException>(() => logs.Describe(key));
+        }
+        finally { File.Move(unavailable, secondPath); }
+        Assert.Equal(aggregate.SnapshotSha256, logs.Describe(key).SnapshotSha256);
+
+        byte[] Export(RunLogKey request, string snapshot)
+        {
+            using var input = logs.OpenOriginal(request, snapshot);
+            using var bytes = new MemoryStream();
+            input.CopyTo(bytes);
+            return bytes.ToArray();
+        }
+    }
+
     [Theory(DisplayName = "One Actual Successful Pre Is Inherited And Only The Final Invocation Runs The Actual Post")]
     [InlineData(false)]
     [InlineData(true)]
@@ -169,4 +217,35 @@ public sealed class RetryHooksTests
     private static AttemptWriterState Read(RetryHooksFixture fixture, Guid parent) =>
         fixture.Provider.Source.Lease.PublishExecution(() => AttemptWriterState.Read(
             fixture.Provider.Source.Instance, fixture.Provider.Source.Database, new(), parent));
+
+    [Fact(DisplayName = "A Real Successor Inherits A Committed Pre Hook And Rejects An Invalid Matching Hook Record")]
+    public async Task InheritsAcrossAttempts()
+    {
+        await using var fixture = await RetryHooksFixture.Create(mode: "retry-interrupted");
+        var provider = fixture.Provider;
+        var first = await provider.RunInterruptedAsync();
+        Assert.Equal(LifecycleOutcome.Interrupted, first.Facts.Lifecycle);
+        Assert.Equal(["pre"], fixture.Calls);
+        var retries = fixture.Retries;
+        using var pending = Assert.IsType<PreparedExecutionRetry>(retries.Prepare(first.Facts.RunId, first.Facts.AttemptId, DateTimeOffset.UtcNow));
+        _ = Assert.IsType<AttemptAcceptanceResult>(retries.Start(pending, DateTimeOffset.UtcNow));
+        var second = Assert.IsType<AttemptReceipt>(await provider.Consumer.RunNextAsync());
+        Assert.Equal(first.Facts.RunId, second.Facts.RunId);
+        Assert.Equal(2, second.Facts.Ordinal);
+        Assert.Equal(EngineOutcome.Succeeded, second.Facts.Engine);
+        Assert.Equal(["pre", "post"], fixture.Calls);
+        var state = Read(fixture, second.JournalId);
+        var inherited = Assert.Single(RetryHookCodec.Read(state.Latest.Root, state.Total));
+        Assert.Equal("preHook", inherited.Role);
+        Assert.Equal(first.JournalId, inherited.Source!.JournalId);
+        Assert.Null(inherited.Source.InvocationOrdinal);
+        Assert.DoesNotContain(state.AllJobs, job => job.Role == "preHook");
+        Assert.Equal(first, new AttemptReceiptStore(provider.Source.Database).Read(first.Facts.AttemptId));
+
+        var damaged = JsonNode.Parse(state.Latest.Export())!;
+        var participant = Assert.Single(damaged["participants"]!.AsArray(), item =>
+            item?["identity"]?["format"]?.GetValue<string>() == RetryHookCodec.Format);
+        participant!["identity"]!["version"] = 2;
+        Assert.Throws<JsonException>(() => RetryHookCodec.Read(JsonSerializer.SerializeToElement(damaged), state.Total));
+    }
 }

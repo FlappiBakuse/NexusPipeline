@@ -6,8 +6,11 @@ using NexusPipeline.Core.Execution;
 using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Configuration;
+using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
+using System.Collections.Immutable;
+using System.Security.Cryptography;
 
 namespace NexusPipeline.StorageTests;
 
@@ -38,10 +41,24 @@ public sealed class EditorOutputTests
             var cancel = new ConfigurationEditCancel(edit.SessionId, 2);
             edit.Store.Cancel(ConfigurationEditStore.CancelIdentity(Guid.NewGuid(), "fixture", cancel), cancel, DateTimeOffset.UtcNow);
         }
-        foreach (var change in completion.Batch.Changes)
+        foreach (var target in edit.Request.Targets)
         {
-            var saved = edit.Base.Revisions.Read(change.Address)!; Assert.Equal(save ? 2 : 1, saved.Revision);
-            if (save) Assert.Equal(change.Tree.Entries, saved.Tree.Entries);
+            var saved = edit.Base.Revisions.Read(target.Address)!;
+            Assert.Equal(save ? 2 : 1, saved.Revision);
+            var expectedShape = save ? Enum.Parse<FileObjectKind>(shape, true) : FileObjectKind.File;
+            Assert.Equal(expectedShape, saved.Tree.Shape);
+            if (expectedShape == FileObjectKind.Missing)
+            {
+                Assert.Empty(saved.Tree.Entries);
+                continue;
+            }
+            Assert.Equal(expectedShape == FileObjectKind.Directory ? new[] { "", "edited.json" } : [""],
+                saved.Tree.Entries.Select(entry => entry.RelativePath));
+            var file = Assert.Single(saved.Tree.Entries, entry => entry.Kind == FileObjectKind.File);
+            var expected = !save ? "snapshot-" + target.Address.ResourceId :
+                expectedShape == FileObjectKind.Directory ? "edited-directory" : "edited-" + target.Address.ResourceId;
+            Assert.Equal(System.Text.Encoding.UTF8.GetBytes(expected), File.ReadAllBytes(
+                Path.Combine(edit.Base.Instance.RuntimeRoot, $"blobs/content/{file.Sha256}.bin")));
         }
         edit.VerifyOriginals(); ConfigurationEditInventory.VerifyReadOnly(edit.Base.Database);
     }
@@ -105,8 +122,19 @@ public sealed class EditorOutputTests
         await fixture.WriteAsync(fixture.Edit.Request.Targets.Select(target => (object)new { target = Path.Combine(target.TargetPath, "guard.json"), kind = "file", atomic = true,
             value = sameBytes ? "guard-original" : "unauthorized" }).ToArray());
         var stopped = await fixture.Editor.StopAsync(TimeSpan.FromSeconds(5));
-        Assert.NotNull(Record.Exception(() => fixture.Seal(stopped)));
-        Assert.All(fixture.Edit.Initial.Changes, change => Assert.Equal(1, fixture.Edit.Base.Revisions.Read(change.Address)!.Revision));
+        var journals = new JournalStore(fixture.Edit.Base.Instance, new());
+        var before = fixture.Edit.Session.Resources.ToDictionary(resource => resource.JournalId, resource => journals.Read(resource.JournalId).Revision);
+        if (sameBytes)
+            Assert.Equal("configuration_edit_output_identity_scope_exceeded", Assert.Throws<IOException>(() => fixture.Seal(stopped)).Message);
+        else
+            Assert.Equal("configuration_edit_write_scope_exceeded", Assert.Throws<ConfigurationException>(() => fixture.Seal(stopped)).Message);
+        Assert.All(before, entry => Assert.Equal(entry.Value, journals.Read(entry.Key).Revision));
+        Assert.All(fixture.Edit.Initial.Changes, change =>
+        {
+            var saved = fixture.Edit.Base.Revisions.Read(change.Address)!;
+            Assert.Equal(1, saved.Revision);
+            Assert.Equal(change.Tree.Entries, saved.Tree.Entries);
+        });
         Assert.Equal(ConfigurationEditPhase.Editing, fixture.Edit.Store.Read(fixture.Edit.SessionId, "fixture")!.Phase);
     }
 
@@ -158,17 +186,35 @@ public sealed class EditorOutputTests
     public async Task RejectsLateChanges()
     {
         using var fixture = new EditorOutputFixture();
-        await fixture.WriteAsync(fixture.Edit.Request.Targets.Select(target => (object)new { target = target.TargetPath, kind = "file", value = "frozen-edited" }).ToArray());
-        var stopped = await fixture.Editor.StopAsync(TimeSpan.FromSeconds(5)); var completion = fixture.Seal(stopped);
-        var target = fixture.Edit.Request.Targets[0]; File.WriteAllText(target.TargetPath, "late-unknown");
-        var repeated = fixture.Seal(stopped); Assert.Equal(completion.Batch.Changes[0].Tree.Entries, repeated.Batch.Changes[0].Tree.Entries);
+        await fixture.WriteAsync(fixture.Edit.Request.Targets.Select(target => (object)new
+        {
+            target = target.TargetPath, kind = "file",
+            value = target.Address.ResourceId == "main" ? "frozen-edited" : "frozen-extra"
+        }).ToArray());
+        var stopped = await fixture.Editor.StopAsync(TimeSpan.FromSeconds(5));
+        var completion = fixture.Seal(stopped);
+        var target = Assert.Single(fixture.Edit.Request.Targets, item => item.Address.ResourceId == "main");
+        var savedBefore = fixture.Edit.Base.Revisions.Read(target.Address)!;
+        var content = Assert.Single(Assert.Single(completion.Batch.Changes, item => item.Address == target.Address).Tree.Entries);
+        var relative = $"blobs/content/{content.Sha256}.bin";
+        var blob = Path.Combine(fixture.Edit.Base.Instance.RuntimeRoot, relative);
+        Assert.Equal("frozen-edited"u8.ToArray(), File.ReadAllBytes(blob));
+
+        File.WriteAllText(target.TargetPath, "late-unknown");
+        var repeated = fixture.Seal(stopped);
+        var resealed = Assert.Single(Assert.Single(repeated.Batch.Changes, item => item.Address == target.Address).Tree.Entries);
+        Assert.Equal(content, resealed);
+        Assert.Equal("frozen-edited"u8.ToArray(), File.ReadAllBytes(blob));
+
         var resource = fixture.Edit.Session.Resources.Single(item => item.Address == target.Address);
         Assert.Equal(ConfigurationRecoveryResult.Quarantined, fixture.Edit.Exchange.Restore(resource.JournalId));
-        Assert.Equal("late-unknown", File.ReadAllText(target.TargetPath));
         Assert.Throws<IOException>(() => fixture.Edit.Store.Save(ConfigurationEditStore.SaveIdentity(Guid.NewGuid(), "fixture", completion), completion, DateTimeOffset.UtcNow));
-        var content = completion.Batch.Changes.Single(item => item.Address == target.Address).Tree.Entries.Single();
+        Assert.Equal("late-unknown", File.ReadAllText(target.TargetPath));
+        var savedAfter = fixture.Edit.Base.Revisions.Read(target.Address)!;
+        Assert.Equal(savedBefore.Revision, savedAfter.Revision);
+        Assert.Equal(savedBefore.Tree.Entries.ToArray(), savedAfter.Tree.Entries.ToArray());
         Assert.True(new BlobReferenceIndex(fixture.Edit.Base.Instance, new(), fixture.Edit.Base.Database, new(fixture.Edit.Base.Instance, new()))
-            .IsReferenced(new($"blobs/content/{content.Sha256}.bin", content.SizeBytes, content.Sha256!)));
+            .IsReferenced(new(relative, content.SizeBytes, content.Sha256!)));
     }
 
     [Fact(DisplayName = "Corrupt Job Stop Evidence Cannot Authorize Restoration When The Native Job Has Disappeared")]
@@ -229,4 +275,53 @@ public sealed class EditorOutputTests
         foreach (var resource in edit.Session.Resources)
             Assert.Equal(stopped.Reference, closures.RequireStoredReference(resource.JournalId, stopped.Closure));
     }
+}
+
+[SupportedOSPlatform("windows")]
+internal sealed class EditorOutputFixture : IDisposable
+{
+    internal ConfigurationEditFixture Edit { get; }
+    internal InstanceLease Lease { get; }
+    internal ConfigurationEditorProcess Editor { get; }
+    internal EditOutputRecorder Recorder { get; }
+    private string ReadyReport => Path.Combine(Edit.Base.Root, "editor-ready.json");
+    internal string Executable => Environment.GetEnvironmentVariable("NEXUS_PROCESS_FIXTURE_EXE")!;
+    internal string ExecutableSha256 => Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(Executable)));
+
+    internal EditorOutputFixture(EditWritePolicy? policy = null, bool directorySnapshot = false)
+    {
+        Edit = new(writePolicy: policy ?? new([""], [FileObjectKind.Missing, FileObjectKind.File, FileObjectKind.Directory]), directorySnapshot: directorySnapshot);
+        Lease = InstanceLease.Acquire(Edit.Base.Instance, new());
+        Editor = new(Edit.Base.Instance, Edit.Base.Database, new(), Lease, Edit.SessionId, "fixture");
+        Recorder = new(Edit.Base.Instance, Edit.Base.Database, new(), Lease);
+        Edit.InstallAll();
+    }
+
+    internal async Task WriteAsync(object[] operations, bool child = false)
+    {
+        var input = Path.Combine(Edit.Base.Root, "editor-input.json"); var report = ReadyReport;
+        File.WriteAllBytes(input, JsonSerializer.SerializeToUtf8Bytes(new { operations, child }));
+        Editor.Start(Executable, ExecutableSha256, ["configuration-editor-writer", input, report], Edit.Base.Root);
+        Xunit.Assert.Equal("edited", (await OwnedCrashProcess.ReadReportAsync(report)).GetProperty("status").GetString());
+    }
+
+    internal async Task<ProcessIdentity[]> ReadWritersAsync(bool child = false)
+    {
+        var root = await ReadWriterAsync(ReadyReport);
+        return child ? [root, await ReadWriterAsync(ReadyReport + ".child")] : [root];
+    }
+
+    private static async Task<ProcessIdentity> ReadWriterAsync(string path)
+    {
+        var report = await OwnedCrashProcess.ReadReportAsync(path);
+        return ProcessIdentityReader.Read(report.GetProperty("processId").GetInt32());
+    }
+
+    internal ConfigurationEditCompletion Seal(StoppedConfigurationEditor stopped)
+    {
+        var changes = Edit.Session.Resources.Select(resource => new ConfigurationRevisionChange(resource.Address, resource.ExpectedRevision,
+            Edit.Session.ExpectedBindingRevision, resource.Contract, Recorder.Seal(resource.JournalId, stopped), ConfigurationUpdateKind.Manual)).ToImmutableArray();
+        return new(Edit.SessionId, 2, new(changes));
+    }
+    public void Dispose() { Editor.Dispose(); Lease.Dispose(); }
 }

@@ -25,10 +25,11 @@ internal static class DeviceReaderFixture
         if (mode == "device-sequence")
         {
             await using var pipe = new NamedPipeClientStream(".", channel.Bootstrap.Device!.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
-            await pipe.ConnectAsync(cancellation); _ = await ExecutionProviderFrames.ReadAsync(pipe, 1, cancellation);
+            await pipe.ConnectAsync(cancellation);
+            if (await ExecutionProviderFrames.ReadAsync(pipe, 1, cancellation) is not [1]) throw new IOException("device_fixture_peer_not_admitted");
             await ExecutionProviderFrames.WriteAsync(pipe, ExecutionProviderFrames.Encode(new ExecutionDeviceRequest { Sequence = 2, Kind = "connected" }, 65536), 65536, cancellation);
             try { _ = await ExecutionProviderFrames.ReadAsync(pipe, 262144, cancellation); }
-            catch (IOException) { await File.WriteAllTextAsync(marker + ".device-denied", "sequence", cancellation); return; }
+            catch (EndOfStreamException) { await File.WriteAllTextAsync(marker + ".device-denied", "sequence", cancellation); return; }
             throw new IOException("device_fixture_sequence_not_denied");
         }
         await using var client = await ExecutionDeviceClient.ConnectAsync(channel.Bootstrap, cancellation);
@@ -40,8 +41,9 @@ internal static class DeviceReaderFixture
         }
         if (mode == "device-arguments")
         {
+            _ = await Call(new() { Sequence = 1, Kind = "features" });
             try { _ = await Call(new() { Sequence = 1, Kind = "click", X = 1, Y = 1, Intent = "unrelated.exe" }); }
-            catch (IOException) { await File.WriteAllTextAsync(marker + ".device-denied", "arguments", cancellation); return; }
+            catch (EndOfStreamException) { await File.WriteAllTextAsync(marker + ".device-denied", "arguments", cancellation); return; }
             throw new IOException("device_fixture_arguments_not_denied");
         }
         if (mode is "device-gdi" or "device-screenDc" or "device-framePool" or "device-postMessage")
@@ -56,7 +58,7 @@ internal static class DeviceReaderFixture
         if (mode == "device-frozen")
         {
             try { _ = await Call(new() { Sequence = 1, Kind = "configure", CaptureMethod = "gdi", MouseMethod = "sendMessage", KeyboardMethod = "sendMessage" }); }
-            catch (IOException) { await File.WriteAllTextAsync(marker + ".device-denied", "frozen", cancellation); return; }
+            catch (EndOfStreamException) { await File.WriteAllTextAsync(marker + ".device-denied", "frozen", cancellation); return; }
             throw new IOException("device_fixture_configuration_not_frozen");
         }
         _ = await Call(new() { Sequence = 1, Kind = "connected" });

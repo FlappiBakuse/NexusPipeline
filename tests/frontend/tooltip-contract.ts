@@ -76,4 +76,34 @@ export async function tooltipContract(fixture: HTMLElement, check: (value: unkno
     check(tooltip.open, 'field help is available again after the select closes');
     label.remove();
   } finally { tooltip.remove(); anchor.remove(); replacement.remove(); }
+  await movingAnchorContract(fixture, check);
+}
+
+async function movingAnchorContract(fixture: HTMLElement, check: (value: unknown, name: string) => void): Promise<void> {
+  const clip = document.createElement('div'), wrapper = document.createElement('div'), anchor = document.createElement('button');
+  const tooltip = document.createElement('nexus-tooltip') as UiElement<'nexus-tooltip'>;
+  clip.style.cssText = 'height:100px;overflow:hidden';
+  anchor.textContent = 'Moving anchor';
+  wrapper.append(anchor); clip.append(wrapper); fixture.prepend(clip, tooltip);
+  tooltip.anchor = anchor; tooltip.content = 'Following help';
+  clip.scrollIntoView({ block: 'start' });
+  const panel = tooltip.shadowRoot!.querySelector<HTMLElement>('.panel')!;
+  let wrapperReads = 0, clipReads = 0;
+  const wrapperRect = wrapper.getBoundingClientRect.bind(wrapper), clipRect = clip.getBoundingClientRect.bind(clip);
+  wrapper.getBoundingClientRect = () => { wrapperReads++; return wrapperRect(); };
+  clip.getBoundingClientRect = () => { clipReads++; return clipRect(); };
+  const frame = () => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  try {
+    tooltip.open = true;
+    await frame();
+    check(tooltip.open && panel.matches(':popover-open'), 'tooltip remains open inside a visible clipping ancestor');
+    const start = panel.style.top;
+    wrapper.style.transform = 'translateY(16px)';
+    await frame();
+    check(panel.style.top !== start, 'moving an unclipped wrapper still repositions the tooltip');
+    check(wrapperReads === 0 && clipReads > 0, `tooltip measures only clipping ancestors (${wrapperReads}/${clipReads})`);
+    wrapper.style.transform = 'translateY(200px)';
+    await frame();
+    check(!tooltip.open, 'a moving anchor closes the tooltip when it leaves its clipping ancestor');
+  } finally { tooltip.remove(); clip.remove(); }
 }

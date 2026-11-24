@@ -5,6 +5,20 @@ namespace NexusPipeline.CoreTests;
 
 public sealed class TimeBudgetTests
 {
+    [Fact(DisplayName = "Explicit Unlimited Execution Tracks Elapsed Time Without Adding An Artificial Deadline Or Stall Limit")]
+    public void PreservesUnlimitedExecution()
+    {
+        var clock = new Clock { Now = DateTimeOffset.Parse("2026-10-22T00:00:00Z") }; var budget = new ExecutionTimeBudget(clock, clock.GetTimestamp(), TimeSpan.Zero, DateTimeOffset.MaxValue);
+        clock.Timestamp += TimeSpan.FromDays(30).Ticks;
+        var snapshot = budget.Read();
+        Assert.Equal((long)TimeSpan.FromDays(30).TotalMilliseconds, snapshot.ConsumedMilliseconds);
+        Assert.False(snapshot.IsExhausted); Assert.Equal(TimeSpan.FromSeconds(5), budget.Limit(TimeSpan.FromSeconds(5)));
+        Assert.Equal(StepStopCause.Continue, StepStopPolicy.Evaluate(new(3, 0, 0),
+            TimeSpan.FromDays(30), TimeSpan.FromDays(30), null, null, true));
+        Assert.Equal(StepStopCause.BusinessFailed, StepStopPolicy.Evaluate(new(3, 0, 0),
+            TimeSpan.FromDays(30), TimeSpan.FromDays(30), BusinessOutcome.Failed, TimeSpan.Zero, true));
+    }
+
     [Fact(DisplayName = "Preparation Queueing And Later Steps Share The Original Monotonic Budget Instead Of Starting Another Clock")]
     public void SharesOriginalBudget()
     {

@@ -44,6 +44,96 @@ async function setEnabled(enabled) {
   await json('/control/v1/extensions/reconcile', { extensionId: 'game-checkin',
     expectedInstalledRevision: installed.installedRevision, expectedSettingsRevision: current.saved.revision });
 }
+async function retireWithPendingEditor(module) {
+  const pattern = '**/control/v1/extensions/game-checkin/frontend/' + module.activationId + '/invoke/open-editor';
+  const received = Promise.withResolvers(), release = Promise.withResolvers(), finished = Promise.withResolvers();
+  const handler = async route => {
+    try {
+      const response = await route.fetch();
+      const body = await response.json();
+      assert.equal(response.ok(), true);
+      assert.equal(body.ok, true);
+      assert.ok(body.value.editorSessionId);
+      received.resolve();
+      await release.promise;
+      try {
+        await route.fulfill({ response });
+        finished.resolve('returned');
+      } catch (error) {
+        assert.match(String(error), /not found|closed|canceled|cancelled|interception|handled/i);
+        finished.resolve('transport-aborted');
+      }
+    } catch (error) {
+      received.reject(error);
+      finished.reject(error);
+    }
+  };
+  const editor = page.locator('.checkin-editor');
+  await page.route(pattern, handler, { times: 1 });
+  try {
+    await page.locator('.checkin-task').getByRole('button', { name: '编辑签到', exact: true }).click();
+    await Promise.race([received.promise, finished.promise, new Promise((_, reject) => {
+      const timeout = setTimeout(() => reject(Error('original_editor_response_missing')), 12000);
+      timeout.unref();
+    })]);
+    await setEnabled(false);
+    await page.locator('.checkin-page').waitFor({ state: 'detached' });
+    assert.equal((await request(base + '/assets/entry')).ok, false);
+    checks.push('disable removes the task surface and revokes the original activation');
+    await setEnabled(true);
+    const renewed = (await json('/control/v1/extensions/frontend')).extensions.find(item => item.manifest.extensionId === 'game-checkin');
+    assert.notEqual(renewed.activationId, module.activationId);
+    base = '/control/v1/extensions/game-checkin/frontend/' + renewed.activationId;
+    await page.locator('a[href$="/plugin/game-checkin/tasks"]').first().click();
+    await page.locator('.checkin-task').getByRole('button', { name: '编辑签到', exact: true }).click();
+    const name = editor.getByRole('textbox', { name: '任务名称', exact: true });
+    await name.fill('Current activation draft');
+    release.resolve();
+    const transport = await finished.promise;
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    assert.equal(await editor.count(), 1);
+    assert.equal(await name.inputValue(), 'Current activation draft');
+    await editor.getByRole('button', { name: '取消', exact: true }).click();
+    await editor.waitFor({ state: 'detached' });
+    checks.push('a late original editor callback cannot replace the current activation draft');
+    return transport;
+  } finally {
+    release.resolve();
+    await page.unroute(pattern, handler);
+  }
+}
+async function qualifyTenTasks(platform) {
+  let current = await state();
+  const names = ['Browser qualification', ...Array.from({ length: 9 }, (_, index) => 'Browser task ' + (index + 2))];
+  assert.equal(current.tasks.length, 1);
+  for (const name of names.slice(1)) {
+    const opened = await json(base + '/invoke/open-editor', { operationId: crypto.randomUUID(),
+      input: { taskId: null, expectedRevision: current.configurationRevision } });
+    assert.equal(opened.ok, true);
+    const secrets = Object.fromEntries(Object.entries(opened.value.fields).map(([id, field]) =>
+      [id, { action: 'keep', fieldGeneration: field.fieldGeneration }]));
+    const saved = await json(base + '/invoke/save-task', { operationId: crypto.randomUUID(),
+      input: { editorSessionId: opened.value.editorSessionId, secrets,
+        draft: { id: null, name, remark: '', enabled: false, games: { cn: [platform.games[0].id] },
+          schedules: [], notification: { enabled: false, notificationTaskIds: [] } } } });
+    assert.equal(saved.ok, true, saved.error?.code);
+    assert.equal(saved.value.configurationRevision, current.configurationRevision + 1);
+    current = saved.value;
+  }
+  assert.deepEqual(current.tasks.map(task => task.name), names);
+  assert.equal(new Set(current.tasks.map(task => task.id)).size, names.length);
+  assert.ok(current.tasks.every(task => task.enabled === false && task.schedules.length === 0));
+  await page.locator('a[href="#/settings"]').first().click();
+  await page.locator('a[href$="/plugin/game-checkin/tasks"]').first().click();
+  const rows = page.locator('.checkin-task');
+  for (const [index, name] of names.entries()) {
+    const title = rows.nth(index).getByText(name, { exact: true });
+    await title.scrollIntoViewIfNeeded();
+    assert.equal(await title.isVisible(), true, name);
+  }
+  assert.equal(await rows.count(), names.length);
+  checks.push('ten persisted disabled tasks remain individually visible after reopening the installed surface');
+}
 try {
   const catalog = await json('/control/v1/extensions/frontend');
   const module = catalog.extensions.find(item => item.manifest.extensionId === 'game-checkin');
@@ -114,21 +204,15 @@ try {
   assert.equal((await state()).tasks[0].name, 'Browser qualification');
   checks.push('cancelled edit preserves the previously saved task');
   const recovery = await qualifyCheckinRecovery({ page, state, checks });
-  await setEnabled(false);
-  await page.locator('.checkin-page').waitFor({ state: 'detached' });
-  assert.equal((await request(base + '/assets/entry')).ok, false);
-  checks.push('disable removes the task surface and revokes the original activation');
-  await setEnabled(true);
-  const renewed = (await json('/control/v1/extensions/frontend')).extensions.find(item => item.manifest.extensionId === 'game-checkin');
-  assert.notEqual(renewed.activationId, module.activationId);
-  base = `/control/v1/extensions/game-checkin/frontend/${renewed.activationId}`;
+  const lateEditorTransport = await retireWithPendingEditor(module);
   assert.equal((await state()).tasks[0].name, 'Browser qualification');
+  await qualifyTenTasks(platform);
   assert.equal(operations.includes('run-task'), false);
   assert.deepEqual(errors, []);
   checks.push('reactivation retains the saved task without executing sign-in');
   assert.deepEqual({ script: hash(process.argv[1]), browser: hash(executable) }, sources);
-  fs.writeFileSync(path.join(input.output, 'result.json'), JSON.stringify({ status: 'PASS', checks, sources, recovery,
-    qualification: 'Original installed CheckIn package and production browser UI; isolated disabled task, no account or sign-in execution', network: localOnly ? 'loopback; LAN authorization excluded' : 'authenticated LAN' }, null, 2));
+  fs.writeFileSync(path.join(input.output, 'result.json'), JSON.stringify({ status: 'PASS', checks, sources, recovery, lateEditorTransport,
+    qualification: 'Original installed CheckIn package and production browser UI; isolated disabled tasks', network: localOnly ? 'loopback; LAN authorization excluded' : 'authenticated LAN' }, null, 2));
 } catch (error) {
   fs.writeFileSync(path.join(input.output, 'result.json'), JSON.stringify({ status: 'FAIL', checks, errors,
     failure: String(error.stack || error).replaceAll(token, '[redacted]'), sources,

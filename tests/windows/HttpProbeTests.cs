@@ -34,13 +34,16 @@ public sealed class HttpProbeTests
     [InlineData(true)]
     public async Task BoundsDecodedBodies(bool extra)
     {
-        var body = Enumerable.Repeat((byte)0xff, HttpGetProbe.MaximumBodyBytes + (extra ? 1 : 0)).ToArray();
-        await using var server = new NativeHttpFixture(_ => new(200, Compress(body, "gzip"),
+        const int decodedLimit = 2 * 1024 * 1024;
+        var body = Enumerable.Repeat((byte)0xff, decodedLimit + (extra ? 1 : 0)).ToArray();
+        var compressed = Compress(body, "gzip");
+        Assert.InRange(compressed.Length, 1, decodedLimit / 10);
+        await using var server = new NativeHttpFixture(_ => new(200, compressed,
             new Dictionary<string, string> { ["Content-Encoding"] = "gzip" }));
         using var client = ProbeHttpClient.Create(new(ProxyMode.None, null, ""), null);
         var result = await Get(server.Address, client);
         Assert.True(result.Ok); Assert.Equal(extra, result.Truncated);
-        Assert.Equal(HttpGetProbe.MaximumBodyBytes, result.Body.Length);
+        Assert.Equal(decodedLimit, result.Body.Length);
         Assert.All(result.Body, character => Assert.Equal('\ufffd', character));
     }
 
@@ -90,6 +93,15 @@ public sealed class HttpProbeTests
         using var client = ProbeHttpClient.Create(new(ProxyMode.None, null, ""), null);
         var result = await Get(new(server.Address, "start"), client);
         Assert.True(result.Ok); Assert.Equal("nexus-fixture=value", result.Body); Assert.Equal(2, server.Requests.Count);
+        var originalHost = new Uri(server.Address, "finish");
+        using var independent = ProbeHttpClient.Create(new(ProxyMode.None, null, ""), null);
+        var isolated = await Get(originalHost, independent);
+        Assert.True(isolated.Ok); Assert.Equal("missing", isolated.Body);
+        var otherHost = new UriBuilder(originalHost) { Host = "localhost" }.Uri;
+        var scoped = await Get(otherHost, client);
+        Assert.True(scoped.Ok); Assert.Equal("missing", scoped.Body);
+        var retained = await Get(originalHost, client);
+        Assert.True(retained.Ok); Assert.Equal("nexus-fixture=value", retained.Body);
     }
 
     [Fact(DisplayName = "A Real Slow Response Produces A Bounded Timeout With No Exception Text")]

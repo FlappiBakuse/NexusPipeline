@@ -103,10 +103,15 @@ public sealed class ProviderRuntimeTests
         var original = reader.Read(terminal.Binding, terminal.Artifact); var refs = reader.ReadReferences(terminal.Binding, terminal.Artifact);
         await fixture.Scope.DisposeAsync(); File.Delete(fixture.Package.Worker); File.Delete(fixture.Source.OtherImage);
         Assert.Equal(original.Terminal, reader.Read(terminal.Binding, terminal.Artifact).Terminal);
+        Assert.Contains(terminal.Artifact, refs);
+        Assert.Contains(original.Archive.Bootstrap, refs);
         Assert.All(refs, reference => { using var held = new ImmutableBlobStore(fixture.Source.Instance, new()).OpenVerified(reference); });
         var parent = new RecoveryJournalRegistry(fixture.Source.Database).ReadSnapshot().Journals.Single(item => item.JournalId == fixture.Accepted.JournalId);
-        Assert.All(refs, reference => Assert.Contains(reference, new PlanReferenceClosure(fixture.Source.Instance, new(),
-            new(fixture.Source.Instance, new()), fixture.Source.Database).Read(parent, fixture.Accepted.Plan)));
+        var content = refs.Where(reference => reference.RelativePath.StartsWith("blobs/content/", StringComparison.Ordinal)).ToArray();
+        Assert.NotEmpty(content);
+        var retained = new PlanReferenceClosure(fixture.Source.Instance, new(),
+            new(fixture.Source.Instance, new()), fixture.Source.Database).Read(parent, fixture.Accepted.Plan);
+        Assert.All(content, reference => Assert.Contains(reference, retained));
     }
     [Theory(DisplayName = "Real Control Frames With Another Identity Sequence Or Length Cannot Publish A Provider Terminal")]
     [InlineData("wrong-attempt")]

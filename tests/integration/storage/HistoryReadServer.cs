@@ -5,7 +5,6 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NexusPipeline.Core.Configuration;
@@ -68,15 +67,7 @@ internal sealed class HistoryReadServer : IAsyncDisposable
             app.Use(ControlExceptionBoundary.InvokeAsync);
             var authority = new ControlAuthentication(instance.InstanceId, false, null,
                 () => new HostSettingsStore(database).Read(), null!, TimeProvider.System);
-            app.Use(async (context, next) =>
-            {
-                if (!HttpMethods.IsGet(context.Request.Method))
-                {
-                    context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
-                    return;
-                }
-                await authority.InvokeAsync(context, next);
-            });
+            app.Use(authority.InvokeAsync);
             var useCases = new RecordUseCases(new RunRecordStore(database), new AttemptHistoryReader(database),
                 new LogCatalogReader(instance, database, contracts), new ExecutionLogReader(instance, database, contracts),
                 new ImageCatalogReader(instance, database, contracts),

@@ -15,7 +15,8 @@ internal static class RetirementCrash
     internal static async Task<int> RunAsync(string[] args)
     {
         if (args is not [var root, var binding, var operation, var phase, var report, var subject] ||
-            subject is not ("host:history-retention" or "local:manual-retention")) return 64;
+            subject is not ("host:history-retention" or "local:manual-retention") ||
+            phase is not ("AcceptanceCommitted" or "JournalFlushed" or "BeforeCleanup")) return 64;
         OwnedFixtureEvidence.RequirePath(root); OwnedFixtureEvidence.RequirePath(report);
         try
         {
@@ -38,7 +39,9 @@ internal static class RetirementCrash
             var service = new ContentRetirementService(instance, database, contracts, lease, resources, index, roots, observer);
             var page = service.RetireLogsPage(Guid.Parse(operation), subject, receipt.Facts.RunId)
                 ?? throw new IOException("retirement_fixture_page_missing");
-            Observer.Stop(report, page.CleanupJournalId, receipt.Facts.RunId);
+            if (phase != "BeforeCleanup") throw new IOException("retirement_fixture_persistence_point_not_reached");
+            var journal = new JournalStore(instance, contracts).Read(page.CleanupJournalId);
+            Observer.Stop(report, phase, journal.JournalId, receipt.Facts.RunId, journal.Revision, journal.Phase);
             return 0;
         }
         catch (Exception error)
@@ -53,14 +56,19 @@ internal static class RetirementCrash
     {
         public void Reached(CleanupPersistencePoint point, Guid journalId, long revision, JournalPhase journalPhase)
         {
-            if (phase == point.ToString()) Stop(report, journalId, runId);
+            var actual = point.ToString();
+            if (phase == actual) Stop(report, actual, journalId, runId, revision, journalPhase);
         }
 
-        internal static void Stop(string report, Guid journal, Guid runId)
+        internal static void Stop(string report, string point, Guid journal, Guid runId, long revision, JournalPhase journalPhase)
         {
             using (var output = new FileStream(report, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 4096, FileOptions.WriteThrough))
             {
-                output.Write(JsonSerializer.SerializeToUtf8Bytes(new { status = "faultReady", processId = Environment.ProcessId, journalId = journal, runId }));
+                output.Write(JsonSerializer.SerializeToUtf8Bytes(new
+                {
+                    status = "faultReady", processId = Environment.ProcessId, journalId = journal, runId,
+                    actualPoint = point, revision, journalPhase = journalPhase.ToString()
+                }));
                 output.Flush(flushToDisk: true);
             }
             Thread.Sleep(Timeout.Infinite);

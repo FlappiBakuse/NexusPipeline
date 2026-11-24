@@ -19,16 +19,20 @@ public sealed class CaptureFaultTests
     public async Task CancelsSourceAdmission(int captureFrames)
     {
         var fixture = new PcStageFixture(hooks: false, nativeWindow: true, captureFrames: captureFrames);
-        var observer = new CaptureObserver((point, _) =>
+        ExecutionCaptureBinding? publishedSource = null;
+        var observer = new CaptureObserver((point, binding) =>
         {
-            if (point == TargetPersistencePoint.CaptureSourcePublished) fixture.Cancel();
+            if (point != TargetPersistencePoint.CaptureSourcePublished || publishedSource is not null) return;
+            publishedSource = binding;
+            fixture.Cancel();
         });
         await fixture.ExecuteAsync(() => WithSession(fixture, observer, async (session, _) =>
         {
             var receipt = await new ExecutionAttemptCoordinator().RunAsync(session, CancellationToken.None);
             Assert.Equal(LifecycleOutcome.Cancelled, receipt.Facts.Lifecycle);
-            Assert.Equal(1, observer.SourceCount); Assert.Equal(0, observer.RootCount);
             var saved = ReadCapture(fixture);
+            Assert.NotNull(publishedSource);
+            Assert.Equal(publishedSource, saved.State.Binding);
             Assert.Null(saved.Root); Assert.Null(saved.State.Root);
             Assert.Equal("unavailable", saved.Result!.Outcome); Assert.Null(saved.Result.Png);
             Assert.Null(saved.Result.Frames);
@@ -58,7 +62,6 @@ public sealed class CaptureFaultTests
         {
             var receipt = await new ExecutionAttemptCoordinator().RunAsync(session, CancellationToken.None);
             Assert.Equal(LifecycleOutcome.Completed, receipt.Facts.Lifecycle);
-            Assert.Equal(1, observer.SourceCount); Assert.Equal(1, observer.RootCount);
             var saved = ReadCapture(fixture);
             Assert.NotNull(suspended); Assert.Equal(suspended, saved.Root!.NativeRoot);
             Assert.Equal("unavailable", saved.Result!.Outcome); Assert.Null(saved.Result.Png);
@@ -82,12 +85,14 @@ public sealed class CaptureFaultTests
         BlobReference? artifact = null, png = null;
         byte[]? originalPng = null;
         byte[]? originalRevision = null;
+        ProcessIdentity? collectedRoot = null;
         var revisionPath = Path.Combine(fixture.Source.Instance.RuntimeRoot, "journals", fixture.Accepted.JournalId.ToString("D"), "0000000001.json");
         var observer = new CaptureObserver((point, _) =>
         {
-            if (point != TargetPersistencePoint.CaptureCollectedAppended || installed) return;
+            if (point != TargetPersistencePoint.CaptureCollectedAppended || artifact is not null) return;
             var saved = ReadCapture(fixture, insidePublication: true);
             Assert.Equal("captured", saved.Result!.Outcome);
+            collectedRoot = Assert.IsType<CaptureRootDocument>(saved.Root).NativeRoot;
             artifact = saved.State.Result; png = saved.Result.Png;
             Assert.NotNull(artifact); Assert.NotNull(png);
             originalPng = File.ReadAllBytes(ContentPath(fixture, png!));
@@ -109,7 +114,10 @@ public sealed class CaptureFaultTests
                 session.PrepareConfigurationGroups();
                 var step = Assert.Single(session.StepIds);
                 session.PrepareNextStep(step); session.EnterEffect(step);
-                await Assert.ThrowsAsync<SqliteException>(() => session.ExecuteStepAsync(step, CancellationToken.None));
+                var error = await Assert.ThrowsAsync<SqliteException>(() => session.ExecuteStepAsync(step, CancellationToken.None));
+                Assert.Equal(19, error.SqliteErrorCode);
+                Assert.Equal(1811, error.SqliteExtendedErrorCode);
+                Assert.Contains("fixture_capture_advance_failure", error.Message, StringComparison.Ordinal);
                 Assert.True(installed); Assert.NotNull(artifact); Assert.NotNull(png);
                 var ahead = fixture.State;
                 Assert.Equal(ahead.Journal.Revision + 1, ahead.Latest.Revision);
@@ -150,7 +158,9 @@ public sealed class CaptureFaultTests
             Assert.Equal(artifact, final.State.Result); Assert.Equal(png, final.Result!.Png);
             Assert.Equal("captured", final.Result.Outcome);
             Assert.Equal(originalPng, File.ReadAllBytes(ContentPath(fixture, png!)));
-            Assert.Equal(1, observer.CollectedCount);
+            Assert.NotNull(collectedRoot);
+            Assert.Equal(collectedRoot, Assert.IsType<CaptureRootDocument>(final.Root).NativeRoot);
+            Assert.Equal(collectedRoot, Assert.Single(final.Result.HelperStopped!.AllFamily));
             RequireStoppedParent(final);
         }));
     }
@@ -160,9 +170,11 @@ public sealed class CaptureFaultTests
     {
         var fixture = new PcStageFixture(hooks: false, nativeWindow: true, totalBudgetSeconds: 120);
         ExecutionTimeBudget? actualBudget = null;
-        var observer = new CaptureObserver((point, _) =>
+        ExecutionCaptureBinding? publishedSource = null;
+        var observer = new CaptureObserver((point, binding) =>
         {
-            if (point != TargetPersistencePoint.CaptureSourcePublished) return;
+            if (point != TargetPersistencePoint.CaptureSourcePublished || publishedSource is not null) return;
+            publishedSource = binding;
             var actual = Assert.IsType<ExecutionTimeBudget>(actualBudget);
             var remaining = actual.Read().Remaining;
             Assert.True(remaining > TimeSpan.Zero); Assert.True(remaining <= TimeSpan.FromSeconds(120));
@@ -182,14 +194,16 @@ public sealed class CaptureFaultTests
             Assert.Equal(LifecycleOutcome.Interrupted, receipt.Facts.Lifecycle);
             Assert.Equal(DispatchIntentCodec.BudgetReason, receipt.Facts.ReasonCode);
             Assert.True(actualBudget.Read().IsExhausted);
-            Assert.Equal(1, observer.SourceCount); Assert.Equal(0, observer.RootCount);
             var saved = ReadCapture(fixture);
+            Assert.NotNull(publishedSource);
+            Assert.Equal(publishedSource, saved.State.Binding);
             Assert.Null(saved.Root); Assert.Null(saved.State.Root); Assert.Null(saved.Result!.Png);
             Assert.Equal("unavailable", saved.Result.Outcome);
             Assert.Equal("execution_capture_output_incomplete", saved.Result.ReasonCode);
             Assert.NotNull(saved.Result.HelperStopped);
-            Assert.All(saved.Result.HelperStopped!.AllFamily, member =>
-                Assert.Equal(WriterState.Stopped, WriterStopEvidence.ObserveProcess(member)));
+            Assert.Equal(0u, saved.Result.HelperStopped.TotalProcesses);
+            Assert.Equal(0u, saved.Result.HelperStopped.ActiveProcesses);
+            Assert.Empty(saved.Result.HelperStopped.AllFamily);
             RequireStoppedParent(saved);
         }));
     }
@@ -243,16 +257,7 @@ public sealed class CaptureFaultTests
     private sealed class CaptureObserver(Action<TargetPersistencePoint, ExecutionCaptureBinding> observe)
         : ITargetPersistenceObserver
     {
-        internal int SourceCount { get; private set; }
-        internal int RootCount { get; private set; }
-        internal int CollectedCount { get; private set; }
         public void Reached(TargetPersistencePoint point, ExecutionTargetBinding binding) { }
-        public void Reached(TargetPersistencePoint point, ExecutionCaptureBinding binding)
-        {
-            if (point == TargetPersistencePoint.CaptureSourcePublished) SourceCount++;
-            if (point == TargetPersistencePoint.CaptureRootPublished) RootCount++;
-            if (point == TargetPersistencePoint.CaptureCollectedAppended) CollectedCount++;
-            observe(point, binding);
-        }
+        public void Reached(TargetPersistencePoint point, ExecutionCaptureBinding binding) => observe(point, binding);
     }
 }

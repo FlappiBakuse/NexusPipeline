@@ -62,8 +62,10 @@ public sealed class SecretServiceTests
         using var value = new SecretValue("secret-service-fixture");
         var failure = await Record.ExceptionAsync(async () =>
             await fixture.Service.ApplyAsync(Guid.NewGuid(), fixture.Key, 0, SecretDisposition.Set, value, default));
-        Assert.NotNull(failure);
-        if (fault != "expired-instance") Assert.Equal(fault == "conflict" ? "secret_resource_conflict" : "secret_host_unavailable", failure.Message);
+        if (fault == "expired-instance")
+            Assert.Equal("runtime_exclusive_lease_required", Assert.IsType<IOException>(failure).Message);
+        else Assert.Equal(fault == "conflict" ? "secret_resource_conflict" : "secret_host_unavailable",
+            Assert.IsType<InvalidOperationException>(failure).Message);
         Assert.False(Directory.Exists(Path.Combine(fixture.Instance.RuntimeRoot, "secrets/payloads")));
         Assert.False((await fixture.Store.GetStateAsync(fixture.Key, default)).IsConfigured);
     }

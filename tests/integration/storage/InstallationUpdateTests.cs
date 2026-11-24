@@ -114,9 +114,12 @@ public sealed class InstallationUpdateTests
         using var fixture = new InstallationUpdateFixture(); fixture.Switch();
         var prepared = fixture.Prepare();
         var identity = File.ReadAllBytes(Path.Combine(fixture.Product.Paths.ManagerRoot, InstallationAnchor.IdentityFile));
-        if (fault == "pending") File.WriteAllText(Path.Combine(fixture.Checkpoint, "identity.pending"), "Retained unknown pending identity");
-        if (fault == "worker") File.WriteAllText(Path.Combine(fixture.Product.Paths.ManagerRoot, InstallationAnchor.WorkerFile), "Retained unknown worker");
-        if (fault == "manager") File.WriteAllText(Path.Combine(fixture.Product.Paths.ManagerRoot, "foreign.txt"), "Retained foreign manager data");
+        var pending = Path.Combine(fixture.Checkpoint, "identity.pending");
+        var worker = Path.Combine(fixture.Product.Paths.ManagerRoot, InstallationAnchor.WorkerFile);
+        var managerData = Path.Combine(fixture.Product.Paths.ManagerRoot, "foreign.txt");
+        if (fault == "pending") File.WriteAllText(pending, "Retained unknown pending identity");
+        if (fault == "worker") File.WriteAllText(worker, "Retained unknown worker");
+        if (fault == "manager") File.WriteAllText(managerData, "Retained foreign manager data");
         if (fault == "registry")
         {
             using var key = Registry.CurrentUser.OpenSubKey(fixture.Product.Paths.RegistryKey, writable: true);
@@ -124,10 +127,14 @@ public sealed class InstallationUpdateTests
         }
         var source = fixture.Source;
         if (fault == "source") source = source with { Installation = source.PayloadManifest };
+        var files = RuntimeFingerprint.CaptureFileEvidence(pending, worker, managerData);
+        var ownership = JsonSerializer.Serialize(InstallerMetadataInventory.CaptureRegistry(fixture.Product.Paths.RegistryKey));
         var error = Record.Exception(() => new MaintenanceInstallation(fixture.Instance, new()).Publish(source, fixture.Plan, "test", prepared.Commit));
         Assert.True(error is IOException or JsonException);
         Assert.Equal("0.18.0", Version(fixture));
         Assert.Equal(identity, File.ReadAllBytes(Path.Combine(fixture.Product.Paths.ManagerRoot, InstallationAnchor.IdentityFile)));
+        Assert.Equal(files, RuntimeFingerprint.CaptureFileEvidence(pending, worker, managerData));
+        Assert.Equal(ownership, JsonSerializer.Serialize(InstallerMetadataInventory.CaptureRegistry(fixture.Product.Paths.RegistryKey)));
     }
 
     private static string Version(InstallationUpdateFixture fixture)

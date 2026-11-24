@@ -11,6 +11,42 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class MaintenanceBinaryTests
 {
+    [Fact(DisplayName = "The Actual Helper Exits With A Failure Code While The Parent Stop Signal Is Still Pending")]
+    public async Task RejectsUnconfirmedParentStop()
+    {
+        using var origin = MaintenanceStartupOrigin.CaptureUnjobbedProcess();
+        using var fixture = new MaintenanceBinaryFixture();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+        var old = fixture.Start();
+        Assert.False(string.IsNullOrEmpty(await old.StandardOutput.ReadLineAsync(deadline.Token)));
+        await fixture.AwaitStartupSchedulingAsync(deadline.Token);
+        using (var parentExit = new MaintenanceParentExit(old))
+        {
+            await parentExit.Attached.WaitAsync(deadline.Token);
+            using var client = new HttpClient { BaseAddress = fixture.Address, Timeout = TimeSpan.FromSeconds(30) };
+            using var response = await client.PostAsync($"control/v1/maintenance/operations/{fixture.Plan.OperationId:D}/start", null, deadline.Token);
+            Assert.Equal(202, (int)response.StatusCode);
+            using var helper = await fixture.AwaitHelperAsync(deadline.Token);
+            await parentExit.ExitPending.WaitAsync(deadline.Token);
+            Assert.False(MaintenanceParentExit.IsSignaled(old));
+            await helper.WaitForExitAsync(deadline.Token);
+            Assert.False(MaintenanceParentExit.IsSignaled(old));
+
+            var prefix = Path.Combine(fixture.Instance.RuntimeRoot, "diagnostics",
+                $"maintenance-helper-{fixture.Plan.OperationId:D}-{helper.Id}-");
+            using var refusal = JsonDocument.Parse(File.ReadAllBytes(prefix + "failed.json"));
+            Assert.Equal("13", refusal.RootElement.GetProperty("stage").GetString());
+            Assert.False(File.Exists(prefix + "parent-stopped.json"));
+            Assert.False(File.Exists(prefix + "database-admitted.json"));
+            Assert.Equal("original", File.ReadAllText(Path.Combine(fixture.Plan.TargetPath, "README.md")));
+            var journal = new RecoveryJournalRegistry(fixture.Database).ReadJournal(fixture.Plan.JournalId);
+            Assert.Equal(NexusPipeline.Core.Configuration.JournalPhase.Prepared, journal.Phase);
+            Assert.Equal(13, helper.ExitCode);
+        }
+        await old.WaitForExitAsync(deadline.Token);
+        Assert.Equal(0, old.ExitCode);
+    }
+
     [Fact(DisplayName = "An Actual Candidate Exit Before Its Receipt Restores The Original Payload Only After Its Job Stops")]
     public Task RestoresFailedCandidate() => VerifyRestorationAsync();
 
@@ -38,7 +74,7 @@ public sealed class MaintenanceBinaryTests
         using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(15));
         var old = fixture.Start();
         Assert.False(string.IsNullOrEmpty(await old.StandardOutput.ReadLineAsync(deadline.Token)));
-        await fixture.AwaitSchedulingAsync(deadline.Token);
+        await fixture.AwaitStartupSchedulingAsync(deadline.Token);
         using var client = new HttpClient { BaseAddress = fixture.Address, Timeout = TimeSpan.FromSeconds(30) };
         using var response = await client.PostAsync($"control/v1/maintenance/operations/{fixture.Plan.OperationId:D}/start", null, deadline.Token);
         Assert.Equal(202, (int)response.StatusCode);
@@ -128,7 +164,7 @@ public sealed class MaintenanceBinaryTests
         var path = $"control/v1/maintenance/operations/{fixture.Plan.OperationId:D}";
         if (!nextStartup)
         {
-            await fixture.AwaitSchedulingAsync(deadline.Token);
+            await fixture.AwaitStartupSchedulingAsync(deadline.Token);
             using var before = await client.GetAsync(path, deadline.Token);
             Assert.Equal(200, (int)before.StatusCode);
             var startedAt = System.Diagnostics.Stopwatch.GetTimestamp();

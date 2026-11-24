@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Runtime.Versioning;
+using System.Text.Json;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Extensions;
 using NexusPipeline.Core.Maintenance;
@@ -20,7 +22,9 @@ internal sealed class PackageServiceFixture : IAsyncDisposable
     internal readonly ExtensionRuntimeLifecycle Runtime;
     internal readonly ExtensionPackageService Service;
     internal readonly OperationQueryService Queries;
-    internal int Requests;
+    internal ConcurrentQueue<string> RequestUris { get; } = [];
+    internal int Requests => RequestUris.Count;
+    internal static string ArtifactUri => new Uri(ExtensionCatalogFixture.Artifacts, "v0.5.0/FixturePlugin.zip").AbsoluteUri;
 
     internal PackageServiceFixture(bool? enabled = false, bool trusted = true, Action<string>? payloadEdit = null,
         Func<HttpContent>? artifactContent = null)
@@ -40,15 +44,22 @@ internal sealed class PackageServiceFixture : IAsyncDisposable
         Runtime = new(owner.Instance, owner.Database, owner.Lease, owner.Contracts, Roots, owner.Resources, owner.Index, new(), trust);
         Runtime.ConfigurePorts(new(null, null, null, null, null, null));
         var signed = Package.Signed(); var archive = File.ReadAllBytes(Package.Archive);
+        using var pointer = JsonDocument.Parse(signed.Pointer);
+        var sources = new Dictionary<string, byte[]>(StringComparer.Ordinal)
+        {
+            [new Uri(ExtensionCatalogFixture.MetadataRoot, "stable/index.json").AbsoluteUri] = signed.Pointer,
+            [pointer.RootElement.GetProperty("catalogUrl").GetString()!] = signed.Catalog,
+            [pointer.RootElement.GetProperty("signatureUrl").GetString()!] = signed.Signature,
+            [ArtifactUri] = archive
+        };
         Func<HttpClient>? createClient = trusted ? () => new HttpClient(new Handler(request =>
         {
-            Interlocked.Increment(ref Requests);
-            var path = request.RequestUri!.AbsolutePath;
-            var body = path.EndsWith("index.json", StringComparison.Ordinal) ? signed.Pointer :
-                path.EndsWith("catalog.json", StringComparison.Ordinal) ? signed.Catalog :
-                path.EndsWith("catalog.sig.json", StringComparison.Ordinal) ? signed.Signature : archive;
+            var uri = request.RequestUri!.AbsoluteUri;
+            RequestUris.Enqueue(uri);
+            if (request.Method != HttpMethod.Get || !sources.TryGetValue(uri, out var body))
+                throw new IOException("fixture_unexpected_package_service_request");
             return new(HttpStatusCode.OK) { RequestMessage = request,
-                Content = path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) && artifactContent is not null
+                Content = uri == ArtifactUri && artifactContent is not null
                     ? artifactContent() : new ByteArrayContent(body) };
         })) : null;
         Service = new(owner.Instance, owner.Database, owner.Lease, owner.Contracts, Roots, owner.Resources, owner.Index, Runtime, createClient);

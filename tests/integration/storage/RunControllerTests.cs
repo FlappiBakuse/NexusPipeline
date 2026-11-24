@@ -212,15 +212,33 @@ public sealed class RunControllerTests
         var running = fixture.Controller.Read();
         Assert.True(running.EnteredRunning); Assert.Equal(ConfigurationRunPhase.Running, running.Phase);
         Assert.False(File.Exists(fixture.Base.NativeReport));
+        var resources = fixture.Base.Request.Resources.OrderBy(resource => resource.Target.Address.ResourceId, StringComparer.Ordinal).ToArray();
+        Assert.Equal(2, resources.Length);
+        Assert.Equal(resources.Select(resource => (resource.Target.Address, resource.JournalId)),
+            running.Resources.OrderBy(resource => resource.Address.ResourceId, StringComparer.Ordinal)
+                .Select(resource => (resource.Address, resource.JournalId)));
+        var expectedAddresses = resources.Select(resource => resource.Target.Address).ToArray();
         var result = await fixture.FinishAsync(Guid.NewGuid(), interrupted: true);
+        Assert.Equal(expectedAddresses,
+            result.Items.Select(item => item.Address).OrderBy(address => address.ResourceId, StringComparer.Ordinal));
         Assert.All(result.Items, item => Assert.Equal("configuration_sync_not_due", item.ReasonCode));
         Assert.Equal(0, result.Session.SyncOrdinal); AssertSaved(fixture, 1, Initial);
         fixture.Base.VerifyOriginal();
-        Assert.All(fixture.ClosedWriters(), closure => { Assert.False(closure.WasExecuted); Assert.Equal(0, closure.RunElapsedMilliseconds); });
+        var closures = fixture.ClosedWriters();
+        var expectedJournals = resources.Select(resource => resource.JournalId).Order().ToArray();
+        Assert.Equal(expectedJournals.Length, closures.Length);
+        Assert.Single(closures.Select(closure => closure.JobName).Distinct(StringComparer.Ordinal));
+        Assert.All(closures, closure =>
+        {
+            Assert.Equal(expectedJournals, closure.JournalIds.Order());
+            Assert.False(closure.WasExecuted);
+            Assert.Equal(0, closure.RunElapsedMilliseconds);
+        });
         ConfigurationRunInventory.VerifyReadOnly(fixture.Base.Source.Instance, fixture.Base.Source.Database, new());
         if (recoverCompletion)
         {
             using var sample = new RunProgressCapture(fixture.Base.Source.Instance, fixture.Base.Source.Database, new()).ReadRestored(result.Session);
+            Assert.Equal(expectedAddresses, sample.Items.Select(item => item.Resource.Address).OrderBy(address => address.ResourceId, StringComparer.Ordinal));
             Assert.False(sample.WasExecuted); Assert.All(sample.Items, item => Assert.Equal("configuration_sync_not_due", item.ReasonCode));
         }
     }

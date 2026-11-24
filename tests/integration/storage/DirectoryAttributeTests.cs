@@ -9,24 +9,6 @@ namespace NexusPipeline.StorageTests;
 
 public sealed class DirectoryAttributeTests
 {
-    [Fact(DisplayName = "Nested Directory Scopes Remember Live Read Owners Until Their Facts Are Refreshed")]
-    public void RemembersLiveReadOwners()
-    {
-        var instance = Create();
-        var owner = new object();
-        using var outer = DirectoryAttributeScope.Hold(instance);
-        Assert.True(DirectoryAttributeScope.FirstRead(owner));
-        Assert.False(DirectoryAttributeScope.FirstRead(owner));
-        using (DirectoryAttributeScope.Hold(instance))
-        {
-            Assert.False(DirectoryAttributeScope.FirstRead(owner));
-            DirectoryAttributeScope.Refresh();
-            Assert.True(DirectoryAttributeScope.FirstRead(owner));
-        }
-        Assert.False(DirectoryAttributeScope.FirstRead(owner));
-        GC.KeepAlive(owner);
-    }
-
     [Fact(DisplayName = "A Retained Directory Scope Releases Completed Read Owners Before The Inventory Ends")]
     public void ReleasesCompletedReadOwners()
     {

@@ -43,7 +43,8 @@ public sealed class ExtensionImageTests
             Assert.Single((await Invoke(frontend, "image-list", new { name = "settings" })).EnumerateArray());
         }
         finally { await fixture.Activator.StopAllAsync(TimeSpan.FromSeconds(10)); }
-        await Assert.ThrowsAnyAsync<Exception>(() => Invoke(frontend, "image-read", new { id = secondId }));
+        Assert.Equal("extension_activation_not_published",
+            (await Assert.ThrowsAsync<IOException>(() => Invoke(frontend, "image-read", new { id = secondId }))).Message);
     }
 
     [Fact(DisplayName = "Capacity Failure Rolls Back The Image Its References And The Document Without Consuming The Operation")]
@@ -59,12 +60,19 @@ public sealed class ExtensionImageTests
                 _ = await Invoke(frontend, "image-write", Input("settings", index, ids.ToArray(), image), Guid.NewGuid());
             }
             var addition = Image(32); var id = ExtensionDocumentRows.Digest(addition); var operation = Guid.NewGuid();
-            await Assert.ThrowsAsync<IOException>(() => Invoke(frontend, "image-write", Input("overflow", 0, [id], addition), operation));
+            var originalIds = ids.Order(StringComparer.Ordinal).ToArray();
+            Assert.Equal(originalIds, ReadImageIds(fixture));
+            Assert.Equal("extension_image_inventory_limit",
+                (await Assert.ThrowsAsync<IOException>(() => Invoke(frontend, "image-write", Input("overflow", 0, [id], addition), operation))).Message);
             Assert.Empty((await Invoke(frontend, "image-list", new { name = "overflow" })).EnumerateArray());
-            await Assert.ThrowsAsync<IOException>(() => Invoke(frontend, "image-read", new { id }));
-            _ = await Invoke(frontend, "image-write", Input("overflow", 0, [], null), operation);
-            Assert.Equal(32, (await Invoke(frontend, "image-list", new { name = "settings" })).GetArrayLength());
-            Assert.Equal(32, Count(fixture, "extension_images"));
+            Assert.Equal("extension_image_unavailable", (await Assert.ThrowsAsync<IOException>(() => Invoke(frontend, "image-read", new { id }))).Message);
+            Assert.Equal(originalIds, ReadImageIds(fixture));
+            var retried = await Invoke(frontend, "image-write", Input("overflow", 0, [], null), operation);
+            Assert.True(retried.GetProperty("IsNew").GetBoolean());
+            Assert.Equal(1, retried.GetProperty("Revision").GetInt64());
+            var listed = await Invoke(frontend, "image-list", new { name = "settings" });
+            Assert.Equal(originalIds, listed.EnumerateArray().Select(image => image.GetProperty("Id").GetString()).Order(StringComparer.Ordinal));
+            Assert.Equal(originalIds, ReadImageIds(fixture));
         }
         finally { await fixture.Activator.StopAllAsync(TimeSpan.FromSeconds(10)); }
     }
@@ -106,10 +114,14 @@ public sealed class ExtensionImageTests
         using var parsed = JsonDocument.Parse(result.Content); return parsed.RootElement.Clone();
     }
 
-    private static long Count(InstallRuntimeFixture fixture, string table)
+    private static string[] ReadImageIds(InstallRuntimeFixture fixture)
     {
-        using var connection = DatabaseConnections.Open(fixture.Package.Catalog.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
-        using var command = connection.CreateCommand(); command.CommandText = "SELECT COUNT(*) FROM " + table;
-        return (long)command.ExecuteScalar()!;
+        using var connection = DatabaseConnections.Open(fixture.Package.Catalog.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Extensions);
+        using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT image_id FROM {DatabaseTables.Name("extension_images")} WHERE extension_id='fixture-plugin' ORDER BY image_id;";
+        using var rows = command.ExecuteReader();
+        var result = new List<string>();
+        while (rows.Read()) result.Add(rows.GetString(0));
+        return result.ToArray();
     }
 }

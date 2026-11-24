@@ -173,16 +173,16 @@ internal sealed class MaintenanceBinaryFixture : IDisposable
         _processes.Add(Process.GetProcessById(processId));
     }
 
-    internal async Task AwaitSchedulingAsync(CancellationToken cancellation)
+    internal async Task AwaitStartupSchedulingAsync(CancellationToken cancellation)
     {
-        // HTTP readiness precedes the first background minute commit; maintenance requires its write lease to finish.
+        // The startup queue is recorded even when there are no due schedules in the first minute.
         while (true)
         {
             cancellation.ThrowIfCancellationRequested();
             using (var connection = DatabaseConnections.Open(Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime))
             using (var command = connection.CreateCommand())
             {
-                command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operations WHERE operation_kind='schedule.minute' AND status='completed');";
+                command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operations WHERE operation_kind='schedule.startup' AND status='completed');";
                 if ((long)command.ExecuteScalar()! == 1) return;
             }
             await Task.Delay(20, cancellation);

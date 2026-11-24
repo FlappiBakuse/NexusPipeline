@@ -1,4 +1,6 @@
 using System.Runtime.Versioning;
+using System.Security.Cryptography;
+using System.Text.Json;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Extensions;
 using NexusPipeline.Platform.Extensions;
@@ -23,19 +25,39 @@ public sealed class InstalledMetadataTests
         var bound = Binding(fixture).Read(accepted.JournalId, accepted.Plan);
         var value = Footprint(bound);
         var codec = new InstalledFootprintCodec(fixture.Package.Catalog.Instance, fixture.Roots, fixture.Package.Catalog.Contracts);
-        var reference = fixture.Package.Blobs.PersistPlan(codec.EncodeMetadata(value));
+        var bytes = codec.EncodeMetadata(value);
+        var reference = fixture.Package.Blobs.PersistPlan(bytes);
+        using var export = JsonDocument.Parse(bytes);
+        var root = export.RootElement;
+        Assert.Equal("nexus.extension.installation-footprint", root.GetProperty("format").GetString());
+        Assert.Equal(1, root.GetProperty("version").GetInt32());
+        Assert.Equal("fixture-plugin", root.GetProperty("extensionId").GetString());
+        Assert.Equal(1, root.GetProperty("revision").GetInt64());
+        Assert.Equal(accepted.JournalId, root.GetProperty("journalId").GetGuid());
+        Assert.Equal(fixture.Package.OperationId, root.GetProperty("operationId").GetGuid());
+        Assert.Equal(fixture.Target, root.GetProperty("targetPath").GetString());
         var saved = codec.ReadMetadata(reference);
         var expected = new ExtensionInstalledMetadata("fixture-plugin", 1, true, value.Package, accepted.JournalId, reference);
         codec.RequireBinding(saved, expected, bound.Plan, bound.Plan.ExtensionSource!, bound.Physical[^1]);
         Assert.Equal(value.Payload.Snapshot.Entries.ToArray(), saved.Payload.Snapshot.Entries.ToArray());
         Assert.Equal(value.Payload.OriginalObjects.ToArray(), saved.Payload.OriginalObjects.ToArray());
-        Assert.Throws<NotSupportedException>(() => ((IList<PhysicalTreeObject>)saved.Payload.OriginalObjects)[0] =
-            new("", new(new string('a', 16), new string('b', 32))));
+        var objects = saved.Payload.OriginalObjects.ToArray();
+        if (saved.Payload.OriginalObjects is IList<PhysicalTreeObject> exposed)
+        {
+            try { exposed[0] = new("", new(new string('a', 16), new string('b', 32))); }
+            catch (NotSupportedException) { }
+        }
+        Assert.Equal(objects, saved.Payload.OriginalObjects);
         Assert.Null(new ExtensionInstalledEvidence(fixture.Package.Catalog.Instance, fixture.Package.Catalog.Database,
             fixture.Package.Catalog.Contracts, fixture.Roots).ReadCurrent("fixture-plugin"));
         Assert.Equal(JournalPhase.Applied, bound.Registered.Phase);
-        Assert.Equal(File.ReadAllBytes(Path.Combine(fixture.Package.Deployed, "manifest.json")),
-            File.ReadAllBytes(Path.Combine(fixture.Target, "manifest.json")));
+        var manifestPath = Path.Combine(fixture.Target, "manifest.json");
+        var original = File.ReadAllBytes(Path.Combine(fixture.Package.Deployed, "manifest.json"));
+        Assert.Equal(original, File.ReadAllBytes(manifestPath));
+        var installedManifest = Assert.Single(saved.Payload.Snapshot.Entries, entry => entry.RelativePath == "manifest.json");
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(original)), installedManifest.Sha256);
+        Assert.Equal(PhysicalObjectIdentity.Read(manifestPath),
+            Assert.Single(objects, item => item.RelativePath == "manifest.json").Identity);
     }
 
     [Theory(DisplayName = "Valid Shaped But Rebound Metadata Cannot Replace The Original Applied Source")]

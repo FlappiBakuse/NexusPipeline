@@ -150,10 +150,11 @@ public sealed class InstallerTransitionTests
         using var gate = InstallerRuntimeGate.Acquire(fixture.Product.Application);
         _ = Begin(fixture);
         var path = Path.Combine(fixture.Product.Checkpoint, "prepared.protected"); var original = File.ReadAllBytes(path);
-        if (fault == "application") File.AppendAllText(Path.Combine(fixture.Product.Application, "README.md"), "Keep changed program");
+        var applicationReadme = Path.Combine(fixture.Product.Application, "README.md");
+        var instancePath = Path.Combine(fixture.Runtime.RuntimeRoot, "instance.json");
+        if (fault == "application") File.AppendAllText(applicationReadme, "Keep changed program");
         if (fault == "runtime")
         {
-            var instancePath = Path.Combine(fixture.Runtime.RuntimeRoot, "instance.json");
             var instance = JsonNode.Parse(File.ReadAllBytes(instancePath))!.AsObject();
             instance["instanceId"] = Guid.NewGuid().ToString("D");
             File.WriteAllText(instancePath, instance.ToJsonString());
@@ -163,8 +164,12 @@ public sealed class InstallerTransitionTests
             using var key = Registry.CurrentUser.OpenSubKey(fixture.Product.Paths.UninstallRegistryKey, writable: true);
             key!.SetValue("DisplayVersion", "0.18.9");
         }
+        var evidence = RuntimeFingerprint.CaptureFileEvidence(applicationReadme, instancePath);
+        var native = JsonSerializer.Serialize(InstallerMetadataInventory.CaptureRegistry(fixture.Product.Paths.UninstallRegistryKey));
         Assert.Throws<IOException>(() => fixture.Product.Owner.CancelTransition(fixture.Product.Application, fixture.Product.Transaction, Work(fixture)));
         Assert.Equal(original, File.ReadAllBytes(path));
+        Assert.Equal(evidence, RuntimeFingerprint.CaptureFileEvidence(applicationReadme, instancePath));
+        Assert.Equal(native, JsonSerializer.Serialize(InstallerMetadataInventory.CaptureRegistry(fixture.Product.Paths.UninstallRegistryKey)));
     }
 
     [Fact(DisplayName = "The Actual Published Installer Worker Persists Replays And Cancels An Active Source With The Same Target And Runtime")]

@@ -50,24 +50,36 @@ public sealed class PreparedRecoveryTests
     [InlineData("image")]
     [InlineData("workspace")]
     [InlineData("live-log-writer")]
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     public void KeepsUnprovenIsolation(string fault)
     {
         var fixture = AttemptTestFixture.Create();
         fixture.Accept();
         var registry = new RecoveryJournalRegistry(fixture.Database);
         var logPath = fixture.Plan.InitialLogs[0].Path;
+        var output = Path.Combine(fixture.Instance.RuntimeRoot, fixture.Plan.OutputDirectory);
+        var logDirectory = Path.Combine(fixture.Instance.RuntimeRoot, fixture.Plan.LogDirectory);
+        var configuration = Path.Combine(fixture.Configuration.TargetPath, "settings.bin");
+        var originalImage = Path.Combine(fixture.Root, "original-image");
+        var workspace = Path.Combine(Path.GetDirectoryName(fixture.Configuration.TargetPath)!, ".nexus-" + fixture.Configuration.JournalId.ToString("D"));
+        var unknownOutput = Path.Combine(output, "unknown.bin");
+        var unknownLog = Path.Combine(logDirectory, "unknown.bin");
+        var unknownWorkspace = Path.Combine(workspace, "unknown.bin");
         if (fault == "entered") new JournalEffectGate(fixture.Database).Enter(registry.ReadSnapshot().Journals.Single(), 1);
-        if (fault == "output") Directory.CreateDirectory(Path.Combine(fixture.Instance.RuntimeRoot, fixture.Plan.OutputDirectory));
-        if (fault == "log-directory") Directory.CreateDirectory(Path.Combine(fixture.Instance.RuntimeRoot, fixture.Plan.LogDirectory));
-        if (fault == "configuration") File.WriteAllBytes(Path.Combine(fixture.Configuration.TargetPath, "settings.bin"), [77]);
+        if (fault == "output") { Directory.CreateDirectory(output); File.WriteAllBytes(unknownOutput, [17, 18]); }
+        if (fault == "log-directory") { Directory.CreateDirectory(logDirectory); File.WriteAllBytes(unknownLog, [29, 30]); }
+        if (fault == "configuration") File.WriteAllBytes(configuration, [77]);
         if (fault == "log-content") File.WriteAllBytes(logPath, [88]);
         if (fault == "image")
         {
-            File.Move(fixture.Source.Image, Path.Combine(fixture.Root, "original-image"));
+            File.Move(fixture.Source.Image, originalImage);
             File.WriteAllBytes(fixture.Source.Image, [0, 1, 255]);
         }
-        if (fault == "workspace") Directory.CreateDirectory(Path.Combine(Path.GetDirectoryName(fixture.Configuration.TargetPath)!, ".nexus-" + fixture.Configuration.JournalId.ToString("D")));
-        var before = File.ReadAllBytes(logPath);
+        if (fault == "workspace") { Directory.CreateDirectory(workspace); File.WriteAllBytes(unknownWorkspace, [43, 44]); }
+        var directories = new[] { output, logDirectory, workspace, fixture.Configuration.TargetPath };
+        var files = new[] { logPath, configuration, fixture.Source.Image, originalImage, unknownOutput, unknownLog, unknownWorkspace };
+        var beforeDirectories = CaptureDirectories();
+        var beforeFiles = RuntimeFingerprint.CaptureFileEvidence(files);
         using var writer = fault == "live-log-writer" ? new FileStream(logPath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite) : null;
         Assert.Equal(JournalRecoveryResult.Quarantined, fixture.Recover(id => new(
             fault == "foreign-writer" ? Guid.NewGuid() : fixture.Instance.InstanceId, id, fault != "incomplete",
@@ -76,10 +88,19 @@ public sealed class PreparedRecoveryTests
         Assert.NotEmpty(registry.ReadSnapshot().Isolations);
         Assert.Null(new AttemptReceiptStore(fixture.Database).Read(Guid.Parse(fixture.Plan.AttemptId)));
         writer?.Dispose();
-        Assert.Equal(before, File.ReadAllBytes(logPath));
+        Assert.Equal(beforeDirectories, CaptureDirectories());
+        Assert.Equal(beforeFiles, RuntimeFingerprint.CaptureFileEvidence(files));
         var journal = JournalBytes(fixture);
         Assert.Equal(JournalRecoveryResult.Quarantined, fixture.Recover());
         Assert.Equal(journal, JournalBytes(fixture));
+        Assert.Equal(beforeDirectories, CaptureDirectories());
+        Assert.Equal(beforeFiles, RuntimeFingerprint.CaptureFileEvidence(files));
+
+        (string Path, PhysicalObjectIdentity? Identity, string? Members)[] CaptureDirectories() =>
+            directories.Select(path => Directory.Exists(path)
+                ? (path, (PhysicalObjectIdentity?)PhysicalObjectIdentity.Read(path),
+                    JsonSerializer.Serialize(Directory.EnumerateFileSystemEntries(path).Order(StringComparer.Ordinal)))
+                : (path, null, null)).ToArray();
     }
 
     [Fact(DisplayName = "Unknown Attempt Intent Stops Read Only Preflight Before Any Journal Or Receipt Mutation")]

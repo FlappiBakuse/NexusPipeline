@@ -19,7 +19,7 @@ public sealed class WriterOutcomeTests
     public async Task StopsFailedPublication()
     {
         using var fixture = new NativeWriterFixture(failAfterRootPublication: true);
-        Assert.Equal(1, fixture.Scope.PreparedCalls); Assert.Equal(1, fixture.Scope.RegisterCalls);
+        var input = File.ReadAllBytes(fixture.Target);
         Assert.Equal(0U, fixture.Scope.Job.GetAccounting().TotalProcesses);
         Assert.Equal("fixture_root_published", Assert.Throws<IOException>(() => fixture.Writer.Start()).Message);
         var root = Assert.IsType<ProcessIdentity>(fixture.Scope.Root);
@@ -43,7 +43,10 @@ public sealed class WriterOutcomeTests
             () => fixture.Writer.StopAsync(TimeSpan.FromSeconds(10)))).Message);
         Assert.Equal("configuration_editor_start_closed", Assert.Throws<IOException>(() => fixture.Writer.Start()).Message);
         Assert.Equal("configuration_writer_not_started", Assert.Throws<IOException>(() => fixture.Writer.ElapsedSinceStart).Message);
-        Assert.Equal(1, fixture.Scope.CloseCalls); Assert.Equal(1, fixture.Scope.StartCalls);
+        Assert.Equal(root, fixture.Scope.Root);
+        Assert.Contains(root, fixture.Observer.Family);
+        fixture.AssertStoppedFamily(fixture.Observer.Family);
+        Assert.Equal(input, File.ReadAllBytes(fixture.Target));
         Assert.Equal(0, fixture.Scope.ClosedCalls); Assert.False(File.Exists(fixture.Report));
     }
 
@@ -51,14 +54,12 @@ public sealed class WriterOutcomeTests
     public async Task RecordsVerifiedClosure()
     {
         using var fixture = new NativeWriterFixture(failAfterRootPublication: false);
-        Assert.Equal(1, fixture.Scope.PreparedCalls); Assert.Equal(1, fixture.Scope.RegisterCalls);
         Assert.Equal(0U, fixture.Scope.Job.GetAccounting().TotalProcesses);
         var started = fixture.Writer.Start();
         Assert.Equal(fixture.Scope.ProcessScopeId, started.AttemptId);
         var report = await OwnedCrashProcess.ReadReportAsync(fixture.Report);
         Assert.Equal(started.ProcessId, report.GetProperty("processId").GetInt32());
         Assert.Equal("edited", File.ReadAllText(fixture.Target));
-        Assert.Equal(1, fixture.Observer.Calls); Assert.Equal(1, fixture.Scope.RootCalls);
         var family = fixture.Scope.CaptureFamily();
         var stopped = await fixture.Writer.StopAsync(TimeSpan.FromSeconds(10));
         Assert.True(stopped.WasExecuted);
@@ -67,8 +68,8 @@ public sealed class WriterOutcomeTests
         Assert.Contains(closure.Root!, family); Assert.Equal(closure.Family.Length, family.Length);
         Assert.All(family, member => Assert.Contains(member, closure.Family));
         Assert.Null(closure.RunElapsedMilliseconds);
-        Assert.Equal(1, fixture.Scope.BindCalls); Assert.Equal(1, fixture.Scope.ClosedCalls);
-        Assert.Equal(1, fixture.Scope.CloseCalls); Assert.True(fixture.Scope.ClosedElapsedMilliseconds >= 0);
+        Assert.Equal(1, fixture.Scope.ClosedCalls);
+        Assert.True(fixture.Scope.ClosedElapsedMilliseconds >= 0);
         Assert.Equal(fixture.Scope.Reference, stopped.Reference);
         var saved = fixture.Scope.ReadClosure();
         Assert.Equal(closure.Root, saved.Root); Assert.True(saved.WasExecuted);

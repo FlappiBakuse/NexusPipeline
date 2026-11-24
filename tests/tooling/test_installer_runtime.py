@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tooling'))
-from installer_runtime import LOCK, FRAMEWORKS, read_dependencies, required_frameworks, render_runtime
+from installer_lifecycle import LOCK, FRAMEWORKS, read_dependencies, required_frameworks, render_runtime
 from installer_fixture import application, bundle, compiler_inputs, native_inputs, native_probe
 from installer_flow import native_flow
 

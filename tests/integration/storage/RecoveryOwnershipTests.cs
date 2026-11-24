@@ -23,6 +23,104 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class RecoveryOwnershipTests(ITestOutputHelper output)
 {
+    [Fact(DisplayName = "Maintenance Stop Proof Reads Runtime And Rechecks The Registered Writer Set")]
+    public async Task CapturesMaintenanceStopFromRuntime()
+    {
+        using var fixture = await Fixture.Create("six");
+        await fixture.StopFamily();
+        var instance = fixture.Instance;
+        using var lease = await AcquireStoppedInstance();
+        var database = fixture.Open();
+        lease.BindDatabase(database);
+        var journal = Assert.Single(new RecoveryJournalRegistry(database).ReadSnapshot().Journals,
+            item => item.Kind == JournalKind.UpdateApply);
+        var ownership = new JournalRecoveryOwnership(database);
+        using var execution = ownership.Begin([journal]);
+        const DatabaseDomain broad = DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records |
+            DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content;
+        var runtimeSql = new List<string>();
+        var broadSql = new List<string>();
+        var runtimeHandle = Trace(DatabaseDomain.Runtime, runtimeSql);
+        var broadHandle = Trace(broad, broadSql);
+        JournalRecoveryOwnership.MaintenanceStopProof proof;
+        try { proof = Capture(); }
+        finally
+        {
+            SQLitePCL.raw.sqlite3_trace(runtimeHandle, (SQLitePCL.strdelegate_trace?)null, null);
+            SQLitePCL.raw.sqlite3_trace(broadHandle, (SQLitePCL.strdelegate_trace?)null, null);
+        }
+
+        var proofReads = runtimeSql.Count(IsWriterSet);
+        var broadProofReads = broadSql.Count(IsWriterSet);
+        var proofRole = proofReads != 0 ? DatabaseDomain.Runtime : broad;
+        var statements = proofReads != 0 ? runtimeSql : broadSql;
+        var snapshots = statements.Where(sql => sql.Contains("rootpage FROM ", StringComparison.Ordinal)).Distinct();
+        using (var cold = DatabaseConnections.Open(database.DatabasePath, readOnly: true, allowPooling: false, domains: proofRole))
+        using (var aliases = cold.CreateCommand())
+        {
+            aliases.CommandText = "PRAGMA database_list;";
+            var names = new List<string>();
+            using (var rows = aliases.ExecuteReader())
+                while (rows.Read()) if (rows.GetString(1) != "temp") names.Add(rows.GetString(1));
+            output.WriteLine($"stop-proof runtime-reads={proofReads} wide-reads={broadProofReads} cold-domains={string.Join(',', names)}");
+            var snapshot = Assert.Single(snapshots);
+            Assert.Equal("SELECT rootpage FROM main.sqlite_schema LIMIT 1;", snapshot);
+            output.WriteLine(snapshot);
+            using var command = cold.CreateCommand();
+            command.CommandText = "EXPLAIN QUERY PLAN " + statements.First(IsWriterSet);
+            using var planner = command.ExecuteReader();
+            while (planner.Read()) output.WriteLine(planner.GetString(3));
+        }
+
+        for (var i = 0; i < 5; i++) _ = Capture();
+        const int iterations = 40;
+        using var process = Process.GetCurrentProcess();
+        var cpuBefore = process.TotalProcessorTime;
+        var allocationBefore = GC.GetAllocatedBytesForCurrentThread();
+        var started = Stopwatch.GetTimestamp();
+        for (var i = 0; i < iterations; i++) _ = Capture();
+        var elapsed = Stopwatch.GetElapsedTime(started);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - allocationBefore;
+        var cpu = process.TotalProcessorTime - cpuBefore;
+        output.WriteLine($"stop-proof warm-iterations={iterations} elapsed-ms={elapsed.TotalMilliseconds:F3} allocated-bytes={allocated} process-cpu-ms={cpu.TotalMilliseconds:F3}");
+
+        database.Write((connection, transaction) =>
+        {
+            proof.RequireInside(connection, transaction, journal.JournalId);
+            JournalWriterStore.Insert(connection, transaction, journal.JournalId, JournalWriterStore.CurrentWriter with { WriterId = Guid.NewGuid() });
+            Assert.Equal("maintenance_recovery_writer_stop_unconfirmed", Assert.Throws<IOException>(() =>
+                proof.RequireInside(connection, transaction, journal.JournalId)).Message);
+            return true;
+        });
+        Assert.Equal((2, 0), (proofReads, broadProofReads));
+
+        async Task<InstanceLease> AcquireStoppedInstance()
+        {
+            var wait = Stopwatch.StartNew();
+            while (true)
+            {
+                try { return InstanceLease.Acquire(instance, new()); }
+                catch (IOException error) when ((error.HResult & 0xffff) is 32 or 33 && wait.Elapsed < TimeSpan.FromSeconds(5))
+                { await Task.Delay(20); }
+            }
+        }
+
+        JournalRecoveryOwnership.MaintenanceStopProof Capture() => ownership.CaptureMaintenanceWriters(instance, database, lease, journal.JournalId);
+
+        SQLitePCL.sqlite3 Trace(DatabaseDomain domains, List<string> statements)
+        {
+            using var reader = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: domains);
+            SQLitePCL.strdelegate_trace capture = (_, sql) => statements.Add(sql);
+            var handle = reader.Handle!;
+            SQLitePCL.raw.sqlite3_trace(handle, capture, null);
+            return handle;
+        }
+
+        static bool IsWriterSet(string sql) => sql.StartsWith("SELECT writer_id,process_id,", StringComparison.Ordinal) &&
+            sql.Contains("main.journal_writers WHERE journal_id=", StringComparison.Ordinal) &&
+            sql.EndsWith("ORDER BY writer_id LIMIT 1025;", StringComparison.Ordinal);
+    }
+
     [Theory(DisplayName = "Actual Host Recovers An Accepted Missing Initial Journal Only After Its Recorded Creator Stops")]
     [InlineData(false)]
     [InlineData(true)]
@@ -321,7 +419,7 @@ public sealed class RecoveryOwnershipTests(ITestOutputHelper output)
             : new(Path.Combine(Root, "payload"), Path.Combine(Instance.RuntimeRoot, "extensions"));
 
         internal StateDatabase Open(bool admission = false) => StateDatabase.OpenExisting(Instance,
-            Path.Combine(Instance.RuntimeRoot, "diagnostics", Guid.NewGuid().ToString("N")),
+            Path.Combine(Instance.RuntimeRoot, "diagnostics", "inspection"),
             admission ? new JournalStartupAdmission(Instance, new(), PayloadRoots) : null);
 
         internal static async Task<Fixture> Create(string mode)

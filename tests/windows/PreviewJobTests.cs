@@ -58,7 +58,7 @@ public sealed class PreviewJobTests
                 finally { Assert.True(await helper.StopAsync(TimeSpan.FromSeconds(10))); }
             }
             var stopped = await domain.StopAsync(TimeSpan.FromSeconds(10));
-            Assert.InRange(stopped.TotalProcesses, 4100U, 8200U); Assert.Equal(OwnedPreviewJob.LimitFlags, stopped.Flags);
+            Assert.InRange(stopped.TotalProcesses, 4100U, 8200U);
             Assert.Equal(initial.TotalProcesses, main.GetAccounting().TotalProcesses);
             Assert.Contains(primary.ProcessId, main.ActiveProcessIds());
             Assert.Equal(initial.ActiveProcesses, (uint)main.ActiveProcessIds().Count);

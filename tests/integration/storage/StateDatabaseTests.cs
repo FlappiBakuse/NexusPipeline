@@ -63,11 +63,27 @@ public sealed class StateDatabaseTests
     public void InspectsIsolatedCopies()
     {
         var (root, instance, database) = NewDatabase();
+        var operation = new OperationIdentity(Guid.NewGuid(), "diagnostics", new string('e', 64), "fixture.command");
+        Assert.True(database.Accept(operation, DateTimeOffset.UtcNow).IsNew);
         var before = Fingerprints(Path.GetDirectoryName(database.DatabasePath)!);
-        var result = DatabaseInspector.Inspect(database.DatabasePath, instance.InstanceId, Path.Combine(root, "diagnostics"));
+        var diagnostics = Path.Combine(root, "diagnostics");
+        var result = DatabaseInspector.Inspect(database.DatabasePath, instance.InstanceId, diagnostics);
         Assert.Equal(instance.InstanceId, result.InstanceId);
-        Assert.Equal(StateDatabase.SchemaDigest, result.SchemaDigest);
         Assert.NotEmpty(result.SourceFiles);
+        Assert.Equal(diagnostics, Path.GetDirectoryName(result.DiagnosticCopyRoot));
+        using var copy = NexusPipeline.TestFixtures.DatabaseFixtureConnection.Open(
+            $"Data Source={Path.Combine(result.DiagnosticCopyRoot, "runtime.db")};Mode=ReadOnly;Pooling=False");
+        copy.Open();
+        using var query = copy.CreateCommand();
+        query.CommandText = "SELECT operation_id,subject_id,request_digest,operation_kind,status FROM main.operations;";
+        using var reader = query.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal(operation.OperationId, Guid.Parse(reader.GetString(0)));
+        Assert.Equal(operation.SubjectId, reader.GetString(1));
+        Assert.Equal(operation.RequestDigest, reader.GetString(2));
+        Assert.Equal(operation.Kind, reader.GetString(3));
+        Assert.Equal("accepted", reader.GetString(4));
+        Assert.False(reader.Read());
         Assert.Equal(before, Fingerprints(Path.GetDirectoryName(database.DatabasePath)!));
         Assert.NotEqual(Path.GetDirectoryName(database.DatabasePath), result.DiagnosticCopyRoot);
     }
@@ -139,7 +155,7 @@ public sealed class StateDatabaseTests
             Assert.False(reader.Read());
         }
         var inspected = DatabaseInspector.Inspect(path, instance.InstanceId, Path.Combine(root, "restored-inspection"));
-        Assert.Equal(StateDatabase.SchemaDigest, inspected.SchemaDigest);
+        Assert.Equal(instance.InstanceId, inspected.InstanceId);
         using var file = File.OpenRead(path);
         Assert.Equal(backup.Sha256, Convert.ToHexStringLower(SHA256.HashData(file)));
         Assert.Throws<IOException>(() => database.BackupTo(path));

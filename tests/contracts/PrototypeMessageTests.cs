@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Serialization;
 using Xunit;
@@ -13,17 +14,33 @@ public sealed class PrototypeMessageTests
     [Fact(DisplayName = "Task Adapter Accepts The New Typed Request And Refuses Old Protocol Or Unknown Phase")]
     public void ValidatesAdapterPhase()
     {
-        var request = new TaskAdapter
+        const string digest = "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a";
+        const string operation = "038d6553-fd25-42c9-8d3b-cf143f3b0ee2";
+        var bytes = """
+            {"format":"nexus.task.adapter","version":1,"direction":"request","phase":"discover",
+             "extensionId":"bettergi","operationId":"038d6553-fd25-42c9-8d3b-cf143f3b0ee2",
+             "resources":[{"resourceId":"profile","sha256":"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a","content":"{}"}]}
+            """u8.ToArray();
+        var request = _reader.Read<TaskAdapter>(bytes, "task-adapter.schema.json");
+        Assert.Equal("discover", request.Phase);
+        Assert.Equal("request", request.Direction);
+        Assert.Equal("bettergi", request.ExtensionId);
+        Assert.Equal(operation, request.OperationId);
+        var resource = Assert.Single(request.Resources!);
+        Assert.Equal(("profile", digest, "{}"), (resource.ResourceId, resource.Sha256, resource.Content));
+
+        void Reject(byte[] invalid) => Assert.Equal("unsupported_or_invalid_contract",
+            Assert.Throws<JsonException>(() => _reader.Read(invalid, "task-adapter.schema.json")).Message);
+        Reject(Encoding.UTF8.GetBytes("""{"version":"0.3.0","phase":"discover","resources":[]}"""));
+        foreach (var (field, invalid) in new[] { ("phase", "unsupported"), ("operationId", "missing-guid"), ("runId", operation) })
         {
-            Format = "nexus.task.adapter", Version = 1, Direction = "request", Phase = "discover",
-            ExtensionId = "bettergi", OperationId = Guid.NewGuid().ToString("D"), Resources = []
-        };
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(request);
-        Assert.Equal("discover", _reader.Read<TaskAdapter>(bytes, "task-adapter.schema.json").Phase);
-        var old = Encoding.UTF8.GetBytes("""{"version":"0.3.0","phase":"discover","resources":[]}""");
-        Assert.Throws<JsonException>(() => _reader.Read(old, "task-adapter.schema.json"));
-        var invalid = JsonSerializer.SerializeToUtf8Bytes(request with { Phase = "execute-arbitrary-command" });
-        Assert.Throws<JsonException>(() => _reader.Read(invalid, "task-adapter.schema.json"));
+            var changed = JsonNode.Parse(bytes)!.AsObject();
+            changed[field] = invalid;
+            Reject(JsonSerializer.SerializeToUtf8Bytes(changed));
+        }
+        var wrongResource = JsonNode.Parse(bytes)!;
+        wrongResource["resources"]![0]!["sha256"] = "bad-digest";
+        Reject(JsonSerializer.SerializeToUtf8Bytes(wrongResource));
     }
 
     [Fact(DisplayName = "Desktop Messages Cannot Add An Arbitrary Native Command Or Change Format Generation")]

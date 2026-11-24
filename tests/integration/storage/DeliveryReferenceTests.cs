@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using System.Text;
+using System.Text.Json;
 using NexusPipeline.Core.Records;
 using NexusPipeline.Core.Secrets;
 using NexusPipeline.Platform.Storage;
@@ -50,18 +51,31 @@ public sealed class DeliveryReferenceTests
     {
         using var fixture = new DeliveryReferenceFixture(); await fixture.Prepare();
         var snapshot = fixture.Snapshot;
-        if (conflict == "secret-cas") await fixture.Replace();
+        var codec = new NotificationDeliveryCodec(fixture.Source.Instance, new());
+        if (conflict == "secret-cas")
+        {
+            await fixture.Replace();
+            using var catalog = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Notifications);
+            var current = NotificationCatalogRows.ReadCurrent(catalog, null)!;
+            var task = Assert.Single(new NotificationCatalogCodec(fixture.Source.Instance, new()).Read(current.Reference).Document.Tasks);
+            snapshot = codec.Persist(snapshot.Document with { Catalog = current.Reference, CatalogRevision = current.Revision, Task = task });
+        }
         else
         {
             var bytes = new ImmutableBlobStore(fixture.Source.Instance, new()).PersistContent(Encoding.UTF8.GetBytes("unattached"), default);
-            snapshot = new NotificationDeliveryCodec(fixture.Source.Instance, new()).Persist(snapshot.Document with
+            snapshot = codec.Persist(snapshot.Document with
             {
                 Attachment = new RecordAsset(snapshot.Document.Source.Receipt.Facts.RunId, bytes.Sha256, bytes.SizeBytes, RecordAssetKind.Screenshot)
             });
         }
         var before = fixture.Operations();
-        Assert.ThrowsAny<Exception>(() => fixture.Accept(snapshot));
+        var evidence = fixture.Source.Snapshot();
+        if (conflict == "secret-cas")
+            Assert.Equal("secret_revision_conflict", Assert.Throws<InvalidOperationException>(() => fixture.Accept(snapshot)).Message);
+        else
+            Assert.Equal("notification_delivery_attachment_unbound", Assert.Throws<IOException>(() => fixture.Accept(snapshot)).Message);
         Assert.Equal(before, fixture.Operations());
+        var after = fixture.Source.Snapshot(); Assert.Equal(evidence.Rows, after.Rows); Assert.Equal(evidence.Files, after.Files);
         using var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var command = connection.CreateCommand(); command.CommandText = "SELECT count(*) FROM notifications.notification_deliveries;";
         Assert.Equal(0L, command.ExecuteScalar());
@@ -71,14 +85,21 @@ public sealed class DeliveryReferenceTests
     public async Task RejectsUnknownTransitions()
     {
         using var fixture = new DeliveryReferenceFixture(); await fixture.Prepare(); fixture.Accept();
+        var old = Assert.Single(fixture.Snapshot.Document.Secrets.Where(field => field.Payload is not null)).Payload!;
+        var payload = Path.Combine(fixture.Source.Instance.RuntimeRoot, "secrets", "payloads", $"{old.SecretId:D}-{old.Digest}.bin");
+        var original = File.ReadAllBytes(payload);
+        Assert.True(DeliveryReferenceIndex.IsSecretReferenced(fixture.Source.Instance, fixture.Source.Database, new(), old.SecretId, old.Digest, old.SizeBytes));
         using (var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var command = connection.CreateCommand())
         {
             command.CommandText = "UPDATE notifications.notification_delivery_transitions SET document_json=json_set(document_json,'$.unexpected',true);";
             Assert.Equal(1, command.ExecuteNonQuery());
         }
-        var old = Assert.Single(fixture.Snapshot.Document.Secrets.Where(field => field.Payload is not null)).Payload!;
-        Assert.ThrowsAny<Exception>(() => DeliveryReferenceIndex.IsSecretReferenced(fixture.Source.Instance,
+        var before = fixture.Source.Snapshot();
+        var error = Assert.Throws<JsonException>(() => DeliveryReferenceIndex.IsSecretReferenced(fixture.Source.Instance,
             fixture.Source.Database, new(), old.SecretId, old.Digest, old.SizeBytes));
+        Assert.Equal("$.unexpected", error.Path);
+        var after = fixture.Source.Snapshot(); Assert.Equal(before.Rows, after.Rows); Assert.Equal(before.Files, after.Files);
+        Assert.Equal(original, File.ReadAllBytes(payload));
     }
 }

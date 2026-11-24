@@ -32,6 +32,7 @@ public sealed class LogHistoryTests
             Assert.Equal(BusinessOutcome.Unverified, document.Business);
             var raw = RawOutputCodec.Read(new(fixture.Source.Instance, new()), fixture.Binding, document.RawOutput!);
             Assert.True(raw.IsComplete); Assert.All(raw.FileSources, source => Assert.NotNull(source.EndOffset));
+            RequireClosedJobs(fixture);
             await fixture.Complete(cancelled: true);
         }
         finally { if (File.Exists(path)) File.Delete(path); }
@@ -56,23 +57,34 @@ public sealed class LogHistoryTests
             Assert.DoesNotContain("old-file-success", invocation.Input.GetProperty("log").GetString());
             Assert.DoesNotContain("pipe-success", invocation.Input.GetProperty("log").GetString());
         });
-        var state = fixture.State; Assert.Equal(2, state.Jobs.Length);
-        foreach (var job in state.Jobs)
-        {
-            var closure = new JobClosureStore(fixture.Source.Instance, fixture.Source.Database, new()).ReadForExecutionEvidence(
-                fixture.Binding.ParentJournalId, job.WriterId, job.JobName, job.SessionId)!;
-            Assert.True(closure.WasExecuted); Assert.All(closure.Family, member => Assert.Equal(WriterState.Stopped, WriterStopEvidence.ObserveProcess(member)));
-        }
+        RequireClosedJobs(fixture);
         await fixture.Complete();
         Assert.Equal(original, File.ReadAllBytes(fixture.Source.Configuration)); Assert.Equal(identity, PhysicalObjectIdentity.Read(fixture.Source.Configuration));
         Directory.Delete(fixture.DirectoryPath, recursive: true);
         var reader = new StepEvidenceReader(fixture.Source.Instance, fixture.Source.Database, new());
         Assert.Equal(BusinessOutcome.Failed, reader.Read(fixture.Binding,
             Assert.Single(StepResultCodec.Read(fixture.State.Latest.Root, fixture.Total)).Latest.Artifact, true).Business);
+        using var outputLog = new JudgementLogReader();
+        var inputs = new JudgementInputBuilder(fixture.Source.Instance, fixture.Source.Database, new());
         foreach (var invocation in invocations)
         {
             var exchange = transcript.Exchanges.Single(item => JudgementInvocationArchive.Read(blobs, item.Invocation).Generation == invocation.Generation);
-            new JudgementInputBuilder(fixture.Source.Instance, fixture.Source.Database, new()).VerifyHistorical(fixture.Total, invocation, exchange.RawOutput);
+            inputs.VerifyHistorical(fixture.Total, invocation, exchange.RawOutput, outputLog);
+        }
+    }
+
+    private static void RequireClosedJobs(FileLogFixture fixture)
+    {
+        var state = fixture.State;
+        Assert.Equal(new[] { "judgement", "process" }, state.Jobs.Select(job => job.Role).Order(StringComparer.Ordinal));
+        var store = new JobClosureStore(fixture.Source.Instance, fixture.Source.Database, new());
+        foreach (var job in state.Jobs)
+        {
+            var closure = Assert.IsType<FrozenJobClosure>(store.ReadForExecutionEvidence(fixture.Binding.ParentJournalId,
+                job.WriterId, job.JobName, job.SessionId));
+            Assert.True(closure.WasExecuted);
+            Assert.Contains(Assert.IsType<ProcessIdentity>(closure.Root), closure.Family);
+            Assert.All(closure.Family, member => Assert.Equal(WriterState.Stopped, WriterStopEvidence.ObserveProcess(member)));
         }
     }
 

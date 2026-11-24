@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Runtime.Versioning;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using NexusPipeline.Core.Secrets;
@@ -13,6 +14,83 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class CheckInTests
 {
+    [Fact(DisplayName = "The Original CheckIn Package Preserves Kept Ciphertext And Treats An Unreadable Credential As Configured")]
+    public async Task PreservesCredentialIntents()
+    {
+        using var inputs = new BuiltExtensionInputs("game-checkin", "NEXUS_PACKAGED_CHECKIN_RECEIPT");
+        await using var fixture = new CheckInFixture(inputs, responseCode: 200);
+        await fixture.OpenAsync();
+        var task = await Publish(null, 0, "set");
+        var key = new SecretFieldKey("game-checkin", task, "kuro");
+        var saved = await fixture.Secrets.GetStateAsync(key, default);
+        Assert.True(saved.IsConfigured); Assert.True(saved.IsReadable);
+        Assert.Equal(1, saved.Revision);
+        var secretId = Assert.IsType<Guid>(saved.SecretId);
+        var identity = Payload(secretId);
+        Assert.Equal(NexusPipeline.Platform.Security.UserSecretProtector.Scheme, identity.Scheme);
+        var ciphertext = Path.Combine(fixture.Catalog.Instance.RuntimeRoot, "secrets", "payloads",
+            $"{secretId:D}-{identity.Digest}.bin");
+        var original = File.ReadAllBytes(ciphertext);
+        Assert.Equal(identity.Digest, Convert.ToHexStringLower(SHA256.HashData(original)));
+        Assert.Equal(task, await Publish(task, 1, "keep"));
+        Assert.Equal(saved, await fixture.Secrets.GetStateAsync(key, default));
+        Assert.Equal(identity, Payload(secretId));
+        Assert.Equal(original, File.ReadAllBytes(ciphertext));
+        using (var unavailable = new FileStream(ciphertext, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            Assert.Equal(saved with { IsReadable = false }, await fixture.Secrets.GetStateAsync(key, default));
+            var editor = await fixture.Call("open-editor", new { taskId = task, expectedRevision = 2 });
+            var field = editor.GetProperty("fields").GetProperty("kuro");
+            Assert.True(field.GetProperty("configured").GetBoolean());
+            Assert.Equal("credential_unavailable", field.GetProperty("error").GetString());
+            Assert.DoesNotContain(Credentials["kuro"], editor.ToString(), StringComparison.Ordinal);
+            _ = await fixture.Call("close-editor", new { editorSessionId = editor.GetProperty("editorSessionId").GetString() });
+            _ = await fixture.Call("run-task", new { taskId = task });
+            _ = await fixture.Completed(task);
+            var current = await fixture.Call("read-state", new { }, read: true);
+            var run = TaskView(current, task).GetProperty("recentRun");
+            var game = Assert.Single(run.GetProperty("results").EnumerateArray());
+            Assert.Equal("credential_unavailable", game.GetProperty("code").GetString());
+            Assert.Equal("notSubmitted", game.GetProperty("effectState").GetString());
+            Assert.Equal(0, fixture.Http.Roles);
+            Assert.Equal(0, fixture.Http.Submissions);
+        }
+        Assert.Equal(task, await Publish(task, 2, "clear"));
+        Assert.Equal(new SecretFieldStatus(2, null, false, false), await fixture.Secrets.GetStateAsync(key, default));
+        Assert.Equal(task, await Publish(task, 3, "set"));
+        var replaced = await fixture.Secrets.GetStateAsync(key, default);
+        Assert.Equal(3, replaced.Revision); Assert.True(replaced.IsReadable);
+        Assert.NotEqual(saved.SecretId, replaced.SecretId);
+        new SecretDocumentInventory(fixture.Catalog.Instance, fixture.Catalog.Database, new()).Verify();
+        inputs.VerifyUnchanged();
+
+        SecretPayloadIdentity Payload(Guid id)
+        {
+            using var connection = DatabaseConnections.Open(fixture.Catalog.Database.DatabasePath,
+                readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
+            return SecretFieldStore.ReadPayload(connection, null, id);
+        }
+
+        async Task<Guid> Publish(Guid? taskId, long revision, string action)
+        {
+            var editor = await fixture.Call("open-editor", new { taskId, expectedRevision = revision });
+            var fields = editor.GetProperty("fields");
+            var edits = new Dictionary<string, object>();
+            foreach (var name in Credentials.Keys)
+            {
+                var fieldGeneration = fields.GetProperty(name).GetProperty("fieldGeneration").GetInt64();
+                edits[name] = name == "kuro" && action == "set" ? new { action, fieldGeneration, value = Credentials[name] } :
+                    new { action = name == "kuro" ? action : "keep", fieldGeneration };
+            }
+            var state = await fixture.Call("save-task", new { editorSessionId = editor.GetProperty("editorSessionId").GetString(),
+                secrets = edits, draft = new { id = taskId, name = "credential " + action, remark = "", enabled = false,
+                    games = new { kuro = new[] { "ww" } }, schedules = Array.Empty<object>(),
+                    notification = new { enabled = false, notificationTaskIds = Array.Empty<string>() } } });
+            Assert.Equal(revision + 1, state.GetProperty("configurationRevision").GetInt64());
+            return Assert.Single(state.GetProperty("tasks").EnumerateArray()).GetProperty("id").GetGuid();
+        }
+    }
+
     [Theory(DisplayName = "The Actual CheckIn Zip Uses Host Atomic Secrets Manual Sources And Cross Task Effects With Offline Production Http")]
     [InlineData(200)]
     [InlineData(1511)]

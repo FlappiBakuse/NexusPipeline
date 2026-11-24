@@ -56,23 +56,41 @@ public sealed class StoreTransferTests
     [Theory(DisplayName = "Actual Metadata Responses Cannot Bypass The Raw Size Encoding And Completeness Boundary")]
     [InlineData("empty")] [InlineData("encoded")] [InlineData("range")]
     [InlineData("declared-overflow")] [InlineData("truncated")] [InlineData("chunked-overflow")]
+    [InlineData("declared-limit")] [InlineData("chunked-limit")]
     public async Task BoundsMetadataResponses(string fault)
     {
-        var body = fault == "chunked-overflow" ? new byte[StrictJson.MaximumBytes + 1] : "{}"u8.ToArray();
+        const int allowedMetadataBytes = 2_097_152;
+        var atLimit = fault is "declared-limit" or "chunked-limit";
+        var chunked = fault is "chunked-limit" or "chunked-overflow";
+        var body = fault == "chunked-overflow" ? new byte[allowedMetadataBytes + 1] :
+            atLimit ? new byte[allowedMetadataBytes] : "{}"u8.ToArray();
+        if (atLimit)
+        {
+            Array.Fill(body, (byte)' ');
+            body[0] = (byte)'{'; body[^1] = (byte)'}';
+        }
         var headers = fault switch
         {
             "empty" => "Content-Length: 0\r\n",
             "encoded" => "Content-Encoding: gzip\r\nContent-Length: 2\r\n",
             "range" => "Content-Range: bytes 0-1/2\r\nContent-Length: 2\r\n",
-            "declared-overflow" => $"Content-Length: {StrictJson.MaximumBytes + 1}\r\n",
+            "declared-overflow" => $"Content-Length: {allowedMetadataBytes + 1}\r\n",
+            "declared-limit" => $"Content-Length: {allowedMetadataBytes}\r\n",
             "truncated" => "Content-Length: 20\r\n",
             _ => ""
         };
         if (fault == "empty") body = [];
-        await using var server = new StoreTransferFixture(headers, body, fault == "chunked-overflow");
+        await using var server = new StoreTransferFixture(headers, body, chunked);
         using var client = Client();
         using var response = await client.GetAsync(server.Address, HttpCompletionOption.ResponseHeadersRead);
-        await Assert.ThrowsAnyAsync<IOException>(() => StoreResponseReader.Metadata(response, default));
+        if (atLimit)
+        {
+            Assert.Equal(body, await StoreResponseReader.Metadata(response, default));
+            return;
+        }
+        var rejected = await Assert.ThrowsAnyAsync<IOException>(() => StoreResponseReader.Metadata(response, default));
+        if (fault == "truncated") Assert.Equal(HttpRequestError.ResponseEnded, Assert.IsType<HttpIOException>(rejected).HttpRequestError);
+        else Assert.Equal("extension_store_download_invalid", rejected.Message);
     }
 
     [Theory(DisplayName = "Actual Artifact Transfers Verify Length And Digest Without Owning The Destination Lifetime")]

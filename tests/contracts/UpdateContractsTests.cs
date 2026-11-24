@@ -8,10 +8,10 @@ namespace NexusPipeline.ContractTests;
 public sealed class UpdateContractsTests
 {
     [Theory(DisplayName = "Host Update Documents Have One Strict Current Shape Before Any Trust Or Process Effect")]
-    [InlineData("update-feed")]
-    [InlineData("update-payload-manifest")]
-    [InlineData("update-receipt")]
-    public void ValidatesCurrentDocuments(string name)
+    [InlineData("update-feed", "version", 1)]
+    [InlineData("update-payload-manifest", "schemaVersion", 2)]
+    [InlineData("update-receipt", "version", 1)]
+    public void ValidatesCurrentDocuments(string name, string versionField, int version)
     {
         using var input = typeof(UpdateContractsTests).Assembly.GetManifestResourceStream("Examples." + name + ".json")!;
         using var copy = new MemoryStream(); input.CopyTo(copy);
@@ -19,10 +19,10 @@ public sealed class UpdateContractsTests
         using (reader.Read(bytes, name + ".schema.json")) { }
         var invalid = JsonNode.Parse(bytes)!.AsObject(); invalid["legacy"] = true;
         Assert.Throws<JsonException>(() => reader.Read(JsonSerializer.SerializeToUtf8Bytes(invalid), name + ".schema.json"));
-        invalid.Remove("legacy"); invalid["version"] = 17;
+        invalid.Remove("legacy"); invalid[versionField] = 17;
         Assert.Throws<JsonException>(() => reader.Read(JsonSerializer.SerializeToUtf8Bytes(invalid), name + ".schema.json"));
         using var accepted = reader.Read(bytes, name + ".schema.json");
-        Assert.Equal(1, accepted.RootElement.GetProperty("version").GetInt32());
+        Assert.Equal(version, accepted.RootElement.GetProperty(versionField).GetInt32());
     }
 
     [Theory(DisplayName = "Every Prepared Successor Requires The Same Complete Startup Binding")]

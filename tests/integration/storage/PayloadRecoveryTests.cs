@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Collections.Immutable;
 using NexusPipeline.Core.Configuration;
 using System.Runtime.Versioning;
 using NexusPipeline.Platform.Storage.Extensions;
@@ -86,6 +87,44 @@ public sealed class PayloadRecoveryTests
         Assert.Equal(evidence, JournalBytes(fixture));
     }
 
+    [Fact(DisplayName = "Extension Recovery Restores The Original Physical Tree When Candidate Bytes Are Identical")]
+    public void RestoresEqualContentWithOriginalIdentity()
+    {
+        var root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "payload-equal-" + Guid.NewGuid().ToString("N"));
+        var target = Path.Combine(root, "extensions", "fixture-plugin");
+        Directory.CreateDirectory(target);
+        File.WriteAllText(Path.Combine(target, "same.txt"), "same-payload");
+        var instance = new InstanceRoot(new()).OpenOrCreate(Path.Combine(root, "runtime"));
+        var scanner = new FileTreeScanner(SnapshotBudget.Default);
+        var archive = new FileTreeArchive(scanner, new(instance, new()));
+        var before = archive.Capture(target, default);
+        var plan = new FrozenPayloadApply(instance.InstanceId, Guid.NewGuid(), Guid.NewGuid(), JournalKind.ExtensionApply, PayloadAction.Upgrade,
+            "fixture-plugin", target, PhysicalObjectIdentity.Read(Path.GetDirectoryName(target)!), before, before with { OriginalObjects = [] },
+            ["extension:fixture-plugin"]);
+        var effects = new PayloadTreeEffects(scanner, archive);
+        var work = PayloadWorkspacePath.For(plan);
+        var saved = new PayloadTreeScene(plan.OperationId, plan.JournalId, "workspace-created", effects.CreateWorkspace(plan), []);
+        var candidate = Path.Combine(work, "candidate");
+        var candidateIdentity = archive.MaterializeNew(plan.Candidate, candidate, default);
+        Assert.NotEqual(before.OriginalIdentity, candidateIdentity);
+        saved = saved with { Stage = "original-preservation-started",
+            CandidateObjects = PhysicalTreeIdentity.Capture(candidate, plan.Candidate.Snapshot).ToImmutableArray() };
+        Assert.Equal((false, false), effects.ObserveRestoration(plan, saved));
+        effects.PreserveOriginal(plan, saved);
+        saved = saved with { Stage = "original-preserved" };
+        effects.InstallCandidate(plan, saved);
+        saved = saved with { Stage = "candidate-installed" };
+        Assert.Equal(candidateIdentity, PhysicalObjectIdentity.Read(target));
+        Assert.Equal((true, true), effects.ObserveRestoration(plan, saved));
+        effects.RetireCandidate(plan, saved);
+        effects.RestoreOriginal(plan, saved);
+        Assert.Equal(before.OriginalIdentity, PhysicalObjectIdentity.Read(target));
+        Assert.Equal(candidateIdentity, PhysicalObjectIdentity.Read(Path.Combine(work, "spent")));
+        Assert.Equal("same-payload", File.ReadAllText(Path.Combine(target, "same.txt")));
+        using var proof = effects.HoldRestored(plan, saved);
+        proof.Require(plan, saved);
+    }
+
     [Fact(DisplayName = "Unknown Payload Intent Bytes Are Rejected Before Any Recovery Metadata Is Changed")]
     public void PreservesUnknownIntents()
     {
@@ -100,6 +139,39 @@ public sealed class PayloadRecoveryTests
         Assert.Equal(revision, new RecoveryJournalRegistry(fixture.Database).ReadSnapshot().Revision);
         Assert.Equal(EffectGateState.Unentered, new JournalEffectGate(fixture.Database).Read(fixture.Plan.JournalId).State);
         Assert.Equal("{\"format\":\"unknown-preserve-this-intent\"}", File.ReadAllText(plan));
+    }
+
+    [Fact(DisplayName = "Prepared Payload Session Rejects A Changed Registration Before Sealing Or Projecting")]
+    public void RejectsChangedRegistration()
+    {
+        using var fixture = PayloadTestFixture.Create(JournalKind.UpdateApply, PayloadAction.Upgrade);
+        fixture.Accept();
+        var id = fixture.Plan.JournalId;
+        var session = new PreparedPayloadSession(fixture.Instance, id, new(), fixture.Database, fixture.Roots,
+            () => new(fixture.Instance.InstanceId, id, true, WriterState.Stopped));
+        var evidence = JournalBytes(fixture);
+        var registration = new RecoveryJournalRegistry(fixture.Database);
+        fixture.Database.Write((connection, transaction) =>
+        {
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "UPDATE main.operation_journals SET plan_path=$path,plan_digest=$digest WHERE journal_id=$id;";
+            var digest = new string('f', 64);
+            command.Parameters.AddWithValue("$path", $"blobs/plans/{digest}.json");
+            command.Parameters.AddWithValue("$digest", digest);
+            command.Parameters.AddWithValue("$id", id.ToString("D"));
+            Assert.Equal(1, command.ExecuteNonQuery());
+            return true;
+        });
+
+        Assert.Throws<IOException>(session.SealEffectEntry);
+        Assert.Throws<IOException>(() => session.Inspect());
+        Assert.Throws<IOException>(() => session.Quarantine("payload_prepared_no_effect_unverified"));
+        Assert.Equal(EffectGateState.Unentered, new JournalEffectGate(fixture.Database).Read(id).State);
+        Assert.Equal(JournalPhase.Prepared, registration.ReadJournal(id).Phase);
+        Assert.All(registration.ReadSnapshot().FileEffects.Where(item => item.JournalId == id),
+            item => Assert.Equal(FileEffectState.Pending, item.State));
+        Assert.Equal(evidence, JournalBytes(fixture));
     }
 
     private static string[] JournalBytes(PayloadTestFixture fixture) => Directory.GetFiles(Path.Combine(fixture.Instance.RuntimeRoot, "journals"), "*", SearchOption.AllDirectories)

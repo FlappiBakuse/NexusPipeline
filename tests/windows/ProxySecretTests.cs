@@ -67,7 +67,7 @@ public sealed class ProxySecretTests
         Assert.False(cleared.IsConfigured);
     }
 
-    [Theory(DisplayName = "Host Preparation Requires The Actual Root Before Reading Any Credential")]
+    [Theory(DisplayName = "Invalid Root Qualification Rejects Credential Preparation Without Changing Persistent State")]
     [InlineData("foreign-manager")]
     [InlineData("wrong-operation")]
     [InlineData("missing-claim")]
@@ -86,7 +86,10 @@ public sealed class ProxySecretTests
         var before = PersistentFingerprints(fixture);
         var error = Record.Exception(() => fixture.Service.PrepareProxyCredential(root,
             fault == "wrong-operation" ? Guid.NewGuid() : owner));
-        Assert.True(error is ObjectDisposedException or InvalidOperationException or IOException, error?.ToString());
+        if (fault == "expired-instance")
+            Assert.Equal("runtime_exclusive_lease_required", Assert.IsType<IOException>(error).Message);
+        else if (fault == "disposed-root") Assert.IsType<ObjectDisposedException>(error);
+        else Assert.Equal("resource_operation_borrow_unbound", Assert.IsType<InvalidOperationException>(error).Message);
         Assert.Equal(before, PersistentFingerprints(fixture));
     }
 

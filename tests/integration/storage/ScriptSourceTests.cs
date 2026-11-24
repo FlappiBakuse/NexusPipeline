@@ -21,17 +21,20 @@ public sealed class ScriptSourceTests
     }
 
     [Theory]
-    [InlineData("../outside.json")]
-    [InlineData("D:/outside.json")]
-    [InlineData("account.json:stream")]
-    [InlineData("config\\account.json")]
-    [InlineData("ACCOUNT.JSON")]
-    [InlineData("")]
-    public void RejectsForeignPaths(string path)
+    [InlineData("../outside.json", "unsupported_filesystem_component")]
+    [InlineData("D:/outside.json", "unsupported_snapshot_relative_path")]
+    [InlineData("account.json:stream", "unsupported_snapshot_relative_path")]
+    [InlineData("config\\account.json", "unsupported_snapshot_relative_path")]
+    [InlineData("ACCOUNT.JSON", "script_source_changed")]
+    [InlineData("", "unsupported_filesystem_component")]
+    public void RejectsForeignPaths(string path, string code)
     {
         using var fixture = new ProjectSourceFixture(); fixture.Write("account.json", "{}"u8.ToArray());
         using var source = new ScriptSourceDirectory(fixture.Path, fixture.Catalog.Resources, () => { }, default);
-        Assert.ThrowsAny<Exception>(() => source.Read(path));
+        Assert.Equal("{}", source.Read("account.json"));
+        Assert.Equal(code, Assert.Throws<IOException>(() => source.Read(path)).Message);
+        source.RequireCurrent();
+        Assert.Equal("{}", File.ReadAllText(Path.Combine(fixture.Path, "account.json")));
     }
 
     [Theory]

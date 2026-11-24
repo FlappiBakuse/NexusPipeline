@@ -92,19 +92,24 @@ public sealed class InstallerPreservationTests
         fixture.Product.Owner.PreserveTransition(fixture.Product.Application, fixture.Product.Transaction, Work(fixture));
         var frame = Read(fixture); var workspace = InstallerPayloadTree.Workspace(frame);
         var preserved = Path.Combine(workspace, "README.md");
-        if (fault == "installed") File.WriteAllText(Path.Combine(fixture.Product.Application, "README.md"), "Preserve unknown installed bytes");
+        var installed = Path.Combine(fixture.Product.Application, "README.md");
+        var moved = Path.Combine(fixture.Product.Root, "retained-original.md");
+        if (fault == "installed") File.WriteAllText(installed, "Preserve unknown installed bytes");
         if (fault == "preserved") File.AppendAllText(preserved, "Preserve changed original bytes");
         if (fault == "identity")
         {
             var bytes = File.ReadAllBytes(preserved);
-            File.Move(preserved, Path.Combine(fixture.Product.Root, "retained-original.md")); File.WriteAllBytes(preserved, bytes);
+            File.Move(preserved, moved); File.WriteAllBytes(preserved, bytes);
         }
-        if (fault == "workspace") File.WriteAllText(Path.Combine(workspace, "unknown.txt"), "Preserve foreign workspace bytes");
-        if (fault == "duplicate") File.Copy(preserved, Path.Combine(fixture.Product.Application, "README.md"));
+        var foreign = Path.Combine(workspace, "unknown.txt");
+        if (fault == "workspace") File.WriteAllText(foreign, "Preserve foreign workspace bytes");
+        if (fault == "duplicate") File.Copy(preserved, installed);
         var before = fixture.Scanner.Capture(workspace, default);
+        var files = RuntimeFingerprint.CaptureFileEvidence(preserved, installed, moved, foreign);
         var checkpoint = File.ReadAllBytes(Path.Combine(fixture.Product.Checkpoint, "payload.protected"));
         Assert.Throws<IOException>(() => fixture.Product.Owner.CancelTransition(fixture.Product.Application, fixture.Product.Transaction, Work(fixture)));
         Assert.True(before.Entries.SequenceEqual(fixture.Scanner.Capture(workspace, default).Entries));
+        Assert.Equal(files, RuntimeFingerprint.CaptureFileEvidence(preserved, installed, moved, foreign));
         Assert.Equal(checkpoint, File.ReadAllBytes(Path.Combine(fixture.Product.Checkpoint, "payload.protected")));
         Assert.False(File.Exists(Path.Combine(fixture.Product.Application, ApplicationTree.HostEntry)));
     }

@@ -91,9 +91,51 @@ export async function checkFieldHelp(page, output) {
     const rect = await bubble.boundingBox();
     assert(rect && rect.x >= 0 && rect.x + rect.width <= width && rect.y >= 0 && rect.y + rect.height <= 900,
       'the pointed bubble fits the ' + theme + ' viewport');
-    assert(await bubble.evaluate(node => getComputedStyle(node, '::before').content === '""'),
-      'the shared bubble draws its pointer in ' + theme);
-    await page.screenshot({ path: path.join(output, 'help-' + theme + '.png') });
+    const anchor = await input.boundingBox();
+    assert(anchor, 'the tooltip still has a visible field anchor');
+    const edge = rect.y + rect.height <= anchor.y ? rect.y + rect.height + 3 : rect.y - 3;
+    const tip = await bubble.evaluate((node, y) => {
+      const bounds = node.getBoundingClientRect();
+      const root = node.getRootNode();
+      const hits = [];
+      for (let x = Math.ceil(bounds.left) + 4; x < bounds.right - 4; x++)
+        if (root.elementFromPoint(x, y) === node) hits.push(x);
+      return hits.length > 1 ? hits[Math.floor(hits.length / 2)] : null;
+    }, edge);
+    assert(tip !== null, 'the shared bubble points beyond its edge toward the input in ' + theme);
+    const png = await page.screenshot({ path: path.join(output, 'help-' + theme + '.png'), scale: 'css' });
+    const mask = await bubble.evaluateHandle(node => {
+      const style = document.createElement('style');
+      style.textContent = '.panel::before { opacity: 0 !important }';
+      node.getRootNode().append(style);
+      return style;
+    });
+    let hidden;
+    try { hidden = await page.screenshot({ scale: 'css' }); }
+    finally { await mask.evaluate(style => style.remove()); await mask.dispose(); }
+    const painted = await page.evaluate(async ({ visible, hidden, tip, edge }) => {
+      async function pixels(encoded) {
+        const bytes = Uint8Array.from(atob(encoded), character => character.charCodeAt(0));
+        const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+        const context = canvas.getContext('2d', { willReadFrequently: true });
+        context.drawImage(bitmap, 0, 0);
+        bitmap.close();
+        return context.getImageData(tip - 16, Math.round(edge) - 1, 33, 3).data;
+      }
+      const [before, after] = await Promise.all([pixels(visible), pixels(hidden)]);
+      let pointerPixels = 0, outsidePixels = 0;
+      for (let pixel = 0; pixel < before.length / 4; pixel++) {
+        const index = pixel * 4;
+        const change = [0, 1, 2].reduce((sum, channel) =>
+          sum + Math.abs(before[index + channel] - after[index + channel]), 0);
+        if (change <= 12) continue;
+        if (Math.abs(pixel % 33 - 16) <= 6) pointerPixels++;
+        else outsidePixels++;
+      }
+      return pointerPixels >= 3 && outsidePixels === 0;
+    }, { visible: png.toString('base64'), hidden: hidden.toString('base64'), tip, edge });
+    assert(painted, 'the protruding pointer is painted in the ' + theme + ' screenshot');
   }
   await input.click();
   await bubble.waitFor({ state: 'hidden' });

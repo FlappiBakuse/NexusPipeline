@@ -15,6 +15,43 @@ namespace NexusPipeline.StorageTests;
 
 public sealed class ImportServiceTests
 {
+    [Fact(DisplayName = "An Attachment Import Updates The Approved Existing Script And Publishes Its Exact Asset")]
+    public void UpdatesExistingDefinitionsWithAttachment()
+    {
+        using var fixture = Create();
+        var original = Encode(fixture);
+        var firstId = Guid.NewGuid();
+        var first = fixture.Service.Preview(firstId, original, fixture.Roots, 0);
+        _ = fixture.Service.Apply(firstId, "fixture", original, fixture.Roots, 0, first.PreviewDigest, new Dictionary<Guid, string>());
+
+        var store = new AutomationDefinitionStore(fixture.Database);
+        var before = store.Read();
+        var script = Assert.Single(before.Scripts);
+        var root = Assert.Single(before.Roots);
+        var attachment = Attachment(fixture);
+        var changed = before with { Scripts = [script with { Name = "Updated script" }], Roots = [root with { Name = "Updated root" }] };
+        var input = new AutomationBundleCodec(new()).Encode(changed, DateTimeOffset.UtcNow, selectedAttachments: [attachment.Asset]);
+        var operation = Guid.NewGuid();
+        var preview = fixture.Service.Preview(operation, input, fixture.Roots, before.Revision);
+        Assert.True(preview.CanApply);
+        Assert.Equal(script.Revision, Assert.Single(preview.Bundle.Definitions.Scripts).Revision);
+        Assert.Equal(root.Revision, Assert.Single(preview.Bundle.Definitions.Roots).Revision);
+        var files = new Dictionary<Guid, string> { [attachment.Asset.Id] = attachment.Path };
+        var result = fixture.Service.Apply(operation, "fixture", input, fixture.Roots, before.Revision, preview.PreviewDigest, files);
+        Assert.Equal(AutomationImportState.Published, result.State);
+        Assert.NotNull(result.JournalId);
+        var saved = store.Read();
+        Assert.Equal((script.Id, script.Revision + 1, "Updated script"),
+            (saved.Scripts[0].Id, saved.Scripts[0].Revision, saved.Scripts[0].Name));
+        Assert.Equal((root.Id, root.Revision + 1, "Updated root"), (saved.Roots[0].Id, saved.Roots[0].Revision, saved.Roots[0].Name));
+        using var export = fixture.Service.PrepareExport(DateTimeOffset.UtcNow, script.Id);
+        Assert.Equal(attachment.Asset.Sha256, Assert.Single(export.Attachments).Sha256);
+        using var content = new MemoryStream();
+        export.CopyAttachmentTo(attachment.Asset.Id, content);
+        Assert.Equal(File.ReadAllBytes(attachment.Path), content.ToArray());
+        Assert.Equal(result with { IsNew = false }, fixture.Service.Apply(operation, "fixture", input, fixture.Roots, before.Revision, preview.PreviewDigest, files));
+    }
+
     [Fact(DisplayName = "A Prepared Export Leases Its Real Attachments And Imports Their Exact Bytes Into Another New Instance")]
     public void LeasesExportAttachments()
     {

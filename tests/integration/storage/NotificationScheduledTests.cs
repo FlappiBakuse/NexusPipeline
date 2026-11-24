@@ -36,7 +36,14 @@ public sealed class NotificationScheduledTests
         Assert.Equal(1, fixture.Effects); Assert.Equal(1, fixture.Base.Count("scheduled_provider_occurrences"));
         Assert.Equal(savedTask ? 1 : 0, sink.Requests.Count);
         Assert.Equal(0, fixture.Base.Count("attempt_receipts")); Assert.Equal(0, fixture.Base.Count("run_records"));
-        DeliveryReferenceIndex.VerifyReadOnly(fixture.Base.Source.Instance, fixture.Base.Source.Database, new());
+        var source = fixture.Base.Source;
+        DeliveryReferenceIndex.VerifyReadOnly(source.Instance, source.Database, new());
+        var catalog = new NotificationCatalogService(source.Instance, source.Database, source.Lease, fixture.Base.Resources, fixture.Base.Index, new());
+        var after = await catalog.SetMaximumAsync(Guid.NewGuid(), "local:scheduled-native", savedTask ? 1 : 0, 11);
+        Assert.Equal(savedTask ? 2 : 1, after.Revision);
+        fixture.Base.Execute("UPDATE operations SET operation_kind='notification.registration' WHERE operation_kind='notification.scheduled-source';");
+        Assert.Equal("notification_publication_inventory_unknown", (await Assert.ThrowsAsync<IOException>(() =>
+            catalog.SetMaximumAsync(Guid.NewGuid(), "local:scheduled-native", after.Revision, 12).AsTask())).Message);
     }
 
     [Fact(DisplayName = "A Closed Scheduling Source Restores Its Own Notification Queue And Rejects A Different Run")]

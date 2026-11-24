@@ -51,6 +51,8 @@ public sealed class InstallerOwnedTests
     {
         using var fixture = new OwnedFixture(initialized: false);
         var evidence = Path.Combine(fixture.Product.Application, "README.md");
+        var runtimeData = Path.Combine(fixture.Runtime.RuntimeRoot, "unknown.bin");
+        var managerData = Path.Combine(fixture.Product.Paths.ManagerRoot, "unknown.bin");
         if (fault == "payload") File.AppendAllText(evidence, "Unrecognized application bytes");
         if (fault == "metadata")
         {
@@ -58,20 +60,31 @@ public sealed class InstallerOwnedTests
             key!.SetValue("DisplayVersion", "0.17.6", RegistryValueKind.String);
         }
         if (fault == "runtime")
-            File.WriteAllBytes(Path.Combine(fixture.Runtime.RuntimeRoot, "unknown.bin"), "Preserve runtime evidence"u8.ToArray());
+            File.WriteAllBytes(runtimeData, "Preserve runtime evidence"u8.ToArray());
         if (fault == "manager")
-            File.WriteAllBytes(Path.Combine(fixture.Product.Paths.ManagerRoot, "unknown.bin"), "Preserve manager evidence"u8.ToArray());
+            File.WriteAllBytes(managerData, "Preserve manager evidence"u8.ToArray());
+        var retainedRoot = fixture.Product.Application + "-preserved";
         if (fault == "root")
         {
-            var old = fixture.Product.Application + "-preserved";
-            Directory.Move(fixture.Product.Application, old);
+            Directory.Move(fixture.Product.Application, retainedRoot);
             Directory.CreateDirectory(fixture.Product.Application);
-            evidence = Path.Combine(old, "README.md");
+            evidence = Path.Combine(retainedRoot, "README.md");
         }
         var bytes = File.ReadAllBytes(evidence);
         using var gate = InstallerRuntimeGate.Acquire(fixture.Product.Application);
+        var applicationRoot = PhysicalObjectIdentity.Read(fixture.Product.Application);
+        var files = RuntimeFingerprint.CaptureFileEvidence(evidence, runtimeData, managerData);
+        var registration = JsonSerializer.Serialize(InstallerMetadataInventory.CaptureRegistry(fixture.Product.Paths.UninstallRegistryKey));
         Assert.Throws<IOException>(() => fixture.Read(source => source));
         Assert.Equal(bytes, File.ReadAllBytes(evidence));
+        Assert.Equal(files, RuntimeFingerprint.CaptureFileEvidence(evidence, runtimeData, managerData));
+        Assert.Equal(registration, JsonSerializer.Serialize(InstallerMetadataInventory.CaptureRegistry(fixture.Product.Paths.UninstallRegistryKey)));
+        Assert.Equal(applicationRoot, PhysicalObjectIdentity.Read(fixture.Product.Application));
+        if (fault == "root")
+        {
+            Assert.NotEqual(fixture.Identity.RootIdentity, applicationRoot);
+            Assert.Equal(fixture.Identity.RootIdentity, PhysicalObjectIdentity.Read(retainedRoot));
+        }
         Assert.False(Directory.Exists(fixture.Product.Checkpoint));
     }
 
@@ -108,6 +121,18 @@ public sealed class InstallerOwnedTests
     {
         using var fixture = new OwnedFixture(initialized: true);
         var before = fixture.Scanner.Capture(fixture.Runtime.RuntimeRoot, default);
+        string[] files = ["NexusPipeline.exe", "NexusPipeline.update.exe", "README.md",
+            "resources/desktop/NexusPipeline.Desktop.exe", "resources/desktop/locales/en-US.pak",
+            "resources/desktop/locales/zh-CN.pak", "resources/desktop/resources/app.asar", "resources/payload-manifest.json"];
+        string[] dirs = ["", "resources", "resources/desktop", "resources/desktop/locales", "resources/desktop/resources"];
+        var identities = files.Concat(dirs).ToDictionary(path => path,
+            path => PhysicalObjectIdentity.Read(Path.Combine(fixture.Product.Application, path)), StringComparer.Ordinal);
+        string Digest(string path)
+        {
+            using var file = File.OpenRead(Path.Combine(fixture.Product.Application, path));
+            return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(file));
+        }
+        var digests = files.ToDictionary(path => path, Digest, StringComparer.Ordinal);
         var result = await fixture.Product.Execute("installer-state", "check-transition", "--root", fixture.Product.Application,
             "--work-root", Path.Combine(fixture.Product.Root, "entry-inspection"));
         Assert.Equal(0, result.ExitCode);
@@ -117,7 +142,23 @@ public sealed class InstallerOwnedTests
         Assert.Equal(fixture.Identity.InstallationId, source.GetProperty("identity").GetProperty("installationId").GetGuid());
         Assert.Equal(fixture.Identity.RuntimeId, source.GetProperty("identity").GetProperty("runtimeId").GetGuid());
         Assert.Equal("active", source.GetProperty("identity").GetProperty("state").GetString());
-        Assert.True(source.GetProperty("applicationObjects").GetArrayLength() > 4);
+        var objects = source.GetProperty("applicationObjects").EnumerateArray().ToArray();
+        Assert.Equal(files.Concat(dirs).Order(StringComparer.Ordinal),
+            objects.Select(item => item.GetProperty("relativePath").GetString()).Order(StringComparer.Ordinal));
+        foreach (var item in objects)
+        {
+            var relative = item.GetProperty("relativePath").GetString()!;
+            Assert.Equal(identities[relative],
+                item.GetProperty("identity").Deserialize<PhysicalObjectIdentity>(JsonSerializerOptions.Web));
+            Assert.Equal(identities[relative], PhysicalObjectIdentity.Read(Path.Combine(fixture.Product.Application, relative)));
+        }
+        var entries = source.GetProperty("application").GetProperty("entries").EnumerateArray().ToArray();
+        Assert.All(digests, expected =>
+        {
+            var entry = Assert.Single(entries, item => item.GetProperty("relativePath").GetString() == expected.Key);
+            Assert.Equal(expected.Value, entry.GetProperty("sha256").GetString());
+            Assert.Equal(expected.Value, Digest(expected.Key));
+        });
         Assert.True(before.Entries.SequenceEqual(fixture.Scanner.Capture(fixture.Runtime.RuntimeRoot, default).Entries));
         Assert.False(Directory.Exists(fixture.Product.Checkpoint));
     }

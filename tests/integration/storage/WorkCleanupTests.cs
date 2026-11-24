@@ -205,12 +205,26 @@ public sealed class WorkCleanupTests(ITestOutputHelper output)
         var owner = fixture.Original.Package.Catalog;
         var file = Directory.EnumerateFiles(Path.Combine(fixture.Workspace, "before"), "*", SearchOption.AllDirectories)
             .Order(StringComparer.Ordinal).First();
-        if (change == "extra") file = Path.Combine(fixture.Workspace, "unowned.bin");
-        else if (change == "identity") File.Delete(file);
-        File.WriteAllBytes(file, [9, 7, 3, 1]);
+        if (change == "identity")
+        {
+            var originalIdentity = PhysicalObjectIdentity.Read(file);
+            var originalBytes = File.ReadAllBytes(file);
+            var parked = Path.Combine(Path.GetDirectoryName(fixture.Workspace)!, $"fixture-{Guid.NewGuid():N}.bin");
+            File.Move(file, parked);
+            File.WriteAllBytes(file, originalBytes);
+            Assert.Equal(originalIdentity, PhysicalObjectIdentity.Read(parked));
+            Assert.NotEqual(originalIdentity, PhysicalObjectIdentity.Read(file));
+            Assert.Equal(originalBytes, File.ReadAllBytes(file));
+        }
+        else
+        {
+            if (change == "extra") file = Path.Combine(fixture.Workspace, "unowned.bin");
+            File.WriteAllBytes(file, [9, 7, 3, 1]);
+        }
         var identity = PhysicalObjectIdentity.Read(file); var bytes = File.ReadAllBytes(file);
         var journals = new RecoveryJournalRegistry(owner.Database).ReadSnapshot().Journals.Count;
-        await Assert.ThrowsAnyAsync<IOException>(async () => await fixture.RunAsync(Guid.NewGuid()));
+        var error = await Assert.ThrowsAsync<IOException>(async () => await fixture.RunAsync(Guid.NewGuid()));
+        Assert.Equal("extension_work_tree_changed", error.Message);
         Assert.Equal(journals, new RecoveryJournalRegistry(owner.Database).ReadSnapshot().Journals.Count);
         Assert.Equal(bytes, File.ReadAllBytes(file)); Assert.Equal(identity, PhysicalObjectIdentity.Read(file));
         Assert.Equal(fixture.Producer.Latest.Export(), fixture.Original.Binding().Read(fixture.Producer.Plan.JournalId).Latest.Export());

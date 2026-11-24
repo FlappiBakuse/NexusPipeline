@@ -19,6 +19,9 @@ internal static class LogOutputFixture
                 break;
             case "missing": return 37;
             case "append": await Append(path, "file-failure\n"); break;
+            case "invalid-pipe":
+                await stdout.WriteAsync(new byte[] { 255, 10 }); await stdout.FlushAsync();
+                await Append(path, "file-failure\n"); break;
             case "wait":
                 await Append(path, "file-failure\n"); Publish(marker + ".written");
                 await Task.Delay(Timeout.InfiniteTimeSpan); break;

@@ -6,7 +6,7 @@ import subprocess
 
 from binary_inputs import hash_file
 from dotnet_bundle import MARKER
-from installer_runtime import FRAMEWORKS, read_dependencies, render_runtime
+from installer_lifecycle import FRAMEWORKS, read_dependencies, render_runtime
 from product_assets import COMPILER_SHA256
 from source_snapshot import ordinary_path
 

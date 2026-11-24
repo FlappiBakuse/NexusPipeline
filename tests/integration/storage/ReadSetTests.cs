@@ -149,10 +149,39 @@ public sealed class ReadSetTests
     {
         using var fixture = new PatchBatchFixture();
         var current = fixture.Base.Revisions.Read(fixture.Main)!;
-        var entry = current.Tree.Entries.Single(item => item.RelativePath == "one.jsonc");
-        var stamp = new ConfigurationReadStamp(fixture.Main, current.Revision, 1, current.Contract, entry.RelativePath, entry.Sha256!);
-        var result = fixture.Service.Apply("fixture", fixture.Request(Guid.NewGuid())[..2], DateTimeOffset.UtcNow, readSet: [stamp]);
+        var stamps = current.Tree.Entries.Where(entry => entry.Kind == FileObjectKind.File)
+            .Select(entry => new ConfigurationReadStamp(fixture.Main, current.Revision, 1, current.Contract, entry.RelativePath, entry.Sha256!))
+            .Append(Stamp(fixture)).ToArray();
+        Assert.Equal(4, stamps.Length);
+        var result = fixture.Service.Apply("fixture", fixture.Request(Guid.NewGuid())[..2], DateTimeOffset.UtcNow, readSet: stamps);
         Assert.True(result.IsNew); Assert.Single(result.Items);
+        Assert.Equal(2L, fixture.Base.Revisions.Read(fixture.Main)!.Revision);
+        Assert.Equal(1L, fixture.Base.Revisions.Read(fixture.Extra)!.Revision);
+    }
+
+    [Fact(DisplayName = "Two Read Set Paths With Equal Bytes Each Count Towards The Read Budget")]
+    public void CountsIdenticalReadBytesPerPath()
+    {
+        using var fixture = new PatchBatchFixture();
+        var directory = Path.Combine(fixture.Base.Root, "read-budget");
+        Directory.CreateDirectory(directory);
+        foreach (var file in new[] { "one.bin", "two.bin" })
+        {
+            using var output = File.Create(Path.Combine(directory, file));
+            output.SetLength(16 * 1024 * 1024 + 1);
+        }
+        var change = fixture.Base.CaptureTree("budget", directory);
+        var saved = Assert.Single(fixture.Base.Save(new([change])).Items).Saved;
+        var stamps = saved.Tree.Entries.Where(entry => entry.Kind == FileObjectKind.File)
+            .Select(entry => new ConfigurationReadStamp(saved.Address, saved.Revision, 1, saved.Contract, entry.RelativePath, entry.Sha256!)).ToArray();
+        Assert.Equal(2, stamps.Length);
+        Assert.Equal(stamps[0].SourceSha256, stamps[1].SourceSha256);
+        using var prepared = fixture.Service.Preview("fixture", fixture.Request(Guid.NewGuid())[..2], stamps);
+        var before = ReadSnapshots(fixture);
+        Assert.Equal("configuration_read_set_limit", Assert.Throws<ConfigurationException>(() =>
+            fixture.Service.Commit(prepared, DateTimeOffset.UtcNow)).Message);
+        AssertUnpublished(fixture, prepared, before);
+        AssertSnapshot(saved, fixture.Base.Revisions.Read(saved.Address)!);
     }
 
     [Fact(DisplayName = "A Corrupt Read Dependency Blob Rejects Before The Patch Can Publish Or Accept An Operation")]

@@ -29,7 +29,7 @@ test('file and folder dialogs remember only successful choices in their live edi
     require(name) {
       if (name === 'electron') return electron;
       if (name === './proof-reader.cjs') return { readSession: () => identity, responseText: async value => value, readProof: value => value };
-      if (name === './native-frontend.cjs') return { installFrontendBridge: () => ({ invalidate() {}, dispose() {} }) };
+      if (name === './diagnostics.cjs') return require('../../apps/desktop/diagnostics.cjs');
       if (name === './native-login.cjs') return { installLoginBridge: () => ({ invalidate() {}, dispose() {} }) };
       return require(name);
     },

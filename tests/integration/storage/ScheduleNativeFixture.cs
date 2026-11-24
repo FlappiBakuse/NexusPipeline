@@ -32,7 +32,8 @@ internal sealed class ScheduleNativeFixture : IDisposable
         Clock = clock ?? TimeProvider.System;
         var now = Clock.GetUtcNow();
         var trigger = nextMinute ? DateTimeOffset.FromUnixTimeSeconds((now.ToUnixTimeSeconds() / 60 + 1) * 60) : now;
-        if (nextMinute && trigger - now < TimeSpan.FromSeconds(2)) trigger = trigger.AddMinutes(1);
+        var minimumLead = clock is null ? TimeSpan.FromSeconds(10) : TimeSpan.FromSeconds(2);
+        if (nextMinute && trigger - now < minimumLead) trigger = trigger.AddMinutes(1);
         TriggerUtc = trigger;
         var catalog = Source.Definitions.Read();
         var queue = catalog.Queues.Single();
@@ -95,8 +96,8 @@ internal sealed class ScheduleNativeFixture : IDisposable
 
     public void Dispose()
     {
-        Scheduler.StopAsync().GetAwaiter().GetResult();
-        _sequential.Dispose();
+        try { Scheduler.StopAsync().GetAwaiter().GetResult(); }
+        finally { _sequential.Dispose(); }
     }
 
     internal sealed class FrozenScheduleClock(DateTimeOffset now) : TimeProvider

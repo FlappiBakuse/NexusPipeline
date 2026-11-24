@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using NexusPipeline.Core.Automation;
 using NexusPipeline.Core.Execution;
+using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Automation;
 using NexusPipeline.Platform.Storage.Execution;
@@ -135,11 +136,12 @@ public sealed class TargetInputsTests
         Assert.Equal(before, fixture.Base.Counts());
     }
 
-    [Theory(DisplayName = "A Stored Mapping Cannot Be Rebound To Another Index Endpoint Manager Or Instance")]
+    [Theory(DisplayName = "A Stored Mapping Cannot Be Rebound To Another Index Endpoint Manager Instance Or Start Anchor")]
     [InlineData("index")]
     [InlineData("endpoint")]
     [InlineData("manager")]
     [InlineData("instance")]
+    [InlineData("start")]
     public async Task RejectsReboundMappings(string damage)
     {
         using var fixture = new MuMuDiscoveryFixture();
@@ -152,6 +154,20 @@ public sealed class TargetInputsTests
         using var draft = fixture.Base.Source.Prepare(new BindingTarget(fixture.Base.Source.OtherBinding));
         var original = Assert.IsType<FrozenExecutionPlan>(draft.ReadPlan()).ReadWire();
         var android = target.Android!;
+        if (damage == "start")
+        {
+            var mapping = android.Mapping!;
+            var reference = mapping.InfoEvidence;
+            var saved = MuMuDiscoveryEvidence.Read(blobs, new(reference.RelativePath, reference.SizeBytes, reference.Sha256));
+            var foreign = new MuMuDiscoveryStart(MuMuDiscoveryEvidence.Format + "-start", 1, saved.InstanceId, Guid.NewGuid(),
+                saved.Endpoint, saved.Manager, saved.Creator, saved.JobName, saved.Root);
+            var foreignStart = blobs.PersistPlan(BoundedJson.Serialize(foreign, MuMuDiscoveryEvidence.Options));
+            var rebound = blobs.PersistPlan(BoundedJson.Serialize(saved with { Start = foreignStart }, MuMuDiscoveryEvidence.Options));
+            target = target with { Android = android with { Mapping = mapping with { InfoEvidence = new()
+            {
+                RelativePath = rebound.RelativePath, SizeBytes = rebound.SizeBytes, Sha256 = rebound.Sha256
+            } } } };
+        }
         target = damage switch
         {
             "index" => target with { Android = android with { Mapping = android.Mapping! with { Index = 4 } } },

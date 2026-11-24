@@ -7,11 +7,12 @@ using NexusPipeline.Platform.Extensions;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace NexusPipeline.StorageTests;
 
 [SupportedOSPlatform("windows")]
-public sealed class PackageArchiveTests
+public sealed class PackageArchiveTests(ITestOutputHelper report)
 {
     [Theory(DisplayName = "Zip Checksum Matches The Standard Independent Known Vectors")]
     [InlineData("", 0U)]
@@ -57,6 +58,65 @@ public sealed class PackageArchiveTests
         Assert.Equal("{}"u8.ToArray(), frozen.ReadManifest());
         var expected = Assert.Single(archive.Files, item => item.RelativePath == "nested/deeper/value.bin");
         Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(data)), expected.Sha256);
+    }
+
+    [Fact(DisplayName = "A Frozen Archive Binds Each Expected Member Once And Copies Every Verified Member")]
+    public void BindsFrozenMembersOnce()
+    {
+        var members = Enumerable.Range(0, 512).Select(index =>
+            new ExtensionZipSpec($"members/{index:D4}.bin", [(byte)(index >> 8), (byte)index])).ToArray();
+        using var input = new MemoryStream(SafeZipFixture.Build(members), writable: false);
+        using var inspected = ExtensionPackageArchive.Open(input);
+        var entries = new CountedEntries(inspected.Directories.Select(path => new FileTreeEntry(path, FileObjectKind.Directory, 0, null))
+            .Concat(inspected.Files.Select(file => new FileTreeEntry(file.RelativePath, FileObjectKind.File, file.SizeBytes, file.Sha256)))
+            .ToArray());
+        input.Position = 0;
+        using var frozen = ExtensionPackageArchive.OpenFrozen(input, new(FileObjectKind.Directory, entries), default);
+        using var bytes = new MemoryStream();
+        foreach (var member in members)
+        {
+            bytes.SetLength(0);
+            frozen.CopyFile(member.Name, bytes, default);
+            Assert.Equal(member.Bytes, bytes.ToArray());
+        }
+        Assert.Equal("{}"u8.ToArray(), frozen.ReadManifest());
+        report.WriteLine($"frozen ZIP: {entries.Count} expected nodes, {members.Length + 1} archive members, {entries.Visits} visits to expected nodes");
+        Assert.Equal(entries.Count, entries.Visits);
+    }
+
+    [Fact(DisplayName = "A Frozen Archive Rejects Duplicate Expected Members And Still Checks The Copied Digest")]
+    public void RejectsUnboundFrozenMembers()
+    {
+        using var input = new MemoryStream(SafeZipFixture.Build(new ExtensionZipSpec("data.bin", [5, 13])), writable: false);
+        using var inspected = ExtensionPackageArchive.Open(input);
+        var entries = inspected.Files.Select(file => new FileTreeEntry(file.RelativePath, FileObjectKind.File, file.SizeBytes, file.Sha256)).ToArray();
+        var data = Assert.Single(entries, file => file.RelativePath == "data.bin");
+        input.Position = 0;
+        Assert.Throws<IOException>(() => ExtensionPackageArchive.OpenFrozen(input, new(FileObjectKind.Directory, [.. entries, data]), default));
+
+        var changed = entries.Select(file => file == data ? file with { Sha256 = new string('0', 64) } : file).ToArray();
+        input.Position = 0;
+        using var frozen = ExtensionPackageArchive.OpenFrozen(input, new(FileObjectKind.Directory, changed), default);
+        using var bytes = new MemoryStream();
+        Assert.Throws<IOException>(() => frozen.CopyFile("data.bin", bytes, default));
+    }
+
+    private sealed class CountedEntries(IReadOnlyList<FileTreeEntry> entries) : IReadOnlyList<FileTreeEntry>
+    {
+        internal int Visits { get; private set; }
+        public int Count => entries.Count;
+        public FileTreeEntry this[int index] => entries[index];
+
+        public IEnumerator<FileTreeEntry> GetEnumerator()
+        {
+            foreach (var entry in entries)
+            {
+                Visits++;
+                yield return entry;
+            }
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     [Theory(DisplayName = "No Archive Path Can Escape Or Alias An Existing File Or Directory Node")]

@@ -1,12 +1,12 @@
 import { createApp, h, nextTick, ref } from 'vue';
-import HistoryCatalogWindow from '../../apps/web/src/components/HistoryCatalogWindow.vue';
+import VirtualHistoryList from '../../apps/web/src/components/VirtualHistoryList.vue';
 
 export async function historyCatalogContract(fixture: HTMLElement, check: (value: unknown, name: string) => void): Promise<void> {
   const items = ref(Array.from({ length: 10000 }, (_, index) => ({ id: String(index) })));
   const visible = ref(true), selected = ref('');
   const mount = document.createElement('section');
   fixture.append(mount);
-  const app = createApp({ render: () => h(HistoryCatalogWindow, {
+  const app = createApp({ render: () => h(VirtualHistoryList, {
     items: items.value, itemKey: (item: { id: string }) => item.id, label: 'Long history catalog', visible: visible.value
   }, { default: ({ item }: { item: { id: string } }) => h('button', {
     onClick: () => { selected.value = item.id; }

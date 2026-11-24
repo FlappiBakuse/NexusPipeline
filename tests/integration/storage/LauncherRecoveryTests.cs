@@ -57,16 +57,17 @@ public sealed class LauncherRecoveryTests
             var retained = evidence.Read<ProviderLauncherRetained>(launcher.Artifact!);
             var intent = evidence.Read<ProviderLauncherRetention>(retained.Intent);
             ProviderLauncherReferences.RequireSubset(state.Total, intent.References, launcher.Binding.ExtensionId);
+            Assert.Contains(retained.Intent, evidence.RequireAll(state, verifyContents: true));
             var upstreamClaims = PhysicalResourceAdmission.Read(fixture.Source.OtherImage, ResourceClaimMode.Mutation, includeDescendants: false);
             using (var unrelated = resources.TryAcquire(Guid.NewGuid(), upstreamClaims).Lease) Assert.NotNull(unrelated);
             var blobs = new ImmutableBlobStore(instance, new());
             var references = new BlobReferenceIndex(instance, new(), database, blobs);
             var parentPlan = new BlobReference(state.Journal.PlanPath,
                 new FileInfo(Path.Combine(instance.RuntimeRoot, state.Journal.PlanPath)).Length, state.Journal.PlanDigest);
-            Assert.Contains(retained.Intent, new PlanReferenceClosure(instance, new(), blobs, database).Read(state.Journal, parentPlan));
             var terminal = Assert.Single(ProviderTerminalCodec.Read(state.Latest.Root, state.Total));
             var control = new ProviderControlReader(instance, database, new()).Read(terminal.Binding, terminal.Artifact);
             var raw = Assert.Single(control.Archive.Parts);
+            Assert.Contains(raw, new PlanReferenceClosure(instance, new(), blobs, database).Read(state.Journal, parentPlan));
             var candidate = Assert.Single(new CleanupPlanCodec(instance, new(), blobs)
                 .Capture(Guid.NewGuid(), Guid.NewGuid(), [raw]).Items);
             Assert.Equal(CleanupStepResult.SkippedReferenced, new BlobCleanup(instance, blobs, references).RemoveVerified(candidate));

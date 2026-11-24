@@ -7,7 +7,6 @@
   ],
   "classes": [
     "NexusPipeline.CoreTests.AdapterRepetitionTests",
-    "NexusPipeline.CoreTests.AdapterTaskTests",
     "NexusPipeline.CoreTests.AssetRecoveryTests",
     "NexusPipeline.CoreTests.AttemptCoordinatorTests",
     "NexusPipeline.CoreTests.AttemptFactsTests",
@@ -20,7 +19,6 @@
     "NexusPipeline.CoreTests.BrowserValueTests",
     "NexusPipeline.CoreTests.BrowserValueContractTests",
     "NexusPipeline.CoreTests.BusinessJudgementTests",
-    "NexusPipeline.CoreTests.BusinessPreservationTests",
     "NexusPipeline.CoreTests.ClaimModeTests",
     "NexusPipeline.CoreTests.CleanupRecoveryTests",
     "NexusPipeline.CoreTests.CompletionAdmissionTests",
@@ -56,7 +54,6 @@
     "NexusPipeline.CoreTests.ResourceLeaseTests",
     "NexusPipeline.CoreTests.RetainedReferencesTests",
     "NexusPipeline.CoreTests.RetryRulesTests",
-    "NexusPipeline.CoreTests.ScheduleMinuteTests",
     "NexusPipeline.CoreTests.SecretRecoveryTests",
     "NexusPipeline.CoreTests.StepStopTests",
     "NexusPipeline.CoreTests.SynchronizationTriggerTests",

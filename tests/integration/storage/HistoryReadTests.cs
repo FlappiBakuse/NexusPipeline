@@ -46,6 +46,8 @@ public sealed class HistoryReadTests
         Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
         using var denied = await server.Client.PostAsync("control/v1/records", new StringContent("{}"));
         Assert.Equal(HttpStatusCode.MethodNotAllowed, denied.StatusCode);
+        Assert.Equal(new[] { "GET" }, denied.Content.Headers.Allow);
+        Assert.True(denied.Headers.CacheControl?.NoStore);
         await server.CoordinateAsync();
     }
 
@@ -89,8 +91,12 @@ public sealed class HistoryReadTests
             Assert.False(summary.RootElement.TryGetProperty("days", out _));
             var items = summary.RootElement.GetProperty("users").EnumerateArray().ToArray();
             Assert.InRange(items.Length, 1, 200);
-            if (users == 0) Assert.Equal(90000, items[0].GetProperty("totals").GetProperty("runs").GetInt32());
-            users += items.Length;
+            foreach (var item in items)
+            {
+                Assert.Equal(HistoryReadSeed.Id("20000000", users + 1), item.GetProperty("userId").GetGuid());
+                Assert.Equal(users == 0 ? 90000 : 1, item.GetProperty("totals").GetProperty("runs").GetInt32());
+                users++;
+            }
             after = summary.RootElement.TryGetProperty("nextUserId", out var next) && next.ValueKind is not JsonValueKind.Null
                 ? next.GetString() : null;
         } while (after is not null);

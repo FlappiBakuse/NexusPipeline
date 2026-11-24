@@ -172,12 +172,28 @@ public sealed class PlanBuilderTests
         using var draft = fixture.Prepare(new ScriptTarget(fixture.ScriptId));
         var before = draft.ReadPlan()!.Export(); var digest = draft.PlanDigest;
         var read = draft.ReadPlan()!; var wire = read.ReadWire();
-        var steps = Assert.IsAssignableFrom<IList<ExecutionPlanStep>>(wire.Steps);
-        steps[0] = steps[0] with { Arguments = ["changed returned copy"], SelectedTaskIds = ["invented"] };
-        var selection = Assert.IsAssignableFrom<IList<ExecutionPlanSelectionItem>>(wire.Selection);
-        selection[0] = selection[0] with { ReasonCode = "changed_copy" };
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(before)), digest);
+        Assert.Equal(fixture.ScriptId.ToString("D"), wire.Steps[0].ScriptId);
+        using (var image = File.OpenRead(fixture.Image))
+            Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(image)), wire.Steps[0].ImageSha256);
+        var expectedArguments = wire.Steps[0].Arguments.ToArray();
+        var expectedTasks = wire.Steps[0].SelectedTaskIds?.ToArray();
+        var expectedReason = wire.Selection[0].ReasonCode;
+        void TryReplace<T>(IReadOnlyList<T> values, T changed)
+        {
+            if (values is not IList<T> exposed) return;
+            try { exposed[0] = changed; } catch (NotSupportedException) { }
+        }
+        TryReplace(wire.Steps, wire.Steps[0] with { Arguments = ["changed returned copy"], SelectedTaskIds = ["invented"] });
+        TryReplace(wire.Selection, wire.Selection[0] with { ReasonCode = "changed_copy" });
         var bytes = read.Export(); Array.Fill(bytes, (byte)0);
         Assert.Equal(before, read.Export()); Assert.Equal(before, draft.ReadPlan()!.Export()); Assert.Equal(digest, draft.PlanDigest);
+        foreach (var reopened in new[] { read.ReadWire(), draft.ReadPlan()!.ReadWire() })
+        {
+            Assert.Equal(expectedArguments, reopened.Steps[0].Arguments);
+            Assert.Equal(expectedTasks, reopened.Steps[0].SelectedTaskIds?.ToArray());
+            Assert.Equal(expectedReason, reopened.Selection[0].ReasonCode);
+        }
         Assert.Equal(ExecutionSelectionPolicy.InputsVerified, draft.Explanation.Items[0].ReasonCode);
     }
 

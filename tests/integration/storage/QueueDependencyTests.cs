@@ -3,6 +3,7 @@ using NexusPipeline.Core.Automation;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Platform.Storage.Automation;
 using NexusPipeline.Platform.Storage.Execution;
+using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
 
 namespace NexusPipeline.StorageTests;
@@ -83,6 +84,50 @@ public sealed class QueueDependencyTests
         Assert.Equal(2, state.Steps.Length);
         Assert.Equal(5, fixture.Base.Count("journal_writer_job_roots"));
         Assert.Empty(BindingSkipCodec.Read(state.Latest.Root, state.Total));
+    }
+
+    [Fact(DisplayName = "Runtime Quota Counts The Requested Binding Inside Its Observed Local Day")]
+    public void ChecksRuntimeQuotaWindow()
+    {
+        using var fixture = new ExecutionRuntimeFixture(independentSuccessors: true, configure: source =>
+        {
+            var catalog = source.Source.Definitions.Read();
+            var binding = catalog.Bindings.Single(item => item.IsEnabled && item.ScriptId == catalog.Queues.Single().ScriptIds[0]);
+            var changes = new AutomationChanges(catalog.Revision, [], [], [], [binding with { MaximumSuccessfulRunsPerDay = 1 }], [], [], []);
+            source.Source.Definitions.Commit(AutomationDefinitionStore.Identity(Guid.NewGuid(), "quota-window", changes), changes, DateTimeOffset.UtcNow);
+        });
+        var step = fixture.State.Total.Steps[0];
+        var target = Guid.Parse(step.BindingId!);
+        var source = fixture.Source;
+        var journalId = fixture.Accepted.JournalId;
+        var now = DateTimeOffset.UtcNow;
+        var day = ExecutionBindingSuccesses.Day(now);
+        SaveSuccesses((target, day.Start.AddTicks(-1)), (target, now.AddMinutes(10)), (target, day.End), (Guid.NewGuid(), day.Start));
+
+        var store = new BindingSkipStore(source.Instance, source.Database, new(), source.Lease);
+        Assert.False(store.TrySkip(journalId, step.StepId));
+        SaveSuccesses((target, day.Start));
+        Assert.True(store.TrySkip(journalId, step.StepId));
+        var saved = fixture.State;
+        var skip = Assert.Single(BindingSkipCodec.Read(saved.Latest.Root, saved.Total));
+        Assert.Equal(step.StepId, skip.StepId);
+        Assert.Equal("execution_daily_success_limit", skip.ReasonCode);
+        Assert.Equal(1L, skip.SuccessfulRunsToday);
+        Assert.Equal(day.Start, skip.DailyWindowStartUtc);
+        Assert.Equal(day.End, skip.DailyWindowEndUtc);
+        Assert.Empty(saved.Jobs);
+
+        void SaveSuccesses(params (Guid Binding, DateTimeOffset Started)[] facts) => source.Database.Write((connection, transaction) =>
+        {
+            foreach (var (binding, started) in facts)
+            {
+                using var insert = DatabaseConnections.Command(connection, transaction,
+                    "INSERT INTO main.execution_binding_successes(run_id,binding_id,journal_id,started_at_utc_ticks) VALUES($0,$1,$2,$3);",
+                    Guid.NewGuid().ToString("D"), binding.ToString("D"), journalId.ToString("D"), started.UtcTicks);
+                Assert.Equal(1, insert.ExecuteNonQuery());
+            }
+            return true;
+        });
     }
 
     [Fact(DisplayName = "A Real Success Grace Stop Releases Its Dependent After The Original Sixty Second Grace")]

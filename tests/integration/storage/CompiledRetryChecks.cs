@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Collections.Immutable;
 using System.Runtime.InteropServices;
 using NexusPipeline.Core.Execution;
@@ -33,6 +34,9 @@ internal static class CompiledRetryChecks
         var blobs = new ImmutableBlobStore(catalog.Instance, new());
         var evidence = StepEvidenceCodec.Read(blobs, result.Binding, result.Latest.Artifact);
         var observed = AdapterObservationCodec.Read(blobs, result.Binding, evidence.RawOutput!, state.Total.Steps.Single(), evidence.TaskAdapter!);
+        string[] expectedTasks = ["fixture:taskA", "fixture:taskB"];
+        Assert.Equal(expectedTasks, observed.Observations.Select(item => item.TaskId).Order(StringComparer.Ordinal));
+        Assert.Equal(expectedTasks, observed.CurrentObservations!.Value.Select(item => item.TaskId).Order(StringComparer.Ordinal));
         Assert.All(observed.Observations, item => Assert.Equal(AdapterObservationState.Succeeded, item.State));
         Assert.Equal(AdapterCompletion.Satisfied, observed.Observations.Single(item => item.TaskId == "fixture:taskA").CompletionKind);
         Assert.Equal(AdapterObservationState.Unknown, observed.CurrentObservations!.Value.Single(item => item.TaskId == "fixture:taskA").State);
@@ -47,8 +51,10 @@ internal static class CompiledRetryChecks
         RequireTamperRejection(catalog, state, observed, evidence, blobs);
         ConfigurationRunInventory.VerifyReadOnly(catalog.Instance, catalog.Database, new());
         var report = new ExecutionLogReader(catalog.Instance, catalog.Database, new()).ReadReport(receipt.Facts.RunId, receipt.Facts.AttemptId);
-        Assert.All(Assert.Single(report.Steps).Tasks, task => Assert.Equal("succeeded", task.State));
-        Assert.Equal("satisfied", Assert.Single(report.Steps).Tasks.Single(task => task.TaskId == "fixture:taskA").CompletionKind);
+        var tasks = Assert.Single(report.Steps).Tasks;
+        Assert.Equal(expectedTasks, tasks.Select(task => task.TaskId).Order(StringComparer.Ordinal));
+        Assert.All(tasks, task => Assert.Equal("succeeded", task.State));
+        Assert.Equal("satisfied", tasks.Single(task => task.TaskId == "fixture:taskA").CompletionKind);
         var capacity = JournalCapacityPolicy.Measure(state.Total);
         Assert.All(new JournalStore(catalog.Instance, new()).ReadAllRevisions(state.Journal.JournalId),
             journal => Assert.True(journal.Export().LongLength <= capacity.MaximumDocumentBytes));
@@ -197,6 +203,16 @@ internal static class CompiledRetryChecks
             observed.Observations, [], null, observed.CurrentObservations));
         Assert.ThrowsAny<Exception>(() => AdapterObservationCodec.Write(blobs, binding, evidence.RawOutput!, step,
             observed.Observations, [], retry, null));
+        var changedStep = step with { Tasks = step.Tasks.AsEnumerable().Reverse().ToArray() };
+        Assert.Throws<IOException>(() => AdapterObservationCodec.Read(blobs, binding, evidence.RawOutput!, changedStep, evidence.TaskAdapter!));
+        using (var previous = blobs.OpenVerified(retry.PreviousObservation))
+        {
+            var changed = JsonNode.Parse(previous)!.AsObject();
+            changed["tasksDigest"] = new string('0', 64);
+            var changedReference = blobs.PersistPlan(JsonSerializer.SerializeToUtf8Bytes(changed));
+            Assert.Throws<IOException>(() => AdapterObservationCodec.Write(blobs, binding, evidence.RawOutput!, step,
+                observed.Observations, [], retry with { PreviousObservation = changedReference }, observed.CurrentObservations));
+        }
         Assert.Throws<IOException>(() => TaskRetryEvidence.RequireInvocation(catalog.Instance, new(), state.Total,
             observed with { Retry = retry with { Selection = new(["fixture:taskB"], ["fixture:taskA", "fixture:taskB"]) } }));
         var invocation = Assert.Single(ExecutionInvocationCodec.Read(state.Latest.Root, state.Total));

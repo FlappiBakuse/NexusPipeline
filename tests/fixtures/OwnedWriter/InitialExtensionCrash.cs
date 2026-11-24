@@ -50,7 +50,8 @@ internal static class InitialExtensionCrash
             var match = input.Point == "applied" && point == PayloadPersistencePoint.SqlProjectionCommitted && phase == JournalPhase.Applied ||
                 input.Point == "committed" && point == PayloadPersistencePoint.JournalFlushed && phase == JournalPhase.Committed;
             if (!match) return;
-            OwnedFixtureEvidence.WriteReport(input.Report, new { input.Instance, journalId, revision, phase, processId = Environment.ProcessId });
+            OwnedFixtureEvidence.WriteReport(input.Report, new { input.Instance, journalId, revision, phase,
+                requestedPoint = input.Point, persistencePoint = point.ToString(), processId = Environment.ProcessId });
             Thread.Sleep(Timeout.Infinite);
         }
     }

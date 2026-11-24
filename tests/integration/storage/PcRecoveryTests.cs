@@ -1,17 +1,20 @@
 using System.Runtime.Versioning;
+using System.Text.Json;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Maintenance;
+using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace NexusPipeline.StorageTests;
 
 [SupportedOSPlatform("windows")]
-public sealed class PcRecoveryTests
+public sealed class PcRecoveryTests(ITestOutputHelper output)
 {
     [Fact(DisplayName = "Owner Exit After Sql Target Root Admission Without A Necessary Closure Keeps The Installed Configuration Quarantined")]
     public async Task IsolatesUnclosedTargets()
@@ -62,8 +65,45 @@ public sealed class PcRecoveryTests
         using var fixture = new PcCrashFixture();
         await fixture.StartAsync(point, holdOriginalJob: holdJob);
         await fixture.KillOwnerAsync(); Assert.True(fixture.GameAlive);
+        if (holdJob) VerifyRetainedObservation(fixture);
         _ = Recover(fixture, expectedStage, BusinessOutcome.Succeeded);
         Assert.True(fixture.GameAlive);
+    }
+
+    private void VerifyRetainedObservation(PcCrashFixture fixture)
+    {
+        var source = fixture.Source;
+        var binding = fixture.Binding;
+        var state = AttemptWriterState.Read(source.Instance, source.Database, new(), fixture.Parent);
+        var image = state.Total.Steps.Single(step => step.StepId == binding.StepId).Target!.Pc!.ReadyImage;
+        var frozen = new PcTargetImage(image.Path, image.SizeBytes, image.Sha256, new(image.Identity.VolumeSerial, image.Identity.FileId));
+        var creator = TargetRootFacts.Creator(source.Database, binding);
+        var root = TargetRootFacts.Read(source.Database, binding);
+        var writer = Console.Error;
+        using var text = new StringWriter();
+        int members;
+        try
+        {
+            Console.SetError(text);
+            using var profile = StartupProfile.Begin("pc-retained-image");
+            var changed = frozen with { SizeBytes = frozen.SizeBytes + 1 };
+            Assert.Equal("execution_target_recovery_native_unverified", Assert.Throws<IOException>(() =>
+                PreparedRecoveryObservation.Capture(binding.JobName, binding.SessionId, creator, root, changed).Dispose()).Message);
+            using var observation = PreparedRecoveryObservation.Capture(binding.JobName, binding.SessionId, creator, root, frozen);
+            members = observation.Use(binding.JobName, binding.SessionId, creator, root, actual =>
+            {
+                Assert.Equal("retained", actual.Kind);
+                Assert.NotEmpty(actual.LivingFamily);
+                Assert.All(actual.LivingFamily, member => Assert.Equal(frozen.Sha256, member.ImageSha256));
+                return actual.LivingFamily.Length;
+            });
+        }
+        finally { Console.SetError(writer); }
+        using var report = JsonDocument.Parse(text.ToString());
+        var hashes = report.RootElement.GetProperty("steps").EnumerateArray()
+            .Single(step => step.GetProperty("name").GetString() == "process.image-hash").GetProperty("count").GetInt64();
+        output.WriteLine($"live retained family: one rejected size, {members} process identities, {hashes} protocol image hash observations");
+        Assert.Equal(1, hashes);
     }
 
     [Fact(DisplayName = "A Physically Retained Game Without Its Original Job Or Recorded Handoff Cannot Be Assumed Stopped Or Owned After Owner Exit")]

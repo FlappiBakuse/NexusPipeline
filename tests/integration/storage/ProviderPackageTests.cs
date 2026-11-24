@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using System.Security.Cryptography;
 using NexusPipeline.Platform.Extensions;
 using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Storage;
@@ -39,15 +40,32 @@ public sealed class ProviderPackageTests
         using var prepared = registry.Acquire("provider-fixture");
         var upstream = package.Worker; var arguments = new[] { "original" };
         var first = ExecutionProviderInputs.Capture(prepared, upstream, arguments);
-        var expected = first.Worker.RuntimeFiles[0];
-        ((IList<ExecutionPlanRuntimeFile>)first.Worker.RuntimeFiles)[0] = expected with { Sha256 = new string('a', 64) };
-        ((IList<ExecutionPlanRuntimeFile>)first.Upstream.RuntimeFiles)[0] = expected with { Sha256 = new string('b', 64) };
-        ((IList<ExecutionPlanRuntimeFile>)upstream.RuntimeFiles)[0] = expected with { Sha256 = new string('c', 64) };
-        ((IList<string>)first.UpstreamArguments)[0] = "returned mutation"; arguments[0] = "caller mutation";
+        var expected = package.Worker.RuntimeFiles.ToArray();
+        Assert.NotEmpty(expected);
+        foreach (var file in expected)
+        {
+            var path = Path.Combine(Path.GetDirectoryName(fixture.Worker)!, file.RelativePath);
+            using var read = File.OpenRead(path);
+            Assert.Equal(read.Length, file.SizeBytes);
+            Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(read)), file.Sha256);
+            var actual = PhysicalObjectIdentity.Read(read.SafeFileHandle);
+            Assert.Equal((actual.VolumeSerial, actual.FileId), (file.Identity.VolumeSerial, file.Identity.FileId));
+        }
+        void TryReplace<T>(IReadOnlyList<T> collection, T changed)
+        {
+            if (collection is not IList<T> exposed) return;
+            try { exposed[0] = changed; } catch (NotSupportedException) { }
+        }
+        arguments[0] = "caller mutation";
+        Assert.Equal("original", Assert.Single(first.UpstreamArguments));
+        TryReplace(first.Worker.RuntimeFiles, expected[0] with { Sha256 = new string('a', 64) });
+        TryReplace(first.Upstream.RuntimeFiles, expected[0] with { Sha256 = new string('b', 64) });
+        TryReplace(upstream.RuntimeFiles, expected[0] with { Sha256 = new string('c', 64) });
+        TryReplace(first.UpstreamArguments, "returned mutation");
         var second = ExecutionProviderInputs.Capture(prepared, package.Worker, ["original"]);
-        Assert.Equal(expected, second.Worker.RuntimeFiles[0]);
-        Assert.Equal(expected, second.Upstream.RuntimeFiles[0]);
-        Assert.Equal(expected, package.Worker.RuntimeFiles[0]);
+        Assert.Equal(expected, second.Worker.RuntimeFiles);
+        Assert.Equal(expected, second.Upstream.RuntimeFiles);
+        Assert.Equal(expected, package.Worker.RuntimeFiles);
         Assert.Equal("original", Assert.Single(second.UpstreamArguments));
     }
 

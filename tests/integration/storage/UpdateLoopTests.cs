@@ -1,11 +1,32 @@
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Host.Lifecycle;
+using Microsoft.Data.Sqlite;
 using Xunit;
 
 namespace NexusPipeline.StorageTests;
 
 public sealed class UpdateLoopTests
 {
+    [Fact(DisplayName = "The Automatic Update Loop Survives A SQLite Failure And Keeps The Retry Interval")]
+    public async Task RetriesAfterDatabaseFailure()
+    {
+        var clock = new CompletionControlledClock();
+        using var stopping = new CancellationTokenSource();
+        var observed = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        var loop = HostAutomaticUpdates.RunLoopAsync(() =>
+        {
+            if (++calls == 1) throw new SqliteException("private fixture data", 10);
+            return Task.FromResult(true);
+        }, code => observed.TrySetResult(code), clock, stopping.Token);
+        clock.Advance(AutomaticUpdatePolicy.FirstCheckDelay);
+        Assert.Equal("automatic_update_check_or_apply_blocked", await observed.Task.WaitAsync(TimeSpan.FromSeconds(2)));
+        Assert.False(loop.IsCompleted);
+        clock.Advance(TimeSpan.FromSeconds(30));
+        await loop.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal(2, calls);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

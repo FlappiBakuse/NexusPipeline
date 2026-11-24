@@ -8,7 +8,7 @@ namespace NexusPipeline.StorageTests;
 
 public sealed class DatabaseReaderTests
 {
-    [Fact(DisplayName = "Domain Pool Eviction Preserves Borrowed And Recently Used Connections Within The Nine Handle Budget")]
+    [Fact(DisplayName = "Borrowed Domain Connections Stay Current Within The Nine Handle Budget And Close With The Instance")]
     public async Task RetainsBusyConnections()
     {
         var root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "domain-pool-" + Guid.NewGuid().ToString("N"));
@@ -18,30 +18,48 @@ public sealed class DatabaseReaderTests
         try
         {
             var database = StateDatabase.CreateFresh(instance, lease);
-            SQLitePCL.sqlite3 writer;
-            using (var held = DatabaseConnections.Open(database.DatabasePath))
+            using var borrowed = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Automation);
+            handles.Add(borrowed.Handle!);
+            Assert.Equal(0L, Count(borrowed));
+            using (var writer = DatabaseConnections.Open(database.DatabasePath))
             {
-                writer = held.Handle!; handles.Add(writer);
+                handles.Add(writer.Handle!);
                 foreach (var domain in DatabaseLayout.Domains)
                 {
                     using var reader = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: domain);
                     handles.Add(reader.Handle!); Assert.Equal(0L, Count(reader));
                 }
             }
-            using (var following = DatabaseConnections.Open(database.DatabasePath)) Assert.Same(writer, following.Handle);
             using (var selected = DatabaseConnections.Open(database.DatabasePath, readOnly: true,
-                domains: DatabaseDomain.Automation | DatabaseDomain.Records)) handles.Add(selected.Handle!);
-            using (var following = DatabaseConnections.Open(database.DatabasePath)) Assert.Same(writer, following.Handle);
-            Assert.InRange(handles.Distinct().Count(handle => !handle.IsClosed), 1, 9);
+                domains: DatabaseDomain.Automation | DatabaseDomain.Records))
+            {
+                handles.Add(selected.Handle!);
+                Assert.Equal(0L, Count(selected));
+            }
+            var operation = new OperationIdentity(Guid.NewGuid(), "reader-fixture", new string('a', 64), "fixture.reader");
+            Assert.True(database.Accept(operation, DateTimeOffset.UtcNow).IsNew);
+            Assert.Equal(1L, Count(borrowed));
+            using (var following = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime))
+            {
+                handles.Add(following.Handle!);
+                Assert.Equal(1L, Count(following));
+            }
             using var wide = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+            handles.Add(wide.Handle!);
+            Assert.Equal(1L, Count(wide));
+            Assert.InRange(handles.Distinct().Count(handle => !handle.IsClosed), 1, 9);
             var budgets = DatabaseLayout.Domains.ToDictionary(domain => domain, domain =>
                 -(long)DatabaseConnections.Scalar(wide, $"PRAGMA {DatabaseLayout.Alias(domain)}.cache_size;"));
             Assert.InRange(budgets.Values.Sum(), 1, 3072);
-            Assert.True(budgets[DatabaseDomain.Runtime] > budgets[DatabaseDomain.Configuration]);
-            Assert.True(budgets[DatabaseDomain.Configuration] > budgets[DatabaseDomain.Records]);
+            var other = new InstanceRoot(new()).OpenOrCreate(root + "-other");
+            var isolated = StateDatabase.CreateFresh(other);
+            using var independent = DatabaseConnections.Open(isolated.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
+            Assert.Equal(0L, Count(independent));
+            Assert.Equal(1L, Count(borrowed));
         }
         finally { lease.Dispose(); await lease.WhenExecutionPublicationsReleased; }
         Assert.All(handles, handle => Assert.True(handle.IsClosed));
+        Directory.Move(root, root + "-released");
     }
 
     [Fact(DisplayName = "Synchronous Read Scope Release Preserves The Instance Background Reader Pool")]

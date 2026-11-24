@@ -30,7 +30,7 @@ public sealed class ProjectConfigTests
             Assert.Equal("local.json", entry.Name); Assert.Null(await port.ReadAsync("config/other.json", default));
         }
         var saved = await port.ReadAsync(path, default); Assert.NotNull(saved); Assert.Equal(entry.Identity, saved.Identity);
-        Assert.Contains("saved-account", Encoding.UTF8.GetString(saved.Content.Span), StringComparison.Ordinal);
+        Assert.Equal("""{"account":"saved-account","TaskItems":[]}"""u8.ToArray(), saved.Content.ToArray());
         _ = source.Freeze(default); _ = mounts.Capture();
         port.Dispose(); Assert.Throws<ObjectDisposedException>(() => port.Configurations);
     }

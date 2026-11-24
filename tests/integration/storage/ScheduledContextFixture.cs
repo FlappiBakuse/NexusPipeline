@@ -74,12 +74,21 @@ internal sealed class ScheduledContextFixture : IAsyncDisposable
     }
     public async ValueTask DisposeAsync()
     {
-        Release("scheduled-planning-release"); Release("scheduled-release"); Release("scheduled-late-release");
+        var errors = new List<Exception>();
+        foreach (var name in new[] { "scheduled-planning-release", "scheduled-release", "scheduled-late-release" })
+            Attempt(() => Release(name));
         try { await Schedules.StopAsync(); }
-        finally
+        catch (Exception error) { errors.Add(error); }
+        try { await Installed.Activator.StopAllAsync(TimeSpan.FromSeconds(10)); }
+        catch (Exception error) { errors.Add(error); }
+        Attempt(Installed.Dispose);
+        Attempt(Base.Dispose);
+        if (errors.Count > 0) throw new AggregateException(errors);
+
+        void Attempt(Action release)
         {
-            try { await Installed.Activator.StopAllAsync(TimeSpan.FromSeconds(10)); }
-            finally { Installed.Dispose(); Base.Dispose(); }
+            try { release(); }
+            catch (Exception error) { errors.Add(error); }
         }
     }
     private sealed class Clock : TimeProvider

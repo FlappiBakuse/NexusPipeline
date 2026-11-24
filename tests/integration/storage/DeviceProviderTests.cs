@@ -55,12 +55,36 @@ public sealed class DeviceProviderTests
     public async Task RejectsForeignDevice(string reason)
     {
         await using var fixture = await ProviderRuntimeFixture.CreateAsync("device-" + reason);
-        var receipt = await fixture.RunAsync().WaitAsync(TimeSpan.FromSeconds(45));
+        var rejection = reason switch
+        {
+            "arguments" => "execution_device_arguments_invalid",
+            "sequence" => "execution_device_sequence_invalid",
+            "peer" => "execution_project_peer_unbound",
+            "frozen" => "execution_device_configuration_frozen",
+            _ => throw new ArgumentOutOfRangeException(nameof(reason))
+        };
+        var receipt = await RunWithDeviceRejection(fixture, rejection);
         Assert.Equal(EngineOutcome.Succeeded, receipt.Facts.Engine);
         if (reason == "peer") Assert.Equal("denied", File.ReadAllText(fixture.Marker + ".device-peer"));
         else Assert.Equal(reason, File.ReadAllText(fixture.Marker + ".device-denied"));
         Assert.DoesNotContain(Inputs(fixture), item => item.GetProperty("message").GetInt32() is 0x100 or 0x101 or 0x102 or 0x201 or 0x202);
         AssertStopped(fixture);
+    }
+
+    internal static async Task<AttemptReceipt> RunWithDeviceRejection(ProviderRuntimeFixture fixture, string reason)
+    {
+        var original = Console.Error;
+        using var diagnostics = new StringWriter();
+        try
+        {
+            Console.SetError(diagnostics);
+            var receipt = await fixture.RunAsync().WaitAsync(TimeSpan.FromSeconds(60));
+            var denials = diagnostics.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+                .Where(line => line.StartsWith("provider_device_denied ", StringComparison.Ordinal)).ToArray();
+            Assert.Equal(new[] { "provider_device_denied " + reason }, denials);
+            return receipt;
+        }
+        finally { Console.SetError(original); }
     }
 
     private static JsonElement[] Inputs(ProviderRuntimeFixture fixture)

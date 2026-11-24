@@ -76,8 +76,14 @@ public sealed class ContractBoundaryTests
     [Fact(DisplayName = "Oversize And Deep Inputs Fail With Their Original Bytes Preserved")]
     public void BoundsInputBytes()
     {
-        var oversize = new byte[StrictJson.MaximumBytes + 1];
-        Assert.Throws<JsonException>(() => StrictJson.Parse(oversize));
+        var oversize = new byte[2097153];
+        Array.Fill(oversize, (byte)' ');
+        "{}"u8.CopyTo(oversize);
+        var original = oversize.ToArray();
+        using (var boundary = StrictJson.Parse(oversize.AsMemory(0, 2097152)))
+            Assert.Equal(JsonValueKind.Object, boundary.RootElement.ValueKind);
+        Assert.Equal("invalid_json_size", Assert.Throws<JsonException>(() => StrictJson.Parse(oversize)).Message);
+        Assert.Equal(original, oversize);
         var deep = Encoding.UTF8.GetBytes(new string('[', 65) + "0" + new string(']', 65));
         var before = deep.ToArray();
         Assert.Throws<JsonException>(() => StrictJson.Parse(deep));

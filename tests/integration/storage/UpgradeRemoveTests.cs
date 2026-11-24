@@ -23,6 +23,11 @@ public sealed class UpgradeRemoveTests
     {
         await using var fixture = await ExtensionUpgradeFixture.CreateAsync(enabled: false, sameVersion: true,
             originalChannel: originalChannel, nextChannel: candidateChannel);
+        const string changedEntry = "activation-input.json";
+        var target = Path.Combine(fixture.Original.Target, changedEntry);
+        var before = File.ReadAllBytes(target);
+        var desired = File.ReadAllBytes(Path.Combine(fixture.Next.Deployed, changedEntry));
+        Assert.False(before.AsSpan().SequenceEqual(desired));
         fixture.Prepare(PayloadAction.Upgrade); _ = fixture.Accept();
         var result = await fixture.Session().ApplyAsync(fixture.Prepared!, default);
         var bound = fixture.Bound();
@@ -30,6 +35,8 @@ public sealed class UpgradeRemoveTests
         Assert.Equal("0.5.0", bound.Footprint!.Package.PackageVersion);
         Assert.Equal(candidateChannel, bound.Source.Package!.Catalog.Identity.Channel);
         Assert.Equal(JournalPhase.Committed, bound.Registered.Phase);
+        Assert.Equal(desired, File.ReadAllBytes(target));
+        Assert.Equal(before, File.ReadAllBytes(Path.Combine(fixture.Backup(bound), changedEntry)));
     }
 
     [Theory(DisplayName = "Upgrade Preserves The Real Preference Drains The Original Scope And Commits The New Owned Tree")]

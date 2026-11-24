@@ -37,12 +37,18 @@ public sealed class NestedJobTests
                 var helperIdentity = new ProcessIdentity(helper.ProcessId, helper.CreatedAtUtc, helper.ImagePath,
                     helper.ImageSha256, helper.UserSid, helper.IsElevated);
                 Assert.Null(await child.AwaitRootAsync(helper, TimeSpan.FromMilliseconds(500)));
+                using var cancelWait = new CancellationTokenSource();
+                var cancelled = child.AwaitRootAsync(helper, TimeSpan.FromSeconds(10), cancelWait.Token);
+                cancelWait.Cancel();
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled);
+                Assert.Null(child.ReadExitCode(helper));
                 var nested = child.CaptureTargetInventory(); var whole = parent.CaptureTargetInventory();
                 Assert.Contains(helperIdentity, nested.LivingFamily); Assert.Contains(helperIdentity, whole.LivingFamily);
                 Assert.All(nested.AllFamily, member => Assert.Contains(member, whole.AllFamily));
                 File.WriteAllBytes(Path.Combine(root, "nested-membership.json"), JsonSerializer.SerializeToUtf8Bytes(new { nested, whole }));
                 if (stopParentFirst) _ = await PreparedStoppedTarget.StopAsync(parent, TimeSpan.FromSeconds(5));
                 var stopped = await PreparedStoppedTarget.StopAsync(child, TimeSpan.FromSeconds(5));
+                Assert.Equal(1, await child.AwaitRootAsync(helper, TimeSpan.FromSeconds(5)));
                 stopped.Use(child, inventory =>
                 {
                     Assert.Contains(helperIdentity, inventory.AllFamily);

@@ -1,6 +1,9 @@
+using System.Runtime.Versioning;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Operations;
+using NexusPipeline.Core.Settings;
 using NexusPipeline.Platform.Storage;
+using NexusPipeline.Platform.Storage.Extensions;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
@@ -199,44 +202,57 @@ public sealed class DatabaseScopeTests
         Assert.Equal(1, ReadValue(final, null));
     }
 
-    [Fact(DisplayName = "Installation Rechecks Runtime On Queue Writes And Rechecks All Domains When Its Settings Change")]
-    public void SeparatesInstallationReads()
+    [Fact(DisplayName = "An Installation Lease Rechecks Its Bound Operation And The Current Extension Preference")]
+    [SupportedOSPlatform("windows")]
+    public async Task SeparatesInstallationReads()
     {
-        var root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "installation-domains-" + Guid.NewGuid().ToString("N"));
-        var instance = new InstanceRoot(new()).OpenOrCreate(root);
-        using var owner = InstanceLease.Acquire(instance, new());
-        var database = StateDatabase.CreateFresh(instance, owner);
-        var domains = DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System;
-        using var proof = new DatabaseValidationLease(database, domains: domains);
-        var full = 0;
-        var runtime = 0;
-        var retention = -1L;
-        void Check() => proof.RequireInstallation((connection, transaction) =>
+        using var fixture = new InstallRuntimeFixture(savedEnabled: true, managedMode: "frontend");
+        _ = await FrontendInstalledTests.OpenAsync(fixture);
+        var catalog = fixture.Package.Catalog;
+        var database = catalog.Database;
+        try
         {
-            Assert.Equal(domains, DatabaseConnections.Domains(connection));
-            retention = ReadValue(connection, transaction);
-            full++;
-        }, (connection, transaction) =>
-        {
-            Assert.Equal(DatabaseDomain.Runtime, DatabaseConnections.Domains(connection));
-            using var query = DatabaseConnections.Command(connection, transaction, "SELECT count(*) FROM main.operations;");
-            Assert.Equal(1L, query.ExecuteScalar());
-            runtime++;
-        });
-        Check();
-        database.Accept(Operation(), DateTimeOffset.UtcNow);
-        Check();
-        Check();
-        Assert.Equal((1, 1), (full, runtime));
-        database.Write((connection, transaction) =>
-        {
-            using var update = DatabaseConnections.Command(connection, transaction,
-                "UPDATE system.settings_snapshots SET retention_days=2 WHERE revision=0;");
-            return update.ExecuteNonQuery();
-        });
-        Check();
-        Assert.Equal(2, retention);
-        Assert.Equal((2, 1), (full, runtime));
+            var source = new ExtensionInstalledEvidence(catalog.Instance, database, catalog.Contracts, fixture.Roots);
+            using var proof = Assert.IsType<InstallationReadLease>(source.ProtectCurrent("fixture-plugin", catalog.Lease));
+            var original = proof.ReadCurrent();
+            Assert.Equal(fixture.Accepted.JournalId, original.Registered.JournalId);
+            Assert.Equal(fixture.Package.OperationId, original.Registered.OperationId);
+            var manifestPath = Path.Combine(fixture.Target, "manifest.json");
+            var manifest = File.ReadAllBytes(manifestPath);
+            var physical = PhysicalObjectIdentity.Read(manifestPath);
+
+            Assert.True(database.Accept(Operation(), DateTimeOffset.UtcNow).IsNew);
+            Assert.Equal(original.PlanReference, proof.ReadCurrent().PlanReference);
+            void ChangeBoundOperation(string before, string after) => Assert.Equal(1, database.Write((connection, transaction) =>
+            {
+                using var change = DatabaseConnections.Command(connection, transaction,
+                    "UPDATE main.operations SET status=$after WHERE operation_id=$id AND status=$before;");
+                change.Parameters.AddWithValue("$id", fixture.Package.OperationId.ToString("D"));
+                change.Parameters.AddWithValue("$before", before);
+                change.Parameters.AddWithValue("$after", after);
+                return change.ExecuteNonQuery();
+            }));
+            ChangeBoundOperation("completed", "accepted");
+            try { Assert.Equal("extension_payload_history_unbound", Assert.Throws<IOException>(proof.RequireCurrent).Message); }
+            finally { ChangeBoundOperation("accepted", "completed"); }
+            Assert.Equal(original.PlanReference, proof.ReadCurrent().PlanReference);
+
+            var settings = new HostSettingsStore(database);
+            void SetEnabled(bool enabled)
+            {
+                var current = settings.Read();
+                var change = new HostSettingsChange(current.Revision, current.Values with { Extensions = [new("fixture-plugin", enabled)] });
+                Assert.True(settings.Commit(HostSettingsStore.Identity(Guid.NewGuid(), "fixture", change), change,
+                    DateTimeOffset.UtcNow).IsNew);
+            }
+            SetEnabled(false);
+            try { Assert.Equal("extension_installation_consumption_unavailable", Assert.Throws<IOException>(proof.RequireCurrent).Message); }
+            finally { SetEnabled(true); }
+            Assert.Equal(original.PlanReference, proof.ReadCurrent().PlanReference);
+            Assert.Equal(physical, PhysicalObjectIdentity.Read(manifestPath));
+            Assert.Equal(manifest, File.ReadAllBytes(manifestPath));
+        }
+        finally { await fixture.Activator.StopAllAsync(TimeSpan.FromSeconds(10)); }
     }
 
     [Theory(DisplayName = "Nested Database Readers Observe New Commits And Keep The Original File Protected Until Its Owner Exits")]

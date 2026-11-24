@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Operations;
@@ -102,7 +101,28 @@ public sealed class SettingsStoreTests
         var change = new HostSettingsChange(0, values);
         if (fault == "sql-failure") Sql(fixture.Database,
             "CREATE TRIGGER system.reject_settings BEFORE INSERT ON settings_mutations BEGIN SELECT RAISE(ABORT,'fixture-failure'); END;");
-        Assert.NotNull(Record.Exception(() => fixture.Store.Commit(HostSettingsStore.Identity(id, "fixture", change), change, DateTimeOffset.UtcNow)));
+        var paths = new[] { fixture.Database.DatabasePath,
+            DatabaseLayout.PathFor(fixture.Database.DatabasePath, DatabaseDomain.System) };
+        var before = paths.Select(File.ReadAllBytes).ToArray();
+        var operation = HostSettingsStore.Identity(id, "fixture", change);
+        void SaveInvalid() => fixture.Store.Commit(operation, change, DateTimeOffset.UtcNow);
+        if (fault == "sql-failure")
+            Assert.Contains("fixture-failure", Assert.Throws<SqliteException>(SaveInvalid).Message, StringComparison.Ordinal);
+        else
+            Assert.Equal(fault == "invalid" ? "settings_retention_invalid" : "settings_startup_effect_required",
+                Assert.Throws<HostSettingsException>(SaveInvalid).Message);
+        Span<byte> journalHeader = stackalloc byte[8];
+        for (var index = 0; index < paths.Length; index++)
+        {
+            var path = paths[index];
+            Assert.Equal(before[index], File.ReadAllBytes(path));
+            Assert.False(File.Exists(path + "-wal"));
+            if (!File.Exists(path + "-journal")) continue;
+            using var journal = File.OpenRead(path + "-journal");
+            var read = journal.ReadAtLeast(journalHeader, journalHeader.Length, false);
+            Assert.False(journalHeader[..read].ContainsAnyExcept((byte)0));
+        }
+        Assert.Null(fixture.Store.Lookup(operation, change));
         AssertSame(new(0, HostSettings.Default), fixture.Store.Read());
         if (fault == "sql-failure") Sql(fixture.Database, "DROP TRIGGER system.reject_settings;");
         var corrected = new HostSettingsChange(0, HostSettings.Default with { HistoryRetentionDays = 40 });
@@ -116,10 +136,16 @@ public sealed class SettingsStoreTests
     {
         var fixture = Create();
         Sql(fixture.Database, fault == "missing-current" ? "DELETE FROM system.settings_current;" : "UPDATE system.settings_snapshots SET proxy_url='file:///private';");
-        var before = Fingerprints(fixture.Database);
-        Assert.NotNull(Record.Exception(() => StateDatabase.OpenExisting(fixture.Instance, Path.Combine(fixture.Root, "diagnostics"),
-            new JournalStartupAdmission(fixture.Instance, new()))));
-        Assert.Equal(before, Fingerprints(fixture.Database));
+        var path = fixture.Database.DatabasePath;
+        var before = RuntimeFingerprint.CaptureDatabaseFiles(path, DatabaseDomain.System);
+        Assert.Contains(before, member => member.StartsWith("system.db:", StringComparison.Ordinal));
+        void Open() => StateDatabase.OpenExisting(fixture.Instance, Path.Combine(fixture.Root, "diagnostics"),
+            new JournalStartupAdmission(fixture.Instance, new()));
+        if (fault == "missing-current")
+            Assert.Equal("settings_current_missing", Assert.Throws<IOException>(Open).Message);
+        else
+            Assert.Equal("settings_proxy_url_invalid", Assert.Throws<HostSettingsException>(Open).Message);
+        Assert.Equal(before, RuntimeFingerprint.CaptureDatabaseFiles(path, DatabaseDomain.System));
     }
 
     private static SettingsSaveResult Save(HostSettingsStore store, HostSettingsChange change) =>
@@ -144,10 +170,6 @@ public sealed class SettingsStoreTests
         command.CommandText = sql;
         command.ExecuteNonQuery();
     }
-
-    private static string[] Fingerprints(StateDatabase database) => new[] { "", "-wal", "-shm", "-journal" }
-        .Where(suffix => File.Exists(database.DatabasePath + suffix))
-        .Select(suffix => suffix + ":" + Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(database.DatabasePath + suffix)))).ToArray();
 
     private sealed record Fixture(string Root, RuntimeInstance Instance, StateDatabase Database, HostSettingsStore Store);
 }

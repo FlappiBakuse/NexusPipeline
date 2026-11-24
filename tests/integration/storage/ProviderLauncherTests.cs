@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Maintenance;
@@ -11,12 +12,118 @@ using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace NexusPipeline.StorageTests;
 
 [SupportedOSPlatform("windows")]
-public sealed class ProviderLauncherTests
+public sealed class ProviderLauncherTests(ITestOutputHelper output)
 {
+    [Fact(DisplayName = "Launcher Projection Reads Its Bound Root Once And Rechecks New Ending Facts After The Snapshot")]
+    public async Task ReadsLauncherProjectionOnce()
+    {
+        await using var fixture = await ProviderRuntimeFixture.CreateAsync("terminal-success", launcher: true);
+        _ = await fixture.RunAsync();
+        var state = fixture.State;
+        var jobs = ProviderLauncherCodec.Read(state.Latest.Root, state.Total, state.Attempt.ExecutionPlan.Sha256);
+        var launcher = Assert.Single(jobs);
+        Assert.Equal("retained", launcher.Stage);
+        var database = fixture.Source.Database;
+        var journalId = state.Journal.JournalId.ToString("D");
+        var launcherId = launcher.Binding.LauncherId.ToString("D");
+        Assert.Null(ProviderLauncherRows.Ended(database, launcher.Binding, launcher.Artifact!));
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, allowPooling: false, domains: DatabaseDomain.Runtime);
+        var queries = new List<string>();
+        using (var transaction = DatabaseConnections.BeginRead(connection))
+        {
+            void Read() => ProviderLauncherRows.VerifyProjectionInside(connection, transaction, journalId, state.Total, jobs);
+            SQLitePCL.strdelegate_trace trace = (_, sql) => queries.Add(sql);
+            SQLitePCL.raw.sqlite3_trace(connection.Handle!, trace, null);
+            try { Read(); }
+            finally { SQLitePCL.raw.sqlite3_trace(connection.Handle!, (SQLitePCL.strdelegate_trace?)null, null); }
+            foreach (var sql in queries)
+            {
+                using var explain = connection.CreateCommand();
+                explain.Transaction = transaction;
+                explain.CommandText = "EXPLAIN QUERY PLAN " + sql;
+                using var planner = explain.ExecuteReader();
+                while (planner.Read()) output.WriteLine(planner.GetString(3));
+            }
+            const int iterations = 80;
+            for (var i = 0; i < 5; i++) Read();
+            using var process = Process.GetCurrentProcess();
+            var cpuBefore = process.TotalProcessorTime;
+            var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            var started = Stopwatch.GetTimestamp();
+            for (var i = 0; i < iterations; i++) Read();
+            var elapsed = Stopwatch.GetElapsedTime(started);
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+            var cpu = process.TotalProcessorTime - cpuBefore;
+            output.WriteLine($"launcher-projection jobs={jobs.Length} selects={queries.Count} repetitions={iterations} elapsed-ms={elapsed.TotalMilliseconds:F3} process-cpu-ms={cpu.TotalMilliseconds:F3} allocated-bytes={allocated}");
+            transaction.Commit();
+        }
+
+        using (var write = DatabaseConnections.Open(database.DatabasePath, domains: DatabaseDomain.Runtime))
+        {
+            using (var transaction = write.BeginTransaction())
+            {
+                using var extra = DatabaseConnections.Command(write, transaction,
+                    "INSERT INTO main.execution_provider_launcher_roots " +
+                    "SELECT journal_id,$0,step_id,$1,writer_id,session_id,total_plan_sha256,activation_id,extension_id,entry_id," +
+                    "process_id,created_file_time,image_path,image_sha256,user_sid,elevated FROM main.execution_provider_launcher_roots " +
+                    "WHERE journal_id=$2 AND launcher_id=$3;",
+                    Guid.NewGuid().ToString("D"), "Local\\NexusWorker-" + Guid.NewGuid().ToString("N"), journalId, launcherId);
+                Assert.Equal(1, extra.ExecuteNonQuery());
+                RejectProjection(write, transaction);
+                transaction.Rollback();
+            }
+            using (var transaction = write.BeginTransaction())
+            {
+                using var wrong = DatabaseConnections.Command(write, transaction,
+                    "UPDATE main.execution_provider_launcher_roots SET activation_id=$0 WHERE journal_id=$1 AND launcher_id=$2;",
+                    Guid.NewGuid().ToString("D"), journalId, launcherId);
+                Assert.Equal(1, wrong.ExecuteNonQuery());
+                RejectProjection(write, transaction);
+                transaction.Rollback();
+            }
+        }
+
+        File.WriteAllText(fixture.LauncherRelease, "release");
+        await UntilAsync(() => fixture.Registry.RetainedCount == 0);
+        ProviderLauncherRows.VerifyRetainedEndings(database, connection, jobs);
+        Assert.NotNull(ProviderLauncherRows.Ended(database, launcher.Binding, launcher.Artifact!));
+        string operation, digest;
+        using (var command = DatabaseConnections.Command(connection, null,
+            "SELECT o.operation_id,o.request_digest FROM main.execution_provider_launcher_ended e " +
+            "JOIN main.operations o USING(operation_id) WHERE e.journal_id=$0 AND e.launcher_id=$1;", journalId, launcherId))
+        using (var row = command.ExecuteReader())
+        {
+            Assert.True(row.Read());
+            operation = row.GetString(0); digest = row.GetString(1);
+        }
+        SetDigest(new string('0', 64));
+        try
+        {
+            Assert.Equal("execution_provider_launcher_sql_unbound",
+                Assert.Throws<IOException>(() => ProviderLauncherRows.VerifyRetainedEndings(database, connection, jobs)).Message);
+        }
+        finally { SetDigest(digest); }
+        ProviderLauncherRows.Verify(database, state.Latest.Root, state.Total, state.Attempt.ExecutionPlan.Sha256);
+        Assert.Equal(2, queries.Count);
+
+        void RejectProjection(SqliteConnection changed, SqliteTransaction transaction) =>
+            Assert.Equal("execution_provider_launcher_sql_unbound", Assert.Throws<IOException>(() =>
+                ProviderLauncherRows.VerifyProjectionInside(changed, transaction, journalId, state.Total, jobs)).Message);
+
+        void SetDigest(string value) => database.Write((write, transaction) =>
+        {
+            using var command = DatabaseConnections.Command(write, transaction,
+                "UPDATE main.operations SET request_digest=$0 WHERE operation_id=$1;", value, operation);
+            Assert.Equal(1, command.ExecuteNonQuery());
+            return true;
+        });
+    }
+
     [Theory(DisplayName = "The Declared Launcher Lives In A Separate Domain Only After The Actual Worker Terminal And Complete Stop")]
     [InlineData(false)]
     [InlineData(true)]

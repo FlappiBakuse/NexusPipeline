@@ -133,12 +133,13 @@ public sealed class RetryConfigurationTests
         fixture.Base.Execute(damage == "previous-publication"
             ? "UPDATE configuration.configuration_run_resources SET current_revision=1 WHERE session_id IN (SELECT session_id FROM configuration.configuration_run_sessions WHERE parent_journal_id='" + first.JournalId.ToString("D") + "');"
             : "UPDATE configuration.configuration_run_resources SET expected_revision=1 WHERE session_id IN (SELECT session_id FROM configuration.configuration_run_sessions WHERE parent_journal_id='" + accepted.JournalId.ToString("D") + "');");
-        var path = fixture.Source.Database.DatabasePath; var bytes = File.ReadAllBytes(path);
-        var wal = File.Exists(path + "-wal") ? File.ReadAllBytes(path + "-wal") : null;
-        Assert.ThrowsAny<Exception>(() => StateDatabase.OpenExisting(fixture.Source.Instance,
+        var path = fixture.Source.Database.DatabasePath;
+        var before = RuntimeFingerprint.CaptureDatabaseFiles(path, DatabaseDomain.Configuration);
+        Assert.Contains(before, member => member.StartsWith("configuration.db:", StringComparison.Ordinal));
+        var error = Assert.Throws<IOException>(() => StateDatabase.OpenExisting(fixture.Source.Instance,
             Path.Combine(fixture.Source.Root, "retry-configuration-diagnostic"), new JournalStartupAdmission(fixture.Source.Instance, new())));
-        Assert.Equal(bytes, File.ReadAllBytes(path));
-        Assert.Equal(wal, File.Exists(path + "-wal") ? File.ReadAllBytes(path + "-wal") : null);
+        Assert.Equal(damage == "previous-publication" ? "configuration_run_resource_cursor_unbound" : "configuration_run_baseline_unbound", error.Message);
+        Assert.Equal(before, RuntimeFingerprint.CaptureDatabaseFiles(path, DatabaseDomain.Configuration));
     }
 
     private static Task<ProviderRuntimeFixture> Create(string mode) =>

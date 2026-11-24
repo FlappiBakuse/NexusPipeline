@@ -1,9 +1,22 @@
+using System.Net;
+using System.Net.Http.Json;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Core.Records;
+using NexusPipeline.Core.Settings;
+using NexusPipeline.Host.Control.Http;
+using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Journals;
@@ -25,9 +38,7 @@ public sealed class RecordRetirementTests
         _ = new PlanReferenceClosure(source.Instance, new(), new(source.Instance, new()), source.Database)
             .Read(registered, AttemptPreparedBinding.Reference(source.Instance, registered));
         var before = fixture.Items.ToArray();
-        var operation = Guid.NewGuid();
-        var page = Assert.IsType<ContentRetirementPage>(fixture.Retirement.RetireLogsPage(operation, "retirement-fixture", fixture.Receipt.Facts.RunId));
-        Assert.Equal(page, fixture.Retirement.RetireLogsPage(operation, "retirement-fixture", fixture.Receipt.Facts.RunId));
+        var page = await RetireOverHttpAsync(fixture, before);
         var plan = fixture.Plan(page);
         Assert.All(plan.Items, item => Assert.True(File.Exists(fixture.PathOf(item.Blob))));
         Assert.Equal(FileCleanupResult.Cleaned, fixture.Cleanup(page));
@@ -47,6 +58,49 @@ public sealed class RecordRetirementTests
         Assert.Equal(after, saved.Items.ToArray());
         Assert.Equal(fixture.Receipt, new AttemptReceiptStore(database).Read(fixture.Receipt.Facts.AttemptId));
         Assert.Equal(original, new JournalStore(source.Instance, new()).Read(fixture.Receipt.JournalId).Export());
+    }
+
+    private static async Task<ContentRetirementPage> RetireOverHttpAsync(RecordRetirementFixture fixture, LogCatalogItem[] before)
+    {
+        var source = fixture.Source;
+        var contracts = new ContractReader();
+        var builder = WebApplication.CreateSlimBuilder(); builder.Logging.ClearProviders();
+        builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
+        await using var app = builder.Build();
+        var authority = new ControlAuthentication(source.Instance.InstanceId, false, null, () => new(0, HostSettings.Default), null!, TimeProvider.System);
+        app.Use(ControlExceptionBoundary.InvokeAsync); app.Use(authority.InvokeAsync);
+        new RecordControl(authority, new(new RunRecordStore(source.Database), new AttemptHistoryReader(source.Database), fixture.Catalog,
+            fixture.Logs, new ImageCatalogReader(source.Instance, source.Database, contracts), fixture.Retirement), contracts).Map(app);
+        await app.StartAsync();
+        var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
+        using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false }) { BaseAddress = new(address) };
+        var route = $"/control/v1/records/{fixture.Receipt.Facts.RunId:D}/retire/logs";
+        var operation = Guid.NewGuid();
+        var command = new JsonObject { ["format"] = "nexus.control.record-retirement", ["version"] = 1,
+            ["operationId"] = operation.ToString("D"), ["afterSha256"] = "", ["limit"] = 50 };
+        async Task RejectAsync(JsonObject wire)
+        {
+            using var response = await client.PostAsJsonAsync(route, wire);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Equal("request_invalid", (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+        }
+        var invalid = command.DeepClone().AsObject(); invalid["unknown"] = true;
+        await RejectAsync(invalid);
+        invalid = command.DeepClone().AsObject(); invalid["format"] = "nexus.control.unknown";
+        await RejectAsync(invalid);
+        invalid = command.DeepClone().AsObject(); invalid.Remove("limit");
+        await RejectAsync(invalid);
+        Assert.Equal(before, fixture.Items.ToArray());
+        async Task<ContentRetirementPage> PostAsync()
+        {
+            using var response = await client.PostAsJsonAsync(route, command);
+            Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+            return Assert.IsType<ContentRetirementPage>(await response.Content.ReadFromJsonAsync<ContentRetirementPage>());
+        }
+        var page = await PostAsync();
+        Assert.Equal(operation, page.OperationId);
+        Assert.Equal(page, await PostAsync());
+        return page;
     }
 
     [Fact(DisplayName = "A Final Sql Failure Rolls Back Proof Operation Retirement And Cleanup Registration Without Changing Original Metadata Or Content")]
@@ -130,18 +184,39 @@ public sealed class RecordRetirementTests
     {
         using var fixture = await RecordRetirementFixture.CreateAsync();
         var before = fixture.Items.ToArray();
+        var originals = before.SelectMany(item => fixture.Logs.Describe(item.Key).Parts.Select(part =>
+        {
+            var path = Path.Combine(fixture.Source.Instance.RuntimeRoot, "blobs", "content", part.Sha256 + ".bin");
+            return (Key: (item.Key, part.Index), Path: path, part.Sha256, Bytes: File.ReadAllBytes(path),
+                Identity: PhysicalObjectIdentity.Read(path));
+        })).ToDictionary(part => part.Key);
         var page = Assert.IsType<ContentRetirementPage>(fixture.Retirement.RetireLogsPage(Guid.NewGuid(), "retirement-fixture",
             fixture.Receipt.Facts.RunId, limit: 1));
-        Assert.Equal(1, page.Count); Assert.Equal(FileCleanupResult.Cleaned, fixture.Cleanup(page));
+        Assert.Equal(1, page.Count);
+        var selected = Assert.Single(fixture.Plan(page).Items).Blob.Sha256;
+        Assert.Equal(page.LastSha256, selected);
+        Assert.Contains(originals.Values, part => part.Sha256 == selected);
+        var unselected = originals.Values.Where(part => part.Sha256 != selected).Select(part => part.Key).ToHashSet();
+        Assert.NotEmpty(unselected);
+        Assert.Equal(FileCleanupResult.Cleaned, fixture.Cleanup(page));
         var after = fixture.Items.ToArray();
         Assert.Contains(after, item => item.ContentAvailability != RecordContentAvailability.Available);
         Assert.Contains(after, item => item.ContentAvailability != RecordContentAvailability.Retired);
         Assert.Equal(before.Select(item => (item.Key, item.RecordedBytes, item.PartCount)), after.Select(item => (item.Key, item.RecordedBytes, item.PartCount)));
-        foreach (var item in after)
+        var available = after.SelectMany(item => fixture.Logs.Describe(item.Key).Parts
+            .Where(part => part.ContentAvailability == RecordContentAvailability.Available)
+            .Select(part => (Item: item, Part: part))).ToArray();
+        Assert.Equal(unselected.Count, available.Length);
+        Assert.True(unselected.SetEquals(available.Select(part => (part.Item.Key, part.Part.Index))));
+        foreach (var (item, part) in available)
         {
-            var description = fixture.Logs.Describe(item.Key);
-            foreach (var part in description.Parts.Where(part => part.ContentAvailability == RecordContentAvailability.Available))
-                using (var input = fixture.Logs.OpenPart(item.Key, item.SnapshotSha256, part.Index)) Assert.Equal(part.SizeBytes, input.Length);
+            var original = originals[(item.Key, part.Index)];
+            Assert.Equal(original.Sha256, part.Sha256);
+            Assert.Equal(original.Identity, PhysicalObjectIdentity.Read(original.Path));
+            using var input = fixture.Logs.OpenPart(item.Key, item.SnapshotSha256, part.Index);
+            var bytes = new byte[checked((int)input.Length)];
+            input.ReadExactly(bytes);
+            Assert.Equal(original.Bytes, bytes);
         }
     }
 

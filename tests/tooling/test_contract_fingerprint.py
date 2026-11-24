@@ -8,7 +8,7 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tooling"))
 from contract_codegen import expected_outputs
-from contract_exports import public_schemas
+from schema_exports import public_schemas
 
 
 class ContractFingerprintTests(unittest.TestCase):
@@ -39,9 +39,9 @@ class ContractFingerprintTests(unittest.TestCase):
                 "assembly": "fixture-shape-only", "declarations": ["initial-declaration"]})
         source = Path(__file__).resolve().parents[2]
         for relative in ("contracts/ui-elements.json", "contracts/ui-types.json", "tooling/contract_codegen.py",
-                         "tooling/contract_exports.py", "tooling/contract_identity.py", "tooling/web_schema.py", "tooling/ui_codegen.py",
+                         "tooling/schema_exports.py", "tooling/contract_identity.py", "tooling/ui_codegen.py",
                          "tooling/sdk_frontend_surface.mjs", "tooling/boundaries/Program.cs",
-                         "tooling/boundaries/PublicSdkSurface.cs", "tooling/boundaries/PublicSdkSignatures.cs",
+                         "tooling/boundaries/PublicSdkSurface.cs",
                          "sdk/dotnet/NexusPipeline.Extensibility.csproj", "sdk/frontend/package.json",
                          "sdk/frontend/tsconfig.json", "sdk/frontend/build.mjs", "Directory.Build.props"):
             target = self.root / relative

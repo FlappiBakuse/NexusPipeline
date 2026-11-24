@@ -38,6 +38,7 @@ public sealed class CleanupCrashTests(ITestOutputHelper output)
         Assert.Equal(expected.ToString(), result.GetProperty("result").GetString());
         var snapshot = new RecoveryJournalRegistry(fixture.Database).ReadSnapshot();
         Assert.Equal(expected == JournalRecoveryResult.Quarantined ? JournalPhase.Quarantined : JournalPhase.Committed, Assert.Single(snapshot.Journals).Phase);
+        AssertTerminalReceipt(fixture, Assert.Single(snapshot.FileEffects));
         if (expected == JournalRecoveryResult.NotExecuted) fixture.Blobs.Verify(fixture.Plan.Items[0].Blob);
         else Assert.False(File.Exists(Path.Combine(fixture.Instance.RuntimeRoot, fixture.Plan.Items[0].Blob.RelativePath)));
         var fingerprints = Evidence(fixture);
@@ -76,9 +77,23 @@ public sealed class CleanupCrashTests(ITestOutputHelper output)
         fixture.Blobs.Verify(fixture.Plan.Items[0].Blob);
         var snapshot = new RecoveryJournalRegistry(fixture.Database).ReadSnapshot();
         Assert.Empty(snapshot.Isolations);
-        Assert.Equal(FileEffectState.NotExecuted, Assert.Single(snapshot.FileEffects).State);
+        var effect = Assert.Single(snapshot.FileEffects);
+        Assert.Equal(FileEffectState.NotExecuted, effect.State);
+        AssertTerminalReceipt(fixture, effect);
         output.WriteLine(JsonSerializer.Serialize(new { point, revision, accepted, stopped, result, faultEvidence,
             finalEvidence = CaptureRuntime(fixture), finalSnapshot = snapshot }));
+    }
+
+    private static void AssertTerminalReceipt(Fixture fixture, FileEffect effect)
+    {
+        if (effect.State is not (FileEffectState.Completed or FileEffectState.NotExecuted)) return;
+        var state = effect.State == FileEffectState.Completed ? "completed" : "notExecuted";
+        var journal = new JournalStore(fixture.Instance, new());
+        var first = journal.ReadAllRevisions(fixture.Plan.JournalId).First(document => document.Root.GetProperty("receipts")
+            .EnumerateArray().Any(receipt => receipt.GetProperty("effect").GetString() == state &&
+                (receipt.GetProperty("stepId").GetString() == effect.StepId ||
+                    state == "notExecuted" && receipt.GetProperty("stepId").GetString() == "verify-no-effect")));
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(first.Export())), effect.ReceiptDigest);
     }
 
     private static async Task<JsonElement> RecoverOnce(Fixture fixture, string input, string suffix)

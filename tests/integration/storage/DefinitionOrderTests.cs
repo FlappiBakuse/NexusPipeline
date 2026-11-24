@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Collections.Immutable;
 using NexusPipeline.Core.Automation;
@@ -43,9 +44,18 @@ public sealed class DefinitionOrderTests
         catalog = new AutomationDefinitionStore(reopened).Read();
         Assert.Equal(new[] { first.Id, second.Id }, catalog.Queues.Select(queue => queue.Id));
         var codec = new AutomationBundleCodec(new());
-        var decoded = codec.Decode(codec.Encode(catalog, DateTimeOffset.UtcNow), catalog.Roots.ToDictionary(root => root.Id, root => root.Path), 0);
-        var imported = AutomationEdits.Apply(AutomationCatalog.Empty, decoded.Definitions);
-        Assert.Equal(catalog.Queues.Select(queue => (queue.Id, queue.Order)), imported.Queues.Select(queue => (queue.Id, queue.Order)));
+        var bytes = codec.Encode(catalog, DateTimeOffset.UtcNow);
+        using var wire = JsonDocument.Parse(bytes);
+        var expected = new[] { (first.Id, 0), (second.Id, 1) };
+        Assert.Equal(expected, wire.RootElement.GetProperty("queues").EnumerateArray()
+            .Select(queue => (queue.GetProperty("id").GetGuid(), queue.GetProperty("order").GetInt32())));
+        var target = Create();
+        var roots = catalog.Roots.ToDictionary(root => root.Id, _ => Directory.CreateDirectory(Path.Combine(target.Root, "selected")).FullName);
+        var decoded = codec.Decode(bytes, roots, 0);
+        var identity = AutomationDefinitionStore.Identity(Guid.NewGuid(), "fixture-import", decoded.Definitions);
+        Assert.True(target.Store.Commit(identity, decoded.Definitions, DateTimeOffset.UtcNow).IsNew);
+        var durable = StateDatabase.OpenExisting(target.Instance, Path.Combine(target.Root, "imported"), new JournalStartupAdmission(target.Instance, new()));
+        Assert.Equal(expected, new AutomationDefinitionStore(durable).Read().Queues.Select(queue => (queue.Id, queue.Order)));
         Assert.Throws<AutomationConflictException>(() => fixture.Store.Commit(
             AutomationDefinitionStore.Identity(Guid.NewGuid(), "fixture", reorder), reorder, DateTimeOffset.UtcNow));
     }

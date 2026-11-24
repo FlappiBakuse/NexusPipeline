@@ -3,15 +3,57 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Net.Sockets;
 using System.Runtime.Versioning;
+using System.Security.Cryptography;
 using System.Text.Json;
 using NexusPipeline.Platform.Processes;
+using NexusPipeline.Platform.Storage;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace NexusPipeline.StorageTests;
 
 [SupportedOSPlatform("windows")]
-public sealed class HostRestartTests
+public sealed class HostRestartTests(ITestOutputHelper output)
 {
+    [Fact(DisplayName = "A Suspended Restart Process Reuses Its Held Executable Digest Across Two Fresh Identity Reads")]
+    public void ReusesSuspendedRestartImage()
+    {
+        var sample = Environment.GetEnvironmentVariable("NEXUS_PROCESS_FIXTURE_EXE") ?? throw new InvalidOperationException();
+        var root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "restart-image-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var executable = Path.Combine(root, "owned.exe");
+        File.Copy(sample, executable);
+        var expected = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(executable)));
+        var instance = Guid.NewGuid(); var operation = Guid.NewGuid();
+        using var creator = ProcessIdentityLease.HoldCurrent();
+        using var creatorScope = new ProcessIdentityScope(creator);
+        using var text = new StringWriter();
+        var previous = Console.Error;
+        try
+        {
+            Console.SetError(text);
+            using var profile = StartupProfile.Begin("suspended-restart-image");
+            using var child = MaintenanceStartupProcess.CreateRestart(executable, [], root);
+            try
+            {
+                var first = child.ReadFrozenIdentity(instance, operation);
+                Assert.Equal(first, child.ReadFrozenIdentity(instance, operation));
+                Assert.Equal(child.ProcessId, first.ProcessId);
+                Assert.Equal(expected, first.ImageSha256);
+                Assert.Equal(executable, first.ImagePath, ignoreCase: true);
+                Assert.Throws<IOException>(() => File.Open(executable, FileMode.Open, FileAccess.Write, FileShare.Read).Dispose());
+            }
+            finally { Assert.Null(child.Stop()); }
+            child.ReleaseStoppedImage();
+        }
+        finally { Console.SetError(previous); }
+        using var report = JsonDocument.Parse(text.ToString());
+        var hashes = report.RootElement.GetProperty("steps").EnumerateArray()
+            .Single(step => step.GetProperty("name").GetString() == "process.image-hash").GetProperty("count").GetInt64();
+        output.WriteLine($"suspended restart: two fresh process identity reads, {hashes} image hashes");
+        Assert.Equal(1, hashes);
+    }
+
     [Fact]
     public async Task RestartsSavedPort()
     {

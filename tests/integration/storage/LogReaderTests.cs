@@ -58,7 +58,7 @@ public sealed class LogReaderTests
         var tail = reader.ReadTail(key, 257);
         Assert.True(tail.PrefixOmitted); Assert.InRange(tail.Slices.Count, 1, 32);
         Assert.Equal(257, tail.Slices.Sum(slice => slice.Bytes.Length));
-        var input = reader.OpenOriginal(key, description.SnapshotSha256);
+        using var input = reader.OpenOriginal(key, description.SnapshotSha256);
         Assert.False(input.CanSeek); Assert.False(input.CanWrite);
         Assert.Equal(description.RecordedBytes, input.Length);
         var paths = description.Parts.Select(part => Path.Combine(fixture.Source.Instance.RuntimeRoot,

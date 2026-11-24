@@ -1,7 +1,9 @@
 using NexusPipeline.Core.Configuration;
+using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Journals;
+using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Storage.Records;
 using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
@@ -29,15 +31,30 @@ public sealed class RetentionResumeTests
         source.Lease.Dispose();
         using var child = new OwnedCrashProcess();
         var report = Path.Combine(source.Root, "retirement-stop.json");
-        child.Start(["retirement-crash", source.Instance.RuntimeRoot, source.BindingA.ToString("D"),
+        var writer = child.Start(["retirement-crash", source.Instance.RuntimeRoot, source.BindingA.ToString("D"),
             operation.ToString("D"), phase, report, manual ? "local:manual-retention" : "host:history-retention"], source.Root, source.Instance.InstanceId, operation,
             Path.Combine(source.Root, "retirement-child.json"));
         var stoppedAt = await child.ReadReportAsync(report, TimeSpan.FromSeconds(30));
         Assert.True(stoppedAt.GetProperty("status").GetString() == "faultReady", stoppedAt.ToString());
+        Assert.Equal(writer.ProcessId, stoppedAt.GetProperty("processId").GetInt32());
+        Assert.Equal(phase, stoppedAt.GetProperty("actualPoint").GetString());
+        Assert.Equal(1, stoppedAt.GetProperty("revision").GetInt64());
+        Assert.Equal("Prepared", stoppedAt.GetProperty("journalPhase").GetString());
         var journalId = stoppedAt.GetProperty("journalId").GetGuid();
+        var physicalPath = Path.Combine(source.Instance.RuntimeRoot, "journals", journalId.ToString("D"), "0000000001.json");
+        if (phase == "AcceptanceCommitted") Assert.False(File.Exists(physicalPath));
+        else
+        {
+            var physical = new JournalStore(source.Instance, new()).Read(journalId);
+            Assert.Equal(1, physical.Revision);
+            Assert.Equal(JournalPhase.Prepared, physical.Phase);
+        }
         var stopped = await child.StopAsync();
         Assert.True(stopped.CompleteJobStopped);
+        Assert.Contains(stopped.Family, member => member.ProcessId == writer.ProcessId && member.CreatedAtUtc == writer.CreatedAtUtc);
+        Assert.All(stopped.Family, member => Assert.Equal(WriterState.Stopped, WriterStopEvidence.ObserveProcess(member)));
         var pending = new RecoveryJournalRegistry(source.Database).ReadJournal(journalId);
+        Assert.Equal(1, pending.Revision);
         Assert.Equal(JournalPhase.Prepared, pending.Phase);
         var blobs = new ImmutableBlobStore(source.Instance, new());
         var path = Path.Combine(source.Instance.RuntimeRoot, pending.PlanPath);

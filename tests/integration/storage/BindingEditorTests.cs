@@ -3,6 +3,7 @@ using System.Runtime.Versioning;
 using NexusPipeline.Core.Automation;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
+using NexusPipeline.Core.Operations;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Automation;
@@ -67,7 +68,15 @@ public sealed class BindingEditorTests
             if (exitsBeforeSave) File.Delete(empty);
             var selected = request with { CandidateId = offered.Options[0].Id };
             var session = Assert.IsType<ConfigurationEditStatus>((await editor.OpenAsync("editor", selected, () => { }, default)).Session);
-            await WaitEditorAsync(directory);
+            var pid = await WaitEditorAsync(directory);
+            var revised = selected with { ExpectedScriptRevision = script.Revision + 1,
+                Draft = selected.Draft is { } owner ? owner with { ScriptRevision = script.Revision + 1 } : null };
+            await Assert.ThrowsAsync<OperationConflictException>(() => editor.OpenAsync("editor", revised, () => { }, default));
+            var original = Assert.IsType<ConfigurationEditStatus>((await editor.OpenAsync("editor", selected, () => { }, default)).Session);
+            Assert.Equal(session.SessionId, original.SessionId);
+            Assert.Equal(session.Revision, original.Revision);
+            Assert.False(original.IsNew);
+            Assert.Equal(pid, await WaitEditorAsync(directory));
             Assert.True(File.Exists(first));
             Assert.False(File.Exists(second));
             var attached = await editor.OpenAsync("editor", request with { SessionId = Guid.NewGuid() }, () => { }, default);

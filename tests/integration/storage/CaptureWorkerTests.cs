@@ -1,8 +1,9 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
-using System.IO.Compression;
 using System.Runtime.Versioning;
 using System.Text.Json;
+using Windows.Graphics.Imaging;
+using Windows.Storage.Streams;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Platform.Media;
 using NexusPipeline.Platform.Processes;
@@ -15,15 +16,17 @@ namespace NexusPipeline.StorageTests;
 public sealed class CaptureWorkerTests
 {
     [Fact(DisplayName = "Batch Frame Encoder Writes A Valid Png And Enforces Its Byte Limit")]
-    public void WritesBoundedFrames()
+    public async Task WritesBoundedFrames()
     {
         using var output = new WindowCaptureWorker.BoundedFrameBuffer();
         var row = new byte[640 * 4];
         for (var index = 0; index < row.Length; index += 4) { row[index] = 255; row[index + 3] = 255; }
         PngScanlineEncoder.Write(output, 640, 480, (_, destination) => row.CopyTo(destination, 0));
         Assert.InRange(output.Length, 57, 8_388_608);
-        var originalLength = output.Length;
-        output.Position = 0; RgbCapturePng.Verify(output, 640, 480); output.Position = originalLength;
+        var pixels = await DecodePng(output.ToArray(), 640, 480);
+        Assert.Equal(0xff0000ffu, Pixel(pixels, 640, 0, 0));
+        Assert.Equal(0xff0000ffu, Pixel(pixels, 640, 320, 240));
+        Assert.Equal(0xff0000ffu, Pixel(pixels, 640, 639, 479));
         var bytes = new byte[65_536];
         while (output.Length < 8_388_608)
             output.Write(bytes, 0, checked((int)Math.Min(bytes.Length, 8_388_608 - output.Length)));
@@ -62,33 +65,40 @@ public sealed class CaptureWorkerTests
         Assert.Equal(fixture.Width, width); Assert.Equal(fixture.Height, height);
         var pngPath = Path.Combine(fixture.Root, "actual-window.png");
         using (var png = new FileStream(pngPath, FileMode.CreateNew, FileAccess.Write, FileShare.None)) await input.CopyToAsync(png);
-        using var pngInput = File.OpenRead(pngPath); RgbCapturePng.Verify(pngInput, width, height);
-        var signature = new byte[8]; pngInput.ReadExactly(signature);
-        Assert.Equal(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }, signature);
-        using var idat = new MemoryStream();
-        while (true)
-        {
-            var header = new byte[8]; pngInput.ReadExactly(header);
-            var length = BinaryPrimitives.ReadInt32BigEndian(header); Assert.InRange(length, 0, 65536);
-            var bytes = new byte[length]; pngInput.ReadExactly(bytes); var crc = new byte[4]; pngInput.ReadExactly(crc);
-            if (header.AsSpan(4).SequenceEqual("IHDR"u8))
-            { Assert.Equal(width, BinaryPrimitives.ReadInt32BigEndian(bytes)); Assert.Equal(height, BinaryPrimitives.ReadInt32BigEndian(bytes.AsSpan(4))); }
-            if (header.AsSpan(4).SequenceEqual("IDAT"u8)) idat.Write(bytes);
-            if (header.AsSpan(4).SequenceEqual("IEND"u8)) break;
-        }
-        idat.Position = 0;
-        using var decompressed = new ZLibStream(idat, CompressionMode.Decompress); var row = new byte[width * 3 + 1];
+        Assert.InRange(new FileInfo(pngPath).Length, 33, 8388608);
+        var pixels = await DecodePng(await File.ReadAllBytesAsync(pngPath), width, height);
         // Compositor captures include the rounded window corners.
         var inset = method is "screenDc" or "framePool" ? 16 : 0;
         for (var y = 0; y < height; y++)
         {
-            decompressed.ReadExactly(row); Assert.Equal(0, row[0]);
-            Assert.Equal(new byte[] { 0, 0, 255 }, row.AsSpan(1 + inset * 3, 3).ToArray());
-            Assert.Equal(new byte[] { 255, 0, 0 }, row.AsSpan(1 + (width - 1 - inset) * 3, 3).ToArray());
+            Assert.Equal(0xff0000ffu, Pixel(pixels, width, inset, y));
+            Assert.Equal(0xffff0000u, Pixel(pixels, width, width - 1 - inset, y));
         }
-        Assert.Equal(-1, decompressed.ReadByte());
-        Assert.InRange(new FileInfo(pngPath).Length, 33, 8388608);
     }
+
+    internal static async Task<byte[]> DecodePng(byte[] bytes, int width, int height)
+    {
+        if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 10240)) throw new PlatformNotSupportedException("fixture_png_decoder_unavailable");
+        using var input = new InMemoryRandomAccessStream();
+        using (var writer = new DataWriter(input))
+        {
+            writer.WriteBytes(bytes);
+            await writer.StoreAsync();
+            writer.DetachStream();
+        }
+        input.Seek(0);
+        var decoder = await BitmapDecoder.CreateAsync(BitmapDecoder.PngDecoderId, input);
+        Assert.Equal((uint)width, decoder.PixelWidth);
+        Assert.Equal((uint)height, decoder.PixelHeight);
+        var data = await decoder.GetPixelDataAsync(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Ignore,
+            new BitmapTransform(), ExifOrientationMode.IgnoreExifOrientation, ColorManagementMode.DoNotColorManage);
+        var pixels = data.DetachPixelData();
+        Assert.Equal(checked(width * height * 4), pixels.Length);
+        return pixels;
+    }
+
+    internal static uint Pixel(byte[] pixels, int width, int x, int y) =>
+        BinaryPrimitives.ReadUInt32LittleEndian(pixels.AsSpan((y * width + x) * 4, 4));
 
     [Theory(DisplayName = "An Isolated Capture Rejects Wrong Native Identity Without Any Png")]
     [InlineData(null)]

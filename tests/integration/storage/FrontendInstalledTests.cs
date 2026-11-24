@@ -1,6 +1,7 @@
 using System.Runtime.Versioning;
 using System.Text.Json;
 using NexusPipeline.Core.Control;
+using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Extensions;
 using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
@@ -29,9 +30,10 @@ public sealed class FrontendInstalledTests
         try
         {
             Assert.True(entered.Wait(TimeSpan.FromSeconds(10)));
+            var waiting = catalog.Lease.WaitForNextExecutionPublication();
             read = Task.Run(async () => await frontend.ReadManifestAsync(default));
-            Assert.True(SpinWait.SpinUntil(() => catalog.Lease.ExecutionPublicationCount == 2 || read.IsCompleted,
-                TimeSpan.FromSeconds(5)));
+            Assert.Same(waiting, await Task.WhenAny(waiting, read).WaitAsync(TimeSpan.FromSeconds(5)));
+            await waiting;
             Assert.False(read.IsCompleted);
         }
         finally { release.Set(); await publisher; }
@@ -144,13 +146,24 @@ public sealed class FrontendInstalledTests
         var frontend = await OpenAsync(fixture);
         try
         {
-            var calls = 0;
-            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => frontend.InvokeAsync("read-state", null, "local", true,
-                "{}"u8.ToArray(), () => { if (++calls == 2) throw new UnauthorizedAccessException(); }, default).AsTask());
-            Assert.Equal(2, calls);
-            await Assert.ThrowsAnyAsync<Exception>(() => frontend.InvokeAsync("bad-json", null, "local", true,
+            var allowed = true;
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            var held = StartHeldRead(fixture, frontend, () =>
+            {
+                if (!Volatile.Read(ref allowed)) throw new UnauthorizedAccessException("fixture_caller_revoked");
+            }, deadline.Token);
+            try
+            {
+                await RequireHeldReadAsync(held);
+                Volatile.Write(ref allowed, false);
+            }
+            finally { File.WriteAllText(held.Marker + "-release", "release"); }
+            var revoked = await Assert.ThrowsAsync<UnauthorizedAccessException>(() => held.Result);
+            Assert.Equal("fixture_caller_revoked", revoked.Message);
+            await Assert.ThrowsAnyAsync<JsonException>(() => frontend.InvokeAsync("bad-json", null, "local", true,
                 "{}"u8.ToArray(), () => { }, default).AsTask());
-            await Assert.ThrowsAsync<IOException>(() => frontend.CapabilityAsync("missing", default).AsTask());
+            var missing = await Assert.ThrowsAsync<IOException>(() => frontend.CapabilityAsync("missing", default).AsTask());
+            Assert.Equal("extension_frontend_operation_unavailable", missing.Message);
         }
         finally { await fixture.Activator.StopAllAsync(TimeSpan.FromSeconds(10)); }
     }
@@ -227,6 +240,7 @@ public sealed class FrontendInstalledTests
             .ReadCurrent("fixture-plugin")!;
         var metadata = Path.Combine(owner.Instance.RuntimeRoot, installed.Metadata.Footprint.RelativePath);
         var bytes = File.ReadAllBytes(metadata);
+        var identity = PhysicalObjectIdentity.Read(metadata);
         var journal = Path.Combine(owner.Instance.RuntimeRoot, "journals", installed.Metadata.JournalId.ToString("D"));
         var sibling = Path.Combine(journal, "9999999999.json");
         void ChangePhase(string phase)
@@ -240,27 +254,50 @@ public sealed class FrontendInstalledTests
         }
         try
         {
-            var calls = 0;
-            await Assert.ThrowsAnyAsync<IOException>(() => frontend.InvokeAsync("read-state", null, "local", true,
-                "{}"u8.ToArray(), () =>
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            var held = StartHeldRead(fixture, frontend, () => { }, deadline.Token);
+            var changedRegistry = false;
+            try
+            {
+                try
                 {
-                    if (++calls != 2) return;
-                    Assert.ThrowsAny<IOException>(() => File.WriteAllBytes(metadata, bytes));
+                    await RequireHeldReadAsync(held);
+                    var locked = Assert.Throws<IOException>(() => File.WriteAllBytes(metadata, bytes));
+                    Assert.Equal(32, locked.HResult & 0xffff);
                     if (change == "history-entry") File.WriteAllText(sibling, "{}");
-                    else ChangePhase("applied");
-                }, default).AsTask());
-        }
-        finally
-        {
-            if (File.Exists(sibling)) File.Delete(sibling);
-            if (change == "registry") ChangePhase("committed");
-        }
-        try
-        {
-            File.WriteAllBytes(metadata, bytes);
-            _ = await frontend.InvokeAsync("read-state", null, "local", true, "{}"u8.ToArray(), () => { }, default);
+                    else { ChangePhase("applied"); changedRegistry = true; }
+                }
+                finally { File.WriteAllText(held.Marker + "-release", "release"); }
+                await Assert.ThrowsAnyAsync<IOException>(() => held.Result);
+            }
+            finally
+            {
+                if (File.Exists(sibling)) File.Delete(sibling);
+                if (changedRegistry) ChangePhase("committed");
+            }
+            Assert.Equal(bytes, File.ReadAllBytes(metadata));
+            Assert.Equal(identity, PhysicalObjectIdentity.Read(metadata));
+            var recovered = await frontend.InvokeAsync("read-state", null, "local", true, "{}"u8.ToArray(), () => { }, default);
+            using var response = JsonDocument.Parse(recovered.Content);
+            Assert.Equal("read-state", response.RootElement.GetProperty("Operation").GetString());
         }
         finally { await fixture.Activator.StopAllAsync(TimeSpan.FromSeconds(10)); }
+    }
+
+    private static (Guid Id, string Marker, Task<FrontendContent> Result) StartHeldRead(InstallRuntimeFixture fixture,
+        InstalledFrontend frontend, Action requireCaller, CancellationToken cancellation)
+    {
+        var id = Guid.NewGuid();
+        return (id, Path.Combine(fixture.ActivationDirectory, "frontend-read-" + id.ToString("N")),
+            frontend.InvokeAsync("coordinated-read", null, "local", true, JsonSerializer.SerializeToUtf8Bytes(new { id }),
+                requireCaller, cancellation).AsTask());
+    }
+
+    private static async Task RequireHeldReadAsync((Guid Id, string Marker, Task<FrontendContent> Result) held)
+    {
+        var entered = await OwnedCrashProcess.ReadReportAsync(held.Marker + ".json", TimeSpan.FromSeconds(10));
+        Assert.Equal(held.Id, entered.GetProperty("id").GetGuid());
+        Assert.False(held.Result.IsCompleted);
     }
 
     internal static async Task<InstalledFrontend> OpenAsync(InstallRuntimeFixture fixture)
