@@ -87,9 +87,25 @@ public sealed class ExecutionProjectReader : IAsyncDisposable
         }
     }
 
+    /// <summary>Returns the decoded bytes of a bounded asset chunk after verifying the response and its length.</summary>
+    public Task<ExecutionProjectChunk> ReadAssetChunkAsync(string name, long offset, int maximumBytes, CancellationToken cancellationToken) =>
+        ReadChunkAsync(Request("asset") with { Name = name, Offset = offset, MaximumBytes = maximumBytes }, cancellationToken);
+
+    /// <summary>Returns the decoded bytes of a bounded chunk of an exact frozen resource path.</summary>
+    public Task<ExecutionProjectChunk> ReadFileChunkAsync(string name, string path, long offset, int maximumBytes, CancellationToken cancellationToken) =>
+        ReadChunkAsync(Request("file") with { Name = name, Path = path, Offset = offset, MaximumBytes = maximumBytes }, cancellationToken);
+
     private ExecutionProjectRequest Request(string kind) => new() { Fingerprint = _fingerprint, Sequence = 1, Kind = kind };
 
-    private async Task<ExecutionProjectResponse> ExchangeAsync(ExecutionProjectRequest request, CancellationToken cancellation)
+    private Task<ExecutionProjectChunk> ReadChunkAsync(ExecutionProjectRequest request, CancellationToken cancellation) =>
+        ExchangeAsync(request, static (response, content) => new ExecutionProjectChunk(
+            response.Fingerprint, response.Kind, response.Offset!.Value, response.SizeBytes!.Value, response.Sha256!, content!), cancellation);
+
+    private Task<ExecutionProjectResponse> ExchangeAsync(ExecutionProjectRequest request, CancellationToken cancellation) =>
+        ExchangeAsync(request, static (response, _) => response, cancellation);
+
+    private async Task<TResult> ExchangeAsync<TResult>(ExecutionProjectRequest request,
+        Func<ExecutionProjectResponse, byte[]?, TResult> select, CancellationToken cancellation)
     {
         await _exchange.WaitAsync(cancellation).ConfigureAwait(false);
         try
@@ -106,14 +122,17 @@ public sealed class ExecutionProjectReader : IAsyncDisposable
                 if (response.Fingerprint != _fingerprint || response.Sequence != request.Sequence || response.Kind != request.Kind ||
                     response.Index != request.Index || response.Offset != request.Offset)
                     throw new IOException("execution_project_response_unbound");
+                byte[]? content = null;
                 if (request.Kind is "asset" or "file")
                 {
-                    var content = Convert.FromBase64String(response.ContentBase64 ?? throw new IOException("execution_project_response_invalid"));
-                    if (content.LongLength > request.MaximumBytes || response.SizeBytes < request.Offset ||
-                        content.LongLength != Math.Min(request.MaximumBytes!.Value, response.SizeBytes!.Value - request.Offset!.Value) ||
+                    content = Convert.FromBase64String(response.ContentBase64 ?? throw new IOException("execution_project_response_invalid"));
+                    var offset = request.Offset!.Value;
+                    if (response.SizeBytes is not { } size || size < offset ||
+                        content.LongLength != Math.Min(request.MaximumBytes!.Value, size - offset) ||
                         response.Sha256 is not { Length: 64 }) throw new IOException("execution_project_response_invalid");
                 }
-                return response;
+                cancellation.ThrowIfCancellationRequested();
+                return select(response, content);
             }
             catch { _closed = true; await _pipe.DisposeAsync().ConfigureAwait(false); throw; }
         }

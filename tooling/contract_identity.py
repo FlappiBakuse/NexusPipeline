@@ -2,7 +2,7 @@
 import hashlib
 import json
 
-from contract_exports import schema_semantics
+from schema_exports import schema_semantics
 
 
 def canonical(value):
@@ -36,8 +36,8 @@ def source_identity(root):
     files.extend(path for path in (root / "sdk/dotnet").rglob("*.cs") if not path.name.endswith(".g.cs"))
     files.extend(path for path in (root / "sdk/frontend/src").rglob("*.ts") if not path.name.endswith(".generated.ts"))
     files.extend(root / "tooling" / name for name in
-                 ("contract_codegen.py", "contract_exports.py", "contract_identity.py", "web_schema.py", "ui_codegen.py",
-                  "sdk_frontend_surface.mjs", "boundaries/Program.cs", "boundaries/PublicSdkSurface.cs", "boundaries/PublicSdkSignatures.cs"))
+                 ("contract_codegen.py", "schema_exports.py", "contract_identity.py", "ui_codegen.py",
+                  "sdk_frontend_surface.mjs", "boundaries/Program.cs", "boundaries/PublicSdkSurface.cs"))
     files.extend(root / name for name in ("sdk/dotnet/NexusPipeline.Extensibility.csproj", "sdk/frontend/package.json",
                                           "sdk/frontend/tsconfig.json", "sdk/frontend/build.mjs", "Directory.Build.props"))
     records = []

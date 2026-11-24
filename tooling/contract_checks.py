@@ -2,7 +2,7 @@
 import json
 from urllib.parse import urldefrag, urljoin
 
-from contract_codegen import expected_outputs
+from contract_codegen import PROTOCOL_DIRECTORIES, expected_outputs
 
 
 def no_duplicates(pairs):
@@ -58,7 +58,7 @@ def check_contracts(root):
     for relative, expected in outputs.items():
         if (root / relative).read_bytes() != expected.encode("utf-8"):
             raise ValueError(f"Generated contract output differs: {relative}")
-    for directory in ("sdk/dotnet/Protocol", "src/platform/Serialization/Protocol"):
+    for directory in PROTOCOL_DIRECTORIES.values():
         actual = {path.relative_to(root).as_posix() for path in (root / directory).glob("*.g.cs")}
         expected = {name for name in outputs if name.startswith(directory + "/") and name.endswith(".g.cs")}
         if actual != expected:

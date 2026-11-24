@@ -43,6 +43,10 @@ public sealed record AssetPreparationPlan
     /// <summary>Schema field <c>roots</c>; constraints are owned by asset-preparation-plan.schema.json.</summary>
     [JsonPropertyName("roots")]
     public required IReadOnlyList<AssetPreparationDefsRoot> Roots { get; init; }
+    /// <summary>Schema field <c>definitionRevisions</c>; constraints are owned by asset-preparation-plan.schema.json.</summary>
+    [JsonPropertyName("definitionRevisions")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<AssetPreparationDefsDefinitionRevision>? DefinitionRevisions { get; init; }
     /// <summary>Schema field <c>assets</c>; constraints are owned by asset-preparation-plan.schema.json.</summary>
     [JsonPropertyName("assets")]
     public required IReadOnlyList<AssetPreparationDefsAsset> Assets { get; init; }

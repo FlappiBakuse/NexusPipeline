@@ -23,6 +23,16 @@
         "identity": {"$ref": "file-tree.schema.json#/$defs/physicalIdentity"}
       }
     },
+    "definitionRevision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "revision"],
+      "properties": {
+        "kind": {"enum": ["root", "script", "user", "binding", "queue", "schedule"]},
+        "id": {"$ref": "common.schema.json#/$defs/uuid"},
+        "revision": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}
+      }
+    },
     "asset": {
       "type": "object",
       "additionalProperties": false,

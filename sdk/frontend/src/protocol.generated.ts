@@ -576,6 +576,7 @@ export interface TaskDefinitionsTaskProjection {
   readonly resourceId: string;
   readonly relativePath: string;
   readonly selector: ReadonlyArray<unknown>;
+  readonly repetitionSelector?: ReadonlyArray<unknown>;
 }
 
 export interface TaskLogEvent {
