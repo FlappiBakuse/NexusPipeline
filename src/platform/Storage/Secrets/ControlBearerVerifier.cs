@@ -25,7 +25,6 @@ public sealed class ControlBearerVerifier : IDisposable
     private bool _mutating;
     private readonly AsyncLocal<ControlBearerRequest?> _requests = new();
     private readonly AsyncLocal<ControlPublicationScope?> _publications = new();
-    internal Action? ProducerRead { get; init; }
 
     public ControlBearerVerifier(RuntimeInstance instance, StateDatabase database, InstanceLease lease, IRecoveryIndex recovery,
         SecretFieldService service)
@@ -244,7 +243,6 @@ public sealed class ControlBearerVerifier : IDisposable
             if (trustedPlan is not null) SecretPreparationRows.VerifyPlan(connection, transaction, trustedPlan);
             return (registered, trustedPlan);
         }
-        ProducerRead?.Invoke();
         if (held is not null)
         {
             var directory = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(_instance.RuntimeRoot, "journals", journalId.ToString("D")));

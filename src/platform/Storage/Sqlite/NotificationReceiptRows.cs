@@ -54,7 +54,7 @@ internal static class NotificationReceiptRows
         return reference;
     }
 
-    internal static void RequireSaved(SqliteConnection connection, SqliteTransaction transaction, NotificationReceiptSnapshot snapshot)
+    internal static int RequireSaved(SqliteConnection connection, SqliteTransaction transaction, NotificationReceiptSnapshot snapshot)
     {
         var document = snapshot.Document;
         using var command = NotificationDeliveryRows.Command(connection, transaction,
@@ -70,7 +70,7 @@ internal static class NotificationReceiptRows
             row.GetString(6) != document.SubjectId || row.GetString(7) != snapshot.Reference.Sha256 ||
             row.GetString(8) != "notification.registration" || row.GetString(9) != "completed")
             throw NotificationReceiptCodec.Invalid();
-        _ = ReceiptProgressRows.Require(connection, transaction, document.OperationId, document.RouteCount);
+        return ReceiptProgressRows.Require(connection, transaction, document.OperationId, document.RouteCount);
     }
 
     internal static void RequireReferences(SqliteConnection connection, SqliteTransaction transaction, NotificationReceiptSnapshot snapshot)

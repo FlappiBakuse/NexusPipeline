@@ -38,7 +38,23 @@ public sealed class ConfigurationPatchService
         ConfigurationPatchRequest request, string? sourceRequestDigest)
     {
         _lease.VerifyHeld(_instance);
-        var before = _store.Read(address);
+        return Prepare(subject, address, expectedBindingRevision, contract, relativePath, syntax, access, request,
+            _store.Read(address), sourceRequestDigest);
+    }
+
+    internal PreparedConfigurationPatch PreviewOwned(string subject, PatchBatchRequest.Document document, ConfigurationRevision before)
+    {
+        _lease.VerifyHeld(_instance);
+        var item = document.Input;
+        if (before.Address != item.Address) throw new ConfigurationException("configuration_patch_batch_source_invalid");
+        return Prepare(subject, item.Address, item.ExpectedBindingRevision, item.Contract, item.RelativePath, item.Syntax,
+            item.Access, document.Patch, before, null);
+    }
+
+    private PreparedConfigurationPatch Prepare(string subject, ConfigurationAddress address, long expectedBindingRevision,
+        ConfigurationContractStamp contract, string relativePath, ConfigurationSyntax syntax, ConfigurationDocumentAccess access,
+        ConfigurationPatchRequest request, ConfigurationRevision? before, string? sourceRequestDigest)
+    {
         ConfigurationRevisionPolicy.RequireCurrentContract(before, contract);
         if (before!.Revision != request.Binding.Revision || request.Binding.ResourceId != address.ResourceId)
             throw new ConfigurationException("configuration_patch_binding_conflict");

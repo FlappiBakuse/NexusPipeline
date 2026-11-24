@@ -24,6 +24,17 @@ public sealed class JournalStore
         lock (_gate) return _protection?.JournalId == journalId ? _protection.Read() : null;
     }
 
+    internal bool HasProtectedHead(JournalDocument expected)
+    {
+        var owner = ReadOwner(expected.JournalId);
+        lock (owner._gate)
+        {
+            if (owner._protection is not { } protection || protection.JournalId != expected.JournalId) return false;
+            using var publication = JournalPublicationGate.Acquire(owner._instance, expected.JournalId);
+            return ReferenceEquals(protection.ReadHead(), expected);
+        }
+    }
+
     public JournalStore(RuntimeInstance instance, ContractReader contracts)
     {
         var actual = new InstanceRoot(contracts).OpenExisting(instance.RuntimeRoot);
@@ -35,7 +46,19 @@ public sealed class JournalStore
     internal JournalStore(RuntimeInstance instance, ContractReader contracts, IJournalPublicationObserver observer) : this(instance, contracts)
         => _publicationObserver = observer;
 
-    internal IDisposable ProtectReadHistory(Guid journalId, bool requireFreshInventory = false)
+    internal IDisposable ProtectReadHistory(Guid journalId, bool requireFreshInventory = false) =>
+        ProtectReadHistory(journalId, requireFreshInventory, JournalHistoryProtection.DefaultRevisions, JournalHistoryProtection.DefaultBytes);
+
+    internal IDisposable ProtectCleanupHistory(Guid journalId, int itemCount)
+    {
+        if (itemCount is < 1 or > CleanupPlanCodec.MaximumItems) throw new ArgumentOutOfRangeException(nameof(itemCount));
+        // A normal cleanup appends started and completed receipts per item plus four fixed revisions.
+        var revisions = 2 * itemCount + 4;
+        return revisions <= JournalHistoryProtection.DefaultRevisions ? ProtectReadHistory(journalId) :
+            ProtectReadHistory(journalId, false, revisions, MaximumHistoryBytes);
+    }
+
+    private IDisposable ProtectReadHistory(Guid journalId, bool requireFreshInventory, int maximumRevisions, long maximumBytes)
     {
         using var timing = StartupProfile.Measure("history.protect");
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
@@ -43,7 +66,7 @@ public sealed class JournalStore
         {
             if (_protection is not null) throw new IOException("journal_history_scope_already_active");
             using var publication = JournalPublicationGate.Acquire(_instance, journalId);
-            var held = JournalHistoryProtection.TryAcquire(JournalDirectory(journalId), requireFreshInventory);
+            var held = JournalHistoryProtection.TryAcquire(JournalDirectory(journalId), requireFreshInventory, maximumRevisions, maximumBytes);
             if (held is null) return new ProtectionScope(this, null);
             try
             {
@@ -94,31 +117,37 @@ public sealed class JournalStore
     internal JournalDocument Read(Guid journalId, ConfigurationPlanCodec.OpenedPlan? plan)
     {
         JournalReadScope.SelectActiveParent(_instance, _contracts, journalId);
-        lock (_gate)
+        var owner = ReadOwner(journalId);
+        lock (owner._gate)
         {
-            using var publication = JournalPublicationGate.Acquire(_instance, journalId);
-            return ReadHistory(journalId, configurationPlan: plan);
+            using var publication = JournalPublicationGate.Acquire(owner._instance, journalId, _publicationObserver);
+            return owner.ReadHistory(journalId, configurationPlan: plan);
         }
     }
 
     public IReadOnlyList<JournalDocument> ReadAllRevisions(Guid journalId)
     {
         JournalReadScope.SelectActiveParent(_instance, _contracts, journalId);
-        lock (_gate)
+        var owner = ReadOwner(journalId);
+        lock (owner._gate)
         {
-            using var publication = JournalPublicationGate.Acquire(_instance, journalId);
-            if ((ReadProtectedHistory(journalId) ?? JournalReadScope.Read(this, journalId)) is { } held) return held;
+            using var publication = JournalPublicationGate.Acquire(owner._instance, journalId, _publicationObserver);
+            if (owner.ReadProtectedHistory(journalId) is { } held) return held;
             var revisions = new List<JournalDocument>();
-            ReadHistory(journalId, revisions);
+            owner.ReadHistory(journalId, revisions);
             return revisions.AsReadOnly();
         }
     }
+
+    // Resolve the protected store before taking the publication mutex so reads and appends share the same lock order.
+    private JournalStore ReadOwner(Guid journalId) =>
+        ProtectedJournalId == journalId ? this : JournalReadScope.ProtectedOwner(this, journalId) ?? this;
 
     public JournalDocument Append(Guid journalId, long expectedRevision, ReadOnlyMemory<byte> bytes,
         NoEffectEvidence? noEffect = null, bool hasVerifiedRecoveryEvidence = false)
     {
         JournalReadScope.SelectActiveParent(_instance, _contracts, journalId);
-        var owner = JournalReadScope.WriteOwner(this, journalId) ?? this;
+        var owner = JournalReadScope.ProtectedOwner(this, journalId) ?? this;
         return owner.AppendCore(journalId, expectedRevision, bytes, noEffect, hasVerifiedRecoveryEvidence, _publicationObserver);
     }
 
@@ -155,12 +184,13 @@ public sealed class JournalStore
     private JournalDocument ReadHistory(Guid journalId, List<JournalDocument>? snapshots = null,
         JournalHistoryProtection? initialProtection = null, ConfigurationPlanCodec.OpenedPlan? configurationPlan = null)
     {
-        var protectedDocuments = ReadProtectedHistory(journalId) ?? JournalReadScope.Read(this, journalId);
-        if (protectedDocuments is not null)
+        if (_protection is { } protection && protection.JournalId == journalId)
         {
-            configurationPlan?.RequireReference(_instance, protectedDocuments[^1]);
-            snapshots?.AddRange(protectedDocuments);
-            return protectedDocuments[^1];
+            var protectedDocuments = snapshots is null ? null : protection.Read();
+            var last = protectedDocuments is null ? protection.ReadHead() : protectedDocuments[^1];
+            configurationPlan?.RequireReference(_instance, last);
+            if (protectedDocuments is not null) snapshots!.AddRange(protectedDocuments);
+            return last;
         }
         var directory = JournalDirectory(journalId);
         var files = Directory.EnumerateFileSystemEntries(directory).Take(MaximumRevisions + 1).Order(StringComparer.Ordinal).ToArray();

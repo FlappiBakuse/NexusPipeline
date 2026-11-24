@@ -204,10 +204,11 @@ internal sealed class ExecutionCaptureStore(RuntimeInstance instance, StateDatab
         var next = JournalDocument.Read(JsonSerializer.SerializeToUtf8Bytes(node), contracts);
         var history = state.RequireValidatedRead().History.Append(next).ToArray();
         var reader = new CaptureEvidenceReader(instance, database, contracts);
-        _ = reader.ReadMetadata(state.Journal, state.Attempt, state.Total, history);
-        using var collection = stage == "collected" ? reader.HoldCollectedForPublication(
+        var collected = stage == "collected";
+        if (!collected) _ = reader.ReadMetadata(state.Journal, state.Attempt, state.Total, history);
+        using var collection = collected ? reader.HoldCollectedForPublication(
             state.Journal, state.Attempt, state.Total, history, binding, reference) : null;
-        if (stage == "collected" && value is CaptureResultDocument { Outcome: "captured" } captured)
+        if (collected && value is CaptureResultDocument { Outcome: "captured" } captured)
         {
             try { database.Write((connection, transaction) =>
             {
@@ -223,7 +224,7 @@ internal sealed class ExecutionCaptureStore(RuntimeInstance instance, StateDatab
             }
         }
         new JournalStore(instance, contracts).Append(state.Journal.JournalId, state.Latest.Revision, next.Export());
-        if (stage == "collected") observer?.Reached(TargetPersistencePoint.CaptureCollectedAppended, binding);
+        if (collected) observer?.Reached(TargetPersistencePoint.CaptureCollectedAppended, binding);
         ExecutionAttemptProjection.SynchronizeCaptureAppend(instance, database, contracts, state, next);
         if (MuMuCaptureSequence.IsRoot(stage)) _childAdmission = (state, next);
         return reference;

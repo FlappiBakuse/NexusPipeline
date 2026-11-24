@@ -15,11 +15,13 @@ internal sealed class JudgementFileAccess
     private readonly string[] _configurationTargets;
     private readonly CancellationToken _cancellation;
     private readonly bool _enabled;
+    private readonly JudgementDiagnostics _diagnostics;
     internal JsonElement Files { get; }
 
-    internal JudgementFileAccess(JudgementWorkerInitialization initialization, JsonElement input, CancellationToken cancellation)
+    internal JudgementFileAccess(JudgementWorkerInitialization initialization, JsonElement input, JudgementDiagnostics diagnostics, CancellationToken cancellation)
     {
         _scriptDirectory = initialization.WorkingDirectory; _scriptIdentity = initialization.WorkingDirectoryIdentity; _cancellation = cancellation;
+        _diagnostics = diagnostics;
         _enabled = input.TryGetProperty("format", out var format) && format.GetString() == "nexus.execution.judgement-input" &&
             input.TryGetProperty("scriptDir", out var directory) && directory.GetString() == _scriptDirectory &&
             input.TryGetProperty("configurations", out var configurations) && configurations.ValueKind == JsonValueKind.Array &&
@@ -44,13 +46,14 @@ internal sealed class JudgementFileAccess
             using var reader = new StreamReader(input, JudgementWorkerProtocol.Utf8, detectEncodingFromByteOrderMarks: true);
             var text = reader.ReadToEnd(); _cancellation.ThrowIfCancellationRequested(); return text;
         }
-        catch (Exception error) when (Unavailable(error)) { return null; }
+        catch (Exception error) when (Unavailable(error)) { _diagnostics.Add("read", "read-only", error); return null; }
     }
 
-    internal bool WriteText(string relative, string text)
+    internal bool WriteText(string relative, string text, Action? afterTruncate = null)
     {
         if (!_enabled) return false;
         byte[]? bytes = null; var held = new List<IDisposable>();
+        var effect = "not-started"; var stage = "prepare-write";
         try
         {
             _cancellation.ThrowIfCancellationRequested();
@@ -66,24 +69,37 @@ internal sealed class JudgementFileAccess
             foreach (var component in components.Where(component => component != "."))
             {
                 _cancellation.ThrowIfCancellationRequested(); current = Path.Combine(current, component);
-                if (!Directory.Exists(current)) RequireWritable(current);
+                if (!Directory.Exists(current))
+                {
+                    RequireWritable(current);
+                    stage = "create"; effect = "partial-or-unknown";
+                }
                 directory = directory.AcquireDirectory(component); held.Add(directory);
             }
             RequireWritable(path);
+            stage = "open-write"; effect = "partial-or-unknown";
             using var output = Open(directory, path, write: true);
             RequireWritable(path);
-            bytes = JudgementWorkerProtocol.Utf8.GetBytes(text); _cancellation.ThrowIfCancellationRequested(); output.SetLength(0);
+            bytes = JudgementWorkerProtocol.Utf8.GetBytes(text); _cancellation.ThrowIfCancellationRequested();
+            stage = "truncate"; output.SetLength(0);
+            stage = "write";
+            afterTruncate?.Invoke();
             for (var offset = 0; offset < bytes.Length; offset += 65536)
             {
                 _cancellation.ThrowIfCancellationRequested(); output.Write(bytes.AsSpan(offset, Math.Min(65536, bytes.Length - offset)));
             }
-            output.Flush(flushToDisk: true); return true;
+            stage = "flush"; output.Flush(flushToDisk: true); effect = "completed"; return true;
         }
-        catch (Exception error) when (Unavailable(error)) { return false; }
+        catch (Exception error) when (Unavailable(error)) { _diagnostics.Add(stage, effect, error); return false; }
+        catch (OperationCanceledException error) when (effect != "not-started") { _diagnostics.Add(stage, effect, error); throw; }
         finally
         {
             if (bytes is not null) CryptographicOperations.ZeroMemory(bytes);
-            for (var index = held.Count - 1; index >= 0; index--) held[index].Dispose();
+            for (var index = held.Count - 1; index >= 0; index--)
+            {
+                try { held[index].Dispose(); }
+                catch (Exception cleanup) when (Unavailable(cleanup)) { _diagnostics.Add("file-release", "cleanup", cleanup); }
+            }
         }
     }
 

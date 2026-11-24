@@ -9,7 +9,11 @@ namespace NexusPipeline.Platform.Storage.Scheduling;
 internal sealed class ScheduledProviderCodec(RuntimeInstance instance, ContractReader contracts)
 {
     internal BlobReference Persist<T>(T document) => new ImmutableBlobStore(instance, contracts).PersistPlan(Encode(document));
-    internal static byte[] Encode<T>(T document) => BoundedJson.Serialize(document, StoredPlanFormat.Options);
+    internal static byte[] Encode<T>(T document)
+    {
+        using var timing = StartupProfile.Measure("schedule.codec.encode");
+        return BoundedJson.Serialize(document, StoredPlanFormat.Options);
+    }
 
     internal T ReadDocument<T>(BlobReference reference)
     {
@@ -17,8 +21,9 @@ internal sealed class ScheduledProviderCodec(RuntimeInstance instance, ContractR
         using var held = new ImmutableBlobStore(instance, contracts).OpenVerified(reference);
         var bytes = new byte[checked((int)held.Length)]; held.ReadExactly(bytes);
         using var parsed = StrictJson.Parse(bytes);
-        var result = JsonSerializer.Deserialize<T>(bytes, StoredPlanFormat.Options) ?? throw Invalid();
-        if (!JsonElement.DeepEquals(parsed.RootElement, JsonSerializer.SerializeToElement(result, StoredPlanFormat.Options))) throw Invalid();
+        var root = parsed.RootElement;
+        var result = root.Deserialize<T>(StoredPlanFormat.Options) ?? throw Invalid();
+        if (!JsonElement.DeepEquals(root, JsonSerializer.SerializeToElement(result, StoredPlanFormat.Options))) throw Invalid();
         return result;
     }
 
@@ -43,8 +48,9 @@ internal sealed class ScheduledProviderCodec(RuntimeInstance instance, ContractR
         WorkPlanPolicy.Validate(new(document.PlansRevision, ImmutableArray.Create(document.Task)));
         var plans = ReadDocument<ScheduledWorkPlans>(document.Plans);
         WorkPlanPolicy.Validate(plans);
-        if (plans.Revision != document.PlansRevision || !plans.Tasks.Any(task =>
-            Encode(task).AsSpan().SequenceEqual(Encode(document.Task)))) throw Invalid();
+        if (plans.Revision != document.PlansRevision) throw Invalid();
+        var candidate = plans.Tasks.FirstOrDefault(task => task.TaskId == document.Task.TaskId);
+        if (candidate is null || !Encode(candidate).AsSpan().SequenceEqual(Encode(document.Task))) throw Invalid();
         var expected = ScheduleMinutePolicy.DeriveProviderOccurrence(instance.InstanceId, document.ExtensionId, document.ProviderId,
             document.PlansRevision, document.Task, document.ObservedAtUtc);
         if (!expected.Invocation.Matches(document.Invocation) || expected.TriggerUtcMinute != document.TriggerUtcMinute ||

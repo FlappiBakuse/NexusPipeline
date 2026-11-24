@@ -52,12 +52,13 @@ public static class JudgementWorkerHost
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(TimeSpan.FromSeconds(initialization.InvocationTimeoutSeconds));
         var console = new JudgementConsole();
-        var probes = new JudgementProbeBridge(invocation, input, output, deadline.Token);
+        var diagnostics = new JudgementDiagnostics();
+        using var probes = new JudgementProbeBridge(invocation, input, output, deadline.Token);
         JudgementWorkerResponse response;
         try
         {
-            var result = initialization.Language == "javascript" ? BoundedJudgementScript.Execute(initialization, invocation, console, probes, deadline.Token) :
-                await JudgementPythonInvocation.ExecuteAsync(initialization, invocation, console, probes, input, output, deadline.Token).ConfigureAwait(false);
+            var result = initialization.Language == "javascript" ? BoundedJudgementScript.Execute(initialization, invocation, console, diagnostics, probes, deadline.Token) :
+                await JudgementPythonInvocation.ExecuteAsync(initialization, invocation, console, diagnostics, probes, input, output, deadline.Token).ConfigureAwait(false);
             response = new(JudgementWorkerProtocol.ResponseFormat, 1, invocation.Identity, invocation.Generation,
                 invocation.IsFinal, invocation.InputSha256, result, null);
         }
@@ -75,8 +76,8 @@ public static class JudgementWorkerHost
         {
             response = Fault(invocation, "judgement_worker_execution_failed");
         }
-        return response with { Console = console.Entries, ProbeCount = probes.Exchanges.Count,
-            ProbeTranscriptSha256 = JudgementProbeProtocol.Hash(probes.Exchanges) };
+        return response with { Console = console.Entries, Diagnostics = diagnostics.Failures, ProbeCount = probes.ProbeCount,
+            ProbeTranscriptSha256 = probes.FinishTranscript() };
     }
 
     private static ProcessIdentity RequireOwnedBroker(JudgementWorkerInitialization initialization)

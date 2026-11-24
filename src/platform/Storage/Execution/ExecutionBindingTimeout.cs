@@ -19,8 +19,7 @@ internal static class BindingTimeoutCodec
 
     internal static bool IsParticipant(JsonElement participant)
     {
-        var identity = participant.GetProperty("identity");
-        if (!identity.TryGetProperty("format", out var format) || format.GetString() != Format) return false;
+        if (!ExecutionParticipantText.MatchesFormat(participant, Format)) return false;
         _ = Decode(participant); return true;
     }
 
@@ -28,8 +27,9 @@ internal static class BindingTimeoutCodec
     {
         journal = ExecutionInvocationCodec.Current(journal);
         var result = ImmutableArray.CreateBuilder<ExecutionBindingTimeout>();
-        foreach (var participant in journal.Participants.Where(IsParticipant))
+        foreach (var participant in journal.Participants)
         {
+            if (!ExecutionParticipantText.MatchesFormat(participant, Format)) continue;
             var item = Decode(participant);
             var step = total.Steps.SingleOrDefault(step => step.StepId == item.StepId) ?? throw Invalid();
             var jobs = WriterIntentCodec.ReadJobs(journal, total).Where(job => job.StepId == item.StepId).ToArray();

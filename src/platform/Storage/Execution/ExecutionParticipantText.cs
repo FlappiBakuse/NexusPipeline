@@ -14,6 +14,9 @@ internal static class ExecutionParticipantText
     private static readonly Queue<TextKey> Order = [];
     private static int _characters;
 
+    internal static bool MatchesFormat(JsonElement participant, string name) =>
+        participant.GetProperty("identity").TryGetProperty("format", out var format) && format.GetString() == name;
+
     internal static DecodedExecutionParticipant<T> Read<T>(JsonElement identity, JsonSerializerOptions options,
         Func<Exception> invalid) where T : class
     {

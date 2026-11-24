@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using NexusPipeline.Core.Configuration;
@@ -8,21 +7,40 @@ using NexusPipeline.Platform.Storage.Maintenance;
 
 namespace NexusPipeline.Platform.Storage.Journals;
 
-internal sealed record BoundPreparedPayload(FrozenPayloadApply Plan, JsonObject Document);
+internal sealed record BoundPreparedPayload(FrozenPayloadApply Plan, BlobReference Reference, JsonObject Document);
 
 internal static class PayloadPreparedBinding
 {
     internal static FrozenPayloadApply ReadPlan(RuntimeInstance instance, ContractReader contracts, PayloadApplyRoots roots,
-        RegisteredJournal journal, bool verifyContents = true)
+        RegisteredJournal journal) =>
+        ReadPlan(instance, contracts, roots, journal, out _, verifyContents: true);
+
+    private static FrozenPayloadApply ReadPlan(RuntimeInstance instance, ContractReader contracts, PayloadApplyRoots roots,
+        RegisteredJournal journal, out BlobReference reference, bool verifyContents)
     {
         if (journal.Kind is not (JournalKind.UpdateApply or JournalKind.ExtensionApply)) throw new IOException("payload_kind_unbound");
         var path = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(instance.RuntimeRoot, journal.PlanPath));
         var codec = new PayloadPlanCodec(instance, contracts, new(instance, contracts), roots);
-        var reference = new BlobReference(journal.PlanPath, new FileInfo(path).Length, journal.PlanDigest);
+        reference = new(journal.PlanPath, new FileInfo(path).Length, journal.PlanDigest);
         var plan = verifyContents ? codec.Read(reference) : codec.ReadStructure(reference);
-        if (plan.OperationId != journal.OperationId || plan.JournalId != journal.JournalId || plan.Kind != journal.Kind ||
-            !plan.ResourceKeys.SequenceEqual(journal.ResourceKeys)) throw new IOException("payload_plan_registration_unbound");
+        RequireRegistered(plan, reference, journal);
         return plan;
+    }
+
+    internal static void RequireRegistered(FrozenPayloadApply plan, BlobReference reference, RegisteredJournal journal)
+    {
+        if (plan.OperationId != journal.OperationId || plan.JournalId != journal.JournalId || plan.Kind != journal.Kind ||
+            reference.RelativePath != journal.PlanPath || reference.Sha256 != journal.PlanDigest ||
+            !plan.ResourceKeys.SequenceEqual(journal.ResourceKeys))
+            throw new IOException("payload_plan_registration_unbound");
+    }
+
+    internal static EffectGateSnapshot RequireGate(FrozenPayloadApply plan, BlobReference reference, EffectGateSnapshot gate)
+    {
+        if (gate.InstanceId != plan.InstanceId || gate.JournalId != plan.JournalId || gate.OperationId != plan.OperationId ||
+            gate.Kind != plan.Kind || gate.PlanDigest != reference.Sha256)
+            throw new IOException("payload_gate_binding_changed");
+        return gate;
     }
 
     internal static BoundPreparedPayload Read(RuntimeInstance instance, ContractReader contracts, StateDatabase database,
@@ -31,7 +49,7 @@ internal static class PayloadPreparedBinding
         var snapshot = new RecoveryJournalRegistry(database).ReadSnapshot(journalId);
         RecoveryRegistryPolicy.Verify(snapshot);
         var registered = snapshot.Journals.Single(item => item.JournalId == journalId);
-        var plan = ReadPlan(instance, contracts, roots, registered,
+        var plan = ReadPlan(instance, contracts, roots, registered, out var reference,
             verifyContents && !(registered.Kind == JournalKind.ExtensionApply && registered.Phase == JournalPhase.Committed));
         if (plan.Kind == JournalKind.UpdateApply)
         {
@@ -45,9 +63,7 @@ internal static class PayloadPreparedBinding
         var history = new JournalStore(instance, contracts).ReadAllRevisions(journalId);
         var projected = history.SingleOrDefault(item => item.Revision == registered.Revision) ?? throw new IOException("payload_sql_prefix_missing");
         if (projected.Phase != registered.Phase) throw new IOException("payload_sql_phase_unbound");
-        var gate = new JournalEffectGate(database).Read(journalId);
-        if (gate.InstanceId != instance.InstanceId || gate.OperationId != plan.OperationId || gate.Kind != plan.Kind || gate.PlanDigest != registered.PlanDigest)
-            throw new IOException("payload_gate_binding_changed");
+        var gate = RequireGate(plan, reference, new JournalEffectGate(database).Read(journalId));
         foreach (var physical in history)
         {
             if (physical.Kind != plan.Kind || physical.Root.GetProperty("operationId").GetGuid() != plan.OperationId ||
@@ -63,7 +79,7 @@ internal static class PayloadPreparedBinding
                 throw new IOException("payload_no_effect_decision_unbound");
         }
         VerifyEffects(snapshot, plan, registered, history);
-        return new(plan, JsonNode.Parse(history[^1].Export())!.AsObject());
+        return new(plan, reference, JsonNode.Parse(history[^1].Export())!.AsObject());
     }
 
     internal static void VerifyPending(RecoveryRegistrySnapshot snapshot, FrozenPayloadApply plan, RegisteredJournal registered)
@@ -87,7 +103,9 @@ internal static class PayloadPreparedBinding
     }
 
     internal static bool HasUnexecutedReceipt(JsonElement root) => root.GetProperty("receipts").EnumerateArray()
-        .Any(item => item.GetProperty("stepId").GetString() == "verify-no-effect" && item.GetProperty("effect").GetString() == "notExecuted");
+        .Any(item => IsUnexecutedReceipt(item.GetProperty("stepId").GetString(), item.GetProperty("effect").GetString()));
+
+    internal static bool IsUnexecutedReceipt(string? step, string? effect) => (step, effect) is ("verify-no-effect", "notExecuted");
 
     private static void VerifyReceipts(JsonElement receipts)
     {

@@ -130,17 +130,19 @@ internal sealed class StepJudgementWorker : IDisposable
             }
             if (accepted is null) return;
             invocation = draft.Bind(accepted) with { ProbeEvidenceAllowance = probeAllowance };
-            var size = JudgementWorkerProtocol.Encode(invocation).LongLength;
+            using var frame = new JudgementInvocationFrame(invocation);
+            var size = frame.Bytes.Length;
             lock (_gate)
             {
                 if (size > _initialization.MaximumEvidenceBytes - _recordedBytes) throw new IOException("judgement_evidence_capacity_exhausted");
                 _recordedBytes += size;
             }
-            invocationReference = JudgementInvocationArchive.Write(_blobs, invocation, Hold);
-            var exchange = await _client!.InvokeAsync(invocation, _transportStopping.Token).ConfigureAwait(false);
+            invocationReference = JudgementInvocationArchive.Write(_blobs, frame, Hold);
+            var exchange = await _client!.InvokeAsync(frame, _transportStopping.Token).ConfigureAwait(false);
             probeArchivingAttempted = true;
-            ArchiveProbes(invocation, exchange.Probes, probes);
-            var responseBytes = JudgementWorkerProtocol.Encode(exchange.Response);
+            ArchiveProbes(invocation, probes);
+            if (exchange.Response.Diagnostics is { } diagnostics) ExecutionFailureTrace.RecordJudgement(invocation, diagnostics);
+            var responseBytes = JudgementWorkerProtocol.Encode(exchange.Response with { Diagnostics = null });
             lock (_gate)
             {
                 if (responseBytes.LongLength > _initialization.MaximumEvidenceBytes - _recordedBytes)
@@ -159,7 +161,7 @@ internal sealed class StepJudgementWorker : IDisposable
             if (!probeArchivingAttempted && invocation is not null && _client is not null)
             {
                 probeArchivingAttempted = true;
-                try { ArchiveProbes(invocation, _client.Probes, probes); }
+                try { ArchiveProbes(invocation, probes); }
                 catch (Exception archiveError) when (archiveError is IOException or System.Text.Json.JsonException or InvalidOperationException) { }
             }
             lock (_gate)
@@ -172,21 +174,18 @@ internal sealed class StepJudgementWorker : IDisposable
         }
     }
 
-    private void ArchiveProbes(JudgementWorkerInvocation invocation, IReadOnlyList<JudgementProbeExchange> exchanges, List<BlobReference> references)
-    {
-        JudgementProbeProtocol.RequireExchanges(exchanges, invocation);
-        foreach (var exchange in exchanges)
+    private void ArchiveProbes(JudgementWorkerInvocation invocation, List<BlobReference> references) =>
+        _client!.UseProbeFrames(invocation, frame =>
         {
-            var bytes = JudgementWorkerProtocol.Encode(exchange);
             lock (_gate)
             {
-                if (bytes.LongLength > _initialization!.MaximumEvidenceBytes - _recordedBytes)
+                var size = frame.Bytes.Length;
+                if (size > _initialization!.MaximumEvidenceBytes - _recordedBytes)
                     throw new IOException("judgement_evidence_capacity_exhausted");
-                _recordedBytes += bytes.LongLength;
+                _recordedBytes += size;
             }
-            var reference = JudgementProbeArchive.Write(_blobs, exchange, Hold); references.Add(reference);
-        }
-    }
+            references.Add(JudgementProbeArchive.Write(_blobs, frame, Hold));
+        });
 
     private bool IsPeriodicallyRejected(BlobReference raw)
     {

@@ -1,9 +1,9 @@
-using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Operations;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Sqlite;
+using System.Security.Cryptography;
 
 namespace NexusPipeline.Platform.Storage.Configuration;
 
@@ -141,6 +141,14 @@ public sealed class ConfigurationRevisionStore : IConfigurationRevisionStore
         return result;
     }
 
+    internal void RequirePatchPreviewCurrent(StoredConfigurationRevision source)
+    {
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true,
+            domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration);
+        using var transaction = DatabaseConnections.BeginRead(connection);
+        ConfigurationRevisionRows.RequirePatchPreviewCurrent(connection, transaction, source);
+    }
+
     internal long? ReadCurrentRevision(ConfigurationAddress address)
     {
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration);
@@ -165,15 +173,28 @@ public sealed class ConfigurationRevisionStore : IConfigurationRevisionStore
 
     internal void RequireReadSet(SqliteConnection connection, SqliteTransaction transaction, IReadOnlyList<ConfigurationReadStamp> readSet)
     {
+        if (readSet.Count == 0) return;
+        var bindings = new Dictionary<Guid, (long Revision, Guid UserId, Guid ScriptId)>();
+        var resources = new Dictionary<ConfigurationAddress, ConfigurationReadFiles>();
         foreach (var item in readSet)
         {
-            var binding = ConfigurationRevisionRows.Binding(connection, transaction, item.Address.BindingId);
-            var current = ConfigurationRevisionRows.Current(connection, transaction, item.Address, _codec)?.Revision;
-            var entry = current?.Tree.Entries.SingleOrDefault(entry => entry.RelativePath == item.RelativePath && entry.Kind == FileObjectKind.File);
-            if (binding.Revision != item.ExpectedBindingRevision || current?.Revision != item.ExpectedRevision ||
-                current.Contract != item.Contract || current.UserId != binding.UserId || current.ScriptId != binding.ScriptId ||
-                entry?.Sha256 != item.SourceSha256)
+            var bindingId = item.Address.BindingId;
+            if (!bindings.TryGetValue(bindingId, out var binding))
+            {
+                binding = ConfigurationRevisionRows.Binding(connection, transaction, bindingId);
+                bindings.Add(bindingId, binding);
+            }
+            if (!resources.TryGetValue(item.Address, out var files))
+            {
+                var current = ConfigurationRevisionRows.Current(connection, transaction, item.Address, _codec)?.Revision;
+                if (current is null || current.UserId != binding.UserId || current.ScriptId != binding.ScriptId)
+                    throw new ConfigurationException("configuration_read_set_changed");
+                files = new(current);
+                resources.Add(item.Address, files);
+            }
+            if (binding.Revision != item.ExpectedBindingRevision)
                 throw new ConfigurationException("configuration_read_set_changed");
+            _ = files.Require(item);
         }
     }
 
@@ -235,4 +256,198 @@ public sealed class ConfigurationRevisionStore : IConfigurationRevisionStore
     private static void RequireIdentity(OperationIdentity operation, ConfigurationRevisionChange change)
     { if (operation.Kind != "configuration.save" || operation.RequestDigest != Digest(change)) throw new OperationConflictException(); }
     private static string Digest(ConfigurationRevisionChange change) => Convert.ToHexStringLower(SHA256.HashData(BoundedJson.Serialize(change)));
+}
+
+internal sealed record StoredConfigurationRevision(ConfigurationRevision Revision, BlobReference Manifest);
+
+internal static class ConfigurationRevisionRows
+{
+    internal const string ReadQuery = "configuration.revision.select";
+
+    internal static (long Revision, Guid UserId, Guid ScriptId) Binding(SqliteConnection connection, SqliteTransaction transaction, Guid id)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT revision,user_id,automation_id FROM automation.bindings WHERE binding_id=$binding;";
+        command.Parameters.AddWithValue("$binding", id.ToString("D"));
+        using var timing = StartupProfile.Measure(ReadQuery);
+        using var row = command.ExecuteReader();
+        if (!row.Read()) throw new ConfigurationException("configuration_binding_missing");
+        return (row.GetInt64(0), Guid.Parse(row.GetString(1)), Guid.Parse(row.GetString(2)));
+    }
+
+    internal static StoredConfigurationRevision? Current(SqliteConnection connection, SqliteTransaction transaction,
+        ConfigurationAddress address, ConfigurationSnapshotCodec codec)
+    {
+        using var command = KeyCommand(connection, transaction, address);
+        command.CommandText = "SELECT revision FROM configuration.configuration_current WHERE binding_id=$binding AND resource_id=$resource;";
+        long? revision;
+        using (StartupProfile.Measure(ReadQuery)) revision = command.ExecuteScalar() as long?;
+        if (revision is { } saved) return Read(connection, transaction, address, saved, codec);
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM configuration.configuration_revisions WHERE binding_id=$binding AND resource_id=$resource);";
+        using (StartupProfile.Measure(ReadQuery))
+            if ((long)command.ExecuteScalar()! != 0) throw new IOException("configuration_current_missing");
+        return null;
+    }
+
+    internal static void RequirePatchPreviewCurrent(SqliteConnection connection, SqliteTransaction transaction,
+        StoredConfigurationRevision source)
+    {
+        var saved = source.Revision;
+        using var command = KeyCommand(connection, transaction, saved.Address);
+        command.CommandText = """
+            SELECT 1 FROM configuration.configuration_current c
+            JOIN configuration.configuration_revisions r
+              ON r.binding_id=c.binding_id AND r.resource_id=c.resource_id AND r.revision=c.revision
+            JOIN automation.bindings b ON b.binding_id=c.binding_id
+            WHERE c.binding_id=$binding AND c.resource_id=$resource AND c.revision=$revision
+              AND b.user_id=$user AND b.automation_id=$script
+              AND r.user_id=$user AND r.automation_id=$script
+              AND r.contract_revision=$contractRevision AND r.contract_digest=$contractDigest
+              AND r.instance_key IS $instanceKey AND r.requires_instance=$requiresInstance
+              AND r.manifest_path=$manifestPath AND r.manifest_size=$manifestSize AND r.manifest_digest=$manifestDigest;
+            """;
+        command.Parameters.AddWithValue("$revision", saved.Revision);
+        command.Parameters.AddWithValue("$user", saved.UserId.ToString("D"));
+        command.Parameters.AddWithValue("$script", saved.ScriptId.ToString("D"));
+        command.Parameters.AddWithValue("$contractRevision", saved.Contract.Revision);
+        command.Parameters.AddWithValue("$contractDigest", saved.Contract.DefinitionSha256);
+        command.Parameters.AddWithValue("$instanceKey", (object?)saved.Contract.InstanceKey ?? DBNull.Value);
+        command.Parameters.AddWithValue("$requiresInstance", saved.Contract.RequiresInstance ? 1 : 0);
+        command.Parameters.AddWithValue("$manifestPath", source.Manifest.RelativePath);
+        command.Parameters.AddWithValue("$manifestSize", source.Manifest.SizeBytes);
+        command.Parameters.AddWithValue("$manifestDigest", source.Manifest.Sha256);
+        using var timing = StartupProfile.Measure(ReadQuery);
+        if (command.ExecuteScalar() is null) throw new ConfigurationException("configuration_patch_batch_source_invalid");
+    }
+
+    internal static StoredConfigurationRevision Read(SqliteConnection connection, SqliteTransaction transaction,
+        ConfigurationAddress address, long revision, ConfigurationSnapshotCodec codec)
+    {
+        ConfigurationContractStamp contract;
+        BlobReference manifest;
+        Guid user, script;
+        using (var command = KeyCommand(connection, transaction, address))
+        {
+            command.CommandText = "SELECT user_id,automation_id,contract_revision,contract_digest,instance_key,requires_instance," +
+                "manifest_path,manifest_size,manifest_digest FROM configuration.configuration_revisions WHERE binding_id=$binding AND resource_id=$resource AND revision=$revision;";
+            command.Parameters.AddWithValue("$revision", revision);
+            using var timing = StartupProfile.Measure(ReadQuery);
+            using var row = command.ExecuteReader();
+            if (!row.Read()) throw new IOException("configuration_revision_missing");
+            user = Guid.Parse(row.GetString(0)); script = Guid.Parse(row.GetString(1));
+            contract = new(row.GetInt64(2), row.GetString(3), row.IsDBNull(4) ? null : row.GetString(4), row.GetBoolean(5));
+            manifest = new(row.GetString(6), row.GetInt64(7), row.GetString(8));
+        }
+        try { ConfigurationRevisionPolicy.ValidateContract(contract); }
+        catch (ConfigurationException error) { throw new IOException("configuration_contract_invalid", error); }
+        var tree = codec.Read(manifest);
+        var source = new ConfigurationRevision(address, revision, user, script, contract, tree);
+        RequireAssets(connection, transaction, source);
+        return new(source, manifest);
+    }
+
+    internal static void RequireCurrentFrozen(SqliteConnection connection, SqliteTransaction transaction,
+        ConfigurationRevision source, long bindingRevision, BlobReference manifest) =>
+        RequireFrozen(connection, transaction, source, bindingRevision, manifest, requireCurrent: true);
+
+    internal static void RequireHistoricalFrozen(SqliteConnection connection, SqliteTransaction transaction,
+        ConfigurationRevision source, long bindingRevision, BlobReference sourceManifest, StoredConfigurationRevision publication)
+    {
+        if (publication.Revision.Address != source.Address || publication.Revision.Revision < source.Revision ||
+            publication.Revision.UserId != source.UserId || publication.Revision.ScriptId != source.ScriptId ||
+            publication.Revision.Contract != source.Contract) throw new IOException("configuration_retry_source_unbound");
+        RequireFrozen(connection, transaction, source, bindingRevision, sourceManifest, requireCurrent: false);
+        RequireFrozen(connection, transaction, publication.Revision, bindingRevision, publication.Manifest, requireCurrent: true);
+    }
+
+    private static void RequireFrozen(SqliteConnection connection, SqliteTransaction transaction,
+        ConfigurationRevision source, long bindingRevision, BlobReference manifest, bool requireCurrent)
+    {
+        var binding = Binding(connection, transaction, source.Address.BindingId);
+        if (binding.Revision != bindingRevision) throw new ConfigurationException("configuration_binding_revision_conflict");
+        if (binding.UserId != source.UserId || binding.ScriptId != source.ScriptId) throw new IOException("configuration_binding_owner_changed");
+        using var command = KeyCommand(connection, transaction, source.Address);
+        command.CommandText = "SELECT r.revision,r.user_id,r.automation_id,r.contract_revision,r.contract_digest,r.instance_key,r.requires_instance," +
+            "r.manifest_path,r.manifest_size,r.manifest_digest FROM configuration.configuration_revisions r " +
+            "WHERE r.binding_id=$binding AND r.resource_id=$resource AND r.revision=$revision " +
+            "AND ($current=0 OR EXISTS(SELECT 1 FROM configuration.configuration_current c WHERE c.binding_id=r.binding_id AND c.resource_id=r.resource_id AND c.revision=r.revision));";
+        command.Parameters.AddWithValue("$revision", source.Revision);
+        command.Parameters.AddWithValue("$current", requireCurrent);
+        using (var row = command.ExecuteReader())
+        {
+            if (!row.Read() || row.GetInt64(0) != source.Revision) throw new ConfigurationException("configuration_revision_conflict");
+            if (row.GetString(1) != source.UserId.ToString("D") || row.GetString(2) != source.ScriptId.ToString("D") ||
+                row.GetInt64(3) != source.Contract.Revision || row.GetString(4) != source.Contract.DefinitionSha256 ||
+                (row.IsDBNull(5) ? null : row.GetString(5)) != source.Contract.InstanceKey || row.GetBoolean(6) != source.Contract.RequiresInstance ||
+                row.GetString(7) != manifest.RelativePath || row.GetInt64(8) != manifest.SizeBytes || row.GetString(9) != manifest.Sha256)
+                throw new IOException("configuration_run_source_changed");
+        }
+        RequireAssets(connection, transaction, source);
+    }
+
+    private static void RequireAssets(SqliteConnection connection, SqliteTransaction transaction, ConfigurationRevision source)
+    {
+        var references = source.Tree.Entries.Where(entry => entry.Kind == FileObjectKind.File)
+            .Select(entry => (entry.Sha256!, entry.SizeBytes, $"blobs/content/{entry.Sha256}.bin")).Distinct().OrderBy(entry => entry.Item1, StringComparer.Ordinal).ToArray();
+        using var assets = KeyCommand(connection, transaction, source.Address);
+        assets.CommandText = "SELECT a.digest,b.size_bytes,b.relative_path FROM configuration.configuration_revision_assets a JOIN content.blobs b ON b.digest=a.digest " +
+            "WHERE binding_id=$binding AND resource_id=$resource AND revision=$revision ORDER BY a.digest;";
+        assets.Parameters.AddWithValue("$revision", source.Revision);
+        var actual = new List<(string, long, string)>();
+        using (StartupProfile.Measure(ReadQuery))
+        using (var row = assets.ExecuteReader()) while (row.Read()) actual.Add((row.GetString(0), row.GetInt64(1), row.GetString(2)));
+        if (!references.SequenceEqual(actual) || source.UserId == Guid.Empty || source.ScriptId == Guid.Empty)
+            throw new IOException("configuration_reference_closure_invalid");
+    }
+
+    internal static void Insert(SqliteConnection connection, SqliteTransaction transaction, ConfigurationRevision value, BlobReference manifest)
+    {
+        using var command = KeyCommand(connection, transaction, value.Address);
+        command.CommandText = "INSERT INTO configuration.configuration_revisions VALUES($binding,$resource,$revision,$user,$script,$contractRevision," +
+            "$contractDigest,$instance,$required,$path,$digest,$size);";
+        command.Parameters.AddWithValue("$revision", value.Revision);
+        command.Parameters.AddWithValue("$user", value.UserId.ToString("D"));
+        command.Parameters.AddWithValue("$script", value.ScriptId.ToString("D"));
+        command.Parameters.AddWithValue("$contractRevision", value.Contract.Revision);
+        command.Parameters.AddWithValue("$contractDigest", value.Contract.DefinitionSha256);
+        command.Parameters.AddWithValue("$instance", (object?)value.Contract.InstanceKey ?? DBNull.Value);
+        command.Parameters.AddWithValue("$required", value.Contract.RequiresInstance);
+        command.Parameters.AddWithValue("$path", manifest.RelativePath);
+        command.Parameters.AddWithValue("$digest", manifest.Sha256);
+        command.Parameters.AddWithValue("$size", manifest.SizeBytes);
+        command.ExecuteNonQuery();
+        command.CommandText = "INSERT INTO configuration.configuration_current VALUES($binding,$resource,$revision) " +
+            "ON CONFLICT(binding_id,resource_id) DO UPDATE SET revision=excluded.revision;";
+        command.ExecuteNonQuery();
+    }
+
+    internal static void AttachAssets(SqliteConnection connection, SqliteTransaction transaction, ConfigurationRevision value)
+    {
+        foreach (var entry in value.Tree.Entries.Where(entry => entry.Kind == FileObjectKind.File).DistinctBy(entry => entry.Sha256))
+        {
+            using var command = KeyCommand(connection, transaction, value.Address);
+            command.CommandText = "INSERT INTO content.blobs VALUES($digest,$size,$path) ON CONFLICT(digest) DO NOTHING;";
+            command.Parameters.AddWithValue("$digest", entry.Sha256!);
+            command.Parameters.AddWithValue("$size", entry.SizeBytes);
+            command.Parameters.AddWithValue("$path", $"blobs/content/{entry.Sha256}.bin");
+            command.ExecuteNonQuery();
+            command.CommandText = "SELECT size_bytes,relative_path FROM content.blobs WHERE digest=$digest;";
+            using (var row = command.ExecuteReader())
+                if (!row.Read() || row.GetInt64(0) != entry.SizeBytes || row.GetString(1) != $"blobs/content/{entry.Sha256}.bin")
+                    throw new IOException("configuration_blob_identity_conflict");
+            command.CommandText = "INSERT INTO configuration.configuration_revision_assets VALUES($binding,$resource,$revision,$digest);";
+            command.Parameters.AddWithValue("$revision", value.Revision);
+            command.ExecuteNonQuery();
+        }
+    }
+
+    internal static SqliteCommand KeyCommand(SqliteConnection connection, SqliteTransaction transaction, ConfigurationAddress address)
+    {
+        var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.Parameters.AddWithValue("$binding", address.BindingId.ToString("D"));
+        command.Parameters.AddWithValue("$resource", address.ResourceId);
+        return command;
+    }
 }

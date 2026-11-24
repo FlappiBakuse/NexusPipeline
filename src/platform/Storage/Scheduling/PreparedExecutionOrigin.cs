@@ -48,9 +48,7 @@ internal sealed class PreparedExecutionOrigin : IDisposable
     internal static PreparedExecutionOrigin CaptureStartup(RuntimeInstance instance, StateDatabase database, InstanceLease lease, Guid occurrenceId,
         bool allowBlocked = false, bool revalidate = false)
     {
-        lease.VerifyHeld(instance);
-        if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot ||
-            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "runtime.db"))) throw Invalid();
+        RequireOwner(instance, database, lease);
         using var connection = NexusPipeline.Platform.Storage.Sqlite.DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: Sqlite.DatabaseDomain.Runtime | Sqlite.DatabaseDomain.Automation | Sqlite.DatabaseDomain.System);
         using var transaction = DatabaseConnections.BeginRead(connection);
         var saved = StartupQueueRows.Read(connection, transaction, occurrenceId, instance.InstanceId);
@@ -67,9 +65,7 @@ internal sealed class PreparedExecutionOrigin : IDisposable
     internal static PreparedExecutionOrigin Capture(RuntimeInstance instance, StateDatabase database, InstanceLease lease, Guid occurrenceId,
         bool allowBlocked = false, bool revalidate = false)
     {
-        lease.VerifyHeld(instance);
-        if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot ||
-            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "runtime.db"))) throw Invalid();
+        RequireOwner(instance, database, lease);
         using var connection = NexusPipeline.Platform.Storage.Sqlite.DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: Sqlite.DatabaseDomain.Runtime | Sqlite.DatabaseDomain.Automation | Sqlite.DatabaseDomain.System);
         using var transaction = DatabaseConnections.BeginRead(connection);
         var saved = ScheduleMinuteRows.ReadOccurrence(connection, transaction, occurrenceId, instance.InstanceId);
@@ -86,6 +82,24 @@ internal sealed class PreparedExecutionOrigin : IDisposable
             return new(instance, database, lease, saved, SettingsRevision(connection, transaction), catalog.Revision, queue.Revision, true);
         }
         return new(instance, database, lease, saved, document.SettingsRevision);
+    }
+
+    internal static void RegisterWaitingUnderRoot(RuntimeInstance instance, StateDatabase database, InstanceLease lease,
+        ResourceLeaseManager resources, ResourceOperationLease root, ScheduleMinuteRows.PendingMinute pending, Guid occurrenceId)
+    {
+        RequireOwner(instance, database, lease);
+        // Waiting phase and absence of a start operation were verified in the live registration snapshot.
+        var saved = pending.RequireWaiting(database, occurrenceId);
+        using var origin = new PreparedExecutionOrigin(instance, database, lease, saved, pending.SettingsRevision);
+        origin.RequireRequest(origin.Request);
+        origin.RegisterQueued(resources, root);
+    }
+
+    private static void RequireOwner(RuntimeInstance instance, StateDatabase database, InstanceLease lease)
+    {
+        lease.VerifyHeld(instance);
+        if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot ||
+            !StringComparer.OrdinalIgnoreCase.Equals(database.DatabasePath, Path.Combine(instance.RuntimeRoot, "state", "runtime.db"))) throw Invalid();
     }
 
     internal AcceptedExecutionRun RegisterUnderRoot(ResourceLeaseManager resources, ResourceOperationLease root)
@@ -112,6 +126,11 @@ internal sealed class PreparedExecutionOrigin : IDisposable
         command.Parameters.AddWithValue("$id", OperationId.ToString("D"));
         if ((long)command.ExecuteScalar()! != 0) throw new IOException("execution_scheduled_already_accepted");
         if (_revalidated) _ = RequireCurrentSource(connection, transaction);
+        return RegisterQueued(resources, root);
+    }
+
+    private AcceptedExecutionRun RegisterQueued(ResourceLeaseManager resources, ResourceOperationLease root)
+    {
         var existing = resources.FindQueuedRun(RunId, OperationId, SubjectId, (QueueTarget)Request.Target);
         if (existing is null) return resources.RegisterQueuedRun(root, RunId, ExecutionStartIdentity.Create(OperationId, SubjectId, Request), Request);
         if (_revalidated) resources.RefreshQueuedRun(root, existing, ExecutionStartIdentity.Create(OperationId, SubjectId, Request), Request);

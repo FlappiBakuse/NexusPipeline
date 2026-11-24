@@ -29,7 +29,7 @@ public sealed class OwnedWorkerJob : IDisposable
     private readonly Dictionary<(int ProcessId, long Created), SafeKernelHandle> _observedHandles = [];
     private readonly Dictionary<(int ProcessId, long Created), ProcessIdentity> _observedIdentities = [];
     private readonly object _handleGate = new();
-    private readonly Dictionary<OwnedWorkerIdentity, SafeKernelHandle> _roots = [];
+    private readonly Dictionary<OwnedWorkerIdentity, RootProcess> _roots = [];
     private bool _isDisposed;
     private ProcessStartObserver? _observer;
     private Action<int, long>? _reserveObservedIdentity;
@@ -201,7 +201,7 @@ public sealed class OwnedWorkerJob : IDisposable
             persistBeforeExecution(identity);
             if (JobNative.ResumeThread(thread) != 1)
                 throw NativeFailure();
-            _roots.Add(identity, process);
+            lock (_handleGate) _roots.Add(identity, new(process));
             return identity;
         }
         catch
@@ -214,29 +214,80 @@ public sealed class OwnedWorkerJob : IDisposable
 
     public async Task<int?> AwaitRootAsync(OwnedWorkerIdentity identity, TimeSpan timeout, CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_isDisposed, this);
-        if (timeout <= TimeSpan.Zero || timeout > TimeSpan.FromDays(7)) throw new ArgumentOutOfRangeException(nameof(timeout));
-        if (!_roots.TryGetValue(identity, out var handle)) throw new IOException("worker_root_not_owned");
-        var elapsed = Stopwatch.StartNew();
-        while (true)
+        RootProcessWait signal;
+        lock (_handleGate)
+        {
+            ObjectDisposedException.ThrowIf(_isDisposed, this);
+            if (timeout <= TimeSpan.Zero || timeout > TimeSpan.FromDays(7)) throw new ArgumentOutOfRangeException(nameof(timeout));
+            if (!_roots.TryGetValue(identity, out var root)) throw new IOException("worker_root_not_owned");
+            cancellationToken.ThrowIfCancellationRequested();
+            if (root.Wait is null && ReadRootExitCode(root.Handle) is { } exited) return exited;
+            signal = root.Wait ??= new(root.Handle);
+        }
+
+        try { await signal.Exit.WaitAsync(timeout, cancellationToken).ConfigureAwait(false); }
+        catch (TimeoutException)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var result = JobNative.WaitForSingleObject(handle, 0);
-            if (result == 0)
+            return ReadExitCode(identity);
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        return ReadExitCode(identity) ?? throw new IOException("worker_root_signal_unbound");
+    }
+
+    private sealed class RootProcess(SafeKernelHandle handle)
+    {
+        internal SafeKernelHandle Handle { get; } = handle;
+        internal RootProcessWait? Wait { get; set; }
+    }
+
+    private sealed class RootProcessWait : WaitHandle
+    {
+        private readonly TaskCompletionSource _exited = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly RegisteredWaitHandle _registration;
+        internal Task Exit => _exited.Task;
+
+        internal RootProcessWait(SafeKernelHandle root)
+        {
+            // Keep one registration on the original process object across callers' individual deadlines.
+            var current = new IntPtr(-1);
+            if (!JobNative.DuplicateWaitHandle(current, root, current, out var duplicate, 0, false, 2))
+                throw NativeFailure();
+            SafeWaitHandle = duplicate;
+            try
             {
-                if (!JobNative.GetExitCodeProcess(handle, out var code)) throw NativeFailure();
-                return unchecked((int)code);
+                _registration = ThreadPool.RegisterWaitForSingleObject(this,
+                    static (state, _) => ((TaskCompletionSource)state!).TrySetResult(), _exited, Timeout.Infinite, executeOnlyOnce: true);
             }
-            if (result != 258) throw NativeFailure();
-            if (elapsed.Elapsed >= timeout) return null;
-            await Task.Delay(TimeSpan.FromMilliseconds(20), cancellationToken).ConfigureAwait(false);
+            catch { duplicate.Dispose(); throw; }
+        }
+
+        protected override void Dispose(bool explicitDisposing)
+        {
+            try
+            {
+                if (explicitDisposing)
+                {
+                    _registration.Unregister(null);
+                    _exited.TrySetCanceled();
+                }
+            }
+            finally { base.Dispose(explicitDisposing); }
         }
     }
 
     internal int? ReadExitCode(OwnedWorkerIdentity identity)
     {
-        ObjectDisposedException.ThrowIf(_isDisposed, this);
-        if (!_roots.TryGetValue(identity, out var handle)) throw new IOException("worker_root_not_owned");
+        lock (_handleGate)
+        {
+            ObjectDisposedException.ThrowIf(_isDisposed, this);
+            if (!_roots.TryGetValue(identity, out var root)) throw new IOException("worker_root_not_owned");
+            return ReadRootExitCode(root.Handle);
+        }
+    }
+
+    private static int? ReadRootExitCode(SafeKernelHandle handle)
+    {
         var result = JobNative.WaitForSingleObject(handle, 0);
         if (result == 258) return null;
         if (result != 0 || !JobNative.GetExitCodeProcess(handle, out var code)) throw NativeFailure();
@@ -354,10 +405,11 @@ public sealed class OwnedWorkerJob : IDisposable
             _job.Dispose();
             lock (_handleGate)
             {
+                foreach (var root in _roots.Values) root.Wait?.Dispose();
+                _roots.Clear();
                 foreach (var process in _processHandles.Concat(_observedHandles.Values)) process.Dispose();
                 _processHandles.Clear(); _observedHandles.Clear(); _observedIdentities.Clear();
             }
-            _roots.Clear();
         }
     }
 

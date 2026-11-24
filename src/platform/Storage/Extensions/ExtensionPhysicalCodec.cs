@@ -1,12 +1,23 @@
+using NexusPipeline.Core.Configuration;
+using NexusPipeline.Platform.Serialization;
+using NexusPipeline.Platform.Storage.Journals;
 using System.Collections.Immutable;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
-using NexusPipeline.Core.Configuration;
-using NexusPipeline.Platform.Serialization;
-using NexusPipeline.Platform.Storage.Journals;
 
 namespace NexusPipeline.Platform.Storage.Extensions;
+
+internal sealed record ExtensionPhysicalRecord(string Format, int Version, Guid InstanceId, Guid OperationId,
+    Guid JournalId, string PlanDigest, BlobReference Source, long BeforeRevision, string Stage,
+    Guid? PreviousActivationId, string PreviousScopeClosure, PhysicalObjectIdentity? WorkspaceIdentity,
+    ImmutableArray<PhysicalTreeObject> CandidateObjects);
+
+internal sealed record ExtensionPhysicalIntent(string Format, int Version, long BeforeRevision,
+    string Stage, BlobReference Artifact);
+
+internal sealed record ExtensionPhysicalEntry(ExtensionPhysicalIntent Intent,
+    ExtensionPhysicalRecord Record);
 
 internal sealed class ExtensionPhysicalCodec(RuntimeInstance instance, ContractReader contracts)
 {

@@ -279,18 +279,25 @@ public sealed class ContentRetirementService
     {
         var selected = new SortedDictionary<string, BlobReference>(StringComparer.Ordinal);
         var retirements = new RecordRetirementContents(_instance, _database, _contracts, family.RunId, family, kind);
-        foreach (var item in candidates)
+        var afterCursor = candidates.Where(item => StringComparer.Ordinal.Compare(item.Sha256, after) > 0);
+        foreach (var batch in afterCursor.Chunk(RecordRetirementRows.ProofBatchSize))
         {
-            if (StringComparer.Ordinal.Compare(item.Sha256, after) <= 0) continue;
-            if (selected.TryGetValue(item.Sha256, out var prior))
+            var cutoff = selected.Count == limit ? selected.Last().Key : null;
+            var pending = batch.Where(item => !selected.ContainsKey(item.Sha256) &&
+                (cutoff is null || StringComparer.Ordinal.Compare(item.Sha256, cutoff) < 0)).ToArray();
+            var index = pending.Length == 0 ? null : retirements.ReadIndex(pending);
+            foreach (var item in batch)
             {
-                if (prior != item) throw RecordRetirementCodec.Invalid();
-                continue;
+                if (selected.TryGetValue(item.Sha256, out var prior))
+                {
+                    if (prior != item) throw RecordRetirementCodec.Invalid();
+                    continue;
+                }
+                if (selected.Count == limit && StringComparer.Ordinal.Compare(item.Sha256, selected.Last().Key) >= 0) continue;
+                if (index is not null && retirements.IsRetired(item, index)) continue;
+                selected.Add(item.Sha256, item);
+                if (selected.Count > limit) selected.Remove(selected.Last().Key);
             }
-            if (selected.Count == limit && StringComparer.Ordinal.Compare(item.Sha256, selected.Last().Key) >= 0) continue;
-            if (retirements.Read([item]).Contains(item)) continue;
-            selected.Add(item.Sha256, item);
-            if (selected.Count > limit) selected.Remove(selected.Last().Key);
         }
         return selected.Values.ToArray();
     }

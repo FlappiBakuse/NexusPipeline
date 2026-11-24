@@ -1,9 +1,13 @@
-using System.Collections.Immutable;
-using System.Text.Json;
+using Microsoft.Data.Sqlite;
+using NexusPipeline.Core.Configuration;
 using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Serialization;
+using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
+using System.Collections.Immutable;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace NexusPipeline.Platform.Storage.Execution;
 
@@ -252,4 +256,182 @@ internal sealed class TargetJobEvidence(RuntimeInstance instance, StateDatabase 
     private static bool Same<T>(T first, T second) => JsonElement.DeepEquals(JsonSerializer.SerializeToElement(first, StepResultCodec.Options),
         JsonSerializer.SerializeToElement(second, StepResultCodec.Options));
     private static IOException Invalid() => new("execution_target_evidence_unrecognized");
+}
+
+internal static class TargetJobCodec
+{
+    internal const string Format = "nexus.execution.target-job";
+    internal const int MaximumRetentionIntents = 3;
+    private static readonly JsonSerializerOptions Options = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow
+    };
+
+    internal static bool IsParticipant(JsonElement participant)
+    {
+        var identity = participant.GetProperty("identity");
+        return identity.TryGetProperty("format", out var format) && format.GetString() == Format;
+    }
+
+    internal static ImmutableArray<TargetJobState> Read(AttemptJournalView journal, ExecutionPlan total, string totalPlanSha256)
+        => ReadCore(journal, total, totalPlanSha256, null);
+
+    private static ImmutableArray<TargetJobState> ReadCore(AttemptJournalView journal, ExecutionPlan total, string totalPlanSha256,
+        ImmutableArray<TargetJobIntent>.Builder? intents)
+    {
+        journal = ExecutionInvocationCodec.Current(journal);
+        var states = new Dictionary<string, TargetJobState>(StringComparer.Ordinal);
+        var retentionCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var participant in journal.Participants.Where(IsParticipant))
+        {
+            var identity = participant.GetProperty("identity");
+            var decoded = ExecutionParticipantText.Read<TargetJobIntent>(identity, Options, Invalid);
+            var item = decoded.Value;
+            intents?.Add(item);
+            var binding = item.Binding ?? throw Invalid();
+            if (!decoded.MatchesOriginal || item.Format != Format || item.Version != 1 ||
+                binding.InstanceId.ToString("D") != total.InstanceId || binding.ParentJournalId.ToString("D") != journal.Root.GetProperty("journalId").GetString() ||
+                binding.ParentOperationId.ToString("D") != journal.Root.GetProperty("operationId").GetString() ||
+                binding.AttemptId.ToString("D") != journal.Root.GetProperty("attemptId").GetString() || binding.TargetId == Guid.Empty ||
+                binding.OwnerWriterId == Guid.Empty || binding.SessionId < 0 ||
+                binding.TotalPlanSha256 != totalPlanSha256 ||
+                binding.JobName is null || binding.JobName.Length != 50 || !binding.JobName.StartsWith("Local\\NexusWorker-", StringComparison.Ordinal) ||
+                !Guid.TryParseExact(binding.JobName[18..], "N", out var jobId) || jobId == Guid.Empty || binding.JobName[18..] != jobId.ToString("N") ||
+                participant.GetProperty("kind").GetString() != "process") throw Invalid();
+            var step = total.Steps.SingleOrDefault(step => step.StepId == binding.StepId) ?? throw Invalid();
+            if (step.Target is not { Kind: "pc", LaunchByHost: true, Pc: not null } ||
+                participant.GetProperty("resourceKey").GetString() != "automation:" + step.ScriptId) throw Invalid();
+            if (item.Stage == "registered")
+            {
+                if (item.Evidence is not null || states.ContainsKey(binding.StepId) ||
+                    states.Values.Any(value => value.Binding.TargetId == binding.TargetId || value.Binding.JobName == binding.JobName)) throw Invalid();
+                states.Add(binding.StepId, new(binding, item.Stage, null));
+                continue;
+            }
+            if (!states.TryGetValue(binding.StepId, out var previous) || previous.Binding != binding || item.Evidence is null ||
+                !Transition(previous.Stage, item.Stage)) throw Invalid();
+            if (item.Stage == "retentionPrepared")
+            {
+                var count = retentionCounts.GetValueOrDefault(binding.StepId) + 1;
+                if (count > MaximumRetentionIntents) throw Invalid();
+                retentionCounts[binding.StepId] = count;
+            }
+            StepEvidenceCodec.Plan(item.Evidence);
+            states[binding.StepId] = new(binding, item.Stage, item.Evidence);
+        }
+        return total.Steps.Where(step => states.ContainsKey(step.StepId)).Select(step => states[step.StepId]).ToImmutableArray();
+    }
+
+    internal static JsonObject Participant(TargetJobIntent item, string scriptId) => new()
+    {
+        ["participantId"] = Guid.NewGuid().ToString("D"), ["kind"] = "process", ["resourceKey"] = "automation:" + scriptId,
+        ["identity"] = JsonSerializer.SerializeToNode(item, Options)
+    };
+
+    internal static ImmutableArray<TargetJobIntent> ReadAll(AttemptJournalView journal, ExecutionPlan total, string totalPlanSha256)
+    {
+        var intents = ImmutableArray.CreateBuilder<TargetJobIntent>();
+        _ = ReadCore(journal, total, totalPlanSha256, intents);
+        return intents.ToImmutable();
+    }
+
+    internal static ImmutableArray<TargetJobIntent> ReadHistory(AttemptJournalView journal, ExecutionPlan total, string sha)
+    {
+        foreach (var view in ExecutionInvocationCodec.Views(journal)) _ = Read(view, total, sha);
+        return journal.Participants.Where(IsParticipant)
+            .Select(item => item.GetProperty("identity").Deserialize<TargetJobIntent>(Options) ?? throw Invalid()).ToImmutableArray();
+    }
+
+    private static bool Transition(string before, string after) => (before, after) switch
+    {
+        ("registered", "root") or ("root", "ready") or
+        ("root" or "ready", "retentionPrepared") or ("retentionPrepared", "retentionPrepared") or
+        ("retentionPrepared", "retained") => true,
+        ("registered" or "root" or "ready" or "retentionPrepared", "stopped") => true,
+        ("registered" or "root" or "ready" or "retentionPrepared", "recoveredStopped") or ("retentionPrepared", "recoveredRetained") => true,
+        _ => false
+    };
+
+    private static JsonException Invalid() => new("execution_target_job_unrecognized");
+}
+
+internal static class TargetJobProjection
+{
+    internal static void RequireInside(SqliteConnection connection, SqliteTransaction transaction,
+        AttemptWriterState state, JournalDocument before, JournalDocument next)
+    {
+        var previous = TargetJobCodec.ReadHistory(before.Root, state.Total, state.Attempt.ExecutionPlan.Sha256);
+        var current = TargetJobCodec.ReadHistory(next.Root, state.Total, state.Attempt.ExecutionPlan.Sha256);
+        foreach (var item in current.Skip(previous.Length))
+        {
+            if (!state.IsExecutionStart || state.Gate.State != EffectGateState.Entered ||
+                next.Phase is not (JournalPhase.Applying or JournalPhase.Quarantined)) throw Invalid();
+            if (item.Stage != "registered")
+            {
+                if (item.Stage is "root" or "ready" or "retentionPrepared" or "retained" or "recoveredRetained" &&
+                    TargetRootFacts.ReadInside(connection, transaction, item.Binding) is null) throw Invalid();
+                continue;
+            }
+            if (next.Phase != JournalPhase.Applying || before.Phase != JournalPhase.Applying) throw Invalid();
+            ExecutionCancellationRows.RequireDispatchOpen(connection, transaction, item.Binding.ParentJournalId);
+            var jobs = WriterIntentCodec.ReadJobs(before.Root, state.Total);
+            ExecutionStepAdmission.RequireOpenRoles(state.Total, jobs, item.Binding.StepId, "process", before.Root);
+            if (jobs.Any(job => job.JobName == item.Binding.JobName) ||
+                StepResultCodec.Read(before.Root, state.Total).Any(result => result.Binding.StepId == item.Binding.StepId)) throw Invalid();
+            using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM main.journal_writers WHERE journal_id=$journal AND writer_id=$writer) " +
+                "AND NOT EXISTS(SELECT 1 FROM main.journal_writer_job_roots WHERE journal_id=$journal AND job_name=$main);";
+            command.Parameters.AddWithValue("$journal", item.Binding.ParentJournalId.ToString("D"));
+            command.Parameters.AddWithValue("$writer", item.Binding.OwnerWriterId.ToString("D"));
+            command.Parameters.AddWithValue("$main", jobs.Single(job => job.StepId == item.Binding.StepId && job.Role == "process").JobName);
+            if ((long)command.ExecuteScalar()! != 1) throw Invalid();
+            ExecutionStepAdmission.RequirePredecessorsInside(connection, transaction, state, before,
+                state.Total.Steps.ToList().FindIndex(step => step.StepId == item.Binding.StepId));
+        }
+    }
+
+    internal static void RequireResolved(AttemptWriterState state, JournalDocument document, string? stepId = null)
+    {
+        if (TargetJobCodec.Read(document.Root, state.Total, state.Attempt.ExecutionPlan.Sha256)
+            .Any(item => (stepId is null || item.Binding.StepId == stepId) && item.Stage is not ("stopped" or "retained" or "recoveredStopped" or "recoveredRetained")))
+            throw new IOException("execution_target_collection_pending");
+    }
+
+    private static IOException Invalid() => new("execution_target_stage_unbound");
+}
+
+internal sealed class HistoricalTargetEvidence(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
+    ExecutionPlan total, string totalSha256)
+{
+    private readonly Dictionary<TargetJobState, AttemptJournalView> _targets = [];
+    private readonly Dictionary<PcStageIntent, AttemptJournalView> _stages = [];
+
+    internal HistoricalTargetEvidence Fork()
+    {
+        var copy = new HistoricalTargetEvidence(instance, database, contracts, total, totalSha256);
+        foreach (var item in _targets) copy._targets.Add(item.Key, item.Value);
+        foreach (var item in _stages) copy._stages.Add(item.Key, item.Value);
+        return copy;
+    }
+
+    internal void Observe(AttemptJournalView journal)
+    {
+        foreach (var view in ExecutionInvocationCodec.Views(journal).Select(ExecutionInvocationCodec.Current))
+        {
+            foreach (var item in TargetJobCodec.ReadAll(view, total, totalSha256))
+                _targets.TryAdd(new(item.Binding, item.Stage, item.Evidence), view);
+            foreach (var item in PcStageCodec.Read(view, total, totalSha256)) _stages.TryAdd(item, view);
+        }
+    }
+
+    internal void Verify()
+    {
+        using var sql = new ExecutionSqlScope(database);
+        var targets = new TargetJobEvidence(instance, database, contracts, sql);
+        // Append-only revisions share intents; retain the first complete context for every historical artifact.
+        foreach (var (item, context) in _targets) _ = targets.Require(item, total, context);
+        var stages = new PcStageEvidence(instance, database, contracts, sql);
+        foreach (var context in _stages.Values.Distinct()) _ = stages.RequireAll(context, total, totalSha256);
+    }
 }

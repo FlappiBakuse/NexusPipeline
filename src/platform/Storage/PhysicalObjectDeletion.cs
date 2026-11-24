@@ -16,6 +16,12 @@ public static class PhysicalObjectDeletion
         _ = Delete(intent, static () => true);
     }
 
+    internal static void DeleteNewlyCreatedFile(SafeFileHandle owned)
+    {
+        PhysicalObjectIdentity.RequireSingleLink(owned);
+        MarkDeleted(owned);
+    }
+
     internal static void DeleteInspectionCopy(FileObjectDeletion intent)
     {
         if (intent.Kind != FileObjectKind.File) throw new ArgumentException("An inspection file is required");

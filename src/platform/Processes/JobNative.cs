@@ -18,6 +18,11 @@ internal static class JobNative
     internal static extern bool DuplicateHandle(IntPtr sourceProcess, SafeKernelHandle source, IntPtr targetProcess,
         out SafeKernelHandle target, uint desiredAccess, [MarshalAs(UnmanagedType.Bool)] bool inherit, uint options);
 
+    [DllImport("kernel32.dll", EntryPoint = "DuplicateHandle", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool DuplicateWaitHandle(IntPtr sourceProcess, SafeKernelHandle source, IntPtr targetProcess,
+        out SafeWaitHandle target, uint desiredAccess, [MarshalAs(UnmanagedType.Bool)] bool inherit, uint options);
+
     [StructLayout(LayoutKind.Sequential)]
     internal struct BasicLimits
     {

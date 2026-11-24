@@ -38,7 +38,8 @@ public sealed class ConfigurationSwap(FileTreeScanner scanner, FileTreeArchive a
         VerifyTree(plan.TargetPath, plan.Before.Snapshot, plan.Before.OriginalObjects);
         RequireMissing(backup);
         if (plan.Before.Snapshot.Shape == FileObjectKind.Missing) return;
-        Move(plan.TargetPath, backup, plan.Before.Snapshot.Shape);
+        PhysicalObjectMove.MoveVerified(new(plan.TargetPath, plan.ParentIdentity, plan.Before.OriginalIdentity!,
+            backup, prepared.WorkIdentity, plan.Before.Snapshot.Shape));
         VerifyTree(backup, plan.Before.Snapshot, plan.Before.OriginalObjects);
     }
 
@@ -53,7 +54,9 @@ public sealed class ConfigurationSwap(FileTreeScanner scanner, FileTreeArchive a
         RequireMissing(plan.TargetPath);
         VerifyTree(candidate, plan.Candidate.Snapshot, prepared.CandidateObjects);
         if (plan.Candidate.Snapshot.Shape == FileObjectKind.Missing) return;
-        Move(candidate, plan.TargetPath, plan.Candidate.Snapshot.Shape);
+        var identity = prepared.CandidateObjects.Single(item => item.RelativePath.Length == 0).Identity;
+        PhysicalObjectMove.MoveVerified(new(candidate, prepared.WorkIdentity, identity,
+            plan.TargetPath, plan.ParentIdentity, plan.Candidate.Snapshot.Shape));
         VerifyTree(plan.TargetPath, plan.Candidate.Snapshot, prepared.CandidateObjects);
     }
 
@@ -69,7 +72,9 @@ public sealed class ConfigurationSwap(FileTreeScanner scanner, FileTreeArchive a
         VerifyTree(plan.TargetPath, plan.Candidate.Snapshot, prepared.CandidateObjects);
         RequireMissing(spent);
         if (plan.Candidate.Snapshot.Shape == FileObjectKind.Missing) return;
-        Move(plan.TargetPath, spent, plan.Candidate.Snapshot.Shape);
+        var identity = prepared.CandidateObjects.Single(item => item.RelativePath.Length == 0).Identity;
+        PhysicalObjectMove.MoveVerified(new(plan.TargetPath, plan.ParentIdentity, identity,
+            spent, prepared.WorkIdentity, plan.Candidate.Snapshot.Shape));
         VerifyTree(spent, plan.Candidate.Snapshot, prepared.CandidateObjects);
     }
 
@@ -93,7 +98,8 @@ public sealed class ConfigurationSwap(FileTreeScanner scanner, FileTreeArchive a
         }
         VerifyTree(backup, plan.Before.Snapshot, plan.Before.OriginalObjects);
         if (plan.Before.Snapshot.Shape == FileObjectKind.Missing) return;
-        Move(backup, plan.TargetPath, plan.Before.Snapshot.Shape);
+        PhysicalObjectMove.MoveVerified(new(backup, prepared.WorkIdentity, plan.Before.OriginalIdentity!,
+            plan.TargetPath, plan.ParentIdentity, plan.Before.Snapshot.Shape));
         VerifyTree(plan.TargetPath, plan.Before.Snapshot, plan.Before.OriginalObjects);
     }
 
@@ -305,17 +311,6 @@ public sealed class ConfigurationSwap(FileTreeScanner scanner, FileTreeArchive a
 
     private static string WorkPath(FrozenConfigurationExchange plan) => PhysicalPathPolicy.NormalizeWithoutLinks(
         Path.Combine(Path.GetDirectoryName(plan.TargetPath)!, ".nexus-" + plan.JournalId.ToString("D")));
-
-    private static void Move(string source, string destination, FileObjectKind shape)
-    {
-        PhysicalPathPolicy.NormalizeWithoutLinks(source);
-        PhysicalPathPolicy.NormalizeWithoutLinks(destination);
-        if (PhysicalObjectIdentity.Read(Path.GetDirectoryName(source)!).VolumeSerial != PhysicalObjectIdentity.Read(Path.GetDirectoryName(destination)!).VolumeSerial)
-            throw new IOException("configuration_cross_volume_move_rejected");
-        if (shape == FileObjectKind.File) File.Move(source, destination, overwrite: false);
-        else if (shape == FileObjectKind.Directory) Directory.Move(source, destination);
-        else throw new IOException("configuration_move_shape_invalid");
-    }
 
     private sealed class WritableWorkspaceLease(IDisposable path, IDisposable before) : IDisposable
     {

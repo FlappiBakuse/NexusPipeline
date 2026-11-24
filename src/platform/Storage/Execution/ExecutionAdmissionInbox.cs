@@ -1,7 +1,8 @@
-using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Configuration;
+using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Core.Operations;
+using System.Collections.Concurrent;
 
 namespace NexusPipeline.Platform.Storage.Execution;
 
@@ -120,4 +121,41 @@ internal sealed class AcceptedExecutionAdmission(OperationIdentity identity, Pre
     internal ResourceOperationLease Root { get; } = root;
     internal AttemptAcceptanceResult Receipt { get; } = receipt;
     public void Dispose() { Prepared.Dispose(); Root.Dispose(); }
+}
+
+internal sealed class AdmissionCommitQueue
+{
+    private sealed record Work(Guid OperationId, Func<IExecutionAdmissionReceipt> Commit, TaskCompletionSource<IExecutionAdmissionReceipt> Completion);
+    private readonly ConcurrentQueue<Work> _pending = new();
+    private int _count;
+    private int _draining;
+    internal bool IsWaiting(Guid operationId) => _pending.Any(item => item.OperationId == operationId);
+
+    internal IExecutionAdmissionReceipt Run(Guid operationId, Func<IExecutionAdmissionReceipt> commit)
+    {
+        if (Interlocked.Increment(ref _count) > 64)
+        {
+            Interlocked.Decrement(ref _count);
+            throw new ExecutionSelectionException("execution_admission_queue_full");
+        }
+        var completion = new TaskCompletionSource<IExecutionAdmissionReceipt>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _pending.Enqueue(new(operationId, commit, completion));
+        if (Interlocked.CompareExchange(ref _draining, 1, 0) == 0) _ = Task.Run(Drain);
+        return completion.Task.GetAwaiter().GetResult();
+    }
+
+    private void Drain()
+    {
+        while (true)
+        {
+            while (_pending.TryDequeue(out var work))
+            {
+                try { work.Completion.SetResult(work.Commit()); }
+                catch (Exception error) { work.Completion.SetException(error); }
+                finally { Interlocked.Decrement(ref _count); }
+            }
+            Volatile.Write(ref _draining, 0);
+            if (_pending.IsEmpty || Interlocked.CompareExchange(ref _draining, 1, 0) != 0) return;
+        }
+    }
 }

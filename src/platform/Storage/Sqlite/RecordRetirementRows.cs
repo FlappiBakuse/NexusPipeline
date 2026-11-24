@@ -8,6 +8,17 @@ namespace NexusPipeline.Platform.Storage.Sqlite;
 
 internal static class RecordRetirementRows
 {
+    internal const int ProofBatchSize = 32;
+
+    internal sealed record ProofRow(BlobReference Reference, long SizeBytes, string RelativePath)
+    {
+        internal BlobReference Bind(BlobReference content)
+        {
+            if (SizeBytes != content.SizeBytes || RelativePath != content.RelativePath) throw RecordRetirementCodec.Invalid();
+            return Reference;
+        }
+    }
+
     internal static SqliteCommand Command(SqliteConnection connection, SqliteTransaction? transaction, string sql, params object[] values)
     {
         var command = connection.CreateCommand(); command.Transaction = transaction; command.CommandText = sql;
@@ -87,20 +98,41 @@ internal static class RecordRetirementRows
         Guid runId, IReadOnlyList<BlobReference> contents)
     {
         var result = new HashSet<BlobReference>();
-        foreach (var content in contents.Distinct())
+        foreach (var batch in contents.Distinct().Chunk(ProofBatchSize))
         {
-            using var command = Command(connection, transaction,
-                "SELECT r.relative_path,r.size_bytes,r.sha256,c.size_bytes,c.relative_path " +
-                "FROM records.record_retired_contents c JOIN records.record_content_retirements r USING(operation_id) " +
-                "WHERE c.run_id=$0 AND c.digest=$1;", runId, content.Sha256);
-            using var rows = command.ExecuteReader();
-            while (rows.Read())
-            {
-                if (rows.GetInt64(3) != content.SizeBytes || rows.GetString(4) != content.RelativePath) throw RecordRetirementCodec.Invalid();
-                result.Add(new(rows.GetString(0), rows.GetInt64(1), rows.GetString(2)));
-            }
+            var digests = batch.Select(item => item.Sha256).Distinct(StringComparer.Ordinal).ToArray();
+            var proofs = ReadProofIndex(connection, transaction, runId, digests);
+            foreach (var content in batch)
+                foreach (var proof in proofs[content.Sha256])
+                    result.Add(proof.Bind(content));
         }
         return result.ToArray();
+    }
+
+    internal static ILookup<string, ProofRow> ReadProofIndex(SqliteConnection connection, SqliteTransaction transaction,
+        Guid runId, IReadOnlyList<string> digests)
+    {
+        if (digests.Count is < 1 or > ProofBatchSize) throw RecordRetirementCodec.Invalid();
+        var arguments = new object[digests.Count + 1];
+        arguments[0] = runId;
+        var parameters = new string[digests.Count];
+        for (var index = 0; index < digests.Count; index++)
+        {
+            arguments[index + 1] = digests[index];
+            parameters[index] = "$" + (index + 1);
+        }
+        using var command = Command(connection, transaction,
+            "SELECT c.digest,r.relative_path,r.size_bytes,r.sha256,c.size_bytes,c.relative_path " +
+            "FROM records.record_retired_contents c JOIN records.record_content_retirements r USING(operation_id) " +
+            "WHERE c.run_id=$0 AND c.digest IN (" + string.Join(',', parameters) + ");", arguments);
+        var indexed = new List<(string Digest, ProofRow Proof)>();
+        using var rows = command.ExecuteReader();
+        while (rows.Read())
+        {
+            var reference = new BlobReference(rows.GetString(1), rows.GetInt64(2), rows.GetString(3));
+            indexed.Add((rows.GetString(0), new(reference, rows.GetInt64(4), rows.GetString(5))));
+        }
+        return indexed.ToLookup(row => row.Digest, row => row.Proof, StringComparer.Ordinal);
     }
 
     internal static void RequireSavedInside(SqliteConnection connection, SqliteTransaction transaction,

@@ -1,9 +1,11 @@
-using System.Collections.Immutable;
-using System.Security.Cryptography;
 using NexusPipeline.Core.Configuration;
+using NexusPipeline.Core.Execution;
 using NexusPipeline.Extensibility.Protocol;
+using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Configuration;
+using System.Collections.Immutable;
+using System.Security.Cryptography;
 
 namespace NexusPipeline.Platform.Storage.Execution;
 
@@ -69,3 +71,47 @@ internal static class AndroidCommandIdentity
 
     private static ArgumentException Invalid() => new("execution_android_command_request_invalid");
 }
+
+internal sealed record AndroidControlLimits(long StartupCommands, long CleanupCommands, long MaximumCommands,
+    int MaximumCommandRawBytes, int MaximumBindingRawBytes, int MaximumObservedProcesses, long RegistrationEvents,
+    int ResultEvents);
+
+internal static class AndroidControlCapacity
+{
+    internal const int PollMilliseconds = 1000;
+    internal const int MaximumCommandRawBytes = 2097152;
+    internal const int MaximumBindingRawBytes = 20 * 1024 * 1024;
+    internal const int MaximumObservedProcesses = 4096;
+    internal const int MaximumOfflineSeconds = 60;
+
+    internal static AndroidControlLimits Derive(ExecutionPlanStep step)
+    {
+        if (step.Target is not { Kind: "android", Android: not null, Pc: null } target ||
+            target.WaitSeconds is < 0 or > 604800 || target.Android.Driver is not ("genericAdb" or "mumu"))
+            throw new ArgumentException("execution_android_control_definition_invalid");
+        var polls = checked(target.WaitSeconds + 1);
+        var startup = !target.LaunchByHost ? 0 : checked(polls + (target.Android.Driver == "mumu" || target.Android.Emulator is not null ? 6 : 5));
+        var cleanup = checked(1L + (target.Android.Driver == "mumu" ? 1 : 0) + (target.ForceCloseAtEnd ? 1L + MaximumOfflineSeconds + 1 : 0));
+        var commands = checked(startup + cleanup);
+        return new(startup, cleanup, commands, MaximumCommandRawBytes,
+            MaximumBindingRawBytes, MaximumObservedProcesses, commands, 2 + (target.LaunchByHost && target.Android.Emulator is not null ? 2 : 0));
+    }
+}
+
+internal enum AndroidResponseCompletion { Unverified, NaturalRootExitAndEofBeforeStop, OwnedLaunchHandoff }
+
+internal sealed record AndroidCommandRegistration(string Format, int Version, ExecutionTargetBinding Binding,
+    int Sequence, AndroidCommandPurpose Purpose, ExecutionAndroidAction Action, BlobReference Request,
+    string RequestDigest, BlobReference ControlPlan, BlobReference? PreviousObservation);
+internal sealed record AndroidCommandObservation(string Format, int Version, ExecutionTargetBinding Binding,
+    string RequestDigest, ProcessIdentity? Root, int? ExitCode, bool StartReturned, bool OutputComplete,
+    ImmutableArray<TargetCommandPart> Parts, EngineOutcome Engine, long? ElapsedMilliseconds,
+    AndroidResponseCompletion Completion);
+internal sealed record AndroidCommandCollection(string Format, int Version, ExecutionTargetBinding Binding,
+    string RequestDigest, BlobReference Observation, OwnedTargetInventory Inventory)
+{
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public BlobReference? Retention { get; init; }
+}
+internal sealed record AndroidControlPlan(string Format, int Version, Guid InstanceId, Guid ParentJournalId,
+    Guid ParentOperationId, Guid AttemptId, string StepId, string TotalPlanSha256, AndroidControlLimits Limits);

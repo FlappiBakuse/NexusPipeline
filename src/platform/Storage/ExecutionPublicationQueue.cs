@@ -12,8 +12,18 @@ internal sealed class ExecutionPublicationQueue
     private bool _closed;
     private Action? _release;
     private readonly TaskCompletionSource _released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private TaskCompletionSource? _nextPublication;
     internal int PendingCount { get { lock (_gate) return _count; } }
     internal Task Released => _released.Task;
+
+    internal Task WaitForNextEnqueue()
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_closed, this);
+            return (_nextPublication ??= new(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
+        }
+    }
 
     internal void RequireNotReentrant()
     {
@@ -53,6 +63,8 @@ internal sealed class ExecutionPublicationQueue
                 catch { _worker = null; _pending.Dequeue(); _count--; throw; }
             }
             _available.Set();
+            _nextPublication?.SetResult();
+            _nextPublication = null;
         }
         return completion.Task.GetAwaiter().GetResult();
     }
@@ -64,6 +76,8 @@ internal sealed class ExecutionPublicationQueue
         {
             if (_closed) return;
             _closed = true;
+            _nextPublication?.SetException(new ObjectDisposedException(nameof(ExecutionPublicationQueue)));
+            _nextPublication = null;
             if (_worker is null) { immediate = release; _available.Dispose(); }
             else
             {

@@ -78,6 +78,7 @@ public sealed class NotificationDeliveryService
         }
         reads.HoldReceipt(reference, connection, transaction);
         var source = new NotificationReceiptCodec(_instance, _database, _contracts).ReadContext(reference, connection, transaction);
+        var evidence = new NotificationDeliveryEvidence(_instance, _database, _contracts);
         var counts = new int[Enum.GetValues<NotificationDeliveryState>().Length];
         var expanded = true;
         for (var ordinal = 0; ordinal < source.Routes.Length; ordinal++)
@@ -88,8 +89,8 @@ public sealed class NotificationDeliveryService
             foreach (var target in route.Targets)
             {
                 if (target.Delivery is null) { counts[(int)NotificationDeliveryState.Skipped]++; continue; }
-                var delivery = new NotificationDeliveryEvidence(_instance, _database, _contracts).ReadFromSnapshot(target.Delivery, connection, transaction, source);
-                var state = NotificationDeliveryRows.ReadState(connection, transaction, delivery.Document.OperationId);
+                // The route and its targets were already verified in this transaction.
+                _ = evidence.ReadMetadata(target.Delivery, connection, transaction, out var state, source.Catalog);
                 counts[(int)state.State]++;
             }
         }

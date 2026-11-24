@@ -9,6 +9,20 @@ namespace NexusPipeline.Platform.Storage.Sqlite;
 
 public sealed class AttemptReceiptStore(StateDatabase database) : IAttemptReceiptReader
 {
+    internal const string ReceiptColumns = "run_id,ordinal,journal_id,operation_id,plan_digest,source_receipt_digest," +
+        "engine_outcome,business_outcome,lifecycle_outcome,recovery_outcome,reason_code";
+
+    internal readonly record struct StoredReceipt(string RunId, int Ordinal, string JournalId, string OperationId,
+        string PlanDigest, string SourceReceiptDigest, EngineOutcome Engine, BusinessOutcome Business,
+        LifecycleOutcome Lifecycle, RecoveryOutcome Recovery, string ReasonCode)
+    {
+        internal AttemptReceipt Bind(Guid attemptId)
+        {
+            var facts = new AttemptFacts(Guid.Parse(RunId), attemptId, Ordinal, Engine, Business, Lifecycle, Recovery, ReasonCode);
+            return new(Guid.Parse(JournalId), Guid.Parse(OperationId), PlanDigest, SourceReceiptDigest, facts);
+        }
+    }
+
     internal static void ProjectInside(SqliteConnection connection, SqliteTransaction transaction, RunAttemptPlan plan,
         JournalDocument document, AttemptFacts facts)
     {
@@ -61,12 +75,16 @@ public sealed class AttemptReceiptStore(StateDatabase database) : IAttemptReceip
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT run_id,ordinal,journal_id,operation_id,plan_digest,source_receipt_digest,engine_outcome,business_outcome,lifecycle_outcome,recovery_outcome,reason_code FROM records.attempt_receipts WHERE attempt_id=$id;";
+        command.CommandText = "SELECT " + ReceiptColumns + " FROM records.attempt_receipts WHERE attempt_id=$id;";
         command.Parameters.AddWithValue("$id", attemptId.ToString("D"));
         using var reader = command.ExecuteReader();
         if (!reader.Read()) return null;
-        var facts = new AttemptFacts(Guid.Parse(reader.GetString(0)), attemptId, reader.GetInt32(1), (EngineOutcome)reader.GetInt32(6),
-            (BusinessOutcome)reader.GetInt32(7), (LifecycleOutcome)reader.GetInt32(8), (RecoveryOutcome)reader.GetInt32(9), reader.GetString(10));
-        return new(Guid.Parse(reader.GetString(2)), Guid.Parse(reader.GetString(3)), reader.GetString(4), reader.GetString(5), facts);
+        return ReadColumns(reader, 0, reader.GetInt32(1)).Bind(attemptId);
     }
+
+    internal static StoredReceipt ReadColumns(SqliteDataReader reader, int offset, int ordinal) => new(
+        reader.GetString(offset), ordinal, reader.GetString(offset + 2), reader.GetString(offset + 3),
+        reader.GetString(offset + 4), reader.GetString(offset + 5), (EngineOutcome)reader.GetInt32(offset + 6),
+        (BusinessOutcome)reader.GetInt32(offset + 7), (LifecycleOutcome)reader.GetInt32(offset + 8),
+        (RecoveryOutcome)reader.GetInt32(offset + 9), reader.GetString(offset + 10));
 }

@@ -14,8 +14,7 @@ internal static class BindingSuppressionCodec
 
     internal static bool IsParticipant(JsonElement participant)
     {
-        var identity = participant.GetProperty("identity");
-        if (!identity.TryGetProperty("format", out var format) || format.GetString() != Format) return false;
+        if (!ExecutionParticipantText.MatchesFormat(participant, Format)) return false;
         _ = Decode(participant); return true;
     }
 
@@ -26,8 +25,9 @@ internal static class BindingSuppressionCodec
         var hooks = HookResultCodec.Read(journal, total);
         var close = DispatchIntentCodec.Read(journal, total);
         var result = ImmutableArray.CreateBuilder<ExecutionBindingSuppression>();
-        foreach (var participant in journal.Participants.Where(IsParticipant))
+        foreach (var participant in journal.Participants)
         {
+            if (!ExecutionParticipantText.MatchesFormat(participant, Format)) continue;
             var item = Decode(participant);
             var step = total.Steps.SingleOrDefault(step => step.StepId == item.StepId) ?? throw Invalid();
             var current = jobs.Where(job => job.StepId == item.StepId).ToArray();

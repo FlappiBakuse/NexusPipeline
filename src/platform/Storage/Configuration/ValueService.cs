@@ -42,9 +42,10 @@ public sealed class ValueService
         var (binding, script) = Definitions(bindingId);
         return Array.AsReadOnly(script.ConfigurationPaths.Select(path =>
         {
-            var saved = _revisions.Read(new(bindingId, GenericConfigurationPolicy.ResourceId(path)));
-            if (saved is not null) saved = GenericConfigurationPolicy.RequireSaved(binding, script, path, _revisions);
-            return new GenericConfigurationResource(GenericConfigurationPolicy.ResourceId(path), binding.Revision, saved?.Revision ?? 0,
+            var id = GenericConfigurationPolicy.ResourceId(path);
+            var stored = _revisions.ReadStored(new(bindingId, id));
+            var saved = stored is null ? null : GenericConfigurationPolicy.RequireStored(binding, script, path, stored);
+            return new GenericConfigurationResource(id, binding.Revision, saved?.Revision ?? 0,
                 saved is not null, saved?.Tree.Shape ?? FileObjectKind.Missing,
                 saved?.Tree.Entries.Count(item => item.Kind == FileObjectKind.File) ?? 0);
         }).ToArray());
@@ -98,12 +99,26 @@ public sealed class ValueService
         var owned = patchBytes.ToArray();
         try
         {
-            var (request, address, contract, access) = Decode(bindingId, relativePath, syntax, owned);
-            _ = RequireSaved(address, bindingRevision);
-            using var preview = _patches.PreviewCore(subject, address, bindingRevision, contract, relativePath, syntax, access, request, null);
-            return new(request.Binding.OperationId, preview.SizeBytes, preview.HasChanges);
+            RequireValueRequest(relativePath, syntax);
+            return Preview(subject, bindingId, bindingRevision, relativePath, syntax, _reader.Read(owned));
         }
         finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(owned); }
+    }
+
+    internal ValuePreview PreviewValidated(string subject, Guid bindingId, long bindingRevision,
+        string relativePath, ConfigurationSyntax syntax, JsonElement patch)
+    {
+        RequireValueRequest(relativePath, syntax);
+        return Preview(subject, bindingId, bindingRevision, relativePath, syntax, ConfigurationPatchReader.DecodeValidated(patch));
+    }
+
+    private ValuePreview Preview(string subject, Guid bindingId, long bindingRevision, string relativePath, ConfigurationSyntax syntax,
+        ConfigurationPatchRequest request)
+    {
+        var (address, contract, access) = DecodeTarget(bindingId, request);
+        _ = RequireSaved(address, bindingRevision);
+        using var preview = _patches.PreviewCore(subject, address, bindingRevision, contract, relativePath, syntax, access, request, null);
+        return new(request.Binding.OperationId, preview.SizeBytes, preview.HasChanges);
     }
 
     public ConfigurationSaveResult Apply(string subject, Guid bindingId, long bindingRevision,
@@ -113,36 +128,53 @@ public sealed class ValueService
         var owned = patchBytes.ToArray();
         try
         {
-            var (request, address, contract, access) = Decode(bindingId, relativePath, syntax, owned);
-            var digest = ConfigurationPatchService.SourceDigest(address, bindingRevision, contract, relativePath, syntax, access, request);
-            var prior = _patches.ReadAccepted(subject, address, request, digest);
-            if (prior is not null) return prior;
-            var admission = _resources.TryAcquire(request.Binding.OperationId, ConfigurationRevisionService.Claims(address));
-            using var root = admission.Lease ?? throw new ConfigurationException(admission.Denial == ResourceLeaseDenial.Conflict
-                ? "configuration_resource_conflict" : "configuration_host_unavailable");
-            prior = _patches.ReadAccepted(subject, address, request, digest);
-            if (prior is not null) return prior;
-            _ = RequireSaved(address, bindingRevision);
-            using var preview = _patches.PreviewCore(subject, address, bindingRevision, contract, relativePath, syntax, access, request, digest);
-            return _patches.CommitOwned(preview, root, () => { _ = RequireSaved(address, bindingRevision); }, now, CancellationToken.None);
+            RequireValueRequest(relativePath, syntax);
+            return Apply(subject, bindingId, bindingRevision, relativePath, syntax, _reader.Read(owned), now);
         }
         finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(owned); }
     }
 
-    private (ConfigurationPatchRequest Request, ConfigurationAddress Address, ConfigurationContractStamp Contract,
-        ConfigurationDocumentAccess Access) Decode(Guid bindingId, string relativePath, ConfigurationSyntax syntax, ReadOnlyMemory<byte> bytes)
+    internal ConfigurationSaveResult ApplyValidated(string subject, Guid bindingId, long bindingRevision,
+        string relativePath, ConfigurationSyntax syntax, JsonElement patch, DateTimeOffset now)
+    {
+        RequireValueRequest(relativePath, syntax);
+        return Apply(subject, bindingId, bindingRevision, relativePath, syntax, ConfigurationPatchReader.DecodeValidated(patch), now);
+    }
+
+    private ConfigurationSaveResult Apply(string subject, Guid bindingId, long bindingRevision, string relativePath, ConfigurationSyntax syntax,
+        ConfigurationPatchRequest request, DateTimeOffset now)
+    {
+        var (address, contract, access) = DecodeTarget(bindingId, request);
+        var digest = ConfigurationPatchService.SourceDigest(address, bindingRevision, contract, relativePath, syntax, access, request);
+        var prior = _patches.ReadAccepted(subject, address, request, digest);
+        if (prior is not null) return prior;
+        var admission = _resources.TryAcquire(request.Binding.OperationId, ConfigurationRevisionService.Claims(address));
+        using var root = admission.Lease ?? throw new ConfigurationException(admission.Denial == ResourceLeaseDenial.Conflict
+            ? "configuration_resource_conflict" : "configuration_host_unavailable");
+        prior = _patches.ReadAccepted(subject, address, request, digest);
+        if (prior is not null) return prior;
+        _ = RequireSaved(address, bindingRevision);
+        using var preview = _patches.PreviewCore(subject, address, bindingRevision, contract, relativePath, syntax, access, request, digest);
+        return _patches.CommitOwned(preview, root, () => { _ = RequireSaved(address, bindingRevision); }, now, CancellationToken.None);
+    }
+
+    private void RequireValueRequest(string relativePath, ConfigurationSyntax syntax)
     {
         _lease.VerifyHeld(_instance);
         if (syntax is not (ConfigurationSyntax.Json or ConfigurationSyntax.JsonWithComments or ConfigurationSyntax.Yaml) ||
             relativePath.Length > 1024) throw new ConfigurationException("configuration_generic_value_request_invalid");
         if (relativePath.Length != 0) PhysicalPathPolicy.ValidateRelativePath(relativePath);
-        var request = _reader.Read(bytes);
+    }
+
+    private static (ConfigurationAddress Address, ConfigurationContractStamp Contract, ConfigurationDocumentAccess Access)
+        DecodeTarget(Guid bindingId, ConfigurationPatchRequest request)
+    {
         var id = request.Binding.ResourceId;
         if (!id.StartsWith("generic-", StringComparison.Ordinal) || !FileTreePolicy.Digest(id["generic-".Length..]))
             throw new ConfigurationException("configuration_generic_definition_unbound");
         var grants = request.Edits.Select(edit => new ConfigurationAccessGrant(edit.Selector, false)).ToImmutableArray();
         // The inverse stamp is used only for exact original-operation lookup; new effects still require the actual saved declaration.
-        return (request, new(bindingId, id), new(1, id["generic-".Length..], null, false), ConfigurationPatchPolicy.Freeze(new ConfigurationDocumentAccess(grants, grants, [])));
+        return (new(bindingId, id), new(1, id["generic-".Length..], null, false), ConfigurationPatchPolicy.Freeze(new ConfigurationDocumentAccess(grants, grants, [])));
     }
 
     private ConfigurationRevision RequireSaved(ConfigurationAddress address, long? bindingRevision)

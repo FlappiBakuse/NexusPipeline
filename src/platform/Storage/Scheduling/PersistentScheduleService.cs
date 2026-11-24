@@ -52,17 +52,15 @@ public sealed class PersistentScheduleService
         _instance = instance; _database = database; _lease = lease; _resources = resources; _lifecycle = lifecycle;
         _recovery = recovery; _execution = execution; _clock = clock ?? TimeProvider.System;
         _contracts = contracts ?? new();
-        ScheduledProviderInventory.Visit(instance, database, _contracts, _ => { });
-        WorkEffectInventory.Verify(instance, database, _contracts);
+        var (manualStore, pendingManual) = ManualWorkStore.OpenWithStartupAudit(instance, database, lease, resources, _contracts, _clock);
         var providerPublication = new ScheduledProviderPublication(instance, database, _contracts, lease, resources, _clock);
-        if (!providerPublication.ReconcilePriorOwners())
+        if (!providerPublication.ReconcilePendingOwners())
         {
             FailureCode = "schedule_provider_recovery_unverified";
             _recovery.BlockUnknown(FailureCode);
         }
         _providers = new(instance, database, _contracts, lease, resources, _clock);
-        var manualStore = new ManualWorkStore(instance, database, lease, resources, _contracts, _clock);
-        if (!manualStore.ReconcilePriorOwners())
+        if (!manualStore.ReconcilePendingOwners(pendingManual))
         {
             FailureCode = "manual_work_recovery_unverified";
             _recovery.BlockUnknown(FailureCode);

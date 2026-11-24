@@ -26,18 +26,23 @@ internal sealed class AndroidDeviceInput(AndroidTargetStage target, StepEvidence
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         deadline.CancelAfter(timeout);
         _device ??= target.PrepareDevice(binding);
-        await _device.RequireCurrentAsync(deadline.Token).ConfigureAwait(false);
-        var frozen = _device.Use(value => value);
-        var arguments = Arguments(frozen, request);
-        if (arguments is null) return response;
-        if (frozen.Driver == "mumu") await RequireMappingAsync(frozen, deadline.Token).ConfigureAwait(false);
-        var result = await RunAsync(frozen, arguments, timeout, deadline.Token).ConfigureAwait(false);
-        if (frozen.Driver == "mumu") await RequireMappingAsync(frozen, deadline.Token).ConfigureAwait(false);
-        RequireLive(cancellation);
-        var text = Decode(result.StandardOutput);
-        var success = result.ExitCode == 0;
-        if (request.Kind == "connected" && frozen.Driver == "genericAdb") success &= text.Trim() == "device";
-        return response with { Success = success, Text = request.Kind == "shell" && success ? text : null };
+        try
+        {
+            await _device.RequireCurrentAsync(deadline.Token).ConfigureAwait(false);
+            var frozen = _device.Use(value => value);
+            var arguments = Arguments(frozen, request);
+            if (arguments is null) return response;
+            if (frozen.Driver == "mumu") await RequireMappingAsync(frozen, deadline.Token).ConfigureAwait(false);
+            var result = await RunAsync(frozen, arguments, timeout, deadline.Token).ConfigureAwait(false);
+            if (frozen.Driver == "mumu") await RequireMappingAsync(frozen, deadline.Token).ConfigureAwait(false);
+            RequireLive(cancellation);
+            var text = Decode(result.StandardOutput);
+            var success = result.ExitCode == 0;
+            if (request.Kind == "connected" && frozen.Driver == "genericAdb") success &= text.Trim() == "device";
+            return response with { Success = success, Text = request.Kind == "shell" && success ? text : null };
+        }
+        catch (OperationCanceledException error) when (deadline.IsCancellationRequested && !cancellation.IsCancellationRequested)
+        { throw new IOException("execution_device_command_deadline", error); }
     }
 
     private async Task RequireMappingAsync(ExecutionTargetAndroid frozen, CancellationToken cancellation)

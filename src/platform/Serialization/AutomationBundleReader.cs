@@ -25,7 +25,12 @@ public sealed class AutomationBundleReader(ContractReader reader)
                 RequireReference(roots, pc.LaunchExecutable.RootId);
                 RequireReference(roots, pc.ReadyExecutable.RootId);
             }
-            if (script.Target?.Android is { } android) RequireReference(roots, android.Tool.RootId);
+            if (script.Target?.Android is { } android)
+            {
+                RequireReference(roots, android.Tool.RootId);
+                if (android.ScreenshotTool is { } screenshot) RequireReference(roots, screenshot.RootId);
+                if (android.Emulator is { } emulator) RequireReference(roots, emulator.RootId);
+            }
         }
         foreach (var binding in bundle.Bindings)
         {

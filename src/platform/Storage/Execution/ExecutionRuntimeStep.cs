@@ -62,7 +62,10 @@ internal sealed class ExecutionRuntimeStep : IDisposable
         (_controller is null || !_controller.HasConfigurationHistory);
 
     internal ExecutionRuntimeStep(RuntimeInstance instance, StateDatabase database, ContractReader contracts, InstanceLease lease,
-        RecoveryIndex index, AcceptedExecutionAdmission accepted, ExecutionPlanStep step, Guid? configurationSessionId, ResourceLeaseManager? resources = null, ITargetPersistenceObserver? targetObserver = null, ExecutionLiveMedia? liveMedia = null, TaskAdapterService? adapters = null, PreparedConfigurationRun? preparedConfiguration = null, BindingRawAllowance? rawAllowance = null, Func<TimeSpan>? bindingElapsed = null, ConfigurationSessionFactory? configurationFactory = null)
+        RecoveryIndex index, AcceptedExecutionAdmission accepted, ExecutionPlanStep step, Guid? configurationSessionId,
+        ResourceLeaseManager? resources = null, ITargetPersistenceObserver? targetObserver = null, ExecutionLiveMedia? liveMedia = null,
+        TaskAdapterService? adapters = null, PreparedConfigurationRun? preparedConfiguration = null, BindingRawAllowance? rawAllowance = null,
+        Func<TimeSpan>? bindingElapsed = null, ConfigurationSessionFactory? configurationFactory = null, AttemptTerminalStore? terminal = null)
     {
         _configurationFactory = configurationFactory ?? new(instance, database, contracts, lease, index);
         _parentJournalId = accepted.Receipt.JournalId; StepId = step.StepId;
@@ -75,7 +78,7 @@ internal sealed class ExecutionRuntimeStep : IDisposable
         var budget = accepted.Prepared.Total.Plan.ReadWire().Budget;
         _stopTimeout = TimeSpan.FromSeconds(Math.Min(budget.StopTimeoutSeconds, 60));
         _drainTimeout = TimeSpan.FromSeconds(Math.Min(budget.DrainTimeoutSeconds, 60));
-        _terminal = new(instance, database, contracts, lease);
+        _terminal = terminal ?? new(instance, database, contracts, lease);
     }
 
     internal void InitializeCapture()

@@ -41,7 +41,7 @@ internal sealed class EmulatorTargetService(RuntimeInstance instance, StateDatab
         foreach (var owner in providers)
         {
             var roots = ReadRoots(selected, owner);
-            views.Add(await UseAsync(roots, authorize, (provider, inventory, discovery, current) =>
+            views.Add(await UseAsync(roots, authorize, (provider, inventory, discovery, current, installed) =>
             {
             var targets = new List<EmulatorTargetOption>(); var diagnostics = discovery.Diagnostics.ToList();
             foreach (var source in discovery.Sources)
@@ -82,7 +82,7 @@ internal sealed class EmulatorTargetService(RuntimeInstance instance, StateDatab
         var declared = new EmulatorRoot(root.Id, root.Name, root.Path, true);
         var owner = activator.Emulators.Select(expected.ExtensionId, expected.ProviderId);
         var all = ReadRoots([root], owner);
-        return UseAsync(all, () => lease.VerifyHeld(instance), (provider, inventory, discovery, current) =>
+        return UseAsync(all, () => lease.VerifyHeld(instance), (provider, inventory, discovery, current, installed) =>
         {
             var target = provider.Select(discovery.Sources, expected.TargetId, ExecutionAndroidCommands.Endpoint(android.Endpoint), true);
             var directory = inventory.InstanceDirectory(target, provider.Describe(target)); var selection = Selection(target, declared.Id, directory, owner);
@@ -90,11 +90,11 @@ internal sealed class EmulatorTargetService(RuntimeInstance instance, StateDatab
                 target.Installation.Adb is null || PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(root.Path, android.Tool.RelativePath)) != target.Installation.Adb.Path)
                 throw new IOException("emulator_selection_changed");
             if (expected.ExtensionId is null) selection = selection with { ExtensionId = null, ProviderId = null };
-            var installed = _installed.Read(owner.ExtensionId, "emulator.provide");
-            var blobs = new ImmutableBlobStore(instance, contracts); var manifest = blobs.PersistContent(installed.Bytes, default);
+            current();
+            var blobs = new ImmutableBlobStore(instance, contracts); var manifest = installed.PersistManifest(blobs);
             var identity = PhysicalObjectIdentity.Read(directory);
             var extensionLock = new ExecutionPlanExtensionLocksItem { ExtensionId = installed.Installed.ExtensionId, PackageVersion = installed.Installed.Package.PackageVersion,
-                SdkVersion = installed.Manifest.SdkVersion, ContractFingerprint = installed.Manifest.ContractFingerprint,
+                SdkVersion = installed.SdkVersion, ContractFingerprint = installed.ContractFingerprint,
                 ManifestSha256 = manifest.Sha256, PackageSha256 = installed.Installed.Package.ArchiveSha256 };
             var observations = inventory.ReadEvidence().SelectMany(value => new[] { blobs.PersistContent(value.StandardOutput, default),
                 blobs.PersistContent(value.StandardError, default) }).Distinct().ToArray();
@@ -107,7 +107,7 @@ internal sealed class EmulatorTargetService(RuntimeInstance instance, StateDatab
                 { ProviderId = owner.ProviderId,
                     Launch = EmulatorTargetProof.Command(provider.Describe(target).Launch, target),
                     Quit = provider.Describe(target).Quit is { } quit ? EmulatorTargetProof.Command(quit, target) : null };
-            current(); _installed.Require(installed);
+            current();
             return ValueTask.FromResult(new EmulatorPlanSource(EmulatorTargetProof.Freeze(proof, blobs), extensionLock));
         }, default, owner).AsTask().GetAwaiter().GetResult();
     }
@@ -115,7 +115,7 @@ internal sealed class EmulatorTargetService(RuntimeInstance instance, StateDatab
     internal void RequireCurrent(EmulatorTargetFrozen target, AutomationScript script)
     {
         lease.VerifyHeld(instance); _installed.RequireAndroid(script);
-        var installed = _installed.Read(target.ExtensionId, "emulator.provide");
+        using var installed = _installed.Open(target.ExtensionId, "emulator.provide");
         if (installed.Installed.Revision != target.InstalledRevision || installed.Installed.Package.ArchiveSha256 != target.PackageSha256 ||
             installed.Activation.ToString("D") != target.ActivationId) throw new IOException("emulator_activation_changed");
         EmulatorTargetProof.RequireCurrent(target);
@@ -132,7 +132,7 @@ internal sealed class EmulatorTargetService(RuntimeInstance instance, StateDatab
         RequireCurrent(frozen, script);
         var root = catalog.Roots.SingleOrDefault(value => value.Id.ToString("D") == frozen.Selection.RootId) ?? throw new IOException("emulator_root_missing");
         var owner = activator.Emulators.Select(frozen.ExtensionId, frozen.ProviderId);
-        _ = await UseAsync(ReadRoots([root], owner), () => lease.VerifyHeld(instance), (provider, inventory, found, current) =>
+        _ = await UseAsync(ReadRoots([root], owner), () => lease.VerifyHeld(instance), (provider, inventory, found, current, installed) =>
         {
             var target = provider.Select(found.Sources, frozen.Selection.TargetId, android.Endpoint, true);
             var directory = inventory.InstanceDirectory(target, provider.Describe(target));
@@ -159,16 +159,17 @@ internal sealed class EmulatorTargetService(RuntimeInstance instance, StateDatab
     }
 
     private async ValueTask<T> UseAsync<T>(IReadOnlyList<EmulatorRoot> roots, Action authorize,
-        Func<IEmulatorProvider, EmulatorInventoryScope, EmulatorDiscoveryResult, Action, ValueTask<T>> callback, CancellationToken cancellation, (string ExtensionId, string ProviderId) selected)
+        Func<IEmulatorProvider, EmulatorInventoryScope, EmulatorDiscoveryResult, Action, EmulatorInstalledSource, ValueTask<T>> callback,
+        CancellationToken cancellation, (string ExtensionId, string ProviderId) selected)
     {
-        var installed = _installed.Read(selected.ExtensionId, "emulator.provide");
+        using var installed = _installed.Open(selected.ExtensionId, "emulator.provide");
         return await activator.Emulators.UseAsync(selected.ExtensionId, selected.ProviderId, async (provider, active) =>
         {
-            void Current() { authorize(); active(); _installed.Require(installed); }
+            void Current() { authorize(); lease.VerifyHeld(instance); active(); _installed.Require(installed); }
             Current();
             await using var inventory = EmulatorInventoryScope.Prepare(instance, lease, resources, roots.Select(value => value.Path).ToArray(), Current, TimeSpan.FromMinutes(1));
             var found = await provider.DiscoverAsync(inventory, true, cancellation).ConfigureAwait(false);
-            return await callback(provider, inventory, found, Current).ConfigureAwait(false);
+            return await callback(provider, inventory, found, Current, installed).ConfigureAwait(false);
         }, cancellation).ConfigureAwait(false);
     }
 

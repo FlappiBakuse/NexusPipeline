@@ -1,6 +1,3 @@
-using System.Collections.Immutable;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Maintenance;
@@ -8,8 +5,19 @@ using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Archives;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
+using System.Collections.Immutable;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace NexusPipeline.Platform.Storage.Maintenance;
+
+internal sealed record HostUpdateSource(string Format, int Version, Guid InstanceId, Guid OperationId, Guid JournalId,
+    SavedUpdateFeed Feed, string HostVersion, BlobReference PayloadManifest, BlobReference Archive,
+    HostUpdateTiming Timing, UpdateWindowIntent Window)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public BlobReference? Installation { get; init; }
+}
 
 internal sealed class UpdateSourceCodec(RuntimeInstance instance, ContractReader contracts)
 {
@@ -28,10 +36,10 @@ internal sealed class UpdateSourceCodec(RuntimeInstance instance, ContractReader
         return _blobs.PersistPlan(JsonSerializer.SerializeToUtf8Bytes(source, Options));
     }
 
-    internal HostUpdateSource ReadMetadata(BlobReference reference)
+    internal HostUpdateSource ReadMetadata(BlobReference reference, List<FileStream>? held = null)
     {
         RequirePlan(reference);
-        var bytes = Read(reference);
+        var bytes = Read(reference, held);
         using var strict = StrictJson.Parse(bytes);
         var source = JsonSerializer.Deserialize<HostUpdateSource>(bytes, Options) ?? throw Invalid();
         Validate(source); return source;
@@ -147,9 +155,11 @@ internal sealed class UpdateSourceCodec(RuntimeInstance instance, ContractReader
             source.Archive.RelativePath != $"blobs/content/{source.Archive.Sha256}.bin") throw Invalid();
     }
 
-    private byte[] Read(BlobReference reference)
+    private byte[] Read(BlobReference reference, List<FileStream>? held = null)
     {
-        using var input = _blobs.OpenVerified(reference);
+        var input = _blobs.OpenVerified(reference);
+        using var local = held is null ? input : null;
+        held?.Add(input);
         var bytes = new byte[checked((int)input.Length)]; input.ReadExactly(bytes); return bytes;
     }
     private static bool Digest(string value) => value is { Length: 64 } && value.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');

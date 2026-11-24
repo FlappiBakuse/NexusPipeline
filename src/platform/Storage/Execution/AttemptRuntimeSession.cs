@@ -50,7 +50,9 @@ internal sealed class AttemptRuntimeSession : IExecutionAttemptSession, IDisposa
     public bool HasEnteredEffect => new JournalEffectGate(_database).Read(_parent.JournalId).State == EffectGateState.Entered;
 
     internal AttemptRuntimeSession(RuntimeInstance instance, StateDatabase database, ContractReader contracts, InstanceLease lease,
-        ResourceLeaseManager resources, RecoveryIndex index, AcceptedExecutionAdmission accepted, ITargetPersistenceObserver? targetObserver = null, ExecutionLiveMedia? liveMedia = null, TaskAdapterService? adapters = null, ExecutionProgress? progress = null, ConfigurationSessionFactory? configurationFactory = null)
+        ResourceLeaseManager resources, RecoveryIndex index, AcceptedExecutionAdmission accepted, ITargetPersistenceObserver? targetObserver = null,
+        ExecutionLiveMedia? liveMedia = null, TaskAdapterService? adapters = null, ExecutionProgress? progress = null,
+        ConfigurationSessionFactory? configurationFactory = null, Action<Guid>? hookResultFlushed = null)
     {
         _configurationFactory = configurationFactory ?? new(instance, database, contracts, lease, index);
         lease.VerifyHeld(instance); accepted.Prepared.RequireLive();
@@ -62,7 +64,8 @@ internal sealed class AttemptRuntimeSession : IExecutionAttemptSession, IDisposa
         _currentConfigurations = accepted.Prepared.Configurations.ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
         _parent = new(accepted.Receipt.JournalId, accepted.Identity.OperationId, JournalKind.RunAttempt, JournalPhase.Prepared, 1,
             accepted.Receipt.Plan.RelativePath, accepted.Receipt.Plan.Sha256, _total.ResourceKeys);
-        _terminal = new(instance, database, contracts, lease); StepIds = Array.AsReadOnly(_total.Steps.Select(step => step.StepId).ToArray());
+        _terminal = new(instance, database, contracts, lease, hookResultFlushed);
+        StepIds = Array.AsReadOnly(_total.Steps.Select(step => step.StepId).ToArray());
         _readSession = lease.BindAttemptReads(database).Start(instance, database, contracts, _parent.JournalId);
     }
 
@@ -109,7 +112,8 @@ internal sealed class AttemptRuntimeSession : IExecutionAttemptSession, IDisposa
         }
         var step = new ExecutionRuntimeStep(_instance, _database, _contracts, _lease, _index, _accepted, input,
             _configurationSessions.TryGetValue(stepId, out var sessionId) ? sessionId : null, _resources, _targetObserver, _liveMedia, _adapters, prepared,
-            _rawAllowances.TryGetValue(stepId, out var allowance) ? allowance : _rawAllowances[stepId] = new(BindingOutputBudget.MaximumForStep(input), 0), () => BindingElapsed(stepId), _configurationFactory);
+            _rawAllowances.TryGetValue(stepId, out var allowance) ? allowance : _rawAllowances[stepId] = new(BindingOutputBudget.MaximumForStep(input), 0),
+            () => BindingElapsed(stepId), _configurationFactory, _terminal);
         _steps.Add(stepId, step); step.InitializeCapture();
         _progress?.Invocation(stepId, step.InvocationOrdinal);
     }
@@ -131,7 +135,8 @@ internal sealed class AttemptRuntimeSession : IExecutionAttemptSession, IDisposa
             var input = _total.Steps.Single(item => item.StepId == stepId);
             var request = previous.Request with { SyncInitially = false, Resources = previous.Request.Resources.Select(resource =>
                 resource with { OperationId = Guid.NewGuid(), JournalId = Guid.NewGuid(),
-                    Tasks = resource.Tasks.Select(rule => rule with { SelectedIds = TaskRetryEvidence.Selected(input, rule, taskRetry) }).ToImmutableArray() }).ToImmutableArray() };
+                    Tasks = resource.Tasks.Select(rule => taskRetry is null ? rule with { SelectedIds = TaskRetryEvidence.Selected(input, rule, null) }
+                        : TaskRetryEvidence.ApplySelection(rule, taskRetry.Selection, origin.RepetitionOffsets)).ToImmutableArray() }).ToImmutableArray() };
             prepared = new ConfigurationRunPreparation(_instance, _database, _contracts, _lease, _resources)
                 .PrepareHistorical(_accepted.Root, _accepted.Identity.OperationId, _accepted.Prepared.Total.Plan, stepId, request, origin);
             _retryConfigurations.Add(prepared);

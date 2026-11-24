@@ -13,7 +13,8 @@ using NexusPipeline.Platform.Storage.Sqlite;
 namespace NexusPipeline.Platform.Storage.Execution;
 
 [SupportedOSPlatform("windows")]
-internal sealed class AttemptTerminalStore(RuntimeInstance instance, StateDatabase database, ContractReader contracts, InstanceLease lease)
+internal sealed class AttemptTerminalStore(RuntimeInstance instance, StateDatabase database, ContractReader contracts, InstanceLease lease,
+    Action<Guid>? hookResultFlushed = null)
 {
     internal AttemptWriterState Read(Guid parentJournalId)
     {
@@ -408,6 +409,7 @@ internal sealed class AttemptTerminalStore(RuntimeInstance instance, StateDataba
             BindingOutputBudget.RequireReplacement(instance, database, contracts, current, binding, proof.Role, artifact);
             Append(current, current.Latest.Phase, document => document["participants"]!.AsArray().Add(
                 HookResultCodec.Participant(intended, current.Total.Steps.Single(step => step.StepId == binding.StepId).ScriptId)));
+            hookResultFlushed?.Invoke(parentJournalId);
             Synchronize(parentJournalId); return true;
         }));
     }

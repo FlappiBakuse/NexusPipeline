@@ -5,6 +5,8 @@ using NexusPipeline.Platform.Storage.Sqlite;
 
 namespace NexusPipeline.Platform.Storage.Records;
 
+internal sealed record RecordRetentionStatus(string? FailureCode, DateTimeOffset? FailedAtUtc, DateTimeOffset? RecoveredAtUtc);
+
 [SupportedOSPlatform("windows")]
 public sealed class RecordHistoryRetention
 {
@@ -18,7 +20,9 @@ public sealed class RecordHistoryRetention
     private DateOnly? _resumeDay;
     private bool _resumeComplete;
     private long _observedMutation = -1;
-    public string? FailureCode { get; private set; }
+    private RecordRetentionStatus _status = new(null, null, null);
+    internal RecordRetentionStatus Status => Volatile.Read(ref _status);
+    public string? FailureCode => Status.FailureCode;
 
     public RecordHistoryRetention(StateDatabase database, ContentRetirementService retirement, TimeProvider? clock = null)
     { _database = database; _retirement = retirement; _clock = clock ?? TimeProvider.System; }
@@ -33,7 +37,7 @@ public sealed class RecordHistoryRetention
                 stopping.ThrowIfCancellationRequested();
                 try { Tick(); }
                 catch (Exception error) when (error is IOException or Microsoft.Data.Sqlite.SqliteException or InvalidOperationException or System.Text.Json.JsonException)
-                { FailureCode = "record_retention_reconciliation_required"; }
+                { SetFailure("record_retention_reconciliation_required"); }
             } while (await timer.WaitForNextTickAsync(stopping).ConfigureAwait(false));
         }
         catch (OperationCanceledException) when (stopping.IsCancellationRequested) { }
@@ -44,7 +48,7 @@ public sealed class RecordHistoryRetention
         var now = _clock.GetUtcNow();
         var localDate = TimeZoneInfo.ConvertTime(now, TimeZoneInfo.Local).Date;
         var today = DateOnly.FromDateTime(localDate);
-        if (_resumeComplete && _nextSweep is { } nextDay && today < nextDay && _observedMutation == _database.CommitSequence) return;
+        if (FailureCode is null && _resumeComplete && _nextSweep is { } nextDay && today < nextDay && _observedMutation == _database.CommitSequence) return;
         using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications))
         using (var command = connection.CreateCommand())
         {
@@ -65,10 +69,10 @@ public sealed class RecordHistoryRetention
         if (!_resumeComplete)
         {
             var resumed = _retirement.ResumeAutomatic(_resumeAfter, saved.Revision, cutoff);
-            if (resumed is not null) { _resumeAfter = resumed; FailureCode = null; return; }
+            if (resumed is not null) { _resumeAfter = resumed; SetFailure(null); return; }
             _resumeComplete = true;
         }
-        if (_nextSweep is { } next && today < next) return;
+        if (_nextSweep is { } next && today < next) { SetFailure(null); return; }
         Guid? run;
         using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var command = connection.CreateCommand())
@@ -82,7 +86,7 @@ public sealed class RecordHistoryRetention
             run = command.ExecuteScalar() is string id ? Guid.ParseExact(id, "D") : null;
         }
         if (run is null)
-        { _after = null; _nextSweep = DateOnly.FromDateTime(localDate).AddDays(1); return; }
+        { _after = null; _nextSweep = DateOnly.FromDateTime(localDate).AddDays(1); SetFailure(null); return; }
         try
         {
             foreach (var images in new[] { false, true })
@@ -92,13 +96,21 @@ public sealed class RecordHistoryRetention
                     _retirement.RetireLogsPage(Guid.NewGuid(), "host:history-retention", run.Value);
                 if (page is null) continue;
                 if (!_retirement.CompleteCleanup(page)) throw new IOException("record_retirement_cleanup_pending");
-                FailureCode = null; return;
+                SetFailure(null); return;
             }
             if (_retirement.RetireEmptyHistory(run.Value, saved.Revision, now)) _after = run;
-            FailureCode = null;
+            SetFailure(null);
         }
         catch (IOException error) when (error.Message is "record_retirement_admission_blocked" or "record_retirement_run_pending" or
             "record_retirement_notification_pending" or "record_retirement_recovery_pending" or "record_retirement_recovery_changed" or "record_retirement_settings_changed")
-        { _after = run; FailureCode = error.Message; }
+        { _after = run; SetFailure(error.Message); }
+    }
+
+    private void SetFailure(string? code)
+    {
+        var current = Status;
+        if (current.FailureCode == code) return;
+        var now = _clock.GetUtcNow();
+        Volatile.Write(ref _status, code is null ? new(null, current.FailedAtUtc, now) : new(code, now, null));
     }
 }

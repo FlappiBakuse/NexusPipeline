@@ -24,18 +24,41 @@ internal sealed class RecordRetirementContents(RuntimeInstance instance, StateDa
         var result = new HashSet<BlobReference>();
         foreach (var reference in proofs)
         {
-            if (!_proofs.TryGetValue(reference, out var saved))
-            {
-                _family ??= new RetirementFamilyReader(instance, database, contracts).CaptureMetadata(runId);
-                var proof = VerifiedRecordRetirement.ReadProof(instance, database, contracts, _family, reference);
-                saved = proof.ContentKind == kind ? proof.Contents : [];
-                if (_proofs.Count == 32) _proofs.Clear();
-                _proofs.Add(reference, saved);
-            }
+            var saved = ProofContents(reference);
             foreach (var content in saved) if (wanted.Contains(content)) result.Add(content);
         }
         result.IntersectWith(candidates);
         return result;
+    }
+
+    internal ILookup<string, RecordRetirementRows.ProofRow> ReadIndex(IReadOnlyList<BlobReference> candidates)
+    {
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true,
+            domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
+        using var transaction = DatabaseConnections.BeginRead(connection);
+        var rows = RecordRetirementRows.ReadProofIndex(connection, transaction, runId,
+            candidates.Select(item => item.Sha256).Distinct(StringComparer.Ordinal).ToArray());
+        transaction.Commit();
+        return rows;
+    }
+
+    internal bool IsRetired(BlobReference content, ILookup<string, RecordRetirementRows.ProofRow> index)
+    {
+        var retired = false;
+        foreach (var row in index[content.Sha256])
+            if (ProofContents(row.Bind(content)).Contains(content)) retired = true;
+        return retired;
+    }
+
+    private IReadOnlyList<BlobReference> ProofContents(BlobReference reference)
+    {
+        if (_proofs.TryGetValue(reference, out var saved)) return saved;
+        _family ??= new RetirementFamilyReader(instance, database, contracts).CaptureMetadata(runId);
+        var proof = VerifiedRecordRetirement.ReadProof(instance, database, contracts, _family, reference);
+        saved = proof.ContentKind == kind ? proof.Contents : [];
+        if (_proofs.Count == 32) _proofs.Clear();
+        _proofs.Add(reference, saved);
+        return saved;
     }
 
     internal void RequireAvailable(IReadOnlyList<BlobReference> contents)

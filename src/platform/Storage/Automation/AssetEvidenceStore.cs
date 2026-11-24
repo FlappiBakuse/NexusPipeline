@@ -53,15 +53,31 @@ public sealed class AssetEvidenceStore(RuntimeInstance instance, ContractReader 
             ?? throw new IOException("asset_receipt_step_unbound");
         var bytes = BoundedJson.Serialize(receipt);
         var verified = _codec.DecodeReceipt(bytes, plan, planDigest, asset);
-        var path = PathFor(expected.RelativePath);
-        using var parent = new PhysicalDirectoryLease(Path.GetDirectoryName(path)!, AssetEvidenceCodec.Physical(expected.ParentIdentity));
-        using var directory = new PhysicalDirectoryLease(path, AssetEvidenceCodec.Physical(expected.Identity));
-        if (verified.Stage == "completed") VerifyStarted(path, plan, planDigest, asset, receipt.WriterId);
-        var target = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(path, FileName(asset, verified.Stage)));
+        return WriteVerified(plan, planDigest, expected, asset, verified, bytes);
+    }
+
+    internal AssetReceiptEvidence WritePrepared(AssetPreparationPlan plan, string planDigest, AssetPreparationWorkspace workspace,
+        AssetPreparationDefsAsset asset, PhysicalObjectIdentity? identity)
+    {
+        RequireExecuting(plan, planDigest);
+        var writer = JournalWriterStore.CurrentWriter.WriterId;
+        if (workspace.WriterId != writer.ToString("D")) throw new IOException("asset_receipt_writer_unbound");
+        var (receipt, bytes) = _codec.EncodeReceipt(plan, planDigest, asset, writer, identity);
+        return WriteVerified(plan, planDigest, workspace, asset, receipt, bytes);
+    }
+
+    private AssetReceiptEvidence WriteVerified(AssetPreparationPlan plan, string planDigest, AssetPreparationWorkspace workspace,
+        AssetPreparationDefsAsset asset, AssetPreparationReceipt receipt, byte[] bytes)
+    {
+        var path = PathFor(workspace.RelativePath);
+        using var parent = new PhysicalDirectoryLease(Path.GetDirectoryName(path)!, AssetEvidenceCodec.Physical(workspace.ParentIdentity));
+        using var directory = new PhysicalDirectoryLease(path, AssetEvidenceCodec.Physical(workspace.Identity));
+        if (receipt.Stage == "completed") VerifyStarted(path, plan, planDigest, asset, receipt.WriterId);
+        var target = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(path, FileName(asset, receipt.Stage)));
         using var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 4096, FileOptions.WriteThrough);
         output.Write(bytes);
         output.Flush(flushToDisk: true);
-        return new(verified, Convert.ToHexStringLower(SHA256.HashData(bytes)));
+        return new(receipt, Convert.ToHexStringLower(SHA256.HashData(bytes)));
     }
 
     public AssetEvidenceSnapshot Read(FrozenAssetPreparation frozen, string planDigest, AssetPreparationWorkspace workspace)
@@ -104,7 +120,7 @@ public sealed class AssetEvidenceStore(RuntimeInstance instance, ContractReader 
 
     private static void VerifyDigest(FrozenAssetPreparation frozen, string digest)
     {
-        if (Convert.ToHexStringLower(SHA256.HashData(frozen.Export())) != digest) throw new IOException("asset_evidence_plan_digest_unbound");
+        if (frozen.Digest != digest) throw new IOException("asset_evidence_plan_digest_unbound");
     }
 
     private void RequireExecuting(AssetPreparationPlan plan, string planDigest)

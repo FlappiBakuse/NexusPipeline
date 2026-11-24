@@ -1,6 +1,6 @@
+using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Operations;
-using NexusPipeline.Core.Configuration;
 
 namespace NexusPipeline.Core.Maintenance;
 
@@ -493,4 +493,108 @@ public sealed class HostLifecycle(IRecoveryIndex recovery, TimeProvider clock)
         private HostLifecycle? _owner = owner;
         public void Dispose() => Interlocked.Exchange(ref _owner, null)?.ReleaseWrite(id);
     }
+}
+
+public sealed class AcceptedExecutionRun : IDisposable
+{
+    private readonly HostLifecycle _lifecycle;
+    internal ResourceLeaseManager ResourceOwner { get; }
+    internal IReadOnlyList<ResourceClaim> Claims { get; private set; }
+    internal QueuedExecutionSource? QueuedSource { get; private set; }
+    internal bool IsQueued { get; private set; }
+    public Guid RunId { get; }
+    public bool IsActive => _lifecycle.IsRunActive(this);
+
+    internal AcceptedExecutionRun(HostLifecycle lifecycle, ResourceLeaseManager resourceOwner, Guid runId, IReadOnlyList<ResourceClaim> claims)
+    { _lifecycle = lifecycle; ResourceOwner = resourceOwner; RunId = runId; Claims = claims; }
+
+    internal void BindQueue(OperationIdentity operation, ExecutionSelectionRequest request)
+    { QueuedSource = new(operation, ExecutionSelectionPolicy.FreezeRequest(request)); IsQueued = true; }
+
+    internal void Promote(IReadOnlyList<ResourceClaim> claims)
+    { Claims = claims; IsQueued = false; }
+
+    internal void RequireContinuation(Guid operationId, string subject, ExecutionSelectionRequest request)
+        => _lifecycle.RequireAcceptedContinuation(this, operationId, subject, request);
+
+    public void Dispose() => _lifecycle.ReleaseAcceptedRun(this);
+}
+
+internal sealed record QueuedExecutionSource(OperationIdentity Operation, ExecutionSelectionRequest Request);
+
+public sealed class AcceptedNotificationQueue : IDisposable
+{
+    private readonly HostLifecycle _lifecycle;
+    internal ResourceLeaseManager ResourceOwner { get; }
+    public Guid OperationId { get; }
+    public bool IsActive => _lifecycle.IsQueueActive(this);
+
+    internal AcceptedNotificationQueue(HostLifecycle lifecycle, ResourceLeaseManager owner, Guid operationId)
+    { _lifecycle = lifecycle; ResourceOwner = owner; OperationId = operationId; }
+
+    public void Dispose() => _lifecycle.ReleaseNotificationQueue(this);
+}
+
+internal static class NotificationQueueResources
+{
+    internal const string Queue = "notifications:queue";
+    internal static IReadOnlyList<ResourceClaim> SenderClaims { get; } = Array.AsReadOnly(new ResourceClaim[]
+    {
+        new("notifications:catalog", ResourceClaimMode.Reference), new("secrets:fields", ResourceClaimMode.Reference),
+        new("settings:host", ResourceClaimMode.Reference), new("blobs:content", ResourceClaimMode.Reference)
+    });
+}
+
+public sealed class HostCompletionDrain : IDisposable
+{
+    private readonly HostLifecycle _owner;
+    public Guid OperationId { get; }
+
+    internal HostCompletionDrain(HostLifecycle owner, Guid operationId)
+    { _owner = owner; OperationId = operationId; }
+
+    public bool TryReserve() => _owner.ReserveCompletion(this);
+    public bool TryEnterEffect() => _owner.EnterCompletionEffect(this);
+    public bool TryCancel() => _owner.CancelCompletion(this, effectRejected: false);
+    public bool ReleaseFinishedEffect() => _owner.CancelCompletion(this, effectRejected: true);
+    public void Dispose() => TryCancel();
+}
+
+public sealed class PreparedDesktopExit : IDisposable
+{
+    private readonly object _gate = new();
+    private readonly HostLifecycle _owner;
+    private readonly HostCompletionDrain _drain;
+    private ResourceOperationBorrow? _held;
+    private bool _used;
+
+    internal PreparedDesktopExit(HostLifecycle owner, HostCompletionDrain drain, ResourceOperationBorrow held)
+    { _owner = owner; _drain = drain; _held = held; }
+
+    public HostCloseDecision RequestPermit(HostLifecycle actualOwner, Guid sessionId, Guid correlationId)
+    {
+        lock (_gate)
+        {
+            if (_used || !ReferenceEquals(_owner, actualOwner) || _held is not { } held)
+                throw new InvalidOperationException("maintenance_desktop_exit_owner_unbound");
+            var decision = held.Use(() => _owner.RequestDesktopExit(_drain, sessionId, correlationId));
+            _used = decision.Permit is not null; return decision;
+        }
+    }
+
+    public void Dispose()
+    {
+        ResourceOperationBorrow? held;
+        lock (_gate) { held = _held; _held = null; }
+        held?.Dispose();
+    }
+}
+
+internal static class PayloadCompletionClaims
+{
+    internal static IReadOnlyList<ResourceClaim> All { get; } = Array.AsReadOnly<ResourceClaim>([
+        new("blobs:content", ResourceClaimMode.Reference),
+        new("maintenance:feed", ResourceClaimMode.Reference),
+        new("maintenance:host-payload", ResourceClaimMode.Mutation)
+    ]);
 }

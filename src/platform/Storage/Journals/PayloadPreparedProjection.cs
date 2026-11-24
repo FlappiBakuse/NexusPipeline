@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Platform.Storage.Sqlite;
 using NexusPipeline.Platform.Storage.Maintenance;
@@ -8,9 +7,10 @@ namespace NexusPipeline.Platform.Storage.Journals;
 internal sealed class PayloadPreparedProjection(JournalStore store, RecoveryJournalRegistry registry, FileEffectOutbox outbox,
     IPayloadPersistenceObserver? observer)
 {
-    internal void Synchronize(FrozenPayloadApply plan, bool verifiedNoEffects)
+    internal void Synchronize(FrozenPayloadApply plan, BlobReference reference, bool verifiedNoEffects)
     {
         var registered = registry.ReadJournal(plan.JournalId);
+        PayloadPreparedBinding.RequireRegistered(plan, reference, registered);
         foreach (var next in store.ReadAllRevisions(plan.JournalId).Where(item => item.Revision > registered.Revision))
         {
             var recorded = PayloadPreparedBinding.HasUnexecutedReceipt(next.Root);
@@ -18,10 +18,9 @@ internal sealed class PayloadPreparedProjection(JournalStore store, RecoveryJour
                 throw new IOException("payload_recorded_commit_unverified");
             if (recorded && verifiedNoEffects)
             {
-                var digest = Convert.ToHexStringLower(SHA256.HashData(next.Export()));
                 foreach (var effect in outbox.Read(plan.JournalId).Where(item => item.State == FileEffectState.Pending))
                 {
-                    outbox.Record(plan.JournalId, effect.StepId, effect.State, FileEffectState.NotExecuted, digest, new(true, false, false, false));
+                    outbox.Record(plan.JournalId, effect.StepId, effect.State, FileEffectState.NotExecuted, next.Sha256, new(true, false, false, false));
                     observer?.Reached(PayloadPersistencePoint.OutboxCommitted, plan.JournalId, next.Revision, next.Phase);
                 }
             }

@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using NexusPipeline.Core.Maintenance;
+using NexusPipeline.Core.Scheduling;
 using NexusPipeline.Platform.Storage.Sqlite;
 
 namespace NexusPipeline.Platform.Storage.Scheduling;
@@ -14,23 +15,30 @@ internal static class ScheduleQueuedActivities
         using var held = metadataRoot.Borrow(resources, metadataRoot.OperationId, [new("scheduling:state", ResourceClaimMode.Mutation)]);
         try { held.Use(() =>
         {
-            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.System);
-            using var transaction = DatabaseConnections.BeginRead(connection);
-            using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT c.occurrence_id,0 FROM main.scheduled_occurrences c LEFT JOIN main.operations o ON o.operation_id=c.start_operation_id LEFT JOIN main.schedule_occurrence_outcomes b ON b.occurrence_id=c.occurrence_id WHERE o.operation_id IS NULL AND b.occurrence_id IS NULL UNION ALL SELECT c.occurrence_id,1 FROM main.startup_queue_occurrences c LEFT JOIN main.operations o ON o.operation_id=c.start_operation_id LEFT JOIN main.startup_queue_outcomes b ON b.occurrence_id=c.occurrence_id WHERE o.operation_id IS NULL AND b.occurrence_id IS NULL ORDER BY 1 LIMIT 8193;";
-            var ids = new List<(Guid Id, bool Startup)>();
-            using (var reader = command.ExecuteReader())
-                while (reader.Read())
-                {
-                    if (ids.Count == 8192) throw new IOException("schedule_pending_capacity");
-                    ids.Add((StartupQueueRows.ParseId(reader.GetString(0)), reader.GetInt32(1) == 1));
-                }
-            foreach (var (id, startup) in ids)
+            using var connection = DatabaseConnections.Open(database.DatabasePath);
+            using var transaction = DatabaseConnections.BeginRead(connection, DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.System);
+            var ids = ScheduleWaitingCapacity.ReadActivityCandidatesInside(connection, transaction);
+            if (ids.Count == 0) { transaction.Commit(); return true; }
+            var byMinute = ids.Where(item => item.Minute.HasValue).ToLookup(item => item.Minute.GetValueOrDefault(), item => item.Id);
+            var verified = new Dictionary<Guid, ScheduleMinuteRows.PendingMinute>();
+            foreach (var (id, minute) in ids)
             {
-                using var origin = startup ? PreparedExecutionOrigin.CaptureStartup(instance, database, lease, id) :
-                    PreparedExecutionOrigin.Capture(instance, database, lease, id);
-                _ = origin.RegisterUnderRoot(resources, metadataRoot);
+                if (minute is { } source)
+                {
+                    if (!verified.TryGetValue(source, out var saved))
+                    {
+                        saved = ScheduleMinuteRows.PendingMinute.Read(connection, transaction, source, instance.InstanceId, byMinute[source].ToHashSet());
+                        verified.Add(source, saved);
+                    }
+                    PreparedExecutionOrigin.RegisterWaitingUnderRoot(instance, database, lease, resources, metadataRoot, saved, id);
+                }
+                else
+                {
+                    using var origin = PreparedExecutionOrigin.CaptureStartup(instance, database, lease, id);
+                    _ = origin.RegisterUnderRoot(resources, metadataRoot);
+                }
             }
+            transaction.Commit();
             return true;
         }); }
         catch

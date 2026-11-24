@@ -29,7 +29,10 @@ internal static class CompletionActionCodec
     }
 
     internal static OperationIdentity Identity(Guid operationId, string subject, CompletionActionGroup group)
-        => new(operationId, subject, Digest(Encode(group)), "execution.completion");
+    {
+        using var timing = StartupProfile.Measure("completion.identity");
+        return new(operationId, subject, Digest(Encode(group)), "execution.completion");
+    }
 
     internal static string Digest(string value) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 

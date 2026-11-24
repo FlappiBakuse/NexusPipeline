@@ -18,33 +18,33 @@ internal static class ReceiptRouteRows
         NotificationReceiptSnapshot source, ReceiptRouteDocument document, BlobReference reference,
         IReadOnlyList<NotificationDeliverySnapshot> deliveries, DateTimeOffset acceptedAt, Guid generation)
     {
-        NotificationReceiptRows.RequireSaved(connection, transaction, source);
+        var existing = Find(connection, transaction, source.Document.OperationId, document.Ordinal);
+        if (existing is null)
+        {
+            if (ReceiptProgressRows.Require(connection, transaction, source.Document.OperationId, source.Document.RouteCount) != document.Ordinal ||
+                document.SourceOperationId != source.Document.OperationId || document.Ordinal < 0 ||
+                document.Ordinal >= source.Document.RouteCount ||
+                !document.Targets.Where(item => item.DeliveryOperationId is not null).Select(item => item.DeliveryOperationId!.Value)
+                    .SequenceEqual(deliveries.Select(item => item.Document.OperationId))) throw NotificationReceiptCodec.Invalid();
+            using (var insert = NotificationDeliveryRows.Command(connection, transaction,
+                "INSERT INTO notifications.notification_receipt_routes VALUES($0,$1,$2,$3,$4);", document.SourceOperationId.ToString("D"),
+                document.Ordinal, reference.RelativePath, reference.SizeBytes, reference.Sha256)) insert.ExecuteNonQuery();
+            ReceiptProgressRows.AdvanceInside(connection, transaction, document.SourceOperationId, document.Ordinal, source.Document.RouteCount);
+            foreach (var delivery in deliveries)
+            {
+                NotificationDeliveryRows.AcceptRegisteredInside(connection, transaction, delivery, source, acceptedAt, generation);
+                using var insert = NotificationDeliveryRows.Command(connection, transaction,
+                    "INSERT INTO notifications.notification_receipt_deliveries VALUES($0,$1,$2);", document.SourceOperationId.ToString("D"),
+                    document.Ordinal, delivery.Document.OperationId.ToString("D"));
+                insert.ExecuteNonQuery();
+            }
+        }
+        else if (existing != reference) throw NotificationReceiptCodec.Invalid();
+
+        // Verify the registration once against the completed writes before this transaction can commit.
+        var next = NotificationReceiptRows.RequireSaved(connection, transaction, source);
+        if (existing is null && next != document.Ordinal + 1) throw NotificationReceiptCodec.Invalid();
         NotificationReceiptRows.RequireReferences(connection, transaction, source);
-        if (Find(connection, transaction, source.Document.OperationId, document.Ordinal) is { } existing)
-        {
-            if (existing != reference) throw NotificationReceiptCodec.Invalid();
-            RequireSaved(connection, transaction, document, reference);
-            return;
-        }
-        if (ReceiptProgressRows.Require(connection, transaction, source.Document.OperationId, source.Document.RouteCount) != document.Ordinal)
-            throw NotificationReceiptCodec.Invalid();
-        if (document.SourceOperationId != source.Document.OperationId || document.Ordinal < 0 ||
-            document.Ordinal >= source.Document.RouteCount ||
-            !document.Targets.Where(item => item.DeliveryOperationId is not null).Select(item => item.DeliveryOperationId!.Value)
-                .SequenceEqual(deliveries.Select(item => item.Document.OperationId)))
-            throw NotificationReceiptCodec.Invalid();
-        using (var insert = NotificationDeliveryRows.Command(connection, transaction,
-            "INSERT INTO notifications.notification_receipt_routes VALUES($0,$1,$2,$3,$4);", document.SourceOperationId.ToString("D"),
-            document.Ordinal, reference.RelativePath, reference.SizeBytes, reference.Sha256)) insert.ExecuteNonQuery();
-        ReceiptProgressRows.AdvanceInside(connection, transaction, document.SourceOperationId, document.Ordinal, source.Document.RouteCount);
-        foreach (var delivery in deliveries)
-        {
-            NotificationDeliveryRows.AcceptRegisteredInside(connection, transaction, delivery, source, acceptedAt, generation);
-            using var insert = NotificationDeliveryRows.Command(connection, transaction,
-                "INSERT INTO notifications.notification_receipt_deliveries VALUES($0,$1,$2);", document.SourceOperationId.ToString("D"),
-                document.Ordinal, delivery.Document.OperationId.ToString("D"));
-            insert.ExecuteNonQuery();
-        }
         RequireSaved(connection, transaction, document, reference);
     }
 

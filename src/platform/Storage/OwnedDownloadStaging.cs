@@ -69,7 +69,15 @@ internal sealed class OwnedDownloadStaging : IDisposable
                 try { owned.Dispose(); }
                 catch (Exception cleanup) { throw new AggregateException(cleanupCode, failure, cleanup); }
             }
-            else { stream?.Dispose(); directory?.Dispose(); root?.Dispose(); parents?.Dispose(); }
+            else
+            {
+                var cleanup = new CleanupFailures();
+                cleanup.Attempt(() => stream?.Dispose());
+                cleanup.Attempt(() => directory?.Dispose());
+                cleanup.Attempt(() => root?.Dispose());
+                cleanup.Attempt(() => parents?.Dispose());
+                cleanup.Preserve(failure);
+            }
             throw;
         }
     }
@@ -101,7 +109,12 @@ internal sealed class OwnedDownloadStaging : IDisposable
             PhysicalObjectMove.MoveVerified(new(ArchivePath, _parentIdentity, _identity, destination,
                 PhysicalObjectIdentity.Read(Path.GetDirectoryName(destination)!), FileObjectKind.File), _stream.SafeFileHandle);
         }
-        catch (IOException) when (File.Exists(destination) && File.Exists(ArchivePath)) { return false; }
+        catch (IOException error) when (error.Message == "physical_move_rename_rejected" &&
+            error.InnerException is System.ComponentModel.Win32Exception { NativeErrorCode: 80 or 183 })
+        {
+            if (PhysicalObjectIdentity.Read(ArchivePath) != _identity) throw;
+            return false;
+        }
         _transferred = true;
         _stream.Dispose(); _stream = null;
         return true;

@@ -1,10 +1,11 @@
-using System.Runtime.Versioning;
+using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Notifications;
+using NexusPipeline.Core.Operations;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Scheduling;
 using NexusPipeline.Platform.Storage.Sqlite;
 using System.Collections.Immutable;
-using Microsoft.Data.Sqlite;
+using System.Runtime.Versioning;
 
 namespace NexusPipeline.Platform.Storage.Notifications;
 
@@ -138,5 +139,56 @@ internal sealed class PreparedScheduledSource : IDisposable
         if (_disposed) return; _disposed = true;
         foreach (var held in _held) held.Dispose();
         _held.Clear();
+    }
+}
+
+internal sealed class NotificationScheduledCodec(RuntimeInstance instance, ContractReader contracts)
+{
+    internal const string Format = "nexus.notification.scheduled-source";
+    internal const string Kind = "notification.scheduled-source";
+    internal const string Subject = "host:scheduled-provider";
+
+    internal NotificationWorkSnapshot Persist(NotificationWorkDocument document)
+    {
+        RequireShape(document);
+        return new(document, new ImmutableBlobStore(instance, contracts).PersistPlan(NotificationCatalogCodec.Encode(document)));
+    }
+
+    internal NotificationWorkSnapshot Read(BlobReference reference, SqliteConnection connection, SqliteTransaction transaction, Guid? expectedRunId = null)
+    {
+        var document = new NotificationCatalogCodec(instance, contracts).ReadDocument<NotificationWorkDocument>(reference);
+        RequireShape(document);
+        var source = new NotificationWorkSnapshot(document, reference);
+        NotificationScheduledRows.RequireSaved(connection, transaction, source);
+        var invocation = WorkInvocationEvidence.ReadScheduled(instance, contracts, document.Invocation, connection, transaction);
+        if (!invocation.Binds(document.Begin, document.OperationId, document.AcceptedConsumedMilliseconds, document.Targets.Select(item => item.TaskId)) ||
+            expectedRunId is { } run && (run == Guid.Empty || invocation.RunId != run))
+            throw Invalid();
+        NotificationScheduledRows.RequireOccurrence(connection, transaction, document.OperationId, invocation.OperationId);
+        NotificationWorkShape.RequireCatalog(instance, contracts, document, connection, transaction);
+        return source;
+    }
+
+    internal NotificationDeliveryDocument Delivery(NotificationWorkSnapshot source, NotificationWorkTarget target) =>
+        NotificationWorkShape.Delivery(instance.InstanceId, source, target, Subject, "scheduledInvocation");
+
+    internal static OperationIdentity Identity(NotificationWorkSnapshot source) =>
+        new(source.Document.OperationId, Subject, source.Reference.Sha256, Kind);
+    internal static Guid DeliveryId(Guid operation, Guid task) => ReceiptRouteCodec.DeliveryId(operation, 0, task);
+    private void RequireShape(NotificationWorkDocument document) => NotificationWorkShape.Require(document, Format, instance.InstanceId);
+
+    internal static IOException Invalid() => new("notification_scheduled_source_unbound");
+}
+
+internal static class NotificationScheduledSource
+{
+    internal static void VerifyCommitted(RuntimeInstance instance, StateDatabase database,
+        ContractReader contracts, BlobReference reference, Guid expectedRunId)
+    {
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System);
+        using var transaction = DatabaseConnections.BeginRead(connection);
+        var source = new NotificationScheduledCodec(instance, contracts).Read(reference, connection, transaction, expectedRunId);
+        NotificationWorkFanout.Verify(instance, database, contracts, source, connection, transaction);
+        transaction.Commit();
     }
 }

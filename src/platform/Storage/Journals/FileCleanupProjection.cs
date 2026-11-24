@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+using System.Text.Json;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Platform.Storage.Sqlite;
 using NexusPipeline.Platform.Storage.Extensions;
@@ -8,26 +8,19 @@ namespace NexusPipeline.Platform.Storage.Journals;
 internal sealed class FileCleanupProjection(JournalStore store, RecoveryJournalRegistry registry, FileEffectOutbox outbox,
     ICleanupPersistenceObserver? observer, StateDatabase? database = null, ExtensionWorkExecution? work = null)
 {
-    internal void Synchronize(FrozenFileCleanup plan, bool verifiedRecovery)
+    internal void Synchronize(FrozenFileCleanup plan, bool verifiedRecovery, JournalDocument? justAppended = null)
     {
-        if (plan.ExtensionWork is not null) { SynchronizeWork(plan, verifiedRecovery); return; }
+        if (plan.ExtensionWork is not null) { SynchronizeWork(plan, verifiedRecovery, justAppended); return; }
         var registered = registry.ReadJournal(plan.JournalId);
-        foreach (var next in store.ReadAllRevisions(plan.JournalId).Where(item => item.Revision > registered.Revision))
+        foreach (var next in PendingRevisions(plan.JournalId, registered.Revision, justAppended))
         {
-            var receipts = next.Root.GetProperty("receipts").EnumerateArray().ToArray();
-            var noEffects = receipts.Any(item => item.GetProperty("stepId").GetString() == "verify-no-effect");
-            var digest = Convert.ToHexStringLower(SHA256.HashData(next.Export()));
+            var receipts = LatestReceipts(next);
+            var noEffects = receipts.ContainsKey("verify-no-effect");
             foreach (var effect in outbox.Read(plan.JournalId))
             {
-                var receipt = receipts.LastOrDefault(item => item.GetProperty("stepId").GetString() == effect.StepId);
-                var desired = noEffects ? FileEffectState.NotExecuted : receipt.ValueKind == System.Text.Json.JsonValueKind.Undefined ? FileEffectState.Pending :
-                    receipt.GetProperty("effect").GetString() switch
-                    {
-                        "started" => FileEffectState.Started, "completed" => FileEffectState.Completed, "notExecuted" => FileEffectState.NotExecuted,
-                        _ => throw new IOException("cleanup_projection_effect_unknown")
-                    };
+                var desired = DesiredEffect(receipts, effect.StepId, noEffects);
                 if (effect.State == desired || effect.State is FileEffectState.Completed or FileEffectState.NotExecuted) continue;
-                outbox.Record(plan.JournalId, effect.StepId, effect.State, desired, digest,
+                outbox.Record(plan.JournalId, effect.StepId, effect.State, desired, next.Sha256,
                     desired == FileEffectState.NotExecuted ? new(true, false, false, false) : null);
                 observer?.Reached(CleanupPersistencePoint.OutboxCommitted, plan.JournalId, next.Revision, next.Phase);
             }
@@ -51,15 +44,14 @@ internal sealed class FileCleanupProjection(JournalStore store, RecoveryJournalR
             observer?.Reached(CleanupPersistencePoint.SqlProjectionCommitted, plan.JournalId, next.Revision, next.Phase);
         }
     }
-    private void SynchronizeWork(FrozenFileCleanup plan, bool verifiedRecovery)
+    private void SynchronizeWork(FrozenFileCleanup plan, bool verifiedRecovery, JournalDocument? justAppended)
     {
         if (database is null || work is null) throw new IOException("extension_work_projection_authority_required");
         var registered = registry.ReadJournal(plan.JournalId);
-        foreach (var next in store.ReadAllRevisions(plan.JournalId).Where(item => item.Revision > registered.Revision))
+        foreach (var next in PendingRevisions(plan.JournalId, registered.Revision, justAppended))
         {
-            var receipts = next.Root.GetProperty("receipts").EnumerateArray().ToArray();
-            var noEffects = receipts.Any(item => item.GetProperty("stepId").GetString() == "verify-no-effect");
-            var digest = Convert.ToHexStringLower(SHA256.HashData(next.Export()));
+            var receipts = LatestReceipts(next);
+            var noEffects = receipts.ContainsKey("verify-no-effect");
             database.Write((connection, transaction) =>
             {
                 work.RequireInside(connection, transaction);
@@ -69,15 +61,9 @@ internal sealed class FileCleanupProjection(JournalStore store, RecoveryJournalR
                     throw new IOException("extension_work_projection_cursor_changed");
                 foreach (var effect in FileEffectRows.Read(connection, plan.JournalId, transaction))
                 {
-                    var receipt = receipts.LastOrDefault(item => item.GetProperty("stepId").GetString() == effect.StepId);
-                    var desired = noEffects ? FileEffectState.NotExecuted : receipt.ValueKind == System.Text.Json.JsonValueKind.Undefined ? FileEffectState.Pending :
-                        receipt.GetProperty("effect").GetString() switch
-                        {
-                            "started" => FileEffectState.Started, "completed" => FileEffectState.Completed, "notExecuted" => FileEffectState.NotExecuted,
-                            _ => throw new IOException("cleanup_projection_effect_unknown")
-                        };
+                    var desired = DesiredEffect(receipts, effect.StepId, noEffects);
                     if (effect.State == desired || effect.State is FileEffectState.Completed or FileEffectState.NotExecuted) continue;
-                    FileEffectOutbox.RecordInside(connection, transaction, plan.JournalId, effect.StepId, effect.State, desired, digest,
+                    FileEffectOutbox.RecordInside(connection, transaction, plan.JournalId, effect.StepId, effect.State, desired, next.Sha256,
                         desired == FileEffectState.NotExecuted ? new(true, false, false, false) : null);
                 }
                 registry.AdvanceInside(connection, transaction, current with { Revision = next.Revision, Phase = next.Phase },
@@ -99,5 +85,32 @@ internal sealed class FileCleanupProjection(JournalStore store, RecoveryJournalR
         }
     }
 
+    private IEnumerable<JournalDocument> PendingRevisions(Guid journalId, long revision, JournalDocument? justAppended)
+    {
+        if (justAppended is not null && justAppended.JournalId == journalId && justAppended.Revision == revision + 1 &&
+            store.HasProtectedHead(justAppended)) return [justAppended];
+        return store.ReadAllRevisions(journalId).Where(item => item.Revision > revision);
+    }
+
+    private static Dictionary<string, JsonElement> LatestReceipts(JournalDocument document)
+    {
+        var receipts = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        foreach (var receipt in document.Root.GetProperty("receipts").EnumerateArray())
+            receipts[receipt.GetProperty("stepId").GetString()!] = receipt;
+        return receipts;
+    }
+
+    private static FileEffectState DesiredEffect(IReadOnlyDictionary<string, JsonElement> receipts, string step, bool noEffects)
+    {
+        if (noEffects) return FileEffectState.NotExecuted;
+        if (!receipts.TryGetValue(step, out var receipt)) return FileEffectState.Pending;
+        return receipt.GetProperty("effect").GetString() switch
+        {
+            "started" => FileEffectState.Started,
+            "completed" => FileEffectState.Completed,
+            "notExecuted" => FileEffectState.NotExecuted,
+            _ => throw new IOException("cleanup_projection_effect_unknown")
+        };
+    }
 }
 

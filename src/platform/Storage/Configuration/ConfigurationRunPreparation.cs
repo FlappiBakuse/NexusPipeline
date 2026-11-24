@@ -32,7 +32,7 @@ public sealed class ConfigurationRunPreparation
     {
         _instanceLease.VerifyHeld(_instance);
         request = RunRequestPolicy.Freeze(request);
-        var step = RequireStep(execution, stepId, request);
+        var step = RequireStep(execution.ReadWire(), stepId, request);
         ConfigurationTargetPaths.Validate(_instance, request.Resources.Select(item => item.Target).ToArray());
         return Claims(step, request, request.Resources.SelectMany(item => PhysicalResourceAdmission.Read(item.Target.TargetPath)));
     }
@@ -50,7 +50,8 @@ public sealed class ConfigurationRunPreparation
     {
         _instanceLease.VerifyHeld(_instance);
         request = RunRequestPolicy.Freeze(request);
-        var step = RequireStep(execution, stepId, request, origin?.TaskRetry);
+        var plan = execution.ReadWire();
+        var step = RequireStep(plan, stepId, request, origin?.TaskRetry);
         if (step.ExclusiveProgram == true)
         {
             if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
@@ -78,9 +79,9 @@ public sealed class ConfigurationRunPreparation
                         historical[resource.Target.Address].State.Source;
                     RequireSource(source, step, resource.Target);
                     if (step.Provider is not null && step.Adapter is null)
-                        ProviderConfigurationPolicy.RequireFrozenSource(execution.ReadWire(), step, source, blobs, _contracts);
-                    if (step.Adapter is not null) ExecutionAdapterBinding.RequireFrozenConfiguration(execution.ReadWire(), step, source, blobs, _contracts);
-                    ExecutionTaskProjection.RequireBoundRules(execution.ReadWire(), step, source, resource.Tasks, blobs, _contracts);
+                        ProviderConfigurationPolicy.RequireFrozenSource(plan, step, source, blobs, _contracts);
+                    if (step.Adapter is not null) ExecutionAdapterBinding.RequireFrozenConfiguration(plan, step, source, blobs, _contracts);
+                    ExecutionTaskProjection.RequireBoundRules(plan, step, source, resource.Tasks, blobs, _contracts);
                     var captured = new ConfigurationTaskTransformation(blobs).Capture(resource.OperationId, source, resource.Tasks, cancellationToken);
                     ExecutionTaskProjection.RequireValues(step, captured);
                     var inputTree = origin?.TaskRetry is not null ? historical![resource.Target.Address].Publication.Revision.Tree :
@@ -93,10 +94,10 @@ public sealed class ConfigurationRunPreparation
                     var before = archive.Capture(targetPath, cancellationToken);
                     var candidate = new ArchivedFileTree(selected, [], selected.Entries.Where(entry => entry.Kind == FileObjectKind.File)
                         .Select(entry => new BlobReference($"blobs/content/{entry.Sha256}.bin", entry.SizeBytes, entry.Sha256!)).Distinct().ToArray());
-                    var plan = new ConfigurationPlanCodec(_instance, _contracts, blobs).Freeze(new(_instance.InstanceId, resource.OperationId,
+                    var childPlan = new ConfigurationPlanCodec(_instance, _contracts, blobs).Freeze(new(_instance.InstanceId, resource.OperationId,
                         resource.JournalId, JournalKind.ConfigExchange, targetPath, PhysicalObjectIdentity.Read(Path.GetDirectoryName(targetPath)!), before, candidate)
                         { RunState = state.Reference, EditPolicy = resource.Target.WritePolicy, PhysicalClaims = PhysicalResourceAdmission.Read(targetPath) });
-                    plans.Add(plan); held.Add(plan);
+                    plans.Add(childPlan); held.Add(childPlan);
                 }
                 var observed = PhysicalResourceAdmission.Merge(request.Resources.SelectMany(item => PhysicalResourceAdmission.Read(item.Target.TargetPath)));
                 if (!observed.SequenceEqual(files.Claims)) throw new IOException("configuration_file_admission_changed");
@@ -111,16 +112,15 @@ public sealed class ConfigurationRunPreparation
 
         void VerifySourceAuthority()
         {
-            if (origin is null) { VerifyDefinitions(execution.ReadWire(), step, request); return; }
+            if (origin is null) { VerifyDefinitions(plan, step, request); return; }
             using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation | DatabaseDomain.Configuration | DatabaseDomain.Content);
             using var transaction = DatabaseConnections.BeginRead(connection);
             origin.RequireCurrentInside(connection, transaction);
         }
     }
 
-    private ExecutionPlanStep RequireStep(FrozenExecutionPlan execution, string stepId, ConfigurationRunRequest request, ExecutionTaskRetry? taskRetry = null)
+    private ExecutionPlanStep RequireStep(ExecutionPlan plan, string stepId, ConfigurationRunRequest request, ExecutionTaskRetry? taskRetry = null)
     {
-        var plan = execution.ReadWire();
         var step = plan.Steps.SingleOrDefault(item => item.StepId == stepId) ?? throw new IOException("configuration_run_step_unknown");
         if (plan.InstanceId != _instance.InstanceId.ToString("D") || step.BindingId is null || step.UserId is null ||
             request.Resources.Any(item => item.Target.Address.BindingId.ToString("D") != step.BindingId) ||

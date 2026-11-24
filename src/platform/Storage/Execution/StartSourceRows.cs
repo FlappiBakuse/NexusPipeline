@@ -55,7 +55,7 @@ internal static class StartSourceRows
 
     internal static void VerifyInventory(RuntimeInstance instance, StateDatabase database, ContractReader contracts)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = DatabaseConnections.BeginRead(connection);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT o.operation_id FROM main.operations o LEFT JOIN main.execution_start_sources s ON s.operation_id=o.operation_id WHERE o.operation_kind='execution.start' AND s.operation_id IS NULL LIMIT 1;";

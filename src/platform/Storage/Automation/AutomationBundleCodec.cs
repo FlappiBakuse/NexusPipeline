@@ -61,7 +61,7 @@ public sealed class AutomationBundleCodec(ContractReader contracts)
             Roots = roots.Select(value => new AutomationPathsRoot { Id = value.Id.ToString("D"), Name = value.Name, Kind = Lower(value.Kind) }).ToArray(),
             Scripts = scripts.Select(Script).ToArray(),
             Users = templateScriptId.HasValue ? [] : catalog.Users.Select(value => new AutomationRelationsUser
-                { Id = value.Id.ToString("D"), Name = value.Name, Order = value.Order, Notes = value.Notes, Avatar = value.Avatar, BindingOverrides = BindingPolicyCodec.Write(value.BindingOverrides) }).ToArray(),
+                { Id = value.Id.ToString("D"), Name = value.Name, Order = value.Order, Notes = value.Notes, Avatar = value.Avatar, BindingOverrides = AutomationPolicyCodec.Write(value.BindingOverrides) }).ToArray(),
             Bindings = templateScriptId.HasValue ? [] : catalog.Bindings.Select(value => new AutomationRelationsBinding
             {
                 Id = value.Id.ToString("D"), UserId = value.UserId.ToString("D"), ScriptId = value.ScriptId.ToString("D"), Enabled = value.IsEnabled, Priority = value.Priority,
@@ -87,7 +87,8 @@ public sealed class AutomationBundleCodec(ContractReader contracts)
                 { Id = value.Id.ToString("D"), Path = value.PackagePath, SizeBytes = value.SizeBytes, Sha256 = value.Sha256 }).ToArray()
         };
         var bytes = BoundedJson.Serialize(wire);
-        using var verified = contracts.Read(bytes, "automation-bundle.schema.json");
+        using var document = StrictJson.Parse(bytes);
+        contracts.RequireSchema(document, bytes, "automation-bundle.schema.json");
         return bytes;
     }
 
@@ -124,7 +125,7 @@ public sealed class AutomationBundleCodec(ContractReader contracts)
     };
 
     internal static AutomationUser User(AutomationRelationsUser value) => new(Id(value.Id), 0, value.Name, checked((int)value.Order))
-        { Notes = value.Notes ?? "", Avatar = UserAvatar.Require(value.Avatar ?? ""), BindingOverrides = BindingPolicyCodec.Read(value.BindingOverrides) };
+        { Notes = value.Notes ?? "", Avatar = UserAvatar.Require(value.Avatar ?? ""), BindingOverrides = AutomationPolicyCodec.Read(value.BindingOverrides) };
     internal static AutomationBinding Binding(AutomationRelationsBinding value) => new(Id(value.Id), 0, Id(value.UserId), Id(value.ScriptId), value.Enabled, checked((int)value.Priority))
     {
         RunDays = checked((int)(value.RunDays ?? -1)), MaximumSuccessfulRunsPerDay = checked((int)(value.MaximumSuccessfulRunsPerDay ?? -1)),

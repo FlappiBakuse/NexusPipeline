@@ -26,32 +26,31 @@ internal sealed class TreeReadLease : IDisposable
     }
 
     internal static TreeReadLease Capture(string target, PhysicalObjectIdentity parentIdentity, FileTreeScanner scanner,
-        CancellationToken cancellationToken, string hashMeasurement, out CapturedTree captured)
+        CancellationToken cancellationToken, string hashMeasurement, out CapturedTree captured, ImmutableBlobStore? blobs = null)
     {
         var held = new List<IDisposable>();
         try
         {
             HoldParent(target, parentIdentity, held);
-            var sources = new CaptureSources(held, hashMeasurement);
+            var sources = new CaptureSources(held, hashMeasurement, blobs);
             var snapshot = scanner.CaptureProtected(target, sources, cancellationToken);
             var objects = Array.AsReadOnly(snapshot.Entries.Select(entry =>
                 new PhysicalTreeObject(entry.RelativePath, sources.Identities[entry.RelativePath])).ToArray());
             var lease = new TreeReadLease(target, snapshot, objects, application: false, held, requireSingleLinks: true);
             lease.RequireNamespace(cancellationToken);
-            captured = new(snapshot, objects, sources.Files);
+            captured = new(snapshot, objects);
             return lease;
         }
         catch { ReleaseHandles(held); throw; }
     }
 
-    internal sealed record CapturedTree(FileTreeSnapshot Snapshot, IReadOnlyList<PhysicalTreeObject> Objects,
-        IReadOnlyDictionary<string, FileStream> Files);
+    internal sealed record CapturedTree(FileTreeSnapshot Snapshot, IReadOnlyList<PhysicalTreeObject> Objects);
 
-    internal sealed class CaptureSources(List<IDisposable> held, string hashMeasurement)
+    internal sealed class CaptureSources(List<IDisposable> held, string hashMeasurement, ImmutableBlobStore? blobs)
     {
         internal string HashMeasurement { get; } = hashMeasurement;
+        internal ImmutableBlobStore? Blobs { get; } = blobs;
         internal Dictionary<string, PhysicalObjectIdentity> Identities { get; } = new(StringComparer.Ordinal);
-        internal Dictionary<string, FileStream> Files { get; } = new(StringComparer.Ordinal);
 
         internal void HoldDirectory(string path, string relative)
         {
@@ -65,7 +64,6 @@ internal sealed class TreeReadLease : IDisposable
             held.Add(source);
             Identities.Add(relative, PhysicalObjectIdentity.Read(source.SafeFileHandle));
             _ = PhysicalObjectIdentity.ReadSingleLinkLength(source.SafeFileHandle);
-            Files.Add(relative, source);
             return source;
         }
     }

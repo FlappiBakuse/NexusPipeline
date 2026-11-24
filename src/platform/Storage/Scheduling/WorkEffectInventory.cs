@@ -10,23 +10,27 @@ namespace NexusPipeline.Platform.Storage.Scheduling;
 [SupportedOSPlatform("windows")]
 internal static class WorkEffectInventory
 {
-    internal static void Verify(RuntimeInstance instance, StateDatabase database, ContractReader contracts, bool rotations = true)
+    internal static void Verify(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
+        bool rotations = true, List<ManualWorkState>? pendingManual = null)
     {
-        var origins = new Dictionary<Guid, WorkEffectOrigin>();
-        ManualWorkInventory.Visit(instance, database, contracts, state =>
-        {
-            var source = state.Source.Document;
-            origins.Add(source.OperationId, new(source.ExtensionId, source.ProviderId, source.Task.TaskId,
-                source.Invocation.RunId, source.Invocation.AttemptId, source.LocalDate, state.Begin is not null));
-        });
-        ScheduledProviderInventory.Visit(instance, database, contracts, state =>
-        {
-            var source = state.Source.Document;
-            origins.Add(source.OperationId, new(source.ExtensionId, source.ProviderId, source.ManualTask?.TaskId ?? source.Task.TaskId,
-                source.Invocation.RunId, source.Invocation.AttemptId, source.HostLocalDate, state.Begin is not null));
-        });
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
         using var transaction = DatabaseConnections.BeginRead(connection);
+        var origins = new Dictionary<Guid, WorkEffectOrigin>();
+        using (StartupProfile.Measure("inventory.ManualWorkInventory"))
+            ManualWorkInventory.Visit(instance, contracts, connection, transaction, state =>
+            {
+                var source = state.Source.Document;
+                origins.Add(source.OperationId, new(source.ExtensionId, source.ProviderId, source.Task.TaskId,
+                    source.Invocation.RunId, source.Invocation.AttemptId, source.LocalDate, state.Begin is not null));
+                if (state.Result is null) pendingManual?.Add(state);
+            });
+        using (StartupProfile.Measure("inventory.ScheduledProviderInventory"))
+            ScheduledProviderInventory.Visit(instance, contracts, connection, transaction, state =>
+            {
+                var source = state.Source.Document;
+                origins.Add(source.OperationId, new(source.ExtensionId, source.ProviderId, source.ManualTask?.TaskId ?? source.Task.TaskId,
+                    source.Invocation.RunId, source.Invocation.AttemptId, source.HostLocalDate, state.Begin is not null));
+            });
         using (var versions = connection.CreateCommand())
         {
             versions.Transaction = transaction; versions.CommandText = "SELECT extension_id,field,identity_version FROM main.work_identity_versions;";
@@ -75,7 +79,8 @@ internal static class WorkEffectInventory
                 if (facts.GetString(3) == "submitted" && claim.ParentId is null) throw WorkEffectRows.Invalid();
             }
         }
-        if (rotations) EffectRotationInventory.Verify(instance, database, contracts, origins);
+        if (rotations) EffectRotationInventory.Verify(instance, contracts, connection, transaction, origins);
+        transaction.Commit();
     }
 
     internal static WorkEffectOrigin Require(IReadOnlyDictionary<Guid, WorkEffectOrigin> origins, Guid operation, Guid run, Guid attempt, WorkEffectKey key)
@@ -125,11 +130,9 @@ internal static class EffectEpochInventory
 [SupportedOSPlatform("windows")]
 internal static class EffectRotationInventory
 {
-    internal static void Verify(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
-        IReadOnlyDictionary<Guid, WorkEffectOrigin> origins)
+    internal static void Verify(RuntimeInstance instance, ContractReader contracts, SqliteConnection connection,
+        SqliteTransaction transaction, IReadOnlyDictionary<Guid, WorkEffectOrigin> origins)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.System);
-        using var transaction = DatabaseConnections.BeginRead(connection);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT claim_id,operation_id,source_operation_id,run_id,attempt_id,before_secret_id,before_revision,after_secret_id,after_revision FROM main.work_effect_rotations;";
         using var rows = command.ExecuteReader(); var count = 0;

@@ -59,16 +59,17 @@ public sealed class RunAttemptAcceptance(RuntimeInstance instance, ContractReade
         var journal = new RegisteredJournal(Guid.Parse(plan.JournalId), operation.OperationId, JournalKind.RunAttempt, JournalPhase.Prepared, 1,
             prepared.Reference.RelativePath, prepared.Reference.Sha256, Array.AsReadOnly(plan.ResourceKeys.ToArray()));
         var total = new ExecutionPlanCodec(instance, contracts, new(instance, contracts)).Read(AttemptPlanCodec.Reference(plan.ExecutionPlan));
-        var capacity = ExecutionRecoveryCapacity.Measure(total.ReadWire());
-        if (request is not null && total.ReadWire().SettingsRevision != request.ExpectedSettingsRevision)
+        var wire = total.ReadWire();
+        var capacity = ExecutionRecoveryCapacity.Measure(wire);
+        if (request is not null && wire.SettingsRevision != request.ExpectedSettingsRevision)
             throw new ExecutionSelectionException("execution_settings_revision_conflict");
-        var configurations = request is null ? null : ExecutionConfigurationCursors.Read(instance, contracts, plan, total.ReadWire());
+        var configurations = request is null ? null : ExecutionConfigurationCursors.Read(instance, contracts, plan, wire);
         if (retry is not null)
         {
             if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
             retry.RequireConfigurations(configurations ?? throw new IOException("configuration_retry_source_unbound"));
         }
-        var claims = ExecutionPlanResources.Claims(total.ReadWire());
+        var claims = ExecutionPlanResources.Claims(wire);
         var writer = JournalWriterStore.CurrentWriter;
         var result = database.Write((connection, transaction) =>
         {
@@ -79,15 +80,15 @@ public sealed class RunAttemptAcceptance(RuntimeInstance instance, ContractReade
                 if (retry is not null)
                 {
                     if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
-                    retry.RequireInside(connection, transaction, operation, request, plan, total.ReadWire());
+                    retry.RequireInside(connection, transaction, operation, request, plan, wire);
                 }
                 else
                 {
-                    scheduledOrigin?.RequireCurrentInside(connection, transaction, operation, request, plan, total.ReadWire());
+                    scheduledOrigin?.RequireCurrentInside(connection, transaction, operation, request, plan, wire);
                     RequireSourceCursors(connection, transaction, request);
                     configurations!.RequireCurrent(connection, transaction);
-                    JudgementNetworkBinding.RequireCurrent(connection, transaction, total.ReadWire());
-                    ExecutionRetryAuthority.RequireFrozenSettings(connection, transaction, total.ReadWire());
+                    JudgementNetworkBinding.RequireCurrent(connection, transaction, wire);
+                    ExecutionRetryAuthority.RequireFrozenSettings(connection, transaction, wire);
                 }
             }
             var receipt = RecoveryJournalRegistry.AcceptPreparedInside(connection, transaction, operation, journal, [], acceptedAt, claims, writer, capacity);

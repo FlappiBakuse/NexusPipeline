@@ -1,5 +1,7 @@
 using System.Runtime.Versioning;
+using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Configuration;
+using NexusPipeline.Core.Notifications;
 using NexusPipeline.Core.Secrets;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Secrets;
@@ -10,69 +12,125 @@ namespace NexusPipeline.Platform.Storage.Notifications;
 [SupportedOSPlatform("windows")]
 internal sealed class NotificationPublicationInventory(RuntimeInstance instance, StateDatabase database, ContractReader contracts)
 {
+    internal const DatabaseDomain Domains = DatabaseDomain.Runtime | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System;
+
     internal void VerifyReadOnly()
     {
-        var references = new List<(Guid OperationId, BlobReference Reference, long Before, long After)>();
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System))
-        using (var command = connection.CreateCommand())
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: Domains);
+        using var transaction = DatabaseConnections.BeginRead(connection);
+        VerifyInside(connection, transaction);
+        transaction.Commit();
+    }
+
+    internal (NotificationCatalogCursor? Cursor, bool HasPending) VerifyInside(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        using var history = DatabaseConnections.Command(connection, transaction, """
+            SELECT operation_id,relative_path,size_bytes,sha256,before_revision,after_revision
+            FROM notifications.notification_publications ORDER BY after_revision,operation_id;
+            """);
+        using var rows = history.ExecuteReader();
+        var hasRows = rows.Read();
+        using var namespaceLease = hasRows ? StableDirectoryLease.Acquire(Path.Combine(instance.RuntimeRoot, "blobs", "plans")) : null;
+        using var protectedBlobs = BlobReadScope.Hold(instance);
+        var codec = new NotificationPublicationCodec(instance, contracts);
+        NotificationCatalogSnapshot? previous = null;
+        NotificationCatalogSnapshot? pendingBefore = null;
+        long revision = 0;
+        while (hasRows)
         {
-            command.CommandText = "SELECT operation_id,relative_path,size_bytes,sha256,before_revision,after_revision FROM notifications.notification_publications;";
-            using var rows = command.ExecuteReader();
-            while (rows.Read()) references.Add((Guid.ParseExact(rows.GetString(0), "D"),
-                new(rows.GetString(1), rows.GetInt64(2), rows.GetString(3)), rows.GetInt64(4), rows.GetInt64(5)));
-        }
-        var published = new List<NotificationPublicationSnapshot>();
-        NotificationPublicationSnapshot? pending = null;
-        foreach (var row in references)
-        {
-            var publication = new NotificationPublicationCodec(instance, contracts).Read(row.Reference);
-            if (publication.Document.OperationId != row.OperationId || publication.Before.Catalog.Revision != row.Before ||
-                publication.After.Catalog.Revision != row.After) throw new IOException("notification_publication_row_unbound");
-            var status = VerifyOne(publication);
-            if (status == "completed") published.Add(publication);
+            var publication = codec.Read(new(rows.GetString(1), rows.GetInt64(2), rows.GetString(3)),
+                previous is null ? null : (previous, protectedBlobs));
+            if (publication.Document.OperationId != Guid.ParseExact(rows.GetString(0), "D") ||
+                publication.Before.Catalog.Revision != rows.GetInt64(4) || publication.After.Catalog.Revision != rows.GetInt64(5))
+                throw new IOException("notification_publication_row_unbound");
+            var status = VerifyOne(publication, connection, transaction);
+            if (status == "completed")
+            {
+                if (publication.Before.Catalog.Revision != revision || publication.After.Catalog.Revision != revision + 1 ||
+                    previous is not null && publication.Before.Reference != previous.Reference || previous is null &&
+                    (publication.Before.Catalog.Tasks.Length != 0 || publication.Before.Catalog.MaximumTasks != 10))
+                    throw new IOException("notification_catalog_history_unbound");
+                previous = publication.After;
+                revision++;
+            }
             else
             {
-                if (pending is not null) throw new IOException("notification_multiple_pending_publications");
-                pending = publication;
+                if (pendingBefore is not null) throw new IOException("notification_multiple_pending_publications");
+                pendingBefore = publication.Before;
             }
+            hasRows = rows.Read();
         }
-        var ordered = published.OrderBy(item => item.After.Catalog.Revision).ToArray();
-        NotificationPublicationSnapshot? previous = null;
-        for (var index = 0; index < ordered.Length; index++)
-        {
-            var next = ordered[index];
-            if (next.Before.Catalog.Revision != index || next.After.Catalog.Revision != index + 1 ||
-                previous is not null && next.Before.Reference != previous.After.Reference ||
-                previous is null && (next.Before.Catalog.Tasks.Length != 0 || next.Before.Catalog.MaximumTasks != 10))
-                throw new IOException("notification_catalog_history_unbound");
-            previous = next;
-        }
-        using var currentConnection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System);
-        var cursor = NotificationCatalogRows.ReadCurrent(currentConnection, null);
+        rows.Close();
+        var cursor = NotificationCatalogRows.ReadCurrent(connection, transaction);
         if ((previous is null) != (cursor is null) || previous is not null &&
-            (cursor!.Reference != previous.After.Reference || cursor.Revision != previous.After.Catalog.Revision) ||
-            pending is not null && (pending.Before.Catalog.Revision != ordered.Length ||
-                previous is not null && pending.Before.Reference != previous.After.Reference))
+            (cursor!.Reference != previous.Reference || cursor.Revision != previous.Catalog.Revision) ||
+            pendingBefore is not null && (pendingBefore.Catalog.Revision != revision ||
+                previous is not null && pendingBefore.Reference != previous.Reference))
             throw new IOException("notification_catalog_current_unbound");
-        NotificationCatalogRows.RequireTaskEntries(currentConnection, null,
-            previous?.After.Document.Tasks ?? System.Collections.Immutable.ImmutableArray<NotificationCatalogEntry>.Empty);
-        using var unknown = currentConnection.CreateCommand();
-        unknown.CommandText = "SELECT EXISTS(SELECT 1 FROM main.operations o WHERE o.operation_kind LIKE 'notification.%' AND o.operation_kind NOT IN ('notification.delivery','notification.registration','notification.saved-test') AND NOT EXISTS " +
-            "(SELECT 1 FROM notifications.notification_publications p WHERE p.operation_id=o.operation_id)) OR " +
-            "EXISTS(SELECT 1 FROM main.operations o WHERE o.subject_id LIKE 'notificationTask/%' AND NOT EXISTS " +
-            "(SELECT 1 FROM notifications.notification_publication_fields f WHERE f.child_operation_id=o.operation_id)) OR " +
-            "EXISTS(SELECT 1 FROM notifications.notification_task_ids t JOIN notifications.notification_publications p ON p.operation_id=t.first_operation_id " +
-            "LEFT JOIN notifications.notification_publication_outcomes r ON r.operation_id=p.operation_id WHERE r.outcome IS NULL OR r.outcome!='published');";
+        NotificationCatalogRows.RequireTaskEntries(connection, transaction,
+            previous?.Document.Tasks ?? System.Collections.Immutable.ImmutableArray<NotificationCatalogEntry>.Empty);
+        using var unknown = DatabaseConnections.Command(connection, transaction, """
+            SELECT EXISTS(SELECT 1 FROM main.operations o WHERE o.operation_kind LIKE 'notification.%'
+                AND o.operation_kind NOT IN ('notification.delivery','notification.registration','notification.saved-test',$0,$1)
+                AND NOT EXISTS (SELECT 1 FROM notifications.notification_publications p WHERE p.operation_id=o.operation_id))
+            OR EXISTS(SELECT 1 FROM main.operations o WHERE o.operation_kind=$0 AND NOT EXISTS (
+                SELECT 1 FROM notifications.notification_manual_sources s
+                JOIN main.manual_work_runs m ON m.operation_id=s.invocation_operation_id
+                WHERE s.operation_id=o.operation_id AND o.subject_id=$2 AND o.request_digest=s.sha256 AND o.status='completed'))
+            OR EXISTS(SELECT 1 FROM main.operations o WHERE o.operation_kind=$1 AND NOT EXISTS (
+                SELECT 1 FROM notifications.notification_scheduled_sources s
+                JOIN main.scheduled_provider_occurrences c ON c.occurrence_id=s.occurrence_id
+                WHERE s.operation_id=o.operation_id AND o.subject_id=$3 AND o.request_digest=s.sha256 AND o.status='completed'))
+            OR EXISTS(SELECT 1 FROM notifications.notification_manual_sources s
+                LEFT JOIN main.operations o ON o.operation_id=s.operation_id WHERE o.operation_kind IS NOT $0)
+            OR EXISTS(SELECT 1 FROM notifications.notification_scheduled_sources s
+                LEFT JOIN main.operations o ON o.operation_id=s.operation_id WHERE o.operation_kind IS NOT $1)
+            OR EXISTS(SELECT 1 FROM main.operations o WHERE o.subject_id LIKE 'notificationTask/%' AND NOT EXISTS (
+                SELECT 1 FROM notifications.notification_publication_fields f WHERE f.child_operation_id=o.operation_id))
+            OR EXISTS(SELECT 1 FROM notifications.notification_task_ids t
+                JOIN notifications.notification_publications p ON p.operation_id=t.first_operation_id
+                LEFT JOIN notifications.notification_publication_outcomes r ON r.operation_id=p.operation_id
+                WHERE r.outcome IS NULL OR r.outcome!='published');
+            """, NotificationManualCodec.Kind, NotificationScheduledCodec.Kind, NotificationManualCodec.Subject, NotificationScheduledCodec.Subject);
         if ((long)unknown.ExecuteScalar()! != 0) throw new IOException("notification_publication_inventory_unknown");
+        return (cursor, pendingBefore is not null);
+    }
+
+    internal NotificationCatalogCursor VerifyAppend(SqliteConnection connection, SqliteTransaction transaction,
+        BlobReference reference, NotificationCatalogCursor? before)
+    {
+        var publication = new NotificationPublicationCodec(instance, contracts).Read(reference);
+        if (publication.Document.Request.Change is not (NotificationCatalogChange.Limit or NotificationCatalogChange.Reorder) ||
+            (before is null ? publication.Before.Catalog.Revision != 0 || publication.Before.Catalog.Tasks.Length != 0 ||
+                publication.Before.Catalog.MaximumTasks != 10 : before.Revision != publication.Before.Catalog.Revision ||
+                before.Reference != publication.Before.Reference))
+            throw new IOException("notification_catalog_history_unbound");
+        var after = new NotificationCatalogCursor(publication.After.Catalog.Revision, publication.After.Reference);
+        using var row = DatabaseConnections.Command(connection, transaction, """
+            SELECT 1 FROM notifications.notification_publications
+            WHERE operation_id=$0 AND before_revision=$1 AND after_revision=$2;
+            """, publication.Document.OperationId.ToString("D"), publication.Before.Catalog.Revision, after.Revision);
+        if (row.ExecuteScalar() is null || VerifyOne(publication, connection, transaction) != "completed" ||
+            NotificationCatalogRows.ReadCurrent(connection, transaction) != after)
+            throw new IOException("notification_catalog_current_unbound");
+        NotificationCatalogRows.RequireTaskEntries(connection, transaction, publication.After.Document.Tasks);
+        return after;
     }
 
     internal string VerifyOne(NotificationPublicationSnapshot publication)
     {
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: Domains);
+        using var transaction = DatabaseConnections.BeginRead(connection);
+        var status = VerifyOne(publication, connection, transaction);
+        transaction.Commit();
+        return status;
+    }
+
+    private string VerifyOne(NotificationPublicationSnapshot publication, SqliteConnection connection, SqliteTransaction transaction)
+    {
         var document = publication.Document;
         var childPlans = document.Secrets.Where(field => field.Disposition == SecretDisposition.Set).ToDictionary(field => field.Field,
             field => new PreparationPlanCodec(instance, contracts, database).Read(field.Preparation!).ReadWire());
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications | DatabaseDomain.Extensions | DatabaseDomain.System);
-        using var transaction = DatabaseConnections.BeginRead(connection);
         var accepted = NotificationCatalogRows.Lookup(connection, transaction, NotificationPublicationCodec.Identity(document))
             ?? throw new IOException("notification_publication_missing");
         if (accepted.Reference != publication.Reference) throw new IOException("notification_publication_reference_changed");
@@ -123,7 +181,6 @@ internal sealed class NotificationPublicationInventory(RuntimeInstance instance,
                 if (result.ExecuteScalar() is not null) throw new IOException("notification_partial_field_publication");
             }
         }
-        transaction.Commit();
         return accepted.Status;
     }
 }

@@ -104,7 +104,7 @@ internal sealed class ExecutionNotificationSource
     internal static ImmutableArray<NotificationRoute> ReadRoutes(ExecutionPlan total, AutomationBundle bundle)
     {
         var users = bundle.Users.ToDictionary(item => item.Id, StringComparer.Ordinal);
-        var bindings = bundle.Bindings.Select(item => NexusPipeline.Platform.Storage.Automation.BindingPolicyCodec.Resolve(users[item.UserId], item))
+        var bindings = bundle.Bindings.Select(item => NexusPipeline.Platform.Storage.Automation.AutomationPolicyCodec.Resolve(users[item.UserId], item))
             .ToDictionary(item => item.Id, StringComparer.Ordinal);
         var selected = total.Selection.DistinctBy(item => item.BindingId, StringComparer.Ordinal).Select(item =>
         {

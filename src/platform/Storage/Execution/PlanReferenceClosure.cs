@@ -10,24 +10,11 @@ namespace NexusPipeline.Platform.Storage.Execution;
 
 internal sealed class PlanReferenceClosure(RuntimeInstance instance, ContractReader contracts, ImmutableBlobStore blobs, StateDatabase database)
 {
-    internal IReadOnlyList<BlobReference> Read(RegisteredJournal registered, BlobReference reference,
-        bool? retiredContent = null, ReferenceReadBudget? budget = null)
+    internal IReadOnlyList<BlobReference> Read(RegisteredJournal registered, BlobReference reference, ReferenceReadBudget? budget = null)
     {
-        var cacheable = registered.Phase == JournalPhase.Committed && !(retiredContent ?? HasRetiredContent(registered.JournalId));
-        if (cacheable && database.ReferenceFacts.Find(registered) is { } saved) return saved;
+        // A committed registry row identifies the plan. Its retained evidence files still need to be verified for cleanup.
         using var measured = budget?.Enter();
-        var result = ReadCurrent(registered, reference).Where(item => item.RelativePath.StartsWith("blobs/content/", StringComparison.Ordinal)).ToArray();
-        if (cacheable) database.ReferenceFacts.Store(registered, result);
-        return result;
-    }
-
-    private bool HasRetiredContent(Guid journal)
-    {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
-        using var command = DatabaseConnections.Command(connection, null,
-            "SELECT EXISTS(SELECT 1 FROM records.record_content_retirements r JOIN records.attempt_receipts a USING(run_id) WHERE a.journal_id=$0);",
-            journal.ToString("D"));
-        return (long)command.ExecuteScalar()! != 0;
+        return ReadCurrent(registered, reference).Where(item => item.RelativePath.StartsWith("blobs/content/", StringComparison.Ordinal)).ToArray();
     }
 
     private IReadOnlyList<BlobReference> ReadCurrent(RegisteredJournal registered, BlobReference reference)

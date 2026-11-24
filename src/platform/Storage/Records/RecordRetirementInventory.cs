@@ -7,25 +7,29 @@ internal static class RecordRetirementInventory
 {
     internal static void VerifyReadOnly(RuntimeInstance instance, StateDatabase database, ContractReader contracts)
     {
-        var after = "";
+        var afterRun = "";
+        var afterOperation = "";
+        var reader = new RetirementFamilyReader(instance, database, contracts);
+        RecordRetirementFamily? family = null;
         while (true)
         {
             var page = new List<(Guid RunId, BlobReference Reference, Guid OperationId)>();
             using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
             using (var command = RecordRetirementRows.Command(connection, null,
                 "SELECT operation_id,run_id,relative_path,size_bytes,sha256 FROM records.record_content_retirements " +
-                "WHERE operation_id>$0 ORDER BY operation_id LIMIT 64;", after))
+                "WHERE (run_id,operation_id)>($0,$1) ORDER BY run_id,operation_id LIMIT 64;", afterRun, afterOperation))
             using (var rows = command.ExecuteReader())
                 while (rows.Read()) page.Add((Guid.ParseExact(rows.GetString(1), "D"),
                     new(rows.GetString(2), rows.GetInt64(3), rows.GetString(4)), Guid.ParseExact(rows.GetString(0), "D")));
             if (page.Count == 0) break;
             foreach (var item in page)
             {
-                var family = new RetirementFamilyReader(instance, database, contracts).CaptureMetadata(item.RunId);
+                if (family is null || family.RunId != item.RunId) family = reader.CaptureMetadata(item.RunId);
                 var document = VerifiedRecordRetirement.ReadProof(instance, database, contracts, family, item.Reference);
                 if (document.OperationId != item.OperationId) throw RecordRetirementCodec.Invalid();
             }
-            after = page[^1].OperationId.ToString("D");
+            afterRun = page[^1].RunId.ToString("D");
+            afterOperation = page[^1].OperationId.ToString("D");
         }
         using var check = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
         using var query = RecordRetirementRows.Command(check, null,

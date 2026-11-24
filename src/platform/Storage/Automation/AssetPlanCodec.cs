@@ -64,7 +64,8 @@ public sealed class AssetPlanCodec(RuntimeInstance instance, ContractReader cont
             OperationId = preview.OperationId.ToString("D"), JournalId = journalId.ToString("D"), OperationKind = "assetPrepare",
             Input = Wire(frozenInput), ExpectedCatalogRevision = preview.ExpectedRevision, PreviewDigest = preview.PreviewDigest,
             WorkspaceParentIdentity = Wire(PhysicalObjectIdentity.Read(workspaceParent)),
-            Roots = roots, Assets = assets, ResourceKeys = Resources(assets)
+            Roots = roots, DefinitionRevisions = AssetDefinitionRevisions.Capture(preview.Bundle.Definitions),
+            Assets = assets, ResourceKeys = Resources(assets)
         };
     }
 
@@ -99,7 +100,7 @@ public sealed class AssetPlanCodec(RuntimeInstance instance, ContractReader cont
         }
         var input = ReadBytes(Reference(plan.Input), held);
         var bundle = new AutomationBundleCodec(contracts).Decode(input, selectedRoots, plan.ExpectedCatalogRevision);
-        bundle = AutomationTemplateIdentity.Remap(bundle, Id(plan.OperationId));
+        bundle = AssetDefinitionRevisions.Restore(AutomationTemplateIdentity.Remap(bundle, Id(plan.OperationId)), plan.DefinitionRevisions);
         if (plan.Roots.Count != bundle.Definitions.Roots.Length || plan.Roots.Any(root =>
                 !bundle.Definitions.Roots.Any(value => value.Id == Id(root.TargetRootId) && value.Path == root.Path)))
             throw new IOException("asset_preparation_root_identity_unbound");

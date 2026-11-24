@@ -17,7 +17,8 @@ internal static class TaskAdapterProtocol
         }) { TitleLocales = (task.TitleLocales ?? new Dictionary<string, JsonElement>()).ToImmutableDictionary(
             pair => pair.Key, pair => pair.Value.GetString()!, StringComparer.Ordinal),
             Projection = task.Projection is { } projection ? new AdapterTaskProjection(projection.ResourceId, projection.RelativePath,
-            ConfigurationSelectorProtocol.Read(projection.Selector, false)) : null,
+            ConfigurationSelectorProtocol.Read(projection.Selector, false))
+            { RepetitionSelector = projection.RepetitionSelector is { } count ? ConfigurationSelectorProtocol.Read(count, false) : null } : null,
             RetryPrerequisites = (task.RetryPrerequisites ?? []).ToImmutableArray(), ExecutionTaskId = task.ExecutionTaskId,
             RepetitionLimit = task.RepetitionLimit is { } limit ? checked((int)limit) : null,
             NativeResumeScope = (task.NativeResumeScope ?? []).ToImmutableArray() };
@@ -29,7 +30,8 @@ internal static class TaskAdapterProtocol
         Dependencies = task.Dependencies, RetrySafety = task.IsRetrySafe ? "safe" : "unknown",
         WorkflowRole = task.WorkflowRole.ToString().ToLowerInvariant(),
         Projection = task.Projection is { } projection ? new() { ResourceId = projection.ResourceId, RelativePath = projection.RelativePath,
-            Selector = ConfigurationSelectorProtocol.Write(projection.Selector, false) } : null,
+            Selector = ConfigurationSelectorProtocol.Write(projection.Selector, false),
+            RepetitionSelector = projection.RepetitionSelector is { } count ? ConfigurationSelectorProtocol.Write(count, false) : null } : null,
         RetryPrerequisites = task.RetryPrerequisites.IsEmpty ? null : task.RetryPrerequisites,
         NativeResumeScope = task.NativeResumeScope.IsEmpty ? null : task.NativeResumeScope, RepetitionLimit = task.RepetitionLimit
     };

@@ -13,7 +13,17 @@ public sealed class AutomationControlCodec(ContractReader contracts)
     public AutomationControlChange Read(ReadOnlyMemory<byte> bytes)
     {
         using var json = contracts.Read(bytes, "control-automation-change.schema.json");
-        var root = json.RootElement;
+        return Decode(json.RootElement);
+    }
+
+    internal AutomationControlChange ReadParsed(JsonElement root)
+    {
+        contracts.RequireParsedSchema(root, "control-automation-change.schema.json");
+        return Decode(root);
+    }
+
+    private static AutomationControlChange Decode(JsonElement root)
+    {
         return new(Id(root.GetProperty("operationId")), new(root.GetProperty("expectedCatalogRevision").GetInt64(),
             Read(root, "roots", item => new AutomationRoot(Id(item.GetProperty("id")), item.GetProperty("expectedRevision").GetInt64(),
                 item.GetProperty("name").GetString()!, Enum.Parse<AutomationRootKind>(item.GetProperty("kind").GetString()!, true),

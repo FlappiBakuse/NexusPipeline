@@ -21,19 +21,15 @@ internal static class StartupIntentRows
     internal static void Register(SqliteConnection connection, SqliteTransaction transaction, StartupIntentDraft draft,
         Guid instanceId, Guid operationId, HostSettingsSnapshot before, HostSettingsSnapshot next)
     {
-        var document = draft.Read();
         var current = ReadCurrent(connection, transaction);
-        if (document.InstanceId != instanceId || document.OperationId != operationId || document.ExpectedRevision != before.Revision ||
-            document.Enable != next.Values.AutoStart || document.BeforeRegistrationDigest != (current is null ? null : StartupIntentCodec.Hash(current)))
-            throw new IOException("startup_intent_settings_unbound");
+        draft.RequireSettings(instanceId, operationId, before.Revision, next.Values.AutoStart, current);
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = "INSERT INTO system.startup_registration_intents VALUES($id,$revision,$document,$digest,1);";
-        var bytes = draft.Export();
         command.Parameters.AddWithValue("$id", operationId.ToString("D"));
         command.Parameters.AddWithValue("$revision", next.Revision);
-        command.Parameters.AddWithValue("$document", bytes);
-        command.Parameters.AddWithValue("$digest", StartupIntentCodec.Hash(bytes));
+        command.Parameters.AddWithValue("$document", draft.Export());
+        command.Parameters.AddWithValue("$digest", draft.Digest);
         command.ExecuteNonQuery();
     }
 

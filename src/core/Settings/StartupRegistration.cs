@@ -45,3 +45,6 @@ public static class StartupRegistrationPolicy
             throw new HostSettingsException("startup_registration_definition_invalid");
     }
 }
+
+public enum StartupEffectState { None, Prepared, Entered, Completed, Quarantined }
+public sealed record StartupEffectStatus(Guid OperationId, long SettingsRevision, bool Enable, StartupEffectState State);

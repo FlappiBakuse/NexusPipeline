@@ -52,7 +52,7 @@ public sealed class OwnedCleanupExecutor(RuntimeInstance instance, ContractReade
         var scopedAdmission = OperatingSystem.IsWindows() && roots is not null && held is null &&
             initialObservation is { IsComplete: true, State: WriterState.Stopped } &&
             (work is not null || plan.Items.All(item => item.Blob.RelativePath == $"blobs/content/{item.Blob.Sha256}.bin"));
-        if (!scopedAdmission) index.BlockUnknown("cleanup_execution_active");
+        if (!scopedAdmission) instanceLease.PublishExecution(() => index.BlockUnknown("cleanup_execution_active"));
         try
         {
             var blobs = new ImmutableBlobStore(instance, contracts);
@@ -60,25 +60,14 @@ public sealed class OwnedCleanupExecutor(RuntimeInstance instance, ContractReade
             using var candidates = held is null && work is null ? cleanup.ProtectCandidates(plan.Items) : null;
             if (scopedAdmission)
             {
-                try
+                PublishReconciled(() =>
                 {
                     // Extension work already holds its frozen workspace and installation claims.
-                    var published = (work is not null || cleanup.HasProtectedCandidates(plan.Items)) && instanceLease.PublishExecution(() =>
-                    {
-                        if (!index.Current.IsReady || Observe() is not { IsComplete: true, State: WriterState.Stopped }) return false;
-                        var admissionEvidence = new NexusPipeline.Platform.Storage.Execution.AdmissionPublicationEvidence(
-                            instance, database, contracts, roots!, journalId);
-                        new RecoveryCoordinator(registry, admissionEvidence, index).VerifyAndPublish();
-                        NexusPipeline.Platform.Storage.Configuration.ConfigurationRecoveryHolds.Publish(database, index, roots!);
-                        return true;
-                    });
-                    if (!published && work is null) index.BlockUnknown("cleanup_execution_active");
-                }
-                catch
-                {
-                    index.BlockUnknown("cleanup_execution_reconciliation_required");
-                    throw;
-                }
+                    if ((work is not null || cleanup.HasProtectedCandidates(plan.Items)) && index.Current.IsReady &&
+                        Observe() is { IsComplete: true, State: WriterState.Stopped })
+                        VerifyAdmission();
+                    else if (work is null) index.BlockUnknown("cleanup_execution_active");
+                });
             }
             var session = new CleanupRecoverySession(instance, journalId, contracts, database, Observe, observer, roots, work, held, cleanup, instanceLease);
             using var evidence = registered.Phase == JournalPhase.Prepared ? work?.ProtectEvidence(plan) : null;
@@ -88,26 +77,34 @@ public sealed class OwnedCleanupExecutor(RuntimeInstance instance, ContractReade
         }
         finally
         {
-            try
-            {
-                instanceLease.PublishExecution(() =>
-                {
-                    IRecoveryEvidence evidence = roots is null ? new JournalRecoveryEvidence(instance, new(instance, contracts), database) :
-                        OperatingSystem.IsWindows() ? new NexusPipeline.Platform.Storage.Execution.AdmissionPublicationEvidence(
-                            instance, database, contracts, roots, journalId) :
-                        throw new PlatformNotSupportedException();
-                    new RecoveryCoordinator(registry, evidence, index).VerifyAndPublish();
-                    if (roots is not null)
-                        NexusPipeline.Platform.Storage.Configuration.ConfigurationRecoveryHolds.Publish(database, index, roots);
-                });
-            }
+            try { PublishReconciled(VerifyAdmission); }
             catch (Exception error) when (error is IOException or InvalidOperationException or Microsoft.Data.Sqlite.SqliteException)
             {
                 var reason = error.Message.Length is > 0 and <= 160 && error.Message.All(value =>
                     value is >= 'a' and <= 'z' or >= '0' and <= '9' or '_') ? error.Message : error.GetType().Name;
                 Console.Error.WriteLine($"cleanup_execution_reconciliation_required {reason}");
-                index.BlockUnknown("cleanup_execution_reconciliation_required");
             }
+        }
+
+        void PublishReconciled(Action action) => instanceLease.PublishExecution(() =>
+        {
+            try { action(); }
+            catch
+            {
+                index.BlockUnknown("cleanup_execution_reconciliation_required");
+                throw;
+            }
+        });
+
+        void VerifyAdmission()
+        {
+            IRecoveryEvidence evidence = roots is null ? new JournalRecoveryEvidence(instance, new(instance, contracts), database) :
+                OperatingSystem.IsWindows() ? new NexusPipeline.Platform.Storage.Execution.AdmissionPublicationEvidence(
+                    instance, database, contracts, roots, journalId) :
+                throw new PlatformNotSupportedException();
+            new RecoveryCoordinator(registry, evidence, index).VerifyAndPublish();
+            if (roots is not null)
+                NexusPipeline.Platform.Storage.Configuration.ConfigurationRecoveryHolds.Publish(database, index, roots);
         }
     }
 }

@@ -12,8 +12,10 @@ namespace NexusPipeline.Platform.Storage.Execution;
 internal static class ExecutionAdapterBinding
 {
     internal static IReadOnlyList<BlobReference> Require(ExecutionPlan plan, AutomationBundle bundle,
-        ImmutableBlobStore blobs, ContractReader contracts, IReadOnlyDictionary<string, byte[]>? previewInputs = null, bool verifyCompiledContents = true)
+        ImmutableBlobStore blobs, ContractReader contracts, List<IDisposable> manifestHolds,
+        IReadOnlyDictionary<string, byte[]>? previewInputs, bool verifyCompiledContents)
     {
+        Dictionary<(BlobReference Reference, string ExtensionId), ExtensionManifest>? manifests = null;
         var held = new List<BlobReference>();
         foreach (var step in plan.Steps)
         {
@@ -27,9 +29,17 @@ internal static class ExecutionAdapterBinding
                 adapter.Resources.Count != script.AdapterResources.Count || adapter.Resources.Select(item => item.ResourceId).Distinct(StringComparer.Ordinal).Count() != adapter.Resources.Count)
                 throw Invalid();
             var locked = plan.ExtensionLocks.SingleOrDefault(item => item.ExtensionId == step.ExtensionId) ?? throw Invalid();
-            var manifestBytes = Read(adapter.Manifest, blobs, previewInputs);
-            _ = Read(adapter.Script, blobs, previewInputs);
-            var manifest = new ExtensionManifestAdmission(contracts).ReadCurrent(manifestBytes, step.ExtensionId!);
+            var manifestReference = Reference(adapter.Manifest);
+            var verified = manifests ??= [];
+            var key = (manifestReference, step.ExtensionId!);
+            var manifestBytes = verified.TryGetValue(key, out var manifest) ? null : Read(manifestReference, blobs, previewInputs, manifestHolds);
+            var scriptReference = Reference(adapter.Script);
+            _ = Read(scriptReference, blobs, previewInputs);
+            if (manifest is null)
+            {
+                manifest = new ExtensionManifestAdmission(contracts).ReadCurrent(manifestBytes!, step.ExtensionId!);
+                verified.Add(key, manifest);
+            }
             if (manifest.Kind is not ("data-specialized" or "managed-code") || !manifest.Capabilities.Contains("task.adapt", StringComparer.Ordinal) ||
                 locked.ManifestSha256 != adapter.Manifest.Sha256 || locked.PackageVersion != manifest.PackageVersion ||
                 locked.SdkVersion != manifest.SdkVersion || locked.ContractFingerprint != manifest.ContractFingerprint ||
@@ -63,7 +73,7 @@ internal static class ExecutionAdapterBinding
             }
             var footprint = new BlobReference(adapter.InstalledFootprint.RelativePath, adapter.InstalledFootprint.SizeBytes, adapter.InstalledFootprint.Sha256);
             StepEvidenceCodec.Plan(footprint); held.Add(footprint);
-            held.Add(Reference(adapter.Manifest)); held.Add(Reference(adapter.Script));
+            held.Add(scriptReference);
             if (ExecutionCompilationBinding.Require(plan, step, script.RootId, manifest, blobs, contracts, verifyCompiledContents) is { } compiled)
                 held.AddRange(compiled.Closure);
         }
@@ -102,13 +112,18 @@ internal static class ExecutionAdapterBinding
     internal static IEnumerable<(string Path, long Size, string Sha256, FileTreePhysicalIdentity Identity, FileTreePhysicalIdentity Parent)> SourceFiles(ExecutionPlanStep step)
         => (step.Adapter?.SourceFiles ?? []).Select(file => (file.Path, file.Content.SizeBytes, file.Content.Sha256, file.Identity, file.ParentIdentity));
 
-    private static byte[] Read(ExecutionPlanContentReference value, ImmutableBlobStore blobs, IReadOnlyDictionary<string, byte[]>? preview)
+    private static byte[] Read(BlobReference reference, ImmutableBlobStore blobs, IReadOnlyDictionary<string, byte[]>? preview,
+        List<IDisposable>? held = null)
     {
-        var reference = Reference(value); byte[] bytes;
+        byte[] bytes;
         if (preview is not null && preview.TryGetValue(reference.Sha256, out var captured)) bytes = captured.ToArray();
         else
         {
-            using var input = blobs.OpenVerified(reference); bytes = new byte[checked((int)input.Length)]; input.ReadExactly(bytes);
+            var input = blobs.OpenVerified(reference);
+            using var release = held is null ? input : null;
+            held?.Add(input);
+            bytes = new byte[checked((int)input.Length)];
+            input.ReadExactly(bytes);
         }
         if (bytes.LongLength != reference.SizeBytes || Convert.ToHexStringLower(SHA256.HashData(bytes)) != reference.Sha256) throw Invalid();
         return bytes;

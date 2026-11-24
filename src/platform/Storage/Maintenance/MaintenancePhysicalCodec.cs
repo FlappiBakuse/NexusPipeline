@@ -1,12 +1,23 @@
+using NexusPipeline.Core.Configuration;
+using NexusPipeline.Platform.Serialization;
+using NexusPipeline.Platform.Storage.Journals;
 using System.Collections.Immutable;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
-using NexusPipeline.Core.Configuration;
-using NexusPipeline.Platform.Serialization;
-using NexusPipeline.Platform.Storage.Journals;
 
 namespace NexusPipeline.Platform.Storage.Maintenance;
+
+internal sealed record MaintenancePhysicalRecord(string Format, int Version, Guid InstanceId, Guid OperationId,
+    Guid JournalId, string PlanDigest, BlobReference Source, long BeforeRevision, string Stage,
+    PhysicalObjectIdentity? WorkspaceIdentity,
+    ImmutableArray<PhysicalTreeObject> CandidateObjects);
+
+internal sealed record MaintenancePhysicalIntent(string Format, int Version, long BeforeRevision,
+    string Stage, BlobReference Artifact);
+
+internal sealed record MaintenancePhysicalEntry(MaintenancePhysicalIntent Intent,
+    MaintenancePhysicalRecord Record);
 
 internal sealed class MaintenancePhysicalCodec(RuntimeInstance instance, ContractReader contracts)
 {

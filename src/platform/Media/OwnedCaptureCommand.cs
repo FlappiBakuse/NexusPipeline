@@ -1,6 +1,7 @@
 using System.Runtime.Versioning;
 using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Processes;
+using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Execution;
 
 namespace NexusPipeline.Platform.Media;
@@ -15,63 +16,57 @@ internal static class OwnedCaptureCommand
         string[] arguments, Guid instanceId, Guid attemptId, int stdoutMaximum, long totalMaximum,
         int stopTimeoutMilliseconds, Action<OwnedWorkerJob, OwnedWorkerIdentity> admit, CancellationToken cancellation)
     {
-        using var job = new OwnedWorkerJob();
-        using var output = new OwnedProcessOutput();
-        job.ObserveProcessIdentities(_ => { });
+        var job = new OwnedWorkerJob();
+        OwnedProcessOutput? output = null;
         Task<byte[]>? stdout = null, stderr = null;
+        Task<byte[][]>? drain = null;
         var quota = new ReadQuota(totalMaximum);
-        OwnedWorkerIdentity? root = null; int? exitCode = null; var natural = false;
+        var stopTimeout = TimeSpan.FromMilliseconds(stopTimeoutMilliseconds);
+        int? exitCode = null;
+        OwnedTargetInventory? inventory = null;
+        Exception? primary = null;
         try
         {
+            job.ObserveProcessIdentities(_ => { });
             cancellation.ThrowIfCancellationRequested();
-            root = job.Start(image.Path, arguments, Path.GetDirectoryName(image.Path)!,
-                instanceId, attemptId, identity =>
-                {
-                    admit(job, identity);
-                }, output);
+            output = new OwnedProcessOutput();
+            var root = job.Start(image.Path, arguments, Path.GetDirectoryName(image.Path)!,
+                instanceId, attemptId, identity => admit(job, identity), output);
             stdout = ReadAsync(output.StandardOutput, stdoutMaximum, quota);
             stderr = ReadAsync(output.StandardError, MuMuCaptureSequence.MaximumErrorBytes, quota);
+            drain = Task.WhenAll(stdout, stderr);
             while (exitCode is null)
             {
                 cancellation.ThrowIfCancellationRequested();
                 if (stdout.IsFaulted || stderr.IsFaulted) throw new IOException("execution_capture_output_rejected");
                 exitCode = await job.AwaitRootAsync(root, TimeSpan.FromMilliseconds(25), cancellation).ConfigureAwait(false);
             }
-            await Task.WhenAll(stdout, stderr).WaitAsync(cancellation).ConfigureAwait(false);
-            cancellation.ThrowIfCancellationRequested(); natural = true;
+            await drain.WaitAsync(cancellation).ConfigureAwait(false);
+            cancellation.ThrowIfCancellationRequested();
+        }
+        catch (Exception error)
+        {
+            primary = error;
+            throw;
         }
         finally
         {
+            var cleanup = new CleanupFailures();
             try
             {
-                var stopped = await PreparedStoppedTarget.StopAsync(job,
-                    TimeSpan.FromMilliseconds(stopTimeoutMilliseconds)).ConfigureAwait(false);
-                output.CloseUnstartedEnds();
-                if (stdout is not null && stderr is not null)
-                {
-                    try { await Task.WhenAll(stdout, stderr).WaitAsync(TimeSpan.FromMilliseconds(stopTimeoutMilliseconds)).ConfigureAwait(false); }
-                    catch
-                    {
-                        output.Dispose();
-                        await ObserveAsync(stdout, stopTimeoutMilliseconds).ConfigureAwait(false); await ObserveAsync(stderr, stopTimeoutMilliseconds).ConfigureAwait(false);
-                        throw;
-                    }
-                }
-                // The caller receives no result unless this actual command Job has a complete native stop proof.
-                _ = stopped.Use(job, inventory => inventory);
+                var stopped = await PreparedStoppedTarget.StopAsync(job, stopTimeout).ConfigureAwait(false);
+                inventory = stopped.Use(job, actual => actual);
             }
-            catch
-            {
-                output.Dispose();
-                if (stdout is not null) await ObserveAsync(stdout, stopTimeoutMilliseconds).ConfigureAwait(false);
-                if (stderr is not null) await ObserveAsync(stderr, stopTimeoutMilliseconds).ConfigureAwait(false);
-                throw;
-            }
+            catch (Exception error) { cleanup.Add(error); }
+            if (output is not null) cleanup.Attempt(output.Dispose);
+            if (primary is not null && drain is not null)
+                await ObserveDrainAsync(drain, stopTimeout, cleanup).ConfigureAwait(false);
+            cleanup.Attempt(job.Dispose);
+            cleanup.Preserve(primary);
         }
-        if (root is null || stdout is null || stderr is null) throw new IOException("capture_command_unbound");
-        var inventory = job.CaptureTargetInventory();
-        var outBytes = await stdout.ConfigureAwait(false); var errorBytes = await stderr.ConfigureAwait(false);
-        return new(exitCode, natural, outBytes, errorBytes, inventory);
+        if (exitCode is null || drain is null || inventory is null) throw new IOException("capture_command_unbound");
+        var bytes = await drain.ConfigureAwait(false);
+        return new(exitCode, true, bytes[0], bytes[1], inventory);
     }
 
     private static async Task<byte[]> ReadAsync(Stream input, int maximum, ReadQuota quota)
@@ -87,10 +82,21 @@ internal static class OwnedCaptureCommand
         }
     }
 
-    private static async Task ObserveAsync(Task task, int timeout)
+    private static async Task ObserveDrainAsync(Task drain, TimeSpan timeout, CleanupFailures cleanup)
     {
-        try { await task.WaitAsync(TimeSpan.FromMilliseconds(timeout)).ConfigureAwait(false); }
-        catch (Exception error) when (error is IOException or ObjectDisposedException or OperationCanceledException) { }
+        try { await drain.WaitAsync(timeout).ConfigureAwait(false); }
+        catch (TimeoutException error)
+        {
+            cleanup.Add(error);
+            _ = drain.ContinueWith(static completed => { _ = completed.Exception; }, CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        }
+        catch (Exception error)
+        {
+            if (drain.Exception is { } faults)
+                foreach (var fault in faults.InnerExceptions) cleanup.Add(fault);
+            else cleanup.Add(error);
+        }
     }
 
     private sealed class ReadQuota(long maximum)

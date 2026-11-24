@@ -123,7 +123,6 @@ public sealed class BlobReferenceIndex
         BlobReferenceScan? scan)
     {
         using var reads = new HistoryReadScope(_instance, _database, _contracts);
-        var retired = ReadRetiredJournals();
         foreach (var journal in journals)
         {
             var key = journal.JournalId.ToString("D");
@@ -151,7 +150,7 @@ public sealed class BlobReferenceIndex
             else if (journal.Kind == JournalKind.RunAttempt)
             {
                 foreach (var item in new PlanReferenceClosure(_instance, _contracts, _blobs, _database)
-                    .Read(journal, reference, retired.Contains(journal.JournalId), ReadBudget)) include(item);
+                    .Read(journal, reference, ReadBudget)) include(item);
             }
             else if (journal.Kind is JournalKind.UpdateApply or JournalKind.ExtensionApply)
             {
@@ -237,17 +236,6 @@ public sealed class BlobReferenceIndex
         }
         if (journal.Phase == JournalPhase.Committed) _database.ReferenceFacts.Store(journal, references);
         return references;
-    }
-
-    private HashSet<Guid> ReadRetiredJournals()
-    {
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT a.journal_id FROM records.record_content_retirements r JOIN records.attempt_receipts a USING(run_id);";
-        using var rows = command.ExecuteReader();
-        var result = new HashSet<Guid>();
-        while (rows.Read()) result.Add(Guid.Parse(rows.GetString(0)));
-        return result;
     }
 
     private bool SecretIsCurrent(BlobReference item, Guid id)

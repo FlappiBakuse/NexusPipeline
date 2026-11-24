@@ -1,29 +1,38 @@
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Execution;
+using NexusPipeline.Core.Operations;
 using NexusPipeline.Platform.Storage.Sqlite;
 
 namespace NexusPipeline.Platform.Storage.Execution;
 
 internal static class CompletionActionRows
 {
+    private const string ReadQuery = "completion.action.select";
+
     internal static CompletionActionSnapshot? Read(SqliteConnection connection, SqliteTransaction transaction,
         Guid operationId, string subject)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT subject_id,request_digest,frozen_json FROM main.completion_actions WHERE operation_id=$operation;";
         command.Parameters.AddWithValue("$operation", operationId.ToString("D"));
-        string digest; CompletionActionGroup frozen;
+        OperationIdentity identity;
+        CompletionActionGroup frozen;
+        using (StartupProfile.Measure(ReadQuery))
         using (var reader = command.ExecuteReader())
         {
             if (!reader.Read()) return null;
             if (reader.GetString(0) != subject) throw new UnauthorizedAccessException("completion_subject_mismatch");
-            digest = reader.GetString(1); frozen = CompletionActionCodec.Decode<CompletionActionGroup>(reader.GetString(2));
-            if (digest != CompletionActionCodec.Identity(operationId, subject, frozen).RequestDigest) throw CompletionActionCodec.Invalid();
+            var digest = reader.GetString(1);
+            frozen = CompletionActionCodec.Decode<CompletionActionGroup>(reader.GetString(2));
+            identity = CompletionActionCodec.Identity(operationId, subject, frozen);
+            if (digest != identity.RequestDigest) throw CompletionActionCodec.Invalid();
         }
-        var identity = CompletionActionCodec.Identity(operationId, subject, frozen);
-        var operation = OperationRows.ReadExisting(connection, transaction, identity) ?? throw CompletionActionCodec.Invalid();
+        OperationAcceptance operation;
+        using (StartupProfile.Measure(ReadQuery))
+            operation = OperationRows.ReadExisting(connection, transaction, identity) ?? throw CompletionActionCodec.Invalid();
         command.CommandText = "SELECT ordinal,snapshot_json FROM main.completion_action_transitions WHERE operation_id=$operation ORDER BY ordinal;";
         CompletionActionSnapshot? prior = null; var ordinal = 0;
+        using (StartupProfile.Measure(ReadQuery))
         using (var reader = command.ExecuteReader())
         {
             while (reader.Read())
@@ -42,6 +51,7 @@ internal static class CompletionActionRows
         if (operation.Status != (ended ? "completed" : "accepted")) throw CompletionActionCodec.Invalid();
         command.CommandText = "SELECT c.run_id,c.intent_json FROM main.completion_action_members m JOIN main.completion_candidates c ON c.run_id=m.run_id WHERE m.operation_id=$operation ORDER BY c.run_id;";
         var expected = frozen.Intents.ToDictionary(item => item.RunId); var seen = new HashSet<Guid>();
+        using (StartupProfile.Measure(ReadQuery))
         using (var reader = command.ExecuteReader())
             while (reader.Read())
             {

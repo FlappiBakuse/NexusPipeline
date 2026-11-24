@@ -39,23 +39,46 @@ internal static class ScheduledProviderRows
         pending.ExecuteNonQuery();
     }
 
-    internal static void RequireSaved(SqliteConnection connection, SqliteTransaction transaction, ScheduledProviderSnapshot source)
+    internal static IEnumerable<(string OperationId, BlobReference Reference, long Ordinal, bool NeedsProof)> TaskCandidates(
+        SqliteConnection connection, SqliteTransaction transaction, string extensionId, string providerId)
+    {
+        using var command = DatabaseConnections.Command(connection, transaction,
+            "SELECT s.operation_id,s.relative_path,s.size_bytes,s.sha256,o.rowid, " +
+            "o.status<>'completed' OR r.occurrence_id IS NULL OR p.occurrence_id IS NOT NULL " +
+            "FROM main.scheduled_provider_occurrences s LEFT JOIN main.operations o USING(operation_id) " +
+            "LEFT JOIN main.scheduled_provider_result r USING(occurrence_id) " +
+            "LEFT JOIN main.scheduled_provider_pending p USING(occurrence_id) " +
+            "WHERE s.extension_id=$0 AND s.provider_id=$1 ORDER BY o.rowid DESC;", extensionId, providerId);
+        using var rows = command.ExecuteReader();
+        while (rows.Read())
+        {
+            if (rows.IsDBNull(4)) throw ScheduledProviderCodec.Invalid();
+            yield return (rows.GetString(0), new(rows.GetString(1), rows.GetInt64(2), rows.GetString(3)),
+                rows.GetInt64(4), rows.GetBoolean(5));
+        }
+    }
+
+    internal static OperationAcceptance RequireSaved(SqliteConnection connection, SqliteTransaction transaction, ScheduledProviderSnapshot source)
     {
         var document = source.Document;
         var minute = ScheduleMinuteRows.ReadMinute(connection, transaction, document.MinuteOperationId, document.InstanceId) ??
             throw ScheduledProviderCodec.Invalid();
         if (minute.Scan.HighestUtcMinute != document.TriggerUtcMinute || minute.ObservedAtUtc != document.ObservedAtUtc)
             throw ScheduledProviderCodec.Invalid();
-        if (Find(connection, transaction, document.Invocation.OccurrenceId) != source.Reference ||
-            OperationRows.ReadExisting(connection, transaction, Identity(source)) is null) throw ScheduledProviderCodec.Invalid();
         using var command = DatabaseConnections.Command(connection, transaction,
-            "SELECT operation_id,minute_operation_id,extension_id,provider_id,task_id,local_date,local_minute FROM main.scheduled_provider_occurrences WHERE occurrence_id=$0;",
+            "SELECT relative_path,size_bytes,sha256,operation_id,minute_operation_id,extension_id,provider_id,task_id,local_date,local_minute " +
+            "FROM main.scheduled_provider_occurrences WHERE occurrence_id=$0;",
             document.Invocation.OccurrenceId.ToString("D"));
         using var row = command.ExecuteReader();
-        if (!row.Read() || row.GetString(0) != document.OperationId.ToString("D") || row.GetString(1) != document.MinuteOperationId.ToString("D") ||
-            row.GetString(2) != document.ExtensionId || row.GetString(3) != document.ProviderId || row.GetString(4) != document.Task.TaskId.ToString("D") ||
-            row.GetString(5) != document.LocalDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) || row.GetInt32(6) != document.Task.LocalMinute)
+        var reference = source.Reference;
+        if (!row.Read() || row.GetString(0) != reference.RelativePath || row.GetInt64(1) != reference.SizeBytes ||
+            row.GetString(2) != reference.Sha256) throw ScheduledProviderCodec.Invalid();
+        var operation = OperationRows.ReadExisting(connection, transaction, Identity(source)) ?? throw ScheduledProviderCodec.Invalid();
+        if (row.GetString(3) != document.OperationId.ToString("D") || row.GetString(4) != document.MinuteOperationId.ToString("D") ||
+            row.GetString(5) != document.ExtensionId || row.GetString(6) != document.ProviderId || row.GetString(7) != document.Task.TaskId.ToString("D") ||
+            row.GetString(8) != document.LocalDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) || row.GetInt32(9) != document.Task.LocalMinute)
             throw ScheduledProviderCodec.Invalid();
+        return operation;
     }
 
     internal static BlobReference? Leaf(SqliteConnection connection, SqliteTransaction? transaction, Guid occurrence, string leaf)
@@ -91,19 +114,17 @@ internal static class ScheduledProviderRows
 
     internal static void RequireCapacity(SqliteConnection connection, SqliteTransaction transaction, int additions)
     {
-        if (additions is < 0 or > 4096) throw ScheduledProviderCodec.Invalid();
-        using var command = DatabaseConnections.Command(connection, transaction,
-            "SELECT (SELECT COUNT(*) FROM main.scheduled_provider_pending)+(SELECT COUNT(*) FROM main.scheduled_occurrences c LEFT JOIN main.operations o ON o.operation_id=c.start_operation_id LEFT JOIN main.schedule_occurrence_outcomes b ON b.occurrence_id=c.occurrence_id WHERE o.operation_id IS NULL AND b.occurrence_id IS NULL);");
-        if ((long)command.ExecuteScalar()! + additions > 4096) throw new IOException("schedule_waiting_capacity");
+        if (additions is < 0 or > ScheduleWaitingCapacity.Maximum) throw ScheduledProviderCodec.Invalid();
+        if (ScheduleWaitingCapacity.CountInside(connection, transaction) + additions > ScheduleWaitingCapacity.Maximum)
+            throw new IOException("schedule_waiting_capacity");
     }
 
     internal static void RequireOpen(SqliteConnection connection, SqliteTransaction transaction, ScheduledProviderSnapshot source, bool requireBegin)
     {
-        RequireSaved(connection, transaction, source);
+        var operation = RequireSaved(connection, transaction, source);
         var id = source.Document.Invocation.OccurrenceId;
         if (Leaf(connection, transaction, id, "close") is not null || Leaf(connection, transaction, id, "result") is not null ||
             requireBegin && Leaf(connection, transaction, id, "begin") is null) throw new IOException("scheduled_provider_dispatch_closed");
-        var status = OperationRows.ReadExisting(connection, transaction, Identity(source)) ?? throw ScheduledProviderCodec.Invalid();
-        if (status.Status != "accepted") throw ScheduledProviderCodec.Invalid();
+        if (operation.Status != "accepted") throw ScheduledProviderCodec.Invalid();
     }
 }

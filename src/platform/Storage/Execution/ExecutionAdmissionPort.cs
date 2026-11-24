@@ -1,13 +1,14 @@
-using System.Runtime.Versioning;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Core.Operations;
+using NexusPipeline.Platform.Extensions;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Configuration;
 using NexusPipeline.Platform.Storage.Journals;
-using NexusPipeline.Platform.Storage.Sqlite;
 using NexusPipeline.Platform.Storage.Scheduling;
+using NexusPipeline.Platform.Storage.Sqlite;
+using System.Runtime.Versioning;
 
 namespace NexusPipeline.Platform.Storage.Execution;
 
@@ -119,7 +120,7 @@ internal sealed class ExecutionAdmissionPort : IExecutionAdmissionPort
 
     public IExecutionAdmissionReceipt CommitAndHandoff(OperationIdentity identity, IExecutionAdmissionDraft draft,
         IPreparedExecutionAdmission prepared, ResourceOperationLease root, DateTimeOffset acceptedAt)
-        => _inbox.Commits.Run(() => Commit(identity, Require(draft), Require(prepared, identity), root, acceptedAt));
+        => _inbox.Commits.Run(identity.OperationId, () => Commit(identity, Require(draft), Require(prepared, identity), root, acceptedAt));
 
     private IExecutionAdmissionReceipt Commit(OperationIdentity identity, ExecutionAdmissionDraft draft,
         PreparedExecutionAdmission prepared, ResourceOperationLease root, DateTimeOffset acceptedAt)
@@ -186,5 +187,83 @@ internal sealed class ExecutionAdmissionPort : IExecutionAdmissionPort
         if (prepared is not PreparedExecutionAdmission value || !ReferenceEquals(value.Owner, _owner) || value.Identity != identity)
             throw new IOException("execution_admission_preparation_unbound");
         value.RequireLive(); return value;
+    }
+}
+
+internal sealed class ExecutionAdmissionDraft : IExecutionAdmissionDraft
+{
+    internal object Owner { get; }
+    internal ExecutionPlanDraft Draft { get; }
+    public IReadOnlyList<ResourceClaim> Claims { get; }
+    internal ExecutionTimeBudget TimeBudget { get; }
+    internal DateTimeOffset FirstPreparedAtUtc { get; }
+    internal bool Automatic { get; }
+
+    internal ExecutionAdmissionDraft(object owner, ExecutionPlanDraft draft, TimeProvider clock, long startedTimestamp,
+        DateTimeOffset? firstPreparedAtUtc = null, ExecutionTimeBudget? sharedBudget = null, bool automatic = false)
+    {
+        Owner = owner; Draft = draft; FirstPreparedAtUtc = firstPreparedAtUtc ?? clock.GetUtcNow();
+        Automatic = automatic;
+        var plan = draft.ReadPlan() ?? throw new ExecutionSelectionException(draft.Explanation.ReasonCode);
+        var wire = plan.ReadWire();
+        Claims = ExecutionPlanResources.Claims(wire);
+        TimeBudget = sharedBudget ?? new(clock, startedTimestamp, TimeSpan.FromSeconds(wire.Budget.TotalTimeoutSeconds),
+            DateTimeOffset.Parse(wire.RetryPolicy.DeadlineUtc, System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    public void Dispose() => Draft.Dispose();
+}
+
+internal sealed class PreparedExecutionAdmission : IPreparedExecutionAdmission
+{
+    private readonly object _gate = new();
+    private List<IDisposable>? _held;
+    private bool _logsReleased;
+    internal object Owner { get; }
+    internal OperationIdentity Identity { get; }
+    internal PreparedExecutionPlan Total { get; }
+    internal PreparedAttemptPlan Attempt { get; }
+    internal IReadOnlyDictionary<string, PreparedConfigurationRun> Configurations { get; }
+    internal IReadOnlyList<IDisposable> LogGuards { get; }
+    internal ExecutionTimeBudget TimeBudget { get; }
+    internal DateTimeOffset FirstPreparedAtUtc { get; }
+    internal PreparedExecutionNetwork? Network { get; }
+    internal IReadOnlyDictionary<string, ExecutionProviderRegistry.PreparedExecutionProvider> Providers { get; }
+    internal ExecutionRunDisplay? Display { get; init; }
+    internal PayloadApplyRoots PayloadRoots { get; }
+    internal NexusPipeline.Platform.Storage.Emulation.EmulatorTargetService? Emulators { get; init; }
+
+    internal PreparedExecutionAdmission(object owner, OperationIdentity identity, PreparedExecutionPlan total,
+        PreparedAttemptPlan attempt, IReadOnlyDictionary<string, PreparedConfigurationRun> configurations,
+        IReadOnlyList<IDisposable> logGuards, List<IDisposable> held, ExecutionTimeBudget timeBudget, PreparedExecutionNetwork? network, PayloadApplyRoots payloadRoots,
+        IReadOnlyDictionary<string, ExecutionProviderRegistry.PreparedExecutionProvider>? providers = null, DateTimeOffset? firstPreparedAtUtc = null)
+    {
+        PayloadRoots = payloadRoots; FirstPreparedAtUtc = firstPreparedAtUtc ?? default;
+        Providers = providers ?? new Dictionary<string, ExecutionProviderRegistry.PreparedExecutionProvider>();
+        Owner = owner; Identity = identity; Total = total; Attempt = attempt;
+        Configurations = configurations; LogGuards = logGuards; _held = held; TimeBudget = timeBudget; Network = network;
+    }
+
+    internal void RequireLive() => ObjectDisposedException.ThrowIf(Volatile.Read(ref _held) is null, this);
+
+    internal void ReleaseLogGuards()
+    {
+        lock (_gate)
+        {
+            RequireLive();
+            if (_logsReleased) return;
+            if (LogGuards.Any(guard => !_held!.Contains(guard))) throw new IOException("execution_log_guard_ownership_changed");
+            foreach (var guard in LogGuards) _held!.Remove(guard);
+            _logsReleased = true;
+        }
+        for (var index = LogGuards.Count - 1; index >= 0; index--) LogGuards[index].Dispose();
+    }
+
+    public void Dispose()
+    {
+        List<IDisposable>? held;
+        lock (_gate) held = Interlocked.Exchange(ref _held, null);
+        if (held is null) return;
+        for (var index = held.Count - 1; index >= 0; index--) held[index].Dispose();
     }
 }

@@ -145,7 +145,12 @@ public sealed class RunStateCodec(RuntimeInstance instance, ContractReader contr
     {
         var rule = RunTaskPolicy.Freeze(new RunTaskRule(value.RelativePath, Enum.Parse<ConfigurationSyntax>(value.Syntax, true),
             ConfigurationSelectorProtocol.Read(value.Access), new(ConfigurationSelectorProtocol.ReadTaskSource(value.Declaration.Source),
-                value.Declaration.AuthorizedIds.ToImmutableArray()), value.SelectedIds.ToImmutableArray()));
+                value.Declaration.AuthorizedIds.ToImmutableArray()), value.SelectedIds.ToImmutableArray())
+        {
+            Repetitions = (value.Repetitions ?? []).Select(item => new RunTaskRepetition(item.TaskId,
+                ConfigurationSelectorProtocol.Read(item.Selector, false), checked((int)item.OriginalCount),
+                checked((int)item.InvocationCount))).ToImmutableArray()
+        });
         var entry = source.Tree.Entries.SingleOrDefault(item => item.RelativePath == rule.RelativePath && item.Kind == FileObjectKind.File)
             ?? throw new IOException("configuration_run_task_source_missing");
         if (value.InitialValues.Select(item => item.TaskId).Distinct(StringComparer.Ordinal).Count() != value.InitialValues.Count)
@@ -169,12 +174,16 @@ public sealed class RunStateCodec(RuntimeInstance instance, ContractReader contr
         Tasks = state.Tasks.Select(item => new ConfigurationRunStateTasksItem { RelativePath = item.Rule.RelativePath, Syntax = WireSyntax(item.Rule.Syntax),
             Access = ConfigurationSelectorProtocol.Write(item.Rule.Access), SelectedIds = item.Rule.SelectedIds,
             Declaration = new() { Source = ConfigurationSelectorProtocol.WriteTaskSource(item.Rule.Declaration.Source), AuthorizedIds = item.Rule.Declaration.AuthorizedIds },
+            Repetitions = item.Rule.Repetitions.IsEmpty ? null : item.Rule.Repetitions.Select(task =>
+                new ConfigurationRunStateTasksItemRepetitionsItem { TaskId = task.TaskId, OriginalCount = task.OriginalCount,
+                    InvocationCount = task.InvocationCount, Selector = ConfigurationSelectorProtocol.Write(task.Selector, false) }).ToArray(),
             InitialValues = item.Initial.Values.OrderBy(pair => pair.Key, StringComparer.Ordinal).Select(pair =>
                 new ConfigurationRunStateTasksItemInitialValuesItem { TaskId = pair.Key, Enabled = pair.Value }).ToArray() }).ToArray()
     };
 
     internal static void RequireRetrySource(FrozenRunState state, FrozenRunState previous, ExecutionTaskRetry? retry = null,
-        StoredConfigurationRevision? publication = null, RetryConfigurationInput? input = null)
+        StoredConfigurationRevision? publication = null, RetryConfigurationInput? input = null,
+        IReadOnlyList<TaskDefinitionsRepetitionOffset>? offsets = null)
     {
         if (state.SyncInitially || state.SnapshotReference is null || previous.SnapshotReference is null) throw new IOException("configuration_retry_source_unbound");
         var expected = previous with { OwnerOperationId = state.OwnerOperationId, ConfigurationOperationId = state.ConfigurationOperationId,
@@ -182,8 +191,7 @@ public sealed class RunStateCodec(RuntimeInstance instance, ContractReader contr
             InputReference = retry is null ? input?.Reference : (publication ?? throw new IOException("configuration_retry_input_missing")).Manifest,
             InputTree = retry is null ? input?.Tree : publication!.Revision.Tree };
         if (retry is not null) expected = expected with { Tasks = expected.Tasks.Select(item => item with
-            { Rule = RunTaskPolicy.Freeze(item.Rule with { SelectedIds = retry.Selection.SelectedIds.Where(id =>
-                item.Rule.Declaration.AuthorizedIds.Contains(id, StringComparer.Ordinal)).ToImmutableArray() }) }).ToImmutableArray() };
+            { Rule = TaskRetryEvidence.ApplySelection(item.Rule, retry.Selection, offsets) }).ToImmutableArray() };
         if (!JsonSerializer.SerializeToUtf8Bytes(ToWire(expected, previous.SnapshotReference)).AsSpan()
             .SequenceEqual(JsonSerializer.SerializeToUtf8Bytes(ToWire(state, state.SnapshotReference))))
             throw new IOException("configuration_retry_source_unbound");

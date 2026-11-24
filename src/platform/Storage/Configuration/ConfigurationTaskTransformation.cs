@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Security.Cryptography;
+using System.Text.Json;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Platform.Serialization;
 
@@ -18,7 +19,10 @@ public sealed class ConfigurationTaskTransformation(ImmutableBlobStore blobs)
             cancellationToken.ThrowIfCancellationRequested();
             var entry = RequireFile(source.Tree, rule.RelativePath);
             return Read(configurationOperationId, source, entry, rule, document =>
-                new ConfigurationCapturedTasks(rule, TaskSelectionPolicy.Capture(document, rule.Declaration)));
+            {
+                RequireOriginalCounts(document, rule);
+                return new ConfigurationCapturedTasks(rule, TaskSelectionPolicy.Capture(document, rule.Declaration));
+            });
         }).ToImmutableArray();
     }
 
@@ -71,9 +75,21 @@ public sealed class ConfigurationTaskTransformation(ImmutableBlobStore blobs)
                 var actual = TaskSelectionPolicy.Capture(document, item.Rule.Declaration);
                 if (item.Initial.Values.Any(pair => actual.Values[pair.Key] != pair.Value))
                     throw new ConfigurationException("configuration_run_initial_tasks_changed");
-                byte[] Apply(ConfigurationDocument current) => current.Apply(restore
-                    ? TaskSelectionPolicy.Restore(current, item.Initial)
-                    : TaskSelectionPolicy.Select(current, item.Initial, RunTaskPolicy.Choices(item.Rule)));
+                RequireOriginalCounts(document, item.Rule);
+                byte[] Apply(ConfigurationDocument current)
+                {
+                    var changes = restore ? TaskSelectionPolicy.Restore(current, item.Initial)
+                        : TaskSelectionPolicy.Select(current, item.Initial, RunTaskPolicy.Choices(item.Rule));
+                    var counts = item.Rule.Repetitions.Where(task => task.InvocationCount != task.OriginalCount).Select(task =>
+                    {
+                        var before = ReadCount(current, task.Selector);
+                        if (before != task.OriginalCount && (!restore || before != task.InvocationCount))
+                            throw new ConfigurationException("configuration_run_task_count_changed");
+                        return new ConfigurationValueEdit(task.Selector, JsonSerializer.SerializeToElement(before),
+                            JsonSerializer.SerializeToElement(restore ? task.OriginalCount : task.InvocationCount));
+                    });
+                    return current.Apply(changes with { Edits = changes.Edits.AddRange(counts) });
+                }
                 return initial.Sha256 == entry.Sha256 && initial.SizeBytes == entry.SizeBytes
                     ? Apply(document) : Read(operationId, source, entry, item.Rule, Apply);
             });
@@ -90,6 +106,20 @@ public sealed class ConfigurationTaskTransformation(ImmutableBlobStore blobs)
         {
             Entries = Array.AsReadOnly(tree.Entries.Select(entry => replacements.GetValueOrDefault(entry.RelativePath, entry)).ToArray())
         });
+    }
+
+    private static void RequireOriginalCounts(ConfigurationDocument document, RunTaskRule rule)
+    {
+        foreach (var repetition in rule.Repetitions)
+            if (ReadCount(document, repetition.Selector) != repetition.OriginalCount)
+                throw new ConfigurationException("configuration_run_original_count_changed");
+    }
+
+    private static int ReadCount(ConfigurationDocument document, ConfigurationSelector selector)
+    {
+        var value = document.Read(selector);
+        return value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var count) && count is >= 1 and <= 100
+            ? count : throw new ConfigurationException("configuration_run_task_count_invalid");
     }
 
     private T Read<T>(Guid operationId, ConfigurationRevision source, FileTreeEntry entry, RunTaskRule rule,

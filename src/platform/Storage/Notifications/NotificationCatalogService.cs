@@ -87,7 +87,9 @@ public sealed class NotificationCatalogService
     {
         _lease.VerifyHeld(_instance); cancellationToken.ThrowIfCancellationRequested();
         NotificationCatalogPreparation.RequireEdits(request, secrets);
-        new NotificationPublicationInventory(_instance, _database, _contracts).VerifyReadOnly();
+        var history = _lease.NotificationPublications;
+        var canExtendHistory = history.Verify(_instance, _database, _contracts) && ReferenceEquals(_lease.Database, _database) &&
+            request.Change is NotificationCatalogChange.Limit or NotificationCatalogChange.Reorder;
         _ = new OperationIdentity(operationId, subject, new string('0', 64), NotificationPublicationCodec.Kind(request.Change));
         using var flight = await _flights.EnterAsync(operationId, cancellationToken).ConfigureAwait(false);
         var replay = Lookup(operationId, subject, request, secrets);
@@ -101,23 +103,30 @@ public sealed class NotificationCatalogService
         using var cleanup = new SecretRetirementCleanup(_instance, _database, _contracts, _resources,
             prepared.Publication.Document.Secrets.Where(change => change.Retirement?.Plan is not null)
                 .Select(change => change.Retirement!.Plan!));
-        _index.BlockUnknown("notification_publication_in_progress");
-        try
+        if (canExtendHistory) return history.PublishAppend(_instance, _database, _contracts, prepared.Publication, Publish);
+        history.Invalidate();
+        return Publish();
+
+        NotificationTaskCatalog Publish()
         {
-            if (!new NotificationCatalogAcceptance(_instance, _database, _contracts).Accept(prepared, DateTimeOffset.UtcNow))
-                return Lookup(operationId, subject, request, secrets) ?? throw new IOException("notification_original_result_missing");
-            foreach (var payload in prepared.Payloads)
+            _index.BlockUnknown("notification_publication_in_progress");
+            try
             {
-                _observer?.Reached(SecretPreparationPoint.Accepted, Guid.Parse(payload.Plan.ReadWire().JournalId));
-                _ = new SecretPreparationExecutor(_instance, _contracts, _database, _observer).WriteAcceptedCandidate(payload);
+                if (!new NotificationCatalogAcceptance(_instance, _database, _contracts).Accept(prepared, DateTimeOffset.UtcNow))
+                    return Lookup(operationId, subject, request, secrets) ?? throw new IOException("notification_original_result_missing");
+                foreach (var payload in prepared.Payloads)
+                {
+                    _observer?.Reached(SecretPreparationPoint.Accepted, Guid.Parse(payload.Plan.ReadWire().JournalId));
+                    _ = new SecretPreparationExecutor(_instance, _contracts, _database, _observer).WriteAcceptedCandidate(payload);
+                }
+                new SecretPreparationPublication(_instance, _database).CloseNotification(prepared.Publication, _contracts);
+                cleanup.Finish(_instance, _database, _contracts, _lease, _index);
+                foreach (var payload in prepared.Payloads)
+                    _observer?.Reached(SecretPreparationPoint.Published, Guid.Parse(payload.Plan.ReadWire().JournalId));
+                return prepared.Publication.After.Catalog;
             }
-            new SecretPreparationPublication(_instance, _database).CloseNotification(prepared.Publication, _contracts);
-            cleanup.Finish(_instance, _database, _contracts, _lease, _index);
-            foreach (var payload in prepared.Payloads)
-                _observer?.Reached(SecretPreparationPoint.Published, Guid.Parse(payload.Plan.ReadWire().JournalId));
-            return prepared.Publication.After.Catalog;
+            finally { PublishRecovery(); }
         }
-        finally { PublishRecovery(); }
     }
 
     private NotificationTaskCatalog? Lookup(Guid operationId, string subject, NotificationCatalogRequest request,

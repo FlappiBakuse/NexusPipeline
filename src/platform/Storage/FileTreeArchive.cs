@@ -36,12 +36,11 @@ public sealed class FileTreeArchive(FileTreeScanner scanner, ImmutableBlobStore 
     internal TreeReadLease CaptureProtected(string source, PhysicalObjectIdentity parentIdentity,
         CancellationToken cancellationToken, out ArchivedFileTree archive)
     {
-        var lease = TreeReadLease.Capture(source, parentIdentity, scanner, cancellationToken, "configuration.capture.hash", out var captured);
+        var lease = TreeReadLease.Capture(source, parentIdentity, scanner, cancellationToken, "configuration.capture.hash", out var captured, blobs);
         try
         {
             var contents = captured.Snapshot.Entries.Where(entry => entry.Kind == FileObjectKind.File)
-                .Select(entry => blobs.PersistCapturedContent(captured.Files[entry.RelativePath], entry, cancellationToken)).Distinct().ToArray();
-            lease.RequireNamespace(cancellationToken);
+                .Select(entry => new BlobReference($"blobs/content/{entry.Sha256}.bin", entry.SizeBytes, entry.Sha256!)).Distinct().ToArray();
             archive = new(captured.Snapshot, captured.Objects, Array.AsReadOnly(contents));
             return lease;
         }

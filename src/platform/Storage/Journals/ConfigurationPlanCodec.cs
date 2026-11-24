@@ -1,10 +1,10 @@
-using System.Collections.Immutable;
-using System.Text.Json;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Configuration;
+using System.Collections.Immutable;
+using System.Text.Json;
 
 namespace NexusPipeline.Platform.Storage.Journals;
 
@@ -202,10 +202,11 @@ public sealed class ConfigurationPlanCodec(RuntimeInstance instance, ContractRea
             plan.PhysicalClaims.Length != 0 && plan.Editor is null && plan.RunState is null)
             throw new IOException("configuration_physical_claims_invalid");
         var identities = plan.Before.OriginalObjects;
+        var paths = plan.Before.Snapshot.Entries.Select(entry => entry.RelativePath).ToHashSet(StringComparer.Ordinal);
         if (identities.Count != plan.Before.Snapshot.Entries.Count ||
             identities.Select(item => item.RelativePath).Distinct(StringComparer.OrdinalIgnoreCase).Count() != identities.Count ||
             identities.Any(item => item.Identity.VolumeSerial != plan.ParentIdentity.VolumeSerial ||
-                !plan.Before.Snapshot.Entries.Any(entry => entry.RelativePath == item.RelativePath)))
+                !paths.Contains(item.RelativePath)))
             throw new IOException("configuration_plan_original_identity_incomplete");
     }
 
@@ -270,4 +271,35 @@ public sealed class ConfigurationPlanCodec(RuntimeInstance instance, ContractRea
         return char.ToLowerInvariant(text[0]) + text[1..];
     }
 
+}
+
+public sealed class PreparedConfigurationPlan : IDisposable
+{
+    private List<FileStream>? _held;
+    private readonly FrozenConfigurationExchange _plan;
+    private readonly BlobReference _reference;
+
+    internal PreparedConfigurationPlan(FrozenConfigurationExchange plan, BlobReference reference, List<FileStream> held)
+    {
+        _plan = plan;
+        _reference = reference;
+        _held = held;
+    }
+
+    public FrozenConfigurationExchange Plan
+    {
+        get { ObjectDisposedException.ThrowIf(Volatile.Read(ref _held) is null, this); return _plan; }
+    }
+
+    public BlobReference Reference
+    {
+        get { ObjectDisposedException.ThrowIf(Volatile.Read(ref _held) is null, this); return _reference; }
+    }
+
+    public void Dispose()
+    {
+        var held = Interlocked.Exchange(ref _held, null);
+        if (held is null) return;
+        for (var index = held.Count - 1; index >= 0; index--) held[index].Dispose();
+    }
 }

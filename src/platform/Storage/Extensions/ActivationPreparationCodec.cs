@@ -1,10 +1,17 @@
+using NexusPipeline.Platform.Serialization;
+using NexusPipeline.Platform.Storage.Journals;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
-using NexusPipeline.Platform.Serialization;
-using NexusPipeline.Platform.Storage.Journals;
 
 namespace NexusPipeline.Platform.Storage.Extensions;
+
+internal sealed record ExtensionActivationPreparation(string Format, int Version, Guid InstanceId,
+    Guid OperationId, Guid JournalId, long BeforeRevision, BlobReference Source, BlobReference PhysicalResult,
+    Guid ActivationId);
+
+internal sealed record ActivationPreparationIntent(string Format, int Version,
+    long BeforeRevision, BlobReference Artifact);
 
 internal sealed class ActivationPreparationCodec(RuntimeInstance instance, ContractReader contracts)
 {

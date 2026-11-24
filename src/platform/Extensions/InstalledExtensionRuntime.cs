@@ -1,3 +1,8 @@
+using NexusPipeline.Extensibility.Frontend;
+using NexusPipeline.Extensibility.Lifecycle;
+using NexusPipeline.Extensibility.Protocol;
+using NexusPipeline.Platform.Serialization;
+using NexusPipeline.Platform.Storage.Extensions;
 using System.Collections.Immutable;
 using System.Reflection;
 using System.Reflection.Metadata;
@@ -5,13 +10,17 @@ using System.Reflection.PortableExecutable;
 using System.Runtime.Loader;
 using System.Runtime.Versioning;
 using System.Text;
-using NexusPipeline.Extensibility.Lifecycle;
-using NexusPipeline.Extensibility.Protocol;
-using NexusPipeline.Extensibility.Frontend;
-using NexusPipeline.Platform.Serialization;
-using NexusPipeline.Platform.Storage.Extensions;
 
 namespace NexusPipeline.Platform.Extensions;
+
+internal static class RuntimeCleanupGuard
+{
+    internal static void RequireRelease(ExtensionScope scope)
+    {
+        // A failed native destructor can still own callbacks into this assembly and its protected package.
+        if (scope.HasCleanupFailure) throw new IOException("extension_runtime_cleanup_retained");
+    }
+}
 
 [SupportedOSPlatform("windows")]
 internal sealed class InstalledExtensionRuntime : IAsyncDisposable

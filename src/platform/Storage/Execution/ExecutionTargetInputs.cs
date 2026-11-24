@@ -151,17 +151,16 @@ internal static class ExecutionTargetInputs
             if (android.Driver != "mumu") throw Invalid();
             var mapping = android.Mapping ?? throw Invalid();
             var reference = new BlobReference(mapping.InfoEvidence.RelativePath, mapping.InfoEvidence.SizeBytes, mapping.InfoEvidence.Sha256);
-            var saved = MuMuDiscoveryEvidence.Read(blobs, reference);
-            if (saved.InstanceId.ToString("D") != plan.InstanceId || saved.Endpoint != android.Endpoint ||
-                !MuMuDiscoveryEvidence.SameImage(saved.Manager, android.Tool) || !saved.StartReturned || !saved.OutputComplete ||
-                saved.ExitCode != 0 || mapping.Index < 0 || saved.MappingIndex != mapping.Index || mapping.ManagerImageSha256 != android.Tool.Sha256 ||
+            using var verified = MuMuDiscoveryEvidence.VerifiedMuMuDiscovery.Open(blobs, reference);
+            if (verified.InstanceId.ToString("D") != plan.InstanceId || !verified.BindsMapping(android.Endpoint, android.Tool, mapping.Index) ||
+                mapping.ManagerImageSha256 != android.Tool.Sha256 ||
                 mapping.EndpointPort != new Uri("http://" + android.Endpoint).Port) throw Invalid();
             if (verifyContent)
             {
                 if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
-                _ = MuMuDiscoveryEvidence.RequireMapping(blobs, reference, android.Endpoint, android.Tool, mapping.Index);
+                verified.RequireOutputMapping();
             }
-            result.AddRange(MuMuDiscoveryEvidence.ReadReferences(blobs, reference));
+            result.AddRange(verified.References());
         }
         return result.Distinct().ToArray();
     }

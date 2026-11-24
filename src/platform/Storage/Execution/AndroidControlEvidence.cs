@@ -25,6 +25,12 @@ internal sealed class AndroidControlEvidence(RuntimeInstance instance, StateData
     {
         var request = Read<AndroidCommandRequest>(registration.Request);
         var subject = Subject(registration.Binding.ParentJournalId, registration.Binding.ParentOperationId);
+        return RequireRequest(total, registration, request, subject);
+    }
+
+    private AndroidCommandRequest RequireRequest(ExecutionPlan total, AndroidCommandRegistration registration,
+        AndroidCommandRequest request, string subject)
+    {
         var expected = readScope?.Derive(total, registration, subject) ?? AndroidCommandIdentity.Derive(total,
             registration.Binding, subject, registration.Sequence, registration.Purpose, registration.Action);
         if (Digest(request) != registration.RequestDigest || Digest(expected) != registration.RequestDigest) throw Invalid();
@@ -127,7 +133,21 @@ internal sealed class AndroidControlEvidence(RuntimeInstance instance, StateData
     internal AndroidCommandObservation Observation(ExecutionPlan total,
         AndroidCommandRegistration registration, BlobReference reference, bool verifyContent)
     {
-        var request = Request(total, registration);
+        return Observation(registration, Request(total, registration), reference, verifyContent);
+    }
+
+    internal (AndroidCommandRequest Request, AndroidCommandObservation Observation) ReadStartupObservation(
+        AttemptWriterState state, AndroidCommandRegistration registration, BlobReference reference, string subject)
+    {
+        if (registration.Binding.ParentJournalId != state.Journal.JournalId ||
+            registration.Binding.ParentOperationId != state.Journal.OperationId) throw Invalid();
+        var request = RequireRequest(state.Total, registration, Read<AndroidCommandRequest>(registration.Request), subject);
+        return (request, Observation(registration, request, reference, verifyContent: true));
+    }
+
+    private AndroidCommandObservation Observation(AndroidCommandRegistration registration, AndroidCommandRequest request,
+        BlobReference reference, bool verifyContent)
+    {
         var value = Read<AndroidCommandObservation>(reference);
         if (value.Format != AndroidControlCodec.ObservationFormat || value.Version != 1 ||
             value.Binding != registration.Binding || value.RequestDigest != registration.RequestDigest || value.Parts.IsDefault ||

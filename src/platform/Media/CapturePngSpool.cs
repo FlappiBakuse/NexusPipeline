@@ -10,7 +10,8 @@ internal sealed class CapturePngSpool : IDisposable
     private readonly StableDirectoryLease? _directory;
     private readonly int? _width, _height;
     private readonly Guid _requestId;
-    private bool _complete, _readStarted, _verified;
+    private bool _complete, _readStarted;
+    private CapturePngInfo? _verified;
     internal const long MaximumBytes = 8388608;
 
     internal CapturePngSpool(RuntimeInstance instance, Guid requestId) : this(requestId, null, null, instance) { }
@@ -92,28 +93,22 @@ internal sealed class CapturePngSpool : IDisposable
         blobs.PersistContent(_stream, reference, CancellationToken.None); return reference;
     }
 
-    internal void VerifyFrame()
+    internal CapturePngInfo VerifyFrame()
     {
         if (!_complete) throw new IOException("capture_worker_output_incomplete");
-        if (_verified) return;
+        if (_verified is { } verified) return verified;
         _stream.Position = 0;
-        if (_width is { } width) RgbCapturePng.Verify(_stream, width, _height!.Value);
-        else _ = BoundedCapturePng.Verify(_stream, allowRgba: true, allowAncillary: true);
+        var info = _width is { } width
+            ? RgbCapturePng.Verify(_stream, width, _height!.Value)
+            : BoundedCapturePng.Verify(_stream, allowRgba: true, allowAncillary: true);
         _stream.Position = 0;
-        _verified = true;
+        _verified = info;
+        return info;
     }
 
     internal NexusPipeline.Core.Media.PreviewImage ReadLiveFrame()
     {
-        if (!_complete) throw new IOException("capture_worker_output_incomplete");
-        _stream.Position = 0;
-        CapturePngInfo image;
-        if (_width is { } width)
-        {
-            RgbCapturePng.Verify(_stream, width, _height!.Value);
-            image = new(width, _height.Value, 2);
-        }
-        else image = BoundedCapturePng.Verify(_stream, allowRgba: true, allowAncillary: true);
+        var image = VerifyFrame();
         if (_stream is MemoryStream memory)
             return new(image.Width, image.Height, memory.GetBuffer().AsSpan(0, checked((int)memory.Length)));
         _stream.Position = 0;
@@ -124,9 +119,9 @@ internal sealed class CapturePngSpool : IDisposable
 
     internal CapturePngInfo ReadVerifiedInfo()
     {
-        if (!_complete || _width is not null) throw new IOException("capture_worker_output_incomplete");
-        return BoundedCapturePng.Verify(_stream, allowRgba: true, allowAncillary: true);
+        if (_width is not null) throw new IOException("capture_worker_output_incomplete");
+        return VerifyFrame();
     }
 
-    public void Dispose() { _stream.Dispose(); _directory?.Dispose(); }
+    public void Dispose() { _verified = null; _stream.Dispose(); _directory?.Dispose(); }
 }

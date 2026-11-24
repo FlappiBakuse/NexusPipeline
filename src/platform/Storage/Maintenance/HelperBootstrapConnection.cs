@@ -45,7 +45,7 @@ internal sealed class HelperBootstrapConnection : IDisposable
         }
         catch
         {
-            try { pipe?.Dispose(); } finally { try { parent?.Dispose(); } finally { try { origin?.Dispose(); } finally { actor.Dispose(); } } }
+            try { pipe?.Dispose(); } finally { try { parent?.Dispose(); } finally { try { origin?.Dispose(); } finally { actor.ReleaseJobToProcessExit(); } } }
             throw;
         }
     }
@@ -64,7 +64,7 @@ internal sealed class HelperBootstrapConnection : IDisposable
 
     public void Dispose()
     {
-        try { _pipe.Dispose(); } finally { try { _parent.Dispose(); } finally { try { Origin.Dispose(); } finally { Actor.Dispose(); } } }
+        try { _pipe.Dispose(); } finally { try { _parent.Dispose(); } finally { try { Origin.Dispose(); } finally { Actor.ReleaseJobToProcessExit(); } } }
     }
     private static IOException Invalid() => new("maintenance_helper_bootstrap_unbound");
 

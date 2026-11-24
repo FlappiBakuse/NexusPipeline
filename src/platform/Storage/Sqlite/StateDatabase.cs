@@ -39,14 +39,20 @@ public sealed class StateDatabase
     {
         var actual = new InstanceRoot(new()).OpenExisting(instance.RuntimeRoot);
         if (actual != instance) throw new IOException("runtime_identity_mismatch");
-        var inspected = DatabaseInspector.Inspect(DatabaseLayout.RuntimePath(instance), instance.InstanceId,
-            Path.Combine(instance.RuntimeRoot, "diagnostics", "maintenance-peer-inspection"));
+        var path = DatabaseLayout.RuntimePath(actual);
+        DatabaseLayout.RequireFiles(path);
         try
         {
-            if (inspected.SchemaDigest != SchemaDigest) throw new IOException("unsupported_database_identity");
+            // The parent still owns its write connections. Use SQLite's coordinated read snapshot until it releases the runtime.
+            using var connection = DatabaseConnections.Open(path, readOnly: true, allowPooling: false);
+            using var snapshot = DatabaseConnections.BeginRead(connection);
+            DatabaseSchema.VerifyCatalog(connection, snapshot);
+            DatabaseInspector.VerifyIdentity(connection, actual.InstanceId, transaction: snapshot);
+            DatabaseInspector.VerifyIntegrity(connection, snapshot);
+            snapshot.Commit();
         }
-        finally { inspected.OwnedCopy?.Discard(); }
-        return new(DatabaseLayout.RuntimePath(instance), instance.InstanceId, instance.RuntimeRoot, readOnly: true);
+        catch (SqliteException error) { throw new IOException("unrecognized_or_corrupt_database", error); }
+        return new(path, actual.InstanceId, actual.RuntimeRoot, readOnly: true);
     }
 
     internal static StateDatabase Inspected(DatabaseInspection inspection, RuntimeInstance instance)

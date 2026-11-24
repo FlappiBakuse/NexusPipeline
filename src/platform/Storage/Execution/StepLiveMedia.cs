@@ -1,13 +1,13 @@
-using System.Runtime.Versioning;
-using NexusPipeline.Core.Media;
-using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Configuration;
+using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Maintenance;
+using NexusPipeline.Core.Media;
 using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Configuration;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
+using System.Runtime.Versioning;
 
 namespace NexusPipeline.Platform.Storage.Execution;
 
@@ -199,4 +199,23 @@ internal sealed class StepLiveMedia
     private static ProcessIdentity Identity(OwnedWorkerIdentity root) =>
         new(root.ProcessId, root.CreatedAtUtc, root.ImagePath, root.ImageSha256, root.UserSid, root.IsElevated);
     private static IOException Closed() => new("run_live_media_step_unavailable");
+}
+
+[SupportedOSPlatform("windows")]
+internal static class ExecutionTargetPreview
+{
+    internal static ExecutionLiveMedia.Step? Open(ExecutionLiveMedia? owner, RuntimeInstance instance,
+        AcceptedExecutionAdmission accepted, InstanceLease lease, StepWriterScope scope, Func<bool> unavailable, string kind) =>
+        owner?.Register(accepted.Identity.SubjectId,
+            new(instance.InstanceId, Guid.Parse(accepted.Prepared.Total.Plan.ReadWire().RunId),
+                Guid.Parse(accepted.Prepared.Attempt.Plan.ReadWire().AttemptId)), () =>
+            {
+                if (unavailable() || !accepted.Root.IsActive || accepted.Prepared.TimeBudget.Read().Remaining == TimeSpan.Zero)
+                    throw new UnauthorizedAccessException("run_media_grant_required");
+                accepted.Prepared.RequireLive();
+                var current = lease.PublishExecution(scope.VerifyReadOnly);
+                if (current.IsDispatchClosed) throw new UnauthorizedAccessException("run_media_grant_required");
+            }, _ => throw new PreviewUnavailableException(kind == "android"
+                ? PreviewAvailability.EmulatorNotReady : PreviewAvailability.WaitingForGame),
+            kind == "android" ? "emulator" : "pc_game");
 }

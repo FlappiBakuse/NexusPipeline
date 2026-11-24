@@ -10,12 +10,13 @@ internal static class ExecutionRetryRows
     internal static void InsertInside(SqliteConnection connection, SqliteTransaction transaction, ExecutionRetryIntent value,
         RunBudgetObservation budget)
     {
-        _ = RetryIntentCodec.Decode(RetryIntentCodec.Encode(value));
+        var bytes = RetryIntentCodec.Encode(value);
+        _ = RetryIntentCodec.Decode(bytes);
         var f = value.Frozen;
         if (budget.RunId != f.RunId || budget.JournalId != value.PreviousJournalId || budget.TerminalReceiptDigest != f.PreviousReceiptDigest ||
             budget.ConsumedMilliseconds != f.ConsumedMilliseconds) throw RetryIntentCodec.Invalid();
         RequirePrevious(connection, transaction, value);
-        var identity = RetryIntentCodec.Identity(value);
+        var identity = RetryIntentCodec.Identity(value, bytes);
         if (!OperationRows.Accept(connection, transaction, identity, budget.ObservedAtUtc).IsNew) throw RetryIntentCodec.Invalid();
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "INSERT INTO main.execution_retry_intents(operation_id,run_id,previous_attempt_id,previous_journal_id,next_operation_id,next_attempt_id,next_journal_id,next_ordinal,document_json) VALUES($id,$run,$prior,$journal,$next,$attempt,$nextJournal,$ordinal,$json);";
@@ -23,7 +24,7 @@ internal static class ExecutionRetryRows
         command.Parameters.AddWithValue("$prior", f.PreviousAttemptId.ToString("D")); command.Parameters.AddWithValue("$journal", value.PreviousJournalId.ToString("D"));
         command.Parameters.AddWithValue("$next", f.NextOperationId.ToString("D")); command.Parameters.AddWithValue("$attempt", f.NextAttemptId.ToString("D"));
         command.Parameters.AddWithValue("$nextJournal", f.NextJournalId.ToString("D")); command.Parameters.AddWithValue("$ordinal", f.NextOrdinal);
-        command.Parameters.AddWithValue("$json", Encoding.UTF8.GetString(RetryIntentCodec.Encode(value))); command.ExecuteNonQuery();
+        command.Parameters.AddWithValue("$json", Encoding.UTF8.GetString(bytes)); command.ExecuteNonQuery();
         command.CommandText = "UPDATE main.operations SET status='completed' WHERE operation_id=$id;"; command.ExecuteNonQuery();
     }
 

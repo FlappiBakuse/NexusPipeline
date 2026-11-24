@@ -4,8 +4,8 @@ using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Execution.Judgement;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Journals;
-using NexusPipeline.Platform.Storage.Sqlite;
 using NexusPipeline.Platform.Storage.Records;
+using NexusPipeline.Platform.Storage.Sqlite;
 
 namespace NexusPipeline.Platform.Storage.Execution;
 
@@ -78,15 +78,38 @@ internal sealed class JudgementEvidenceReader(RuntimeInstance instance, StateDat
         if (retirement is not null) retirement.RequireOriginalJudgement(originalArtifact ?? throw Invalid(), value);
         var invocations = new JudgementWorkerInvocation[value.Exchanges.Length];
         var inputs = new JudgementInputBuilder(instance, database, contracts);
+        using var outputLog = new JudgementLogReader();
         for (var index = 0; index < value.Exchanges.Length; index++)
         {
             var item = value.Exchanges[index];
             invocations[index] = JudgementInvocationArchive.Decode(_blobs, item.Invocation);
             if (retirement?.ReplacesRawReplay(value.Identity.Primary, item.RawOutput) != true)
-                inputs.VerifyHistorical(total, invocations[index], item.RawOutput);
+                inputs.VerifyHistorical(total, invocations[index], item.RawOutput, outputLog);
         }
         return JudgementEvidenceCodec.Replay(_blobs, value, definition, invocations).Decision;
     }
 
     private static IOException Invalid() => new("execution_judgement_evidence_unbound");
+}
+
+internal static class JudgementEvidenceBudget
+{
+    internal static long MaximumInputBytes(long maximum, long recorded, bool final) =>
+        Available(maximum, recorded, final) - JudgementProbeProtocol.FaultReserveBytes;
+
+    internal static long AllocateProbes(long maximum, long recorded, long maximumInputBytes, bool final)
+    {
+        if (maximumInputBytes < 1) throw new ArgumentOutOfRangeException(nameof(maximumInputBytes));
+        var available = Available(maximum, recorded, final) - maximumInputBytes;
+        return available < JudgementProbeProtocol.FaultReserveBytes ? 0 : Math.Min(available, JudgementProbeProtocol.MaximumEvidenceBytes);
+    }
+
+    private static long Available(long maximum, long recorded, bool final)
+    {
+        if (maximum is < JudgementWorkerProtocol.MaximumInvocationBytes or > JudgementWorkerProtocol.MaximumEvidenceBytes ||
+            recorded < 0 || recorded > maximum) throw new IOException("judgement_evidence_capacity_exhausted");
+        var finalReserve = final ? 0L : JudgementWorkerProtocol.MaximumInvocationBytes + JudgementWorkerProtocol.MaximumResponseBytes +
+            JudgementProbeProtocol.FaultReserveBytes;
+        return maximum - recorded - finalReserve - JudgementWorkerProtocol.MaximumResponseBytes;
+    }
 }

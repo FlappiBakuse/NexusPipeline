@@ -2,6 +2,7 @@ using NexusPipeline.Core.Automation;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Core.Operations;
+using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
@@ -57,7 +58,7 @@ public sealed class AssetPreparationExecutor(RuntimeInstance instance, ContractR
         var held = new List<IDisposable>();
         try
         {
-            PrepareContents(prepared, sources, workspace, held, cancellationToken);
+            PrepareContents(prepared, plan, sources, evidence, workspace, held, cancellationToken);
             using var inspection = new AssetPreparationInspection(instance, contracts, database, prepared.Plan, prepared.Reference, workspace);
             if (!inspection.AllContentReady) throw new IOException("asset_preparation_not_complete");
             new AssetPreparationPublication(instance, contracts, database).VerifyDefinitions(prepared.Plan);
@@ -74,22 +75,18 @@ public sealed class AssetPreparationExecutor(RuntimeInstance instance, ContractR
         finally { for (var position = held.Count - 1; position >= 0; position--) held[position].Dispose(); }
     }
 
-    private void PrepareContents(PreparedAssetPreparation prepared, AssetPreparationSources sources,
-        NexusPipeline.Platform.Serialization.Protocol.AssetPreparationWorkspace workspace, List<IDisposable> held, CancellationToken cancellationToken)
+    private void PrepareContents(PreparedAssetPreparation prepared, AssetPreparationPlan plan, AssetPreparationSources sources,
+        AssetEvidenceStore evidence, AssetPreparationWorkspace workspace, List<IDisposable> held, CancellationToken cancellationToken)
     {
-        var plan = prepared.Plan.ReadWire();
+        _ = prepared.Plan;
         var id = Guid.Parse(plan.JournalId);
-        var evidence = new AssetEvidenceStore(instance, contracts, database);
-        var codec = new AssetEvidenceCodec(instance, contracts);
-        var writer = JournalWriterStore.CurrentWriter.WriterId;
         var outbox = new FileEffectOutbox(database);
         foreach (var asset in plan.Assets.Where(value => !value.WasPresent).DistinctBy(value => value.Content.Sha256))
         {
             cancellationToken.ThrowIfCancellationRequested();
             var path = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(instance.RuntimeRoot, asset.Content.RelativePath));
             held.Add(new PhysicalDirectoryLease(Path.GetDirectoryName(path)!, AssetEvidenceCodec.Physical(asset.ParentIdentity)));
-            var started = evidence.Write(prepared.Plan, prepared.Reference.Sha256, workspace,
-                codec.Receipt(plan, prepared.Reference.Sha256, asset, writer, null));
+            var started = evidence.WritePrepared(plan, prepared.Reference.Sha256, workspace, asset, null);
             At(AssetPreparationPoint.StartedReceipt, id, asset.Content.Sha256);
             var step = AssetPreparationAcceptance.Step(asset.Content.Sha256);
             outbox.Record(id, step, FileEffectState.Pending, FileEffectState.Started, started.Sha256);
@@ -99,8 +96,7 @@ public sealed class AssetPreparationExecutor(RuntimeInstance instance, ContractR
             held.Add(file);
             if (PhysicalObjectIdentity.Read(file.SafeFileHandle) != identity) throw new IOException("asset_preparation_content_replaced");
             At(AssetPreparationPoint.ContentFlushed, id, asset.Content.Sha256);
-            var completed = evidence.Write(prepared.Plan, prepared.Reference.Sha256, workspace,
-                codec.Receipt(plan, prepared.Reference.Sha256, asset, writer, identity));
+            var completed = evidence.WritePrepared(plan, prepared.Reference.Sha256, workspace, asset, identity);
             At(AssetPreparationPoint.CompletedReceipt, id, asset.Content.Sha256);
             outbox.Record(id, step, FileEffectState.Started, FileEffectState.Completed, completed.Sha256);
             At(AssetPreparationPoint.CompletedOutbox, id, asset.Content.Sha256);

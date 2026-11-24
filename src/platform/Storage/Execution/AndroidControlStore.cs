@@ -1,13 +1,15 @@
-using System.Runtime.Versioning;
-using System.Collections.Immutable;
-using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Configuration;
-using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Core.Execution;
+using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
+using System.Collections.Immutable;
+using System.Diagnostics;
+using System.Runtime.Versioning;
+using System.Text.Json;
 
 namespace NexusPipeline.Platform.Storage.Execution;
 
@@ -126,9 +128,7 @@ internal sealed class AndroidControlStore : IDisposable
             !actualJob.ActiveProcessIds().SequenceEqual([root.ProcessId])) throw Invalid();
         _database.Write((connection, transaction) =>
         {
-            AndroidControlRows.RequireRegisteredInside(connection, transaction, registration);
-            _clock.Require(AndroidControlAdmission.IsCleanup(request.Purpose));
-            TargetRootFacts.InsertCommandInside(connection, transaction, state, registration, request, identity);
+            TargetRootFacts.InsertCommandInside(connection, transaction, state, registration, request, identity, _clock);
             return true;
         });
         _clock.Require(AndroidControlAdmission.IsCleanup(request.Purpose));
@@ -514,5 +514,144 @@ internal sealed class PreparedAndroidRetention(AndroidControlStore owner, Prepar
     {
         if (!ReferenceEquals(actual, job)) throw new IOException("execution_emulator_retention_owner_unbound");
         return authority.Use(actual, request => owner.UseRetention(request, reference, inventory, effect));
+    }
+}
+
+internal static class AndroidControlRows
+{
+    internal static void RegisterInside(SqliteConnection connection, SqliteTransaction transaction,
+        AttemptWriterState state, AndroidCommandRegistration item, AndroidCommandRequest request)
+    {
+        AndroidControlAdmission.RequireInside(connection, transaction, state, request);
+        if (item.Binding != request.Binding || item.Sequence != request.Sequence ||
+            item.RequestDigest != AndroidCommandIdentity.Digest(request)) throw Invalid();
+        using var command = connection.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "INSERT INTO main.execution_target_command_jobs(journal_id,command_id,step_id,command_sequence,job_name,writer_id,document_json) " +
+            "VALUES($journal,$id,$step,$sequence,$job,$writer,$document) ON CONFLICT(journal_id,command_id) DO NOTHING;";
+        Bind(command, item);
+        command.Parameters.AddWithValue("$step", item.Binding.StepId); command.Parameters.AddWithValue("$sequence", item.Sequence);
+        command.Parameters.AddWithValue("$job", item.Binding.JobName); command.Parameters.AddWithValue("$writer", item.Binding.OwnerWriterId.ToString("D"));
+        command.Parameters.AddWithValue("$document", System.Text.Encoding.UTF8.GetString(
+            NexusPipeline.Platform.Serialization.BoundedJson.Serialize(item, StepResultCodec.Options)));
+        command.ExecuteNonQuery();
+        RequireRegisteredInside(connection, transaction, item);
+    }
+
+    internal static void RequireRegisteredInside(SqliteConnection connection, SqliteTransaction transaction, AndroidCommandRegistration item)
+    {
+        using var command = connection.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "SELECT step_id,command_sequence,job_name,writer_id,document_json FROM main.execution_target_command_jobs " +
+            "WHERE journal_id=$journal AND command_id=$id;";
+        Bind(command, item); using var row = command.ExecuteReader();
+        if (!row.Read() || row.GetString(0) != item.Binding.StepId || row.GetInt32(1) != item.Sequence ||
+            row.GetString(2) != item.Binding.JobName || row.GetString(3) != item.Binding.OwnerWriterId.ToString("D")) throw Invalid();
+        var saved = AndroidControlCodec.Decode<AndroidCommandRegistration>(System.Text.Encoding.UTF8.GetBytes(row.GetString(4)));
+        if (saved != item) throw Invalid();
+    }
+
+    internal static void VerifyInside(SqliteConnection connection, SqliteTransaction transaction,
+        Guid journalId, IReadOnlyList<AndroidCommandRegistration> projected)
+    {
+        using var command = connection.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "SELECT command_id FROM main.execution_target_command_jobs WHERE journal_id=$journal LIMIT 1025;";
+        command.Parameters.AddWithValue("$journal", journalId.ToString("D"));
+        var ids = new List<Guid>();
+        using (var row = command.ExecuteReader()) while (row.Read()) ids.Add(Guid.Parse(row.GetString(0)));
+        if (ids.Count != projected.Count || !ids.ToHashSet().SetEquals(projected.Select(item => item.Binding.TargetId))) throw Invalid();
+        foreach (var item in projected) RequireRegisteredInside(connection, transaction, item);
+    }
+
+    private static void Bind(SqliteCommand command, AndroidCommandRegistration item)
+    {
+        command.Parameters.AddWithValue("$journal", item.Binding.ParentJournalId.ToString("D"));
+        command.Parameters.AddWithValue("$id", item.Binding.TargetId.ToString("D"));
+    }
+
+    private static IOException Invalid() => new("execution_android_command_sql_unbound");
+}
+
+internal static class AndroidControlAdmission
+{
+    internal static bool IsCleanup(AndroidCommandPurpose purpose) => purpose is
+        AndroidCommandPurpose.CleanupReadiness or AndroidCommandPurpose.CleanupApplication or
+        AndroidCommandPurpose.ShutdownDevice or AndroidCommandPurpose.ConfirmOffline;
+
+    internal static void RequireInside(SqliteConnection connection, SqliteTransaction transaction,
+        AttemptWriterState state, AndroidCommandRequest request)
+    {
+        AttemptWriterState.RequireCursor(connection, transaction, state.Journal, EffectGateState.Entered);
+        if (!state.IsExecutionStart || state.Journal.Phase != JournalPhase.Applying ||
+            state.Latest.Revision != state.Journal.Revision || request.Binding.ParentJournalId != state.Journal.JournalId)
+            throw Invalid();
+        var actualSubject = SubjectInside(connection, transaction, state);
+        var expected = AndroidCommandIdentity.Derive(state.Total, request.Binding, actualSubject,
+            request.Sequence, request.Purpose, request.Action);
+        if (AndroidCommandIdentity.Digest(request) != AndroidCommandIdentity.Digest(expected)) throw Invalid();
+        if (!IsCleanup(request.Purpose))
+        {
+            ExecutionCancellationRows.RequireDispatchOpen(connection, transaction, state.Journal.JournalId);
+            PcStageProjection.RequireConfigurationInstalledInside(connection, transaction, state, request.Binding.StepId);
+            ExecutionStepAdmission.RequireOpenRoles(state.Total, state.Jobs, request.Binding.StepId, "process", state.Latest.Root);
+            var process = state.Jobs.Single(job => job.StepId == request.Binding.StepId && job.Role == "process");
+            using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "SELECT NOT EXISTS(SELECT 1 FROM main.journal_writer_job_roots WHERE journal_id=$journal AND job_name=$job);";
+            command.Parameters.AddWithValue("$journal", state.Journal.JournalId.ToString("D"));
+            command.Parameters.AddWithValue("$job", process.JobName);
+            if ((long)command.ExecuteScalar()! != 1 || state.Coverage.Any(item =>
+                    item.StepId == request.Binding.StepId && item.Kind == StepCompletionKind.Collected)) throw Invalid();
+            ExecutionStepAdmission.RequirePredecessorsInside(connection, transaction, state, state.Latest,
+                state.Total.Steps.ToList().FindIndex(step => step.StepId == request.Binding.StepId));
+            return;
+        }
+        RequireCollectedMain(state, request.Binding.StepId);
+        var cleanup = TargetCleanupFacts.Read(state, request.Binding.StepId);
+        if (request.Purpose == AndroidCommandPurpose.CleanupReadiness &&
+                (request.Driver != "mumu" || cleanup.Application == TargetCleanupAction.None && cleanup.Device == TargetCleanupAction.None) ||
+            request.Purpose == AndroidCommandPurpose.CleanupApplication &&
+                cleanup.Application != TargetCleanupAction.StopAndroidApplication ||
+            request.Purpose is AndroidCommandPurpose.ShutdownDevice or AndroidCommandPurpose.ConfirmOffline &&
+                cleanup.Device != TargetCleanupAction.ShutdownAndroid) throw Invalid();
+        var accepted = ExecutionCancellationRows.Read(connection, transaction, state.Journal, state.Attempt);
+        if (accepted?.Identity != state.Cancellation?.Identity) throw Invalid();
+    }
+
+    internal static void RequireCollectedMain(AttemptWriterState state, string stepId)
+    {
+        var result = StepResultCodec.Read(state.Latest.Root, state.Total).SingleOrDefault(item => item.Binding.StepId == stepId);
+        if (result?.IsCollected != true ||
+            state.Jobs.Any(job => job.StepId == stepId && (job.Role == "postHook" || job.ClosedElapsedMilliseconds is null)))
+            throw new IOException("execution_android_necessary_collection_pending");
+    }
+
+    internal static string SubjectInside(SqliteConnection connection, SqliteTransaction transaction, AttemptWriterState state)
+    {
+        using var command = connection.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "SELECT subject_id FROM main.operations WHERE operation_id=$operation AND operation_kind='execution.start' AND initial_journal_id=$journal;";
+        command.Parameters.AddWithValue("$operation", state.Journal.OperationId.ToString("D"));
+        command.Parameters.AddWithValue("$journal", state.Journal.JournalId.ToString("D"));
+        return command.ExecuteScalar() as string ?? throw Invalid();
+    }
+
+    private static IOException Invalid() => new("execution_android_command_admission_closed");
+}
+
+internal sealed class AndroidControlClock(ExecutionTimeBudget runBudget, TimeSpan cleanupLimit)
+{
+    private long? _cleanupStarted;
+
+    internal TimeSpan Remaining(bool cleanup)
+    {
+        if (!cleanup) return runBudget.Read().Remaining;
+        if (cleanupLimit <= TimeSpan.Zero || cleanupLimit > TimeSpan.FromMinutes(1))
+            throw new IOException("execution_android_cleanup_budget_invalid");
+        _cleanupStarted ??= Stopwatch.GetTimestamp();
+        var remaining = cleanupLimit - Stopwatch.GetElapsedTime(_cleanupStarted.Value);
+        return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
+    }
+
+    internal void Require(bool cleanup)
+    {
+        if (Remaining(cleanup) == TimeSpan.Zero)
+            throw new IOException(cleanup ? "execution_android_cleanup_deadline" : "execution_total_budget_exhausted");
     }
 }

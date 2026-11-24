@@ -33,8 +33,8 @@ public sealed class ConfigurationOverviewReader(RuntimeInstance instance, StateD
             foreach (var (path, index) in script.ConfigurationPaths.Select((path, index) => (path, index)))
             {
                 var id = GenericConfigurationPolicy.ResourceId(path);
-                var saved = revisions.Read(new(binding.Id, id));
-                if (saved is not null) saved = GenericConfigurationPolicy.RequireSaved(binding, script, path, revisions);
+                var stored = revisions.ReadStored(new(binding.Id, id));
+                var saved = stored is null ? null : GenericConfigurationPolicy.RequireStored(binding, script, path, stored);
                 resources.Add(View(id, index, path.RelativePath, "", null, saved));
             }
         }
@@ -42,16 +42,16 @@ public sealed class ConfigurationOverviewReader(RuntimeInstance instance, StateD
         {
             foreach (var declaration in ProviderConfigurationPolicy.Declarations(script, provider))
             {
-                var saved = revisions.Read(new(binding.Id, declaration.ResourceId));
-                if (saved is not null) saved = ProviderConfigurationPolicy.RequireSaved(binding, script, declaration, provider, revisions);
+                var stored = revisions.ReadStored(new(binding.Id, declaration.ResourceId));
+                var saved = stored is null ? null : ProviderConfigurationPolicy.RequireStored(binding, script, declaration, provider, stored);
                 resources.Add(View(declaration.ResourceId, declaration.DeclarationIndex,
                     script.ConfigurationPaths[declaration.DeclarationIndex].RelativePath, "", null, saved));
             }
         }
         else foreach (var resource in script.AdapterResources)
         {
-            var saved = revisions.Read(new(binding.Id, resource.ResourceId));
-            if (saved is not null) saved = AdapterConfigurationPolicy.RequireSaved(binding, script, resource, revisions);
+            var stored = revisions.ReadStored(new(binding.Id, resource.ResourceId));
+            var saved = stored is null ? null : AdapterConfigurationPolicy.RequireStored(binding, script, resource, stored);
             resources.Add(View(resource.ResourceId, resource.DeclarationIndex,
                 script.ConfigurationPaths[resource.DeclarationIndex].RelativePath, resource.RelativePath, resource.Syntax, saved));
         }

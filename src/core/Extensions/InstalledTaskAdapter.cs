@@ -24,7 +24,10 @@ public sealed record AdapterTask(string TaskId, string Title, bool IsSelected, b
     public ImmutableArray<string> RetryPrerequisites { get; init; } = [];
     public ImmutableArray<string> NativeResumeScope { get; init; } = [];
 }
-public sealed record AdapterTaskProjection(string ResourceId, string RelativePath, ConfigurationSelector Selector);
+public sealed record AdapterTaskProjection(string ResourceId, string RelativePath, ConfigurationSelector Selector)
+{
+    public ConfigurationSelector? RepetitionSelector { get; init; }
+}
 public enum AdapterDiagnosticSeverity { Information, Warning, Blocking }
 public sealed record AdapterDiagnostic(string Code, string ResourceId, AdapterDiagnosticSeverity Severity);
 public enum AdapterObservationState { Succeeded, Partial, Failed, Unknown }

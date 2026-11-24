@@ -88,11 +88,10 @@ public sealed class ExecutionPlanCodec(RuntimeInstance instance, ContractReader 
             if (verifyMappingContent || mapping.RelativePath.StartsWith("blobs/plans/", StringComparison.Ordinal))
                 held.Add(blobs.OpenVerified(mapping));
         ValidateExtensions(plan);
-        NexusPipeline.Platform.Storage.Emulation.EmulatorPlanBinding.Require(plan, blobs, contracts);
-        foreach (var reference in ExecutionAdapterBinding.Require(plan, bundle, blobs, contracts, providerManifests, verifyMappingContent))
+        NexusPipeline.Platform.Storage.Emulation.EmulatorPlanBinding.Require(plan, blobs, contracts, held);
+        foreach (var reference in ExecutionAdapterBinding.Require(plan, bundle, blobs, contracts, held, providerManifests, verifyMappingContent))
             if (providerManifests is null || !providerManifests.ContainsKey(reference.Sha256)) held.Add(blobs.OpenVerified(reference));
-        foreach (var manifest in ExecutionProviderBinding.Require(plan, blobs, contracts, providerManifests))
-            if (providerManifests is null) held.Add(blobs.OpenVerified(manifest));
+        ExecutionProviderBinding.Require(plan, blobs, contracts, held, providerManifests);
         if (!plan.ResourceKeys.SequenceEqual(ExecutionPlanResources.Derive(plan))) throw new IOException("execution_resource_scope_unbound");
         return new(bytes);
     }

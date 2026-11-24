@@ -37,7 +37,11 @@ internal static class ExecutionTaskProjection
             new ConfigurationTaskTarget(task.TaskId, task.Projection!.Selector)).ToImmutableArray());
         var rule = new RunTaskRule(declaration.RelativePath, Enum.Parse<ConfigurationSyntax>(declaration.Syntax, true),
             ConfigurationSelectorProtocol.Read(declaration.Access), new(taskSource, selected.Select(task => task.TaskId).ToImmutableArray()),
-            selected.Where(task => task.IsEnabled).Select(task => task.TaskId).ToImmutableArray());
+            selected.Where(task => task.IsEnabled).Select(task => task.TaskId).ToImmutableArray())
+        {
+            Repetitions = selected.Where(task => task.Projection!.RepetitionSelector is not null).Select(task =>
+                new RunTaskRepetition(task.TaskId, task.Projection!.RepetitionSelector!, task.RepetitionLimit!.Value, task.RepetitionLimit.Value)).ToImmutableArray()
+        };
         return RunTaskPolicy.Freeze([rule]);
     }
 
@@ -75,7 +79,9 @@ internal static class ExecutionTaskProjection
         var expected = Rules(total, step, source, blobs, contracts);
         if (expected.IsEmpty) return;
         if (expected.Length != actual.Length || expected.Where((rule, index) => !JsonElement.DeepEquals(
-            JsonSerializer.SerializeToElement(rule with { SelectedIds = actual[index].SelectedIds }), JsonSerializer.SerializeToElement(actual[index]))).Any()) throw Invalid();
+            JsonSerializer.SerializeToElement(rule with { SelectedIds = actual[index].SelectedIds }),
+            JsonSerializer.SerializeToElement(actual[index] with { Repetitions = actual[index].Repetitions.Select(item =>
+                item with { InvocationCount = item.OriginalCount }).ToImmutableArray() }))).Any()) throw Invalid();
     }
 
     private static IOException Invalid() => new("execution_task_projection_unbound");

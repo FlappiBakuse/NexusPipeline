@@ -86,10 +86,9 @@ internal sealed class RunProgressCapture(RuntimeInstance instance, StateDatabase
                     frozen.State.Source.Revision, frozen.Plan.EditPolicy!, raw.Snapshot,
                     tree => new ConfigurationTaskTransformation(blobs).Restore(resource.OperationId, frozen.State.Source, frozen.State.Tasks, tree));
                 var trigger = sealedOutput ? ConfigurationSyncTrigger.Finalization : ConfigurationSyncTrigger.InitialDetection;
-                var baseline = ConfigurationSynchronizationPolicy.Evaluate(frozen.State.Source.Tree, normalized, elapsed, true, trigger);
-                var current = ConfigurationSynchronizationPolicy.Evaluate(saved.Tree, normalized, elapsed, true, trigger);
-                reason = !baseline.IsAllowed ? baseline.ReasonCode : !current.IsAllowed ? current.ReasonCode :
-                    FileTreeDelta.Compare(saved.Tree, normalized).Changes.IsEmpty ? "configuration_sync_unchanged" : "configuration_sync_allowed";
+                var sync = ConfigurationSynchronizationPolicy.Evaluate(frozen.State.Source.Tree, saved.Tree, normalized, elapsed, true, trigger);
+                reason = !sync.IsAllowed ? sync.ReasonCode :
+                    sync.Delta!.Changes.IsEmpty ? "configuration_sync_unchanged" : "configuration_sync_allowed";
                 if (reason == "configuration_sync_allowed") candidate = normalized;
             }
             catch (Exception error) when (error is IOException or ConfigurationException or System.Text.Json.JsonException)

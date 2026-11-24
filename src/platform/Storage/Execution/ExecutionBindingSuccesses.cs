@@ -20,6 +20,27 @@ internal static class ExecutionBindingSuccesses
         return result;
     }
 
+    internal static long CountInWindow(StateDatabase database, Guid bindingId,
+        (DateTimeOffset Start, DateTimeOffset End) window, DateTimeOffset observed)
+    {
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
+        using var transaction = DatabaseConnections.BeginRead(connection);
+        return CountInside(connection, transaction, bindingId.ToString("D"), window, observed);
+    }
+
+    internal static long CountInside(SqliteConnection connection, SqliteTransaction transaction, string bindingId,
+        (DateTimeOffset Start, DateTimeOffset End) window, DateTimeOffset observed)
+    {
+        using var command = DatabaseConnections.Command(connection, transaction,
+            "SELECT count(*) FROM main.execution_binding_successes WHERE binding_id=$binding AND started_at_utc_ticks>=$start " +
+            "AND started_at_utc_ticks<$end AND started_at_utc_ticks<=$observed;");
+        command.Parameters.AddWithValue("$binding", bindingId);
+        command.Parameters.AddWithValue("$start", window.Start.UtcTicks);
+        command.Parameters.AddWithValue("$end", window.End.UtcTicks);
+        command.Parameters.AddWithValue("$observed", observed.UtcTicks);
+        return (long)command.ExecuteScalar()!;
+    }
+
     internal static (DateTimeOffset Start, DateTimeOffset End) Day(DateTimeOffset now)
     {
         var date = TimeZoneInfo.ConvertTime(now, TimeZoneInfo.Local).Date;

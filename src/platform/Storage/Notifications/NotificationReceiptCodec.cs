@@ -32,13 +32,17 @@ internal sealed class NotificationReceiptCodec(RuntimeInstance instance, StateDa
     internal NotificationReceiptSnapshot Read(BlobReference reference, SqliteConnection connection, SqliteTransaction transaction) =>
         ReadContext(reference, connection, transaction).Snapshot;
 
-    internal NotificationReceiptSnapshot ReadMetadata(BlobReference reference, SqliteConnection connection, SqliteTransaction transaction)
+    internal NotificationReceiptSnapshot ReadMetadata(BlobReference reference, SqliteConnection connection, SqliteTransaction transaction) =>
+        ReadMetadata(reference, connection, transaction, out _);
+
+    internal NotificationReceiptSnapshot ReadMetadata(BlobReference reference, SqliteConnection connection,
+        SqliteTransaction transaction, out int nextOrdinal)
     {
         var document = new NotificationCatalogCodec(instance, contracts).ReadDocument<NotificationReceiptDocument>(reference);
         Require(document);
         if (document.InstanceId != instance.InstanceId || database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot) throw Invalid();
         var snapshot = new NotificationReceiptSnapshot(document, reference);
-        NotificationReceiptRows.RequireSaved(connection, transaction, snapshot);
+        nextOrdinal = NotificationReceiptRows.RequireSaved(connection, transaction, snapshot);
         ExecutionNotificationSource.RequirePublishedRecord(connection, transaction, document.Receipt);
         var registered = RecoveryJournalRegistry.ReadInside(connection, transaction, document.Receipt.JournalId);
         if (registered.Phase != JournalPhase.Committed || registered.PlanDigest != document.Receipt.PlanDigest) throw Invalid();

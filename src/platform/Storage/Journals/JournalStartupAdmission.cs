@@ -70,8 +70,6 @@ public sealed class JournalStartupAdmission(RuntimeInstance instance, ContractRe
             Scheduling.ScheduleMinuteInventory.Verify(database);
         using (StartupProfile.Measure("inventory.StartupQueueInventory"))
             Scheduling.StartupQueueInventory.Verify(instance, database);
-        using (StartupProfile.Measure("inventory.ScheduledProviderInventory"))
-            Scheduling.ScheduledProviderInventory.Visit(instance, database, contracts, _ => { });
         using (StartupProfile.Measure("inventory.StartSourceRows"))
             Execution.StartSourceRows.VerifyInventory(instance, database, contracts);
         using (StartupProfile.Measure("inventory.RunBudgetInventory"))
@@ -101,8 +99,6 @@ public sealed class JournalStartupAdmission(RuntimeInstance instance, ContractRe
             new Notifications.NotificationPublicationInventory(instance, database, contracts).VerifyReadOnly();
         using (StartupProfile.Measure("inventory.Secrets"))
             new Secrets.SecretDocumentInventory(instance, database, contracts).Verify();
-        using (StartupProfile.Measure("inventory.ManualWorkInventory"))
-            Scheduling.ManualWorkInventory.Visit(instance, database, contracts, _ => { });
         using (StartupProfile.Measure("inventory.WorkEffectInventory"))
             Scheduling.WorkEffectInventory.Verify(instance, database, contracts, rotations: true);
         using (StartupProfile.Measure("inventory.DeliveryReferenceIndex"))

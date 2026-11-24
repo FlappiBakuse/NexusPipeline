@@ -67,6 +67,6 @@ internal static class DeliveryReferenceIndex
 
     internal static void VerifyReadOnly(RuntimeInstance instance, StateDatabase database, ContractReader contracts)
     {
-        NotificationReferenceInventory.Visit(instance, database, contracts, (_, _, _) => { }, (_, _) => { });
+        NotificationReferenceInventory.VerifyReadOnly(instance, database, contracts);
     }
 }

@@ -1,12 +1,17 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Extensions;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace NexusPipeline.Platform.Storage.Extensions;
+
+internal sealed record ExtensionInstalledFootprint(string Format, int Version, Guid InstanceId,
+    Guid OperationId, Guid JournalId, string ExtensionId, long Revision, bool IsInstalled,
+    ExtensionPackageIdentity Package, string TargetPath, PhysicalObjectIdentity ParentIdentity,
+    BlobReference Source, BlobReference PhysicalResult, ArchivedFileTree Payload);
 
 internal sealed class InstalledFootprintCodec(RuntimeInstance instance, PayloadApplyRoots roots,
     ContractReader contracts)

@@ -1,9 +1,9 @@
-using System.Globalization;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Configuration;
-using NexusPipeline.Core.Operations;
 using NexusPipeline.Core.Maintenance;
+using NexusPipeline.Core.Operations;
 using NexusPipeline.Platform.Storage.Journals;
+using System.Globalization;
 
 namespace NexusPipeline.Platform.Storage.Sqlite;
 
@@ -155,10 +155,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
         using (var row = command.ExecuteReader())
         {
             if (!row.Read()) return null;
-            if (!Enum.TryParse<JournalKind>(row.GetString(1), true, out var kind) ||
-                !Enum.TryParse<JournalPhase>(row.GetString(2), true, out var phase)) throw new IOException("recovery_registry_journal_invalid");
-            result = new(journalId, Guid.ParseExact(row.GetString(0), "D"), kind, phase,
-                row.GetInt64(3), row.GetString(4), row.GetString(5), []);
+            result = JournalHeader.Read(row, 0).Bind(journalId);
         }
         command.CommandText = claims is null
             ? "SELECT resource_key FROM main.journal_resources WHERE journal_id=$id ORDER BY resource_key LIMIT 4097;"
@@ -180,11 +177,29 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
                 if (!Enum.IsDefined(mode)) throw new IOException("configuration_hold_claims_unbound");
                 claims.Add(key, mode);
             }
+        return WithResources(result, resources);
+    }
+
+    private static RegisteredJournal WithResources(RegisteredJournal journal, List<string> resources)
+    {
         if (resources.Count is 0 or > 4096) throw new IOException("recovery_registry_resource_limit");
-        result = result with { ResourceKeys = resources.AsReadOnly() };
+        var result = journal with { ResourceKeys = resources.AsReadOnly() };
         try { Validate(result); }
         catch (ArgumentException error) { throw new IOException("recovery_registry_journal_invalid", error); }
         return result;
+    }
+
+    private readonly record struct JournalHeader(string OperationId, string Kind, string Phase, long Revision, string PlanPath, string PlanDigest)
+    {
+        internal static JournalHeader Read(SqliteDataReader row, int offset) => new(row.GetString(offset),
+            row.GetString(offset + 1), row.GetString(offset + 2), row.GetInt64(offset + 3), row.GetString(offset + 4), row.GetString(offset + 5));
+
+        internal RegisteredJournal Bind(Guid journalId)
+        {
+            if (!Enum.TryParse<JournalKind>(Kind, true, out var kind) || !Enum.TryParse<JournalPhase>(Phase, true, out var phase))
+                throw new IOException("recovery_registry_journal_invalid");
+            return new(journalId, Guid.ParseExact(OperationId, "D"), kind, phase, Revision, PlanPath, PlanDigest, []);
+        }
     }
 
     internal IEnumerable<RegisteredJournal> ReadHistory(bool completedFamiliesOnly = false, string after = "")
@@ -210,16 +225,47 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
         while (true)
         {
             using var command = connection.CreateCommand(); command.Transaction = transaction;
+            const string columns = "SELECT j.journal_id,j.operation_id,j.operation_kind,j.phase,j.revision,j.plan_path,j.plan_digest ";
             command.CommandText = completedFamiliesOnly
-                ? "SELECT j.journal_id FROM main.operation_journals j JOIN main.recovery_capacity_reservations r ON r.owner_journal_id=j.journal_id " +
+                ? columns + "FROM main.operation_journals j JOIN main.recovery_capacity_reservations r ON r.owner_journal_id=j.journal_id " +
                     "WHERE j.journal_id>$after AND NOT " + RecoveryCapacityStore.ActiveReservation + " ORDER BY j.journal_id LIMIT 128;"
-                : "SELECT journal_id FROM main.operation_journals WHERE journal_id>$after ORDER BY journal_id LIMIT 128;";
+                : columns + "FROM main.operation_journals j WHERE j.journal_id>$after ORDER BY j.journal_id LIMIT 128;";
             command.Parameters.AddWithValue("$after", after);
-            var ids = new List<Guid>();
-            using (var reader = command.ExecuteReader()) while (reader.Read()) ids.Add(Guid.ParseExact(reader.GetString(0), "D"));
-            if (ids.Count == 0) yield break;
-            foreach (var id in ids) yield return ReadJournalInside(connection, transaction, id);
-            after = ids[^1].ToString("D");
+            var page = new List<(string Key, Guid Id, JournalHeader Header)>();
+            using (var reader = command.ExecuteReader())
+                while (reader.Read())
+                {
+                    var key = reader.GetString(0);
+                    page.Add((key, Guid.ParseExact(key, "D"), JournalHeader.Read(reader, 1)));
+                }
+            if (page.Count == 0) yield break;
+
+            command.Parameters.Clear();
+            var parameters = new string[page.Count];
+            for (var index = 0; index < page.Count; index++)
+            {
+                parameters[index] = "$journal" + index;
+                command.Parameters.AddWithValue(parameters[index], page[index].Key);
+            }
+            command.CommandText = "SELECT journal_id,resource_key FROM main.journal_resources WHERE journal_id IN (" +
+                string.Join(',', parameters) + ") ORDER BY journal_id,resource_key;";
+            using var rows = command.ExecuteReader();
+            var next = rows.Read() ? rows.GetString(0) : null;
+            foreach (var entry in page)
+            {
+                if (entry.Key != entry.Id.ToString("D")) throw new IOException("journal_not_registered");
+                var journal = entry.Header.Bind(entry.Id);
+                var resources = new List<string>();
+                while (next == entry.Key)
+                {
+                    if (resources.Count == 4096) throw new IOException("recovery_registry_resource_limit");
+                    resources.Add(rows.GetString(1));
+                    next = rows.Read() ? rows.GetString(0) : null;
+                }
+                yield return WithResources(journal, resources);
+            }
+            if (page.Count < 128) yield break;
+            after = page[^1].Key;
         }
     }
 
@@ -453,5 +499,52 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
     {
         var text = value.ToString();
         return char.ToLowerInvariant(text[0]) + text[1..];
+    }
+}
+
+internal static class RecoveryJournalMembers
+{
+    internal static IReadOnlyList<FileEffect> Read(SqliteConnection connection, SqliteTransaction transaction, List<RegisteredJournal> journals)
+    {
+        const int pageSize = 128;
+        using var command = connection.CreateCommand(); command.Transaction = transaction;
+        var effects = new List<FileEffect>();
+        for (var first = 0; first < journals.Count; first += pageSize)
+        {
+            var ids = new string[Math.Min(pageSize, journals.Count - first)];
+            var parameters = new string[ids.Length];
+            command.Parameters.Clear();
+            for (var index = 0; index < ids.Length; index++)
+            {
+                ids[index] = journals[first + index].JournalId.ToString("D");
+                parameters[index] = "$journal" + index;
+                command.Parameters.AddWithValue(parameters[index], ids[index]);
+            }
+            var filter = " WHERE journal_id IN (" + string.Join(',', parameters) + ") ORDER BY journal_id,";
+            command.CommandText = "SELECT journal_id,resource_key FROM main.journal_resources" + filter + "resource_key;";
+            ReadResources(command, journals, first, ids);
+            command.CommandText = FileEffectRows.Select + filter + "step_id;";
+            FileEffectRows.AppendMembers(command, effects);
+        }
+        return effects.AsReadOnly();
+    }
+
+    private static void ReadResources(SqliteCommand command, List<RegisteredJournal> journals, int first, IReadOnlyList<string> ids)
+    {
+        using var rows = command.ExecuteReader();
+        var more = rows.Read();
+        for (var index = 0; index < ids.Count; index++)
+        {
+            var resources = new List<string>();
+            while (more && rows.GetString(0) == ids[index])
+            {
+                if (resources.Count == 4096) throw new IOException("recovery_registry_resource_limit");
+                resources.Add(rows.GetString(1));
+                more = rows.Read();
+            }
+            if (resources.Count == 0) throw new IOException("recovery_registry_resource_limit");
+            journals[first + index] = journals[first + index] with { ResourceKeys = resources.AsReadOnly() };
+        }
+        if (more) throw new IOException("recovery_registry_resource_limit");
     }
 }

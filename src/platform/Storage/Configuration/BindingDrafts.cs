@@ -124,9 +124,22 @@ public sealed class BindingDrafts : IDisposable
                 if (binding is null || binding.Revision != 0 || binding.ScriptId != value.Owner.ScriptId || binding.UserId != value.Owner.UserId)
                     throw new ConfigurationException("configuration_draft_binding_changed");
             }
-            using var files = OperatingSystem.IsWindows() ? new DraftSecretFiles(_instance, _database,
+            var files = OperatingSystem.IsWindows() ? new DraftSecretFiles(_instance, _database,
                 selected.Select(value => value.Secrets).OfType<DraftProjectSecrets>()) : null;
-            var result = write((connection, transaction, before) =>
+            Exception? primary = null;
+            try
+            {
+                var result = write(Publish);
+                foreach (var id in ids) Discard(id, operation.SubjectId);
+                return result;
+            }
+            catch (Exception error) { primary = error; throw; }
+            finally
+            {
+                if (OperatingSystem.IsWindows()) files?.Release(primary);
+            }
+
+            void Publish(SqliteConnection connection, SqliteTransaction transaction, AutomationCatalog before)
             {
                 var installations = new Dictionary<string, ExtensionInstalledMetadata?>(StringComparer.Ordinal);
                 for (var index = 0; index < selected.Length; index++)
@@ -154,9 +167,7 @@ public sealed class BindingDrafts : IDisposable
                     if (OperatingSystem.IsWindows()) value.Secrets?.Publish(connection, transaction, child, acceptedAt);
                 }
                 if (OperatingSystem.IsWindows()) files?.RequireCurrent();
-            });
-            foreach (var id in ids) Discard(id, operation.SubjectId);
-            return result;
+            }
         }
     }
 

@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
 
@@ -35,6 +36,21 @@ public sealed class ContractReader
         ContractSchemas.RequireName(schemaName);
         if (ownedBytes.Length is < 1 or > StrictJson.MaximumBytes) throw new JsonException("invalid_json_size");
         RequireValid(document.RootElement, schemaName, ownedBytes.Span, sha256);
+    }
+
+    // Callers hold the document for the full use of this value. Untrusted input must already have passed StrictJson.
+    internal void RequireParsedSchema(JsonElement value, string schemaName)
+    {
+        ContractSchemas.RequireName(schemaName);
+        var bytes = JsonMarshal.GetRawUtf8Value(value);
+        if (bytes.Length is < 1 or > StrictJson.MaximumBytes) throw new JsonException("invalid_json_size");
+        RequireValid(value, schemaName, bytes);
+    }
+
+    internal T ReadParsed<T>(JsonElement value, string schemaName)
+    {
+        RequireParsedSchema(value, schemaName);
+        return value.Deserialize<T>() ?? throw new JsonException("null_contract");
     }
 
     private static void RequireValid(JsonElement value, string schemaName, ReadOnlySpan<byte> bytes, string? sha256 = null)

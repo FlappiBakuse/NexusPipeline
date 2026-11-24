@@ -25,15 +25,19 @@ internal sealed class AssetEvidenceCodec(RuntimeInstance instance, ContractReade
         return value;
     }
 
-    internal AssetPreparationReceipt Receipt(AssetPreparationPlan plan, string planDigest, AssetPreparationDefsAsset asset,
-        Guid writerId, PhysicalObjectIdentity? identity) => DecodeReceipt(BoundedJson.Serialize(new AssetPreparationReceipt
+    internal (AssetPreparationReceipt Receipt, byte[] Bytes) EncodeReceipt(AssetPreparationPlan plan, string planDigest,
+        AssetPreparationDefsAsset asset, Guid writerId, PhysicalObjectIdentity? identity)
+    {
+        var bytes = BoundedJson.Serialize(new AssetPreparationReceipt
         {
             Format = "nexus.asset.preparation.receipt", Version = 1, InstanceId = plan.InstanceId,
             OperationId = plan.OperationId, JournalId = plan.JournalId, WriterId = writerId.ToString("D"),
             PlanDigest = planDigest, StepId = AssetPreparationAcceptance.Step(asset.Content.Sha256),
             Stage = identity is null ? "started" : "completed", Content = asset.Content,
             ParentIdentity = asset.ParentIdentity, Identity = identity is null ? null : Wire(identity)
-        }), plan, planDigest, asset);
+        });
+        return (DecodeReceipt(bytes, plan, planDigest, asset), bytes);
+    }
 
     internal AssetPreparationReceipt DecodeReceipt(ReadOnlyMemory<byte> bytes, AssetPreparationPlan plan, string planDigest,
         AssetPreparationDefsAsset asset)

@@ -23,10 +23,10 @@ internal sealed class BindingSkipStore(RuntimeInstance instance, StateDatabase d
         if (step?.StepId != stepId) throw Invalid();
         using var predecessors = ExecutionStepAdmission.HoldPredecessors(instance, database, contracts, state, processed.Length);
         var now = DateTimeOffset.UtcNow;
-        var count = step.BindingId is null ? 0 : ExecutionBindingSuccesses.Today(database, now).GetValueOrDefault(Guid.Parse(step.BindingId));
+        var day = ExecutionBindingSuccesses.Day(now);
+        var count = step.BindingId is null ? 0 : ExecutionBindingSuccesses.CountInWindow(database, Guid.Parse(step.BindingId), day, now);
         var reason = Reason(state, stepId, count);
         if (reason is null) return false;
-        var day = ExecutionBindingSuccesses.Day(now);
         var decision = new ExecutionBindingSkip(BindingSkipCodec.Format, 1, stepId, reason, now, count)
             { DailyWindowStartUtc = day.Start, DailyWindowEndUtc = day.End };
         var document = JsonNode.Parse(state.Latest.Export())!.AsObject();
@@ -66,14 +66,8 @@ internal sealed class BindingSkipStore(RuntimeInstance instance, StateDatabase d
             command.CommandText = "SELECT EXISTS(SELECT 1 FROM configuration.configuration_run_sessions WHERE parent_journal_id=$parent AND step_id=$step);";
             command.Parameters.AddWithValue("$parent", state.Journal.JournalId.ToString("D")); command.Parameters.AddWithValue("$step", item.StepId);
             if ((long)command.ExecuteScalar()! != 0) throw Invalid();
-            if (item.ReasonCode == "execution_daily_success_limit")
-            {
-                command.CommandText = "SELECT count(*) FROM main.execution_binding_successes WHERE binding_id=$binding AND started_at_utc_ticks>=$start " +
-                    "AND started_at_utc_ticks<$end AND started_at_utc_ticks<=$observed;";
-                command.Parameters.AddWithValue("$binding", step.BindingId!); command.Parameters.AddWithValue("$start", item.DailyWindowStartUtc.UtcTicks);
-                command.Parameters.AddWithValue("$end", item.DailyWindowEndUtc.UtcTicks); command.Parameters.AddWithValue("$observed", item.EvaluatedAtUtc.UtcTicks);
-                if ((long)command.ExecuteScalar()! < item.SuccessfulRunsToday) throw Invalid();
-            }
+            if (item.ReasonCode == "execution_daily_success_limit" && ExecutionBindingSuccesses.CountInside(connection, transaction, step.BindingId!,
+                (item.DailyWindowStartUtc, item.DailyWindowEndUtc), item.EvaluatedAtUtc) < item.SuccessfulRunsToday) throw Invalid();
             if (Reason(state with { Latest = before }, item.StepId, item.SuccessfulRunsToday) != item.ReasonCode) throw Invalid();
         }
     }

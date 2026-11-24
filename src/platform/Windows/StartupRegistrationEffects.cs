@@ -17,7 +17,7 @@ public sealed class StartupRegistrationEffects : IStartupRegistrationEffects
     public StartupRegistrationInspection Inspect(StartupRegistrationDefinition expected)
     {
         using var session = _open();
-        return Inspect(session, expected);
+        return new ExpectedTask(session, expected).Inspect();
     }
 
     public void ValidateOnly(StartupRegistrationDefinition definition)
@@ -42,14 +42,14 @@ public sealed class StartupRegistrationEffects : IStartupRegistrationEffects
         if (Convert.ToHexStringLower(SHA256.HashData(image)) != command.ExecutableSha256)
             throw new IOException("startup_registration_executable_changed");
         using var session = _open();
-        var before = Inspect(session, definition);
+        var task = new ExpectedTask(session, definition);
+        var before = task.Inspect();
         if (before.State == StartupRegistrationState.Matches) return StartupRegistrationEffect.AlreadySatisfied;
         if (before.State != StartupRegistrationState.Missing) throw new IOException("startup_registration_foreign");
-        var xml = StartupTaskXml.Encode(definition);
-        session.Validate(StartupTaskXml.TaskName(definition), xml, definition.UserSid);
-        if (Inspect(session, definition).State != StartupRegistrationState.Missing) throw new IOException("startup_registration_changed_before_effect");
-        session.Create(StartupTaskXml.TaskName(definition), xml, definition.UserSid);
-        if (Inspect(session, definition).State != StartupRegistrationState.Matches) throw new IOException("startup_registration_outcome_unverified");
+        session.Validate(task.Name, task.Xml, definition.UserSid);
+        if (task.Inspect().State != StartupRegistrationState.Missing) throw new IOException("startup_registration_changed_before_effect");
+        session.Create(task.Name, task.Xml, definition.UserSid);
+        if (task.Inspect().State != StartupRegistrationState.Matches) throw new IOException("startup_registration_outcome_unverified");
         return StartupRegistrationEffect.Created;
     }
 
@@ -57,25 +57,33 @@ public sealed class StartupRegistrationEffects : IStartupRegistrationEffects
     {
         RequireCurrentUser(expected);
         using var session = _open();
-        var before = Inspect(session, expected);
+        var task = new ExpectedTask(session, expected);
+        var before = task.Inspect();
         if (before.State == StartupRegistrationState.Missing) return StartupRegistrationEffect.AlreadySatisfied;
         if (before.State != StartupRegistrationState.Matches) throw new IOException("startup_registration_foreign");
-        if (Inspect(session, expected) != before) throw new IOException("startup_registration_changed_before_effect");
+        if (task.Inspect() != before) throw new IOException("startup_registration_changed_before_effect");
         // Task Scheduler has no compare-and-delete; the instance lease and same-user trust boundary serialize cooperating owners.
-        session.Delete(StartupTaskXml.TaskName(expected));
-        if (session.Read(StartupTaskXml.TaskName(expected)) is not null) throw new IOException("startup_registration_outcome_unverified");
+        session.Delete(task.Name);
+        if (session.Read(task.Name) is not null) throw new IOException("startup_registration_outcome_unverified");
         return StartupRegistrationEffect.Removed;
     }
 
-    private static StartupRegistrationInspection Inspect(IStartupTaskScheduler session, StartupRegistrationDefinition expected)
+    private sealed class ExpectedTask(IStartupTaskScheduler session, StartupRegistrationDefinition definition)
     {
-        var wanted = StartupTaskXml.Encode(expected);
-        var actual = session.Read(StartupTaskXml.TaskName(expected));
-        if (actual is null) return new(StartupRegistrationState.Missing, null);
-        var normalized = session.Normalize(actual);
-        var state = XNode.DeepEquals(StartupTaskXml.Read(session.Normalize(wanted)), StartupTaskXml.Read(normalized))
-            ? StartupRegistrationState.Matches : StartupRegistrationState.Foreign;
-        return new(state, Convert.ToHexStringLower(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(normalized))));
+        private XDocument? _normalized;
+        internal string Name { get; } = StartupTaskXml.TaskName(definition);
+        internal string Xml { get; } = StartupTaskXml.Encode(definition);
+
+        internal StartupRegistrationInspection Inspect()
+        {
+            var actual = session.Read(Name);
+            if (actual is null) return new(StartupRegistrationState.Missing, null);
+            var normalized = session.Normalize(actual);
+            var wanted = _normalized ??= StartupTaskXml.Read(session.Normalize(Xml));
+            var state = XNode.DeepEquals(wanted, StartupTaskXml.Read(normalized))
+                ? StartupRegistrationState.Matches : StartupRegistrationState.Foreign;
+            return new(state, Convert.ToHexStringLower(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(normalized))));
+        }
     }
 
     private static void RequireCurrentUser(StartupRegistrationDefinition definition)

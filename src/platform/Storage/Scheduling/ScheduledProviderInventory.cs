@@ -42,7 +42,34 @@ internal static class ScheduledProviderInventory
             "OR EXISTS(SELECT 1 FROM main.scheduled_provider_result b LEFT JOIN main.scheduled_provider_occurrences s ON s.occurrence_id=b.occurrence_id WHERE s.occurrence_id IS NULL) " +
             "OR EXISTS(SELECT 1 FROM main.scheduled_provider_pending b LEFT JOIN main.scheduled_provider_occurrences s ON s.occurrence_id=b.occurrence_id WHERE s.occurrence_id IS NULL);");
         if ((long)orphans.ExecuteScalar()! != 0) throw ScheduledProviderCodec.Invalid();
-        ScheduledProviderRows.RequireCapacity(connection, transaction, 0);
+        ScheduleWaitingCapacity.VerifyInventory(connection, transaction);
+    }
+
+    internal static IReadOnlyList<ScheduledProviderState> ReadPending(RuntimeInstance instance, StateDatabase database, ContractReader contracts)
+    {
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
+        using var transaction = DatabaseConnections.BeginRead(connection);
+        ScheduleWaitingCapacity.VerifyInventory(connection, transaction);
+        using var command = DatabaseConnections.Command(connection, transaction,
+            "SELECT p.occurrence_id,s.relative_path,s.size_bytes,s.sha256 FROM main.scheduled_provider_pending p" +
+            " LEFT JOIN main.scheduled_provider_occurrences s ON s.occurrence_id=p.occurrence_id ORDER BY p.occurrence_id;");
+        var references = new List<(string Id, BlobReference Reference)>();
+        using (var rows = command.ExecuteReader())
+            while (rows.Read())
+            {
+                if (rows.IsDBNull(1)) throw ScheduledProviderCodec.Invalid();
+                references.Add((rows.GetString(0), new(rows.GetString(1), rows.GetInt64(2), rows.GetString(3))));
+            }
+        var evidence = new ScheduledProviderEvidence(instance, contracts);
+        var pending = new List<ScheduledProviderState>(references.Count);
+        foreach (var (id, reference) in references)
+        {
+            var state = evidence.Read(reference, connection, transaction);
+            if (state.Result is not null || state.Source.Document.OperationId.ToString("D") != id) throw ScheduledProviderCodec.Invalid();
+            pending.Add(state);
+        }
+        transaction.Commit();
+        return pending;
     }
 
 }

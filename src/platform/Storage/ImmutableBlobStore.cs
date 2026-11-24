@@ -73,12 +73,64 @@ public sealed class ImmutableBlobStore
         Persist(source, expected, cancellationToken);
     }
 
-    internal BlobReference PersistCapturedContent(FileStream source, FileTreeEntry expected, CancellationToken cancellationToken)
+    internal BlobReference PersistCapturedContent(FileStream source, long length, CancellationToken cancellationToken)
     {
-        var reference = new BlobReference($"blobs/content/{expected.Sha256}.bin", expected.SizeBytes, expected.Sha256!);
-        source.Position = 0;
-        Persist(source, reference, cancellationToken, measureCaptureCopy: true);
-        return reference;
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
+        cancellationToken.ThrowIfCancellationRequested();
+        var directory = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(_instance.RuntimeRoot, "blobs", "content"));
+        Directory.CreateDirectory(directory);
+        using var parents = StableDirectoryLease.Acquire(directory);
+        using var parent = PhysicalDirectoryHandle.Open(directory);
+        var parentIdentity = parent.ReadIdentity();
+        var name = "." + Guid.NewGuid().ToString("N") + ".staging";
+        var staging = Path.Combine(directory, name);
+        using var owned = parent.CreateNewOwnedFile(name);
+        using var output = new FileStream(owned, FileAccess.ReadWrite, bufferSize: 1);
+        var identity = PhysicalObjectIdentity.Read(owned);
+        Exception? failure = null;
+        BlobReference? reference = null;
+        try
+        {
+            string digest;
+            using (StartupProfile.Measure("configuration.capture.stream"))
+                digest = CopyAndHash(source, output, length, cancellationToken);
+            if (source.Length != length) throw new IOException("snapshot_source_changed");
+            reference = new BlobReference($"blobs/content/{digest}.bin", length, digest);
+            var path = Resolve(reference);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!File.Exists(path))
+            {
+                using (StartupProfile.Measure("configuration.capture.stream.flush")) output.Flush(flushToDisk: true);
+                cancellationToken.ThrowIfCancellationRequested();
+                output.Dispose();
+                PublishStaged(staging, path, identity, reference);
+            }
+            else Verify(reference);
+            return reference;
+        }
+        catch (Exception error) { failure = error; throw; }
+        finally
+        {
+            if (File.Exists(staging))
+            {
+                var cleanup = new CleanupFailures();
+                cleanup.Attempt(() =>
+                {
+                    if (!owned.IsClosed)
+                        PhysicalObjectDeletion.DeleteNewlyCreatedFile(owned);
+                    else if (reference is { } saved)
+                        PhysicalObjectDeletion.DeleteVerified(new(staging, parentIdentity, identity,
+                            FileObjectKind.File, saved.SizeBytes, saved.Sha256));
+                });
+                cleanup.Preserve(failure);
+            }
+        }
+    }
+
+    internal void PersistCapturedBuffer(byte[] bytes, int length, string digest, CancellationToken cancellationToken)
+    {
+        var reference = new BlobReference($"blobs/content/{digest}.bin", length, digest);
+        Persist(reference, cancellationToken, output => output.Write(bytes, 0, length), "configuration.capture.buffer-write");
     }
 
     public void Verify(BlobReference reference)
@@ -103,7 +155,14 @@ public sealed class ImmutableBlobStore
         catch { input.Dispose(); throw; }
     }
 
-    private bool Persist(Stream source, BlobReference reference, CancellationToken cancellationToken, bool measureCaptureCopy = false)
+    private bool Persist(Stream source, BlobReference reference, CancellationToken cancellationToken) =>
+        Persist(reference, cancellationToken, output =>
+        {
+            if (CopyAndHash(source, output, reference.SizeBytes, cancellationToken) != reference.Sha256)
+                throw new IOException("blob_source_changed");
+        }, null);
+
+    private bool Persist(BlobReference reference, CancellationToken cancellationToken, Action<FileStream> write, string? writeMeasurement)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var path = Resolve(reference);
@@ -118,14 +177,12 @@ public sealed class ImmutableBlobStore
             using (var output = new FileStream(staging, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, FileOptions.WriteThrough))
             {
                 owned = PhysicalObjectIdentity.Read(output.SafeFileHandle);
-                using var timing = measureCaptureCopy ? StartupProfile.Measure("configuration.capture.copy") : default;
-                WriteStaged(source, output, reference, cancellationToken);
+                using var timing = writeMeasurement is null ? default : StartupProfile.Measure(writeMeasurement);
+                write(output);
+                output.Flush(flushToDisk: true);
             }
             cancellationToken.ThrowIfCancellationRequested();
-            if (PhysicalObjectIdentity.Read(staging) != owned) throw new IOException("blob_staging_changed");
-            try { File.Move(staging, path, overwrite: false); }
-            catch (IOException) when (File.Exists(path)) { Verify(reference); return true; }
-            Verify(reference);
+            PublishStaged(staging, path, owned!, reference);
             return true;
         }
         finally
@@ -134,7 +191,18 @@ public sealed class ImmutableBlobStore
         }
     }
 
-    private static void WriteStaged(Stream source, FileStream output, BlobReference reference, CancellationToken cancellationToken)
+    private void PublishStaged(string staging, string path, PhysicalObjectIdentity identity, BlobReference reference)
+    {
+        using var verifiedStage = new FileStream(staging, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+        if (PhysicalObjectIdentity.Read(verifiedStage.SafeFileHandle) != identity || PhysicalObjectIdentity.Read(staging) != identity)
+            throw new IOException("blob_staging_changed");
+        try { File.Move(staging, path, overwrite: false); }
+        catch (IOException) when (File.Exists(path)) { Verify(reference); return; }
+        if (PhysicalObjectIdentity.Read(path) != identity) throw new IOException("blob_staging_changed");
+        Verify(reference);
+    }
+
+    private static string CopyAndHash(Stream source, FileStream output, long expectedBytes, CancellationToken cancellationToken)
     {
         using (var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256))
         {
@@ -148,13 +216,12 @@ public sealed class ImmutableBlobStore
                     var count = source.Read(buffer, 0, buffer.Length);
                     if (count == 0) break;
                     written = checked(written + count);
-                    if (written > reference.SizeBytes) throw new IOException("blob_source_changed");
+                    if (written > expectedBytes) throw new IOException("blob_source_changed");
                     hash.AppendData(buffer.AsSpan(0, count));
                     output.Write(buffer, 0, count);
                 }
-                if (written != reference.SizeBytes || Convert.ToHexStringLower(hash.GetHashAndReset()) != reference.Sha256)
-                    throw new IOException("blob_source_changed");
-                output.Flush(flushToDisk: true);
+                if (written != expectedBytes) throw new IOException("blob_source_changed");
+                return Convert.ToHexStringLower(hash.GetHashAndReset());
             }
             finally { ArrayPool<byte>.Shared.Return(buffer, clearArray: true); }
         }

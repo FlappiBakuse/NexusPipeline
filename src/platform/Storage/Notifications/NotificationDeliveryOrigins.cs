@@ -24,15 +24,6 @@ internal static class NotificationDeliveryOrigins
         else throw new IOException("notification_delivery_source_invalid");
     }
 
-    internal static void RequireRegistered(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
-        NotificationDeliverySnapshot delivery, SqliteConnection connection, SqliteTransaction transaction)
-    {
-        if (Reference(delivery.Document) is null) throw new IOException("notification_delivery_registration_required");
-        if (delivery.Document.Source.Kind == "executionReceipt")
-            new ReceiptRouteCodec(instance, database, contracts).RequireOrigin(delivery, connection, transaction);
-        else new ExplicitSourceEvidence(instance, database, contracts).RequireDelivery(delivery, connection, transaction);
-    }
-
     internal static Guid ReadOperation(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
         BlobReference reference, SqliteConnection connection, SqliteTransaction transaction)
     {

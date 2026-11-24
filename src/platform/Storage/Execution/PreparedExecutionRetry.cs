@@ -1,16 +1,54 @@
-using System.Runtime.Versioning;
 using Microsoft.Data.Sqlite;
+using NexusPipeline.Core.Automation;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Core.Operations;
 using NexusPipeline.Core.Settings;
 using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Serialization;
-using NexusPipeline.Platform.Storage.Journals;
+using NexusPipeline.Platform.Storage.Automation;
 using NexusPipeline.Platform.Storage.Configuration;
+using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
+using System.Collections.Immutable;
+using System.Runtime.Versioning;
 
 namespace NexusPipeline.Platform.Storage.Execution;
+
+internal static class ExecutionRetrySelection
+{
+    internal static ExecutionPlanExplanation Read(ContractReader contracts, ExecutionPlan total, ReadOnlyMemory<byte> definitions,
+        ExecutionSelectionRequest request, HostSettingsSnapshot settings)
+    {
+        var roots = total.RootBindings.ToDictionary(root => Guid.Parse(root.RootId), root => root.Path);
+        var imported = new AutomationBundleCodec(contracts).Decode(definitions, roots, request.ExpectedCatalogRevision).Definitions;
+        var revisions = total.SourceRevisions.ToDictionary(item => (item.EntityKind, Guid.Parse(item.EntityId)), item => item.Revision);
+        long Rev(string kind, Guid id) => revisions.TryGetValue((kind, id), out var value) ? value : throw Invalid();
+        var catalog = new AutomationCatalog(request.ExpectedCatalogRevision,
+            imported.Roots.Select(item => item with { Revision = Rev("root", item.Id) }).ToImmutableArray(),
+            imported.Scripts.Select(item => item with { Revision = Rev("script", item.Id) }).ToImmutableArray(),
+            imported.Users.Select(item => item with { Revision = Rev("user", item.Id) }).ToImmutableArray(),
+            imported.Bindings.Select(item => item with { Revision = Rev("binding", item.Id) }).ToImmutableArray(),
+            imported.Queues.Select(item => item with { Revision = Rev("queue", item.Id) }).ToImmutableArray(), []);
+        var selection = ExecutionSelectionPolicy.Select(catalog, settings, request);
+        if (!selection.Items.Select(item => item.Binding.Id.ToString("D")).SequenceEqual(total.Selection.Select(item => item.BindingId)))
+            throw Invalid();
+        var saved = total.Selection.ToDictionary(item => item.StepId, StringComparer.Ordinal);
+        var readiness = selection.Items.Where(item => item.Disposition == ExecutionSelectionDisposition.Candidate).Select(item =>
+        {
+            var prior = saved[item.StepId];
+            if (prior.Disposition != "runnable" || prior.ReasonCode != ExecutionSelectionPolicy.InputsVerified) throw Invalid();
+            return new ExecutionItemReadiness(item, true, ExecutionSelectionPolicy.InputsVerified);
+        }).ToImmutableArray();
+        var explanation = ExecutionSelectionPolicy.Explain(selection, readiness);
+        if (explanation.HasBlockedItems || !explanation.HasRunnable ||
+            !explanation.Items.Select(item => item.Disposition.ToString().ToLowerInvariant()).SequenceEqual(total.Selection.Select(item => item.Disposition)))
+            throw Invalid();
+        return explanation;
+    }
+
+    private static IOException Invalid() => new("execution_retry_selection_unbound");
+}
 
 [SupportedOSPlatform("windows")]
 internal sealed class PreparedExecutionRetry : IPreparedExecutionRetry
@@ -19,8 +57,9 @@ internal sealed class PreparedExecutionRetry : IPreparedExecutionRetry
     private readonly StateDatabase _database;
     private readonly InstanceLease _lease;
     private readonly ContractReader _contracts;
+    private readonly bool _hasConfigurations;
     private bool _disposed;
-    internal PreparedRetryOrigin? ConfigurationOrigin { get; private set; }
+    internal PreparedRetryOrigin? ConfigurationOrigin { get; }
     internal ExecutionRetryIntent Intent { get; }
     internal FrozenStartSource Previous { get; }
     internal ExecutionPlanExplanation Explanation { get; }
@@ -38,10 +77,12 @@ internal sealed class PreparedExecutionRetry : IPreparedExecutionRetry
 
     private PreparedExecutionRetry(RuntimeInstance instance, StateDatabase database, InstanceLease lease, ContractReader contracts,
         ExecutionRetryIntent intent, FrozenStartSource previous, ExecutionPlanExplanation explanation, FrozenExecutionPlan plan,
-        byte[] definitions, HostSettingsSnapshot settings, ExecutionTimeBudget? budget)
+        byte[] definitions, HostSettingsSnapshot settings, ExecutionTimeBudget? budget,
+        bool hasConfigurations, PreparedRetryOrigin? configurationOrigin)
     {
         _instance = instance; _database = database; _lease = lease; _contracts = contracts; Intent = intent; Previous = previous;
         Explanation = explanation; Plan = plan; _definitions = definitions.ToArray(); Settings = settings; _timeBudget = budget;
+        _hasConfigurations = hasConfigurations; ConfigurationOrigin = configurationOrigin;
     }
 
     internal static PreparedExecutionRetry Capture(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
@@ -49,7 +90,8 @@ internal sealed class PreparedExecutionRetry : IPreparedExecutionRetry
     {
         lease.VerifyHeld(instance);
         ExecutionRetryIntent intent; FrozenStartSource previous; HostSettingsSnapshot settings; bool replay;
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true,
+            domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.System))
         using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             intent = ExecutionRetryRows.Read(connection, transaction, retryOperationId);
@@ -70,16 +112,16 @@ internal sealed class PreparedExecutionRetry : IPreparedExecutionRetry
         if (attempt.JournalId != previous.JournalId.ToString("D") || attempt.AttemptId != intent.Frozen.PreviousAttemptId.ToString("D") ||
             attempt.AttemptOrdinal + 1 != intent.Frozen.NextOrdinal || AttemptPlanCodec.Reference(attempt.ExecutionPlan) != intent.TotalPlan)
             throw Invalid();
-        using var input = blobs.OpenVerified(new(plan.ReadWire().DefinitionBundle.RelativePath,
-            plan.ReadWire().DefinitionBundle.SizeBytes, plan.ReadWire().DefinitionBundle.Sha256));
+        var wire = plan.ReadWire();
+        var content = wire.DefinitionBundle;
+        using var input = blobs.OpenVerified(new(content.RelativePath, content.SizeBytes, content.Sha256));
         var definitions = new byte[checked((int)input.Length)]; input.ReadExactly(definitions);
-        var explanation = ExecutionRetrySelection.Read(contracts, plan.ReadWire(), definitions, previous.Request, settings);
+        var explanation = ExecutionRetrySelection.Read(contracts, wire, definitions, previous.Request, settings);
         var receipt = new AttemptReceiptStore(database).Read(intent.Frozen.PreviousAttemptId) ?? throw Invalid();
         var budget = replay ? null : lease.RunBudgets.CounterForRetry(database, receipt);
-        var result = new PreparedExecutionRetry(instance, database, lease, contracts, intent, previous, explanation, plan, definitions, settings, budget);
-        if (!replay && plan.ReadWire().ConfigurationSlots.Count != 0)
-            result.ConfigurationOrigin = PreparedRetryOrigin.Capture(instance, database, contracts, lease, result);
-        return result;
+        var hasConfigurations = wire.ConfigurationSlots.Count != 0;
+        var origin = !replay && hasConfigurations ? PreparedRetryOrigin.Capture(instance, database, contracts, lease, intent, wire) : null;
+        return new(instance, database, lease, contracts, intent, previous, explanation, plan, definitions, settings, budget, hasConfigurations, origin);
     }
 
     internal void RequireRequest(Guid operationId, string subject, ExecutionSelectionRequest request, bool preparing)
@@ -92,7 +134,7 @@ internal sealed class PreparedExecutionRetry : IPreparedExecutionRetry
 
     internal void RequireConfigurations(ExecutionConfigurationCursors cursors)
     {
-        if (Plan.ReadWire().ConfigurationSlots.Count == 0) return;
+        if (!_hasConfigurations) return;
         cursors.RequireHistorical(ConfigurationOrigin ?? throw new IOException("configuration_retry_source_unbound"));
     }
 

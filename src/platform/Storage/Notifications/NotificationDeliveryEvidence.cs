@@ -21,6 +21,11 @@ internal sealed class NotificationDeliveryEvidence(RuntimeInstance instance, Sta
 
     internal NotificationDeliverySnapshot ReadMetadata(BlobReference reference,
         Microsoft.Data.Sqlite.SqliteConnection connection, Microsoft.Data.Sqlite.SqliteTransaction transaction,
+        NotificationCatalogSnapshot? catalog = null) => ReadMetadata(reference, connection, transaction, out _, catalog);
+
+    internal NotificationDeliverySnapshot ReadMetadata(BlobReference reference,
+        Microsoft.Data.Sqlite.SqliteConnection connection, Microsoft.Data.Sqlite.SqliteTransaction transaction,
+        out NotificationDeliveryTransition transition,
         NotificationCatalogSnapshot? catalog = null)
     {
         if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot)
@@ -33,7 +38,7 @@ internal sealed class NotificationDeliveryEvidence(RuntimeInstance instance, Sta
         NotificationDeliveryRows.RequireSaved(connection, transaction, snapshot);
         NotificationDeliveryRows.RequireSource(connection, transaction, document);
         var operation = NotificationDeliveryRows.Identity(snapshot);
-        var transition = NotificationDeliveryRows.ReadState(connection, transaction, document.OperationId);
+        transition = NotificationDeliveryRows.ReadState(connection, transaction, document.OperationId);
         NotificationDeliveryRows.RequirePendingProjection(connection, transaction, transition, NotificationDeliveryOrigins.SourceOperation(document));
         if (transition.Network is { } network)
             DeliveryNetworkEvidence.RequireHistorical(connection, transaction, document.InstanceId, network);
@@ -56,9 +61,13 @@ internal sealed class NotificationDeliveryEvidence(RuntimeInstance instance, Sta
 
     internal NotificationDeliverySnapshot ReadFromSnapshot(BlobReference reference,
         Microsoft.Data.Sqlite.SqliteConnection connection, Microsoft.Data.Sqlite.SqliteTransaction transaction,
-        ReceiptReadContext? source = null)
+        ReceiptReadContext? source = null) => ReadFromSnapshot(reference, connection, transaction, out _, source);
+
+    internal NotificationDeliverySnapshot ReadFromSnapshot(BlobReference reference,
+        Microsoft.Data.Sqlite.SqliteConnection connection, Microsoft.Data.Sqlite.SqliteTransaction transaction,
+        out NotificationDeliveryTransition transition, ReceiptReadContext? source = null)
     {
-        var snapshot = ReadMetadata(reference, connection, transaction, source?.Catalog);
+        var snapshot = ReadMetadata(reference, connection, transaction, out transition, source?.Catalog);
         var document = snapshot.Document;
         if (document.Source.Kind == "executionReceipt") RequireExecutionSource(snapshot, connection, transaction, source);
         else new ExplicitSourceEvidence(instance, database, contracts).RequireDelivery(snapshot, connection, transaction);

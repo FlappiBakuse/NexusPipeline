@@ -1,12 +1,12 @@
-using System.Runtime.Versioning;
-using NexusPipeline.Platform.Storage.Extensions;
-using NexusPipeline.Platform.Storage.Maintenance;
-using System.Text.Json;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Operations;
 using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Serialization;
+using NexusPipeline.Platform.Storage.Extensions;
+using NexusPipeline.Platform.Storage.Maintenance;
 using NexusPipeline.Platform.Storage.Sqlite;
+using System.Runtime.Versioning;
+using System.Text.Json;
 
 namespace NexusPipeline.Platform.Storage.Journals;
 
@@ -83,5 +83,22 @@ public sealed class PayloadApplyAcceptance(RuntimeInstance instance, ContractRea
         };
         new JournalStore(instance, contracts).Create(JsonSerializer.SerializeToUtf8Bytes(document));
         observer?.Reached(PayloadPersistencePoint.JournalCreated, journal.JournalId, 1, JournalPhase.Prepared);
+    }
+}
+
+internal static class PayloadFileIntents
+{
+    internal static IReadOnlyList<FileEffect> Create(FrozenPayloadApply plan, string planDigest)
+    {
+        FileEffect Effect(string step, FileEffectAction action) => new(plan.JournalId, step, action, FileEffectState.Pending, planDigest, null);
+        return plan.Action switch
+        {
+            PayloadAction.Install => [Effect("install-candidate", FileEffectAction.InstallCandidate)],
+            PayloadAction.Upgrade => [Effect("preserve-original", FileEffectAction.PreserveOriginal), Effect("install-candidate", FileEffectAction.InstallCandidate)],
+            PayloadAction.Remove when plan.Kind == JournalKind.ExtensionApply && plan.Before.Snapshot.Shape != FileObjectKind.Missing =>
+                [Effect("preserve-original", FileEffectAction.PreserveOriginal)],
+            PayloadAction.Remove => [],
+            _ => throw new IOException("payload_action_unrecognized")
+        };
     }
 }

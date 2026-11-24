@@ -4,6 +4,7 @@ using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Sqlite;
+using NexusPipeline.Platform.Storage.Execution;
 
 namespace NexusPipeline.Platform.Storage.Journals;
 
@@ -23,6 +24,7 @@ public sealed class PreparedPayloadSession : IPayloadRecoverySession
     private readonly Func<PayloadWriterObservation> _writers;
     private readonly IPayloadPersistenceObserver? _observer;
     private readonly JsonObject _document;
+    private (Type Type, int HResult)? _lastProofFailure;
 
     public PreparedPayloadSession(RuntimeInstance instance, Guid journalId, ContractReader contracts, StateDatabase database,
         PayloadApplyRoots roots, Func<PayloadWriterObservation> writers, IPayloadPersistenceObserver? observer = null)
@@ -30,26 +32,33 @@ public sealed class PreparedPayloadSession : IPayloadRecoverySession
         if (database.InstanceId != instance.InstanceId) throw new IOException("payload_database_instance_unbound");
         _instance = instance; _writers = writers; _observer = observer;
         var bound = PayloadPreparedBinding.Read(instance, contracts, database, roots, journalId);
-        _plan = bound.Plan; _document = bound.Document;
+        _plan = bound.Plan; _reference = bound.Reference; _document = bound.Document;
         _store = new(instance, contracts); _registry = new(database); _gate = new(database); _outbox = new(database);
         _projection = new(_store, _registry, _outbox, observer); _blobs = new(instance, contracts);
-        var registered = _registry.ReadJournal(journalId);
-        var path = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(instance.RuntimeRoot, registered.PlanPath));
-        _reference = new(registered.PlanPath, new FileInfo(path).Length, registered.PlanDigest);
     }
 
     public PreparedPayloadInspection Inspect()
     {
         var registered = _registry.ReadJournal(_plan.JournalId);
+        PayloadPreparedBinding.RequireRegistered(_plan, _reference, registered);
         var agrees = registered.Phase == Phase && registered.Revision == Revision;
-        var gate = _gate.Read(_plan.JournalId);
+        var gate = ReadGate();
         if (Phase == JournalPhase.Committed && agrees) return new(Phase, true, gate.State, false, WriterState.Unknown, false, false);
         var observed = Observe();
         var verified = false;
         if (observed is { IsComplete: true, State: WriterState.Stopped } && gate.State != EffectGateState.Entered)
         {
-            try { using var held = HoldNoEffects(); verified = true; }
-            catch (IOException) { }
+            try
+            {
+                using (HoldNoEffects()) { }
+                verified = true; _lastProofFailure = null;
+            }
+            catch (IOException error)
+            {
+                var failure = (error.GetType(), error.HResult);
+                if (_lastProofFailure != failure) ExecutionFailureTrace.Record(_instance.InstanceId, _plan.OperationId, "payload-no-effect-proof", error);
+                _lastProofFailure = failure;
+            }
         }
         var terminalOutbox = _outbox.Read(_plan.JournalId).All(item => item.State is FileEffectState.Pending or FileEffectState.NotExecuted);
         var noEffects = verified && terminalOutbox;
@@ -61,7 +70,8 @@ public sealed class PreparedPayloadSession : IPayloadRecoverySession
     {
         RequireStopped();
         var registered = _registry.ReadJournal(_plan.JournalId);
-        var gate = _gate.Read(_plan.JournalId);
+        PayloadPreparedBinding.RequireRegistered(_plan, _reference, registered);
+        var gate = ReadGate();
         if (gate.State == EffectGateState.Sealed) return;
         _gate.SealUnentered(registered, gate.Revision);
         _observer?.Reached(PayloadPersistencePoint.GateSealed, _plan.JournalId, Revision, Phase);
@@ -70,10 +80,10 @@ public sealed class PreparedPayloadSession : IPayloadRecoverySession
     public void CommitNoEffects()
     {
         RequireStopped();
-        if (Phase != JournalPhase.Prepared || _gate.Read(_plan.JournalId).State != EffectGateState.Sealed)
+        if (Phase != JournalPhase.Prepared || ReadGate().State != EffectGateState.Sealed)
             throw new IOException("payload_no_effect_gate_unverified");
         using var proof = HoldNoEffects();
-        _projection.Synchronize(_plan, verifiedNoEffects: true);
+        _projection.Synchronize(_plan, _reference, verifiedNoEffects: true);
         if (!RecordedNoEffect()) Save(JournalPhase.Prepared, "verify-no-effect", "notExecuted", "payload_not_executed", true);
         RequireStopped();
         Save(JournalPhase.Committed, "verify-no-effect", "notExecuted", "payload_not_executed", true);
@@ -81,21 +91,23 @@ public sealed class PreparedPayloadSession : IPayloadRecoverySession
 
     public void Quarantine(string reasonCode)
     {
-        _projection.Synchronize(_plan, verifiedNoEffects: false);
+        _projection.Synchronize(_plan, _reference, verifiedNoEffects: false);
         Save(JournalPhase.Quarantined, "isolate-payload", "unknown", reasonCode, false);
     }
 
     public void ReconcileRecordedCommit()
     {
         RequireStopped();
-        if (Phase != JournalPhase.Committed || _gate.Read(_plan.JournalId).State != EffectGateState.Sealed || !RecordedNoEffect())
+        if (Phase != JournalPhase.Committed || ReadGate().State != EffectGateState.Sealed || !RecordedNoEffect())
             throw new IOException("payload_recorded_commit_unverified");
         using var proof = HoldNoEffects();
-        _projection.Synchronize(_plan, verifiedNoEffects: true);
+        _projection.Synchronize(_plan, _reference, verifiedNoEffects: true);
     }
 
+    private EffectGateSnapshot ReadGate() => PayloadPreparedBinding.RequireGate(_plan, _reference, _gate.Read(_plan.JournalId));
     private UnenteredPayloadLease HoldNoEffects() => UnenteredPayloadLease.Acquire(_instance, _plan, _blobs, _reference);
-    private bool RecordedNoEffect() => PayloadPreparedBinding.HasUnexecutedReceipt(JsonSerializer.SerializeToElement(_document));
+    private bool RecordedNoEffect() => _document["receipts"]!.AsArray().Any(item =>
+        PayloadPreparedBinding.IsUnexecutedReceipt(item!["stepId"]!.GetValue<string>(), item["effect"]!.GetValue<string>()));
     private PayloadWriterObservation Observe()
     {
         var observed = _writers();
@@ -121,7 +133,7 @@ public sealed class PreparedPayloadSession : IPayloadRecoverySession
         var noEffect = phase == JournalPhase.Committed && verifiedNoEffects ? new NoEffectEvidence(true, false, false, false) : null;
         var next = _store.Append(_plan.JournalId, previous, JsonSerializer.SerializeToUtf8Bytes(_document), noEffect);
         _observer?.Reached(PayloadPersistencePoint.JournalFlushed, _plan.JournalId, next.Revision, next.Phase);
-        _projection.Synchronize(_plan, verifiedNoEffects);
+        _projection.Synchronize(_plan, _reference, verifiedNoEffects);
     }
 
     private long Revision => _document["revision"]!.GetValue<long>();

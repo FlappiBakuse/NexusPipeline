@@ -45,15 +45,20 @@ internal static class AdapterObservationCodec
         ExecutionPlanStep step, ImmutableArray<AdapterTaskObservation> observations, ImmutableArray<string> proposed,
         ExecutionTaskRetry? retry = null, ImmutableArray<AdapterTaskObservation>? current = null)
     {
+        var expected = new ExpectedStep(step);
         var document = new ExecutionAdapterObservation("nexus.execution.adapter-observation", 1, binding, raw,
-            Digest(step.Adapter), Digest(step.Tasks), observations, proposed) { Retry = retry, CurrentObservations = current };
-        Validate(blobs, binding, raw, step, document, 0);
+            expected.SourceDigest, expected.TasksDigest, observations, proposed) { Retry = retry, CurrentObservations = current };
+        Validate(blobs, binding, raw, expected, document, 0);
         return blobs.PersistPlan(JsonSerializer.SerializeToUtf8Bytes(document, Options));
     }
 
     internal static ExecutionAdapterObservation Read(ImmutableBlobStore blobs, StepEvidenceBinding binding,
         BlobReference raw, ExecutionPlanStep step, BlobReference reference, int depth = 0,
         List<BlobReference>? references = null)
+        => Read(blobs, binding, raw, new ExpectedStep(step), reference, depth, references);
+
+    private static ExecutionAdapterObservation Read(ImmutableBlobStore blobs, StepEvidenceBinding binding,
+        BlobReference raw, ExpectedStep expected, BlobReference reference, int depth, List<BlobReference>? references)
     {
         if (depth is < 0 or > 98) throw Invalid();
         StepEvidenceCodec.Plan(reference);
@@ -66,16 +71,16 @@ internal static class AdapterObservationCodec
             if (!JsonElement.DeepEquals(parsed.RootElement, JsonSerializer.SerializeToElement(value, Options))) throw Invalid();
             return value;
         });
-        Validate(blobs, binding, raw, step, document, depth, references); return document;
+        Validate(blobs, binding, raw, expected, document, depth, references); return document;
     }
 
     private static void Validate(ImmutableBlobStore blobs, StepEvidenceBinding binding, BlobReference raw,
-        ExecutionPlanStep step, ExecutionAdapterObservation document, int depth, List<BlobReference>? references = null)
+        ExpectedStep step, ExecutionAdapterObservation document, int depth, List<BlobReference>? references = null)
     {
         if (document.Format != "nexus.execution.adapter-observation" || document.Version != 1 || document.Binding != binding ||
-            document.RawOutput != raw || step.StepId != binding.StepId || step.Adapter is null ||
-            document.SourceDigest != Digest(step.Adapter) || document.TasksDigest != Digest(step.Tasks) || depth > 98) throw Invalid();
-        var tasks = step.Tasks.Select(TaskAdapterProtocol.ReadTask).ToImmutableArray();
+            document.RawOutput != raw || !step.Matches(binding.StepId) ||
+            document.SourceDigest != step.SourceDigest || document.TasksDigest != step.TasksDigest || depth > 98) throw Invalid();
+        var tasks = step.Tasks;
         AdapterTaskPolicy.RequireOriginalResults(tasks, document.Observations, document.ProposedRetry);
         var current = document.Observations;
         if (document.Retry is { } retry)
@@ -99,6 +104,20 @@ internal static class AdapterObservationCodec
             references.AddRange(output.Parts.Select(part => part.Content));
             references.AddRange(FileLogEvidence.References(blobs, output));
         }
+    }
+
+    private sealed class ExpectedStep(ExecutionPlanStep step)
+    {
+        private string? _sourceDigest;
+        private string? _tasksDigest;
+        private ImmutableArray<AdapterTask> _tasks;
+
+        internal bool Matches(string stepId) => step.StepId == stepId && step.Adapter is not null;
+        internal string SourceDigest => _sourceDigest ??= Digest(step.Adapter);
+        internal string TasksDigest => _tasksDigest ??= Digest(step.Tasks);
+        internal ImmutableArray<AdapterTask> Tasks => _tasks.IsDefault
+            ? _tasks = step.Tasks.Select(TaskAdapterProtocol.ReadTask).ToImmutableArray()
+            : _tasks;
     }
 
     private static string Digest<T>(T value) => Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(value)));

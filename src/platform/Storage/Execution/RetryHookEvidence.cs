@@ -31,46 +31,47 @@ internal sealed class RetryHookEvidence(RuntimeInstance instance, StateDatabase 
             }
         }
         if (state.Attempt.AttemptOrdinal == 1) return null;
-        foreach (var ancestor in Ancestors(state.Attempt))
+        InheritedHookSource? inherited = null;
+        Ancestors(state.Attempt, (operation, reference, plan, journal) =>
         {
-            var journal = new JournalStore(instance, contracts).Read(ancestor.JournalId);
-            var result = HookResultCodec.ReadHistory(journal.Root, state.Total).FirstOrDefault(item =>
+            if (inherited is not null) return;
+            var ancestor = ReadAncestor(state.Total, operation, reference, plan, journal);
+            var result = ancestor.Hooks.FirstOrDefault(item =>
                 item.StepId == stepId && item.Role == "preHook" && item.Engine == EngineOutcome.Succeeded);
-            if (result is null) continue;
-            var source = new InheritedHookSource(ancestor.OperationId, ancestor.JournalId, ancestor.Attempt, result);
-            _ = RequireSource(state.Attempt, state.Total, source, verifyContents: true);
-            return source;
-        }
-        return null;
+            if (result is null) return;
+            inherited = new(ancestor.OperationId, ancestor.JournalId, ancestor.Attempt, result);
+            RequireAncestorBinding(state.Attempt, inherited, ancestor);
+        });
+        if (inherited is not null) _ = ReadInherited(inherited, verifyContents: true);
+        return inherited;
     }
 
-    internal IReadOnlyList<BlobReference> RequireAll(RunAttemptPlan attempt, ExecutionPlan total, AttemptJournalView journal, bool verifyContents) =>
-        ExecutionInvocationCodec.Views(journal).Select(ExecutionInvocationCodec.Current)
-            .SelectMany(view => RequireCurrent(attempt, total, view, verifyContents)).Distinct().ToArray();
-
-    private IReadOnlyList<BlobReference> RequireCurrent(RunAttemptPlan attempt, ExecutionPlan total, AttemptJournalView journal, bool verifyContents)
+    internal IReadOnlyList<BlobReference> RequireAll(RunAttemptPlan attempt, ExecutionPlan total, AttemptJournalView journal, bool verifyContents)
     {
+        var items = ExecutionInvocationCodec.Views(journal).SelectMany(view =>
+            RetryHookCodec.Read(ExecutionInvocationCodec.Current(view), total)).ToArray();
+        if (items.Length == 0) return [];
+        var ancestorIds = items.Select(item => item.Source).Where(source => source is { InvocationOrdinal: null })
+            .Select(source => source!.OperationId).ToHashSet();
+        var history = new HookHistory(new JournalStore(instance, contracts), Guid.ParseExact(attempt.JournalId, "D"), total,
+            () => ExecutionInvocationHistory.Before(instance, database, contracts, attempt, total),
+            () => ReadAncestors(attempt, total, ancestorIds));
         var references = new List<BlobReference>();
-        var jobs = WriterIntentCodec.ReadJobs(journal, total);
-        foreach (var item in RetryHookCodec.Read(journal, total))
+        foreach (var item in items)
         {
-            if (item.AttemptId.ToString("D") != attempt.AttemptId || item.ParentJournalId.ToString("D") != attempt.JournalId ||
-                jobs.Any(job => job.StepId == item.StepId && job.Role == item.Role)) throw Invalid();
-            var history = new JournalStore(instance, contracts).ReadAllRevisions(item.ParentJournalId);
-            var before = history.SingleOrDefault(document => document.Revision == item.BeforeRevision) ?? throw Invalid();
-            var added = history.SingleOrDefault(document => document.Revision == item.BeforeRevision + 1);
-            if (added is null || !RetryHookCodec.Read(added.Root, total).Contains(item) ||
-                RetryHookCodec.Read(before.Root, total).Any(prior => prior.StepId == item.StepId && prior.Role == item.Role))
+            if (item.AttemptId.ToString("D") != attempt.AttemptId || item.ParentJournalId.ToString("D") != attempt.JournalId) throw Invalid();
+            var before = history.Document(item.BeforeRevision);
+            if (!history.Resolutions(item.BeforeRevision + 1).Contains(item) ||
+                history.Resolutions(item.BeforeRevision).Any(prior => prior.StepId == item.StepId && prior.Role == item.Role))
                 throw Invalid();
             if (item.Role == "preHook")
             {
-                if (before.Phase is not (JournalPhase.Prepared or JournalPhase.Applying) || jobs.Any(job => job.StepId == item.StepId && job.Role == "preHook"))
-                    throw Invalid();
-                references.AddRange(RequireSource(attempt, total, item.Source!, verifyContents));
+                if (before.Phase is not (JournalPhase.Prepared or JournalPhase.Applying)) throw Invalid();
+                references.AddRange(RequireSource(attempt, total, item.Source!, verifyContents, history));
             }
             else
             {
-                RequirePost(attempt, total, before, item, ExecutionInvocationHistory.Before(instance, database, contracts, attempt, total).GetValueOrDefault(item.StepId));
+                RequirePost(attempt, total, before, item, history.PreviousInvocations.GetValueOrDefault(item.StepId));
                 references.Add(item.MainArtifact!);
             }
         }
@@ -148,7 +149,7 @@ internal sealed class RetryHookEvidence(RuntimeInstance instance, StateDatabase 
     }
 
     private IReadOnlyList<BlobReference> RequireSource(RunAttemptPlan attempt, ExecutionPlan total,
-        InheritedHookSource source, bool verifyContents)
+        InheritedHookSource source, bool verifyContents, HookHistory? history = null)
     {
         if (source.InvocationOrdinal is { } invocation)
         {
@@ -165,29 +166,52 @@ internal sealed class RetryHookEvidence(RuntimeInstance instance, StateDatabase 
             if (valueLocal.Engine != EngineOutcome.Succeeded || valueLocal.Root is null || valueLocal.ExitCode != 0) throw Invalid();
             return readerLocal.ReadReferences(source.Result.Binding, "preHook", source.Result.Artifact).Append(source.Attempt).Distinct().ToArray();
         }
-        var ancestor = Ancestors(attempt).SingleOrDefault(item => item.OperationId == source.OperationId) ?? throw Invalid();
-        if (ancestor.JournalId != source.JournalId || ancestor.Attempt != source.Attempt) throw Invalid();
-        var parent = ReadAttempt(source.Attempt);
-        var physical = new JournalStore(instance, contracts).Read(source.JournalId);
-        if (parent.RunId != attempt.RunId || parent.AttemptOrdinal >= attempt.AttemptOrdinal ||
-            AttemptPlanCodec.Reference(parent.ExecutionPlan) != AttemptPlanCodec.Reference(attempt.ExecutionPlan) ||
-            physical.Phase != JournalPhase.Committed ||
-            !HookResultCodec.ReadHistory(physical.Root, total).Contains(source.Result)) throw Invalid();
+        var ancestors = history?.Ancestors ?? ReadAncestors(attempt, total, new HashSet<Guid> { source.OperationId });
+        var ancestor = ancestors.GetValueOrDefault(source.OperationId) ?? throw Invalid();
+        RequireAncestorBinding(attempt, source, ancestor);
+        return ReadInherited(source, verifyContents);
+    }
+
+    private static void RequireAncestorBinding(RunAttemptPlan attempt, InheritedHookSource source, Ancestor ancestor)
+    {
+        if (ancestor.OperationId != source.OperationId || ancestor.JournalId != source.JournalId || ancestor.Attempt != source.Attempt ||
+            ancestor.RunId != attempt.RunId || ancestor.Ordinal >= attempt.AttemptOrdinal ||
+            ancestor.TotalPlan != AttemptPlanCodec.Reference(attempt.ExecutionPlan) ||
+            !ancestor.Hooks.Contains(source.Result)) throw Invalid();
+    }
+
+    private IReadOnlyList<BlobReference> ReadInherited(InheritedHookSource source, bool verifyContents)
+    {
         var reader = new HookEvidenceReader(instance, database, contracts);
         var value = reader.Read(source.Result.Binding, "preHook", source.Result.Artifact, verifyContents);
         if (value.Engine != EngineOutcome.Succeeded || value.Root is null || value.ExitCode != 0) throw Invalid();
         return reader.ReadReferences(source.Result.Binding, "preHook", source.Result.Artifact).Append(source.Attempt).Distinct().ToArray();
     }
 
-    private sealed record Ancestor(Guid OperationId, Guid JournalId, BlobReference Attempt);
+    private sealed record Ancestor(Guid OperationId, Guid JournalId, BlobReference Attempt, string RunId,
+        long Ordinal, BlobReference TotalPlan, ImmutableArray<HookResultIntent> Hooks);
 
-    private IReadOnlyList<Ancestor> Ancestors(RunAttemptPlan attempt)
+    private static Ancestor ReadAncestor(ExecutionPlan total, Guid operation, BlobReference reference, RunAttemptPlan plan,
+        JournalDocument journal) =>
+        new(operation, journal.JournalId, reference, plan.RunId, plan.AttemptOrdinal, AttemptPlanCodec.Reference(plan.ExecutionPlan),
+            HookResultCodec.ReadHistory(journal.Root, total));
+
+    private IReadOnlyDictionary<Guid, Ancestor> ReadAncestors(RunAttemptPlan attempt, ExecutionPlan total, IReadOnlySet<Guid> needed)
+    {
+        var result = new Dictionary<Guid, Ancestor>();
+        Ancestors(attempt, (operation, reference, plan, journal) =>
+        {
+            if (needed.Contains(operation)) result.Add(operation, ReadAncestor(total, operation, reference, plan, journal));
+        });
+        return result;
+    }
+
+    private void Ancestors(RunAttemptPlan attempt, Action<Guid, BlobReference, RunAttemptPlan, JournalDocument> visit)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records);
         using var transaction = DatabaseConnections.BeginRead(connection);
         var source = StartSourceRows.Read(connection, transaction, Guid.Parse(attempt.OperationId));
         StartSourceRows.RequireAttempt(source, attempt);
-        var result = new List<Ancestor>();
         for (var expected = checked((int)attempt.AttemptOrdinal) - 1; expected >= 1; expected--)
         {
             if (source.RetrySourceOperationId is not { } previous) throw Invalid();
@@ -204,11 +228,11 @@ internal sealed class RetryHookEvidence(RuntimeInstance instance, StateDatabase 
                 journal.Phase != JournalPhase.Committed) throw Invalid();
             var physical = new JournalStore(instance, contracts).Read(journal.JournalId);
             var receipt = AttemptReceiptStore.ReadInside(connection, transaction, Guid.Parse(plan.AttemptId)) ?? throw Invalid();
-            if (physical.Revision != journal.Revision || receipt != AttemptPreparedBinding.ExpectedReceipt(plan, physical)) throw Invalid();
-            result.Add(new(prior.Identity.OperationId, prior.JournalId, AttemptPreparedBinding.Reference(instance, journal)));
+            if (physical.Phase != JournalPhase.Committed || physical.Revision != journal.Revision ||
+                receipt != AttemptPreparedBinding.ExpectedReceipt(plan, physical)) throw Invalid();
+            visit(prior.Identity.OperationId, reference, plan, physical);
             source = prior;
         }
-        return result.AsReadOnly();
     }
 
     private RunAttemptPlan ReadAttempt(BlobReference reference)
@@ -219,31 +243,60 @@ internal sealed class RetryHookEvidence(RuntimeInstance instance, StateDatabase 
         return contracts.Read<RunAttemptPlan>(bytes, "run-attempt-plan.schema.json");
     }
 
-    internal static ImmutableArray<RetryHookFact> Facts(AttemptJournalView journal, ExecutionPlan total, string stepId)
+    internal static bool CanRetry(AttemptJournalView journal, ExecutionPlan total)
     {
-        var actual = HookResultCodec.Read(journal, total).Where(item => item.StepId == stepId)
-            .Select(item => new RetryHookFact(item.Role == "preHook" ? ExecutionHookRole.Pre : ExecutionHookRole.Post,
-                RetryHookDisposition.Collected, item.Engine));
-        var resolved = RetryHookCodec.Read(journal, total).Where(item => item.StepId == stepId)
-            .Select(item => new RetryHookFact(item.Role == "preHook" ? ExecutionHookRole.Pre : ExecutionHookRole.Post,
-                item.Role == "preHook" ? RetryHookDisposition.InheritedSuccess : RetryHookDisposition.Deferred,
-                item.Role == "preHook" ? EngineOutcome.Succeeded : EngineOutcome.NotStarted));
-        var facts = actual.Concat(resolved).ToList();
-        var suffix = StepResultCodec.ReadUndispatched(journal, total);
-        var suppressed = BindingSuppressionCodec.Read(journal, total).SingleOrDefault(item => item.StepId == stepId);
-        var input = total.Steps.Single(step => step.StepId == stepId);
-        foreach (var declaration in ExecutionRetryAuthority.Hooks(input))
+        if (total.Steps.Count == 0) return true;
+        var actual = HookResultCodec.Read(journal, total).ToLookup(item => item.StepId, StringComparer.Ordinal);
+        var resolved = RetryHookCodec.Read(journal, total).ToLookup(item => item.StepId, StringComparer.Ordinal);
+        var undispatched = StepResultCodec.ReadUndispatched(journal, total)?.StepIds.ToHashSet(StringComparer.Ordinal);
+        var suppressions = BindingSuppressionCodec.Read(journal, total).ToDictionary(item => item.StepId, StringComparer.Ordinal);
+        foreach (var step in total.Steps)
         {
-            var role = declaration.Role == ExecutionHookRole.Pre ? "preHook" : "postHook";
-            if (facts.Any(fact => fact.Role == declaration.Role)) continue;
-            if (suffix?.StepIds.Contains(stepId) == true || suppressed?.Roles.Contains(role) == true)
-                facts.Add(new(declaration.Role, RetryHookDisposition.NotDispatched, EngineOutcome.NotStarted));
+            var declarations = ExecutionRetryAuthority.Hooks(step);
+            var facts = actual[step.StepId].Select(item => new RetryHookFact(
+                item.Role == "preHook" ? ExecutionHookRole.Pre : ExecutionHookRole.Post, RetryHookDisposition.Collected, item.Engine))
+                .Concat(resolved[step.StepId].Select(item => new RetryHookFact(
+                    item.Role == "preHook" ? ExecutionHookRole.Pre : ExecutionHookRole.Post,
+                    item.Role == "preHook" ? RetryHookDisposition.InheritedSuccess : RetryHookDisposition.Deferred,
+                    item.Role == "preHook" ? EngineOutcome.Succeeded : EngineOutcome.NotStarted))).ToList();
+            var suppressed = suppressions.GetValueOrDefault(step.StepId);
+            foreach (var declaration in declarations)
+            {
+                var role = declaration.Role == ExecutionHookRole.Pre ? "preHook" : "postHook";
+                if (facts.Any(fact => fact.Role == declaration.Role)) continue;
+                if (undispatched?.Contains(step.StepId) == true || suppressed?.Roles.Contains(role) == true)
+                    facts.Add(new(declaration.Role, RetryHookDisposition.NotDispatched, EngineOutcome.NotStarted));
+            }
+            if (!RetryHookPolicy.CanRetry(declarations, facts.OrderBy(item => item.Role).ToImmutableArray())) return false;
         }
-        return facts.OrderBy(item => item.Role).ToImmutableArray();
+        return true;
     }
 
-    internal static bool CanRetry(AttemptJournalView journal, ExecutionPlan total) => total.Steps.All(step =>
-        RetryHookPolicy.CanRetry(ExecutionRetryAuthority.Hooks(step), Facts(journal, total, step.StepId)));
+    private sealed class HookHistory(JournalStore store, Guid journalId, ExecutionPlan total,
+        Func<IReadOnlyDictionary<string, int>> readInvocations, Func<IReadOnlyDictionary<Guid, Ancestor>> readAncestors)
+    {
+        private IReadOnlyDictionary<long, JournalDocument>? _documents;
+        private IReadOnlyDictionary<string, int>? _previousInvocations;
+        private IReadOnlyDictionary<Guid, Ancestor>? _ancestors;
+        private readonly Dictionary<long, ImmutableArray<RetryHookIntent>> _resolutions = [];
+
+        internal JournalDocument Document(long revision)
+        {
+            _documents ??= store.ReadAllRevisions(journalId).ToDictionary(item => item.Revision);
+            return _documents.GetValueOrDefault(revision) ?? throw Invalid();
+        }
+
+        internal ImmutableArray<RetryHookIntent> Resolutions(long revision)
+        {
+            if (!_resolutions.TryGetValue(revision, out var items))
+                _resolutions.Add(revision, items = RetryHookCodec.Read(Document(revision).Root, total));
+            return items;
+        }
+
+        internal IReadOnlyDictionary<string, int> PreviousInvocations => _previousInvocations ??= readInvocations();
+
+        internal IReadOnlyDictionary<Guid, Ancestor> Ancestors => _ancestors ??= readAncestors();
+    }
 
     internal static IOException Invalid() => new("execution_retry_hook_evidence_unbound");
 }

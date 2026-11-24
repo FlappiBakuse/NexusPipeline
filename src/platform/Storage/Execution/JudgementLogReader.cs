@@ -6,7 +6,7 @@ internal sealed class JudgementLogReader : IDisposable
     private readonly HashSet<(long Offset, long Order, int Source, bool Flush)> _ends = [];
     private RawOutputManifest? _previous;
     private ExecutionOutputDecoder? _decoder;
-    private JudgementLogTail _tail = new();
+    private JudgementLogTail? _tail;
     private bool _continuous = true, _final, _disposed;
     private StableDirectoryLease? _directory;
 
@@ -33,14 +33,15 @@ internal sealed class JudgementLogReader : IDisposable
             if (_final)
             {
                 if (!final || previous.Parts.Length != manifest.Parts.Length || !ends.All(_ends.Contains)) throw Invalid();
-                return _tail;
+                return _tail!;
             }
             count = previous.Parts.Length;
             if (ends.Any(item => !_ends.Contains(item) && item.Offset < previous.ObservedBytes))
-            { _decoder = null; _tail = new(); _ends.Clear(); count = 0; }
+            { _decoder = null; _tail = null; _ends.Clear(); count = 0; }
         }
         _directory ??= StableDirectoryLease.Acquire(Path.Combine(blobs.Instance.RuntimeRoot, "blobs", "content"));
-        _decoder ??= new(manifest.FileLogBaseline is not null, _tail.AppendLine, _ => _continuous = false);
+        var tail = _tail ??= new();
+        _decoder ??= new(manifest.FileLogBaseline is not null, tail.AppendLine, _ => _continuous = false);
         var pending = ends.Where(item => !_ends.Contains(item)).ToArray(); var next = 0;
         foreach (var part in manifest.Parts.Skip(count))
         {
@@ -64,7 +65,7 @@ internal sealed class JudgementLogReader : IDisposable
         if (final) { _decoder.FlushObservedTails(); _final = true; }
         if (!_continuous) throw Invalid();
         _previous = manifest;
-        return _tail;
+        return tail;
     }
 
     private FileStream Open(ImmutableBlobStore blobs, BlobReference content)

@@ -56,18 +56,37 @@ internal sealed class PcTargetReadiness : IDisposable
                     if (wait != 258) { complete = false; continue; }
                     if (!StringComparer.OrdinalIgnoreCase.Equals(metadata.ImagePath, path)) continue;
                     var identity = image.Read(handle, candidate.Pid);
-                    if (mode == PcReadinessMode.VisibleWindow)
-                    {
-                        var windows = WindowSnapshotProbe.Capture(candidate.Pid, "", cancellation);
-                        if (windows.Truncated) { complete = false; continue; }
-                        if (windows.Windows.Count == 0) continue;
-                        if (JobNative.WaitForSingleObject(handle, 0) != 258) { complete = false; continue; }
-                    }
                     held.Add(new(identity, handle)); handle = null!;
                 }
                 catch (Exception error) when (error is Win32Exception or IOException or UnauthorizedAccessException)
                 { complete = false; }
                 finally { handle?.Dispose(); }
+            }
+            if (mode == PcReadinessMode.VisibleWindow && held.Count > 0)
+            {
+                try
+                {
+                    var windows = WindowSnapshotProbe.CaptureReadiness(held.Select(item => item.Identity.ProcessId), cancellation);
+                    var visible = ImmutableArray.CreateBuilder<Held>(held.Count);
+                    foreach (var item in held)
+                    {
+                        var observation = windows[item.Identity.ProcessId];
+                        if (observation == ExecutionTargetReadiness.Ready && JobNative.WaitForSingleObject(item.Handle, 0) == 258)
+                            visible.Add(item);
+                        else
+                        {
+                            if (observation != ExecutionTargetReadiness.NotReady) complete = false;
+                            item.Handle.Dispose();
+                        }
+                    }
+                    held = visible;
+                }
+                catch (Exception error) when (error is Win32Exception or IOException or UnauthorizedAccessException)
+                {
+                    complete = false;
+                    foreach (var item in held) item.Handle.Dispose();
+                    held.Clear();
+                }
             }
             return new(image, held.ToImmutable(), complete, mode, expected);
         }
@@ -91,12 +110,12 @@ internal sealed class PcTargetReadiness : IDisposable
                 _image.Read(item.Handle, item.Identity.ProcessId) != item.Identity)
                 throw new IOException("execution_target_readiness_expired");
         if (_mode == PcReadinessMode.VisibleWindow)
+        {
+            var windows = WindowSnapshotProbe.CaptureReadiness(_processes.Select(item => item.Identity.ProcessId), CancellationToken.None);
             foreach (var item in _processes)
-            {
-                var windows = WindowSnapshotProbe.Capture(item.Identity.ProcessId, "", CancellationToken.None);
-                if (windows.Truncated || windows.Windows.Count == 0 || JobNative.WaitForSingleObject(item.Handle, 0) != 258)
+                if (windows[item.Identity.ProcessId] != ExecutionTargetReadiness.Ready || JobNative.WaitForSingleObject(item.Handle, 0) != 258)
                     throw new IOException("execution_target_readiness_expired");
-            }
+        }
         return callback(_processes.Select(item => item.Identity).ToImmutableArray());
     }
 

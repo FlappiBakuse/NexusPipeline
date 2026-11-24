@@ -56,13 +56,6 @@ internal static class ImageCatalogRows
         if (index != expected.Entries.Count) throw Invalid();
     }
 
-    internal static SqliteCommand PageCommand(SqliteConnection connection, SqliteTransaction transaction, ImageCatalogQuery query)
-    {
-        ImageCatalogPolicy.Validate(query);
-        return Command(connection, transaction, SelectEntries + "WHERE attempt_id=$0 AND position>$1 ORDER BY position LIMIT $2;",
-            query.AttemptId.ToString("D"), query.AfterPosition, query.Limit + 1);
-    }
-
     internal static ImageCatalogEntry ReadEntry(SqliteDataReader row, Guid run, Guid attempt)
     {
         try

@@ -17,8 +17,9 @@ internal static class RetryIntentCodec
     internal const string Kind = "execution.retry.prepare";
     internal static Guid Id(Guid run, int ordinal, string domain) => new(SHA256.HashData(Encoding.UTF8.GetBytes(
         "nexus.execution.retry/1/" + domain + "/" + run.ToString("D") + "/" + ordinal.ToString(CultureInfo.InvariantCulture))).AsSpan(0, 16), true);
-    internal static OperationIdentity Identity(ExecutionRetryIntent value) => new(Id(value.Frozen.RunId, value.Frozen.NextOrdinal, "prepare"),
-        value.SubjectId, Convert.ToHexStringLower(SHA256.HashData(Encode(value))), Kind);
+    internal static OperationIdentity Identity(ExecutionRetryIntent value) => Identity(value, Encode(value));
+    internal static OperationIdentity Identity(ExecutionRetryIntent value, ReadOnlySpan<byte> bytes) =>
+        new(Id(value.Frozen.RunId, value.Frozen.NextOrdinal, "prepare"), value.SubjectId, Convert.ToHexStringLower(SHA256.HashData(bytes)), Kind);
     internal static byte[] Encode(ExecutionRetryIntent value) => BoundedJson.Serialize(value, StepResultCodec.Options);
 
     internal static ExecutionRetryIntent Decode(ReadOnlyMemory<byte> bytes)

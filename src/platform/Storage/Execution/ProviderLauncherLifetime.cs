@@ -26,9 +26,9 @@ internal sealed class ProviderLauncherLifetime
     private readonly IDisposable _package;
     private readonly Guid _endOperation = Guid.NewGuid();
     private bool _ended;
+    private (string Stage, Type Type, int HResult)? _lastFailure;
     internal ProviderLauncherBinding Binding { get; }
     internal BlobReference Retained { get; }
-    internal Exception? LastObservationFailure { get; private set; }
 
     internal ProviderLauncherLifetime(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
         InstanceLease lease, ResourceLeaseManager resources, ProviderLauncherBinding binding, string subject,
@@ -43,6 +43,7 @@ internal sealed class ProviderLauncherLifetime
     internal bool TryPublishEnded()
     {
         if (_ended) return true;
+        var stage = "provider-launcher-observation";
         try
         {
             _references.VerifyHeld(_resources, Binding.ParentOperationId);
@@ -82,13 +83,21 @@ internal sealed class ProviderLauncherLifetime
             }));
             if (!ended) return false;
             _ended = true;
-            try { _job.Dispose(); } finally { try { _package.Dispose(); } finally { _references.Dispose(); } }
-            LastObservationFailure = null; return true;
+            stage = "provider-launcher-release";
+            var cleanup = new CleanupFailures();
+            cleanup.Attempt(_job.Dispose); cleanup.Attempt(_package.Dispose); cleanup.Attempt(_references.Dispose);
+            cleanup.Preserve();
+            return true;
         }
         catch (Exception error) when (error is IOException or InvalidOperationException or System.ComponentModel.Win32Exception or
             System.Text.Json.JsonException or Microsoft.Data.Sqlite.SqliteException or UnauthorizedAccessException)
         {
-            LastObservationFailure = error;
+            var failure = (stage, error.GetType(), error.HResult);
+            if (_lastFailure != failure)
+            {
+                _lastFailure = failure;
+                ExecutionFailureTrace.Record(_instance.InstanceId, Binding.ParentOperationId, stage, error);
+            }
             return false;
         }
     }

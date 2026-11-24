@@ -14,6 +14,8 @@ namespace NexusPipeline.Platform.Storage.Scheduling;
 internal sealed class WorkRuntimeFacts(RuntimeInstance instance, StateDatabase database, InstanceLease lease,
     ScheduledWorkRegistry registry, ContractReader contracts, TimeProvider clock)
 {
+    private const int RecentRunLimit = 16;
+
     internal async ValueTask<WorkTaskSnapshot> ReadAsync(ExtensionScope scope, string providerId, IReadOnlyList<Guid> taskIds,
         CancellationToken cancellation)
     {
@@ -48,7 +50,7 @@ internal sealed class WorkRuntimeFacts(RuntimeInstance instance, StateDatabase d
             }
             var runs = saved.Where(run => run.TaskId == task.TaskId).OrderByDescending(run => run.Ordinal).ToArray();
             result.Add(new(task.TaskId, task.Revision, runs.Any(run => !run.HasStopped), next,
-                Array.AsReadOnly(runs.Take(16).Select(run => run.Fact).ToArray())));
+                Array.AsReadOnly(runs.Take(RecentRunLimit).Select(run => run.Fact).ToArray())));
         }
         cancellation.ThrowIfCancellationRequested(); entry.Use(() => true);
         return new(new(now, clock.LocalTimeZone.Id), result.AsReadOnly());
@@ -62,9 +64,8 @@ internal sealed class WorkRuntimeFacts(RuntimeInstance instance, StateDatabase d
             throw new UnauthorizedAccessException("work_writer_query_unbound");
         var entry = Entry(scope, providerId); actual.RequireCurrent();
         if (actual.FrozenInvocation.RunId == runId && actual.FrozenInvocation.AttemptId == attemptId) return false;
-        var candidates = ReadRuns(entry.ExtensionId, providerId, new HashSet<Guid> { taskId }, cancellation)
-            .Where(run => run.Fact.RunId == runId && run.Fact.AttemptId == attemptId).ToArray();
-        if (candidates.Length != 1) return false;
+        var candidates = ReadRuns(entry.ExtensionId, providerId, new HashSet<Guid> { taskId }, cancellation, writer: (runId, attemptId));
+        if (candidates.Count != 1) return false;
         var saved = candidates[0];
         actual.RequireCurrent(); cancellation.ThrowIfCancellationRequested();
         if (saved.HasStopped) return true;
@@ -83,7 +84,7 @@ internal sealed class WorkRuntimeFacts(RuntimeInstance instance, StateDatabase d
         Guid attemptId, IInstalledWork actual, CancellationToken cancellation)
     {
         lease.VerifyHeld(instance); actual.RequireCurrent(); cancellation.ThrowIfCancellationRequested();
-        var matches = ReadRuns(extensionId, providerId, new HashSet<Guid> { taskId }, cancellation)
+        var matches = ReadRuns(extensionId, providerId, new HashSet<Guid> { taskId }, cancellation, operationId)
             .Where(run => run.Fact.OperationId == operationId && run.Fact.RunId == runId && run.Fact.AttemptId == attemptId).ToArray();
         if (matches.Length != 1 || !matches[0].HasBegun) throw new IOException("work_effect_origin_unverified");
         actual.RequireCurrent(); cancellation.ThrowIfCancellationRequested();
@@ -96,7 +97,7 @@ internal sealed class WorkRuntimeFacts(RuntimeInstance instance, StateDatabase d
     internal bool ObserveOperation(string extensionId, Guid operationId, Guid runId, Guid attemptId, IInstalledWork actual, CancellationToken cancellation)
     {
         lease.VerifyHeld(instance); actual.RequireCurrent(); cancellation.ThrowIfCancellationRequested();
-        var matches = ReadRuns(extensionId, null, null, cancellation)
+        var matches = ReadRuns(extensionId, null, null, cancellation, operationId)
             .Where(run => run.Fact.OperationId == operationId && run.Fact.RunId == runId && run.Fact.AttemptId == attemptId).ToArray();
         if (matches.Length != 1 || !matches[0].HasBegun) throw new IOException("work_effect_origin_unverified");
         actual.RequireCurrent(); cancellation.ThrowIfCancellationRequested(); if (actual.OperationId == operationId) return false;
@@ -105,32 +106,110 @@ internal sealed class WorkRuntimeFacts(RuntimeInstance instance, StateDatabase d
             saved.Creator == JournalWriterStore.CurrentWriter && saved.OwnerGeneration == lease.StartupGeneration;
     }
 
-    private List<RecordedRun> ReadRuns(string extensionId, string? providerId, IReadOnlySet<Guid>? selected, CancellationToken cancellation)
+    private List<RecordedRun> ReadRuns(string extensionId, string? providerId, IReadOnlySet<Guid>? selected,
+        CancellationToken cancellation, Guid? operationId = null, (Guid RunId, Guid AttemptId)? writer = null)
     {
         var result = new List<RecordedRun>();
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = DatabaseConnections.BeginRead(connection);
-        ManualWorkInventory.Visit(instance, database, contracts, state =>
+        if (operationId is { } id)
+        {
+            if (ManualWorkRows.Find(connection, transaction, id) is { } manual)
+            {
+                var state = ManualWorkRows.Read(instance, contracts, connection, transaction, manual);
+                if (state.Source.Document.OperationId != id) throw ManualWorkCodec.Invalid();
+                RecordManual(state);
+            }
+            if (ScheduledProviderRows.Find(connection, transaction, id) is { } scheduled)
+            {
+                var state = new ScheduledProviderEvidence(instance, contracts).Read(scheduled, connection, transaction);
+                if (state.Source.Document.OperationId != id) throw ScheduledProviderCodec.Invalid();
+                RecordScheduled(state);
+            }
+        }
+        else if (writer is { } identity)
+        {
+            var taskId = selected!.Single();
+            var manual = new ManualWorkCodec(instance, contracts);
+            foreach (var item in ManualWorkRows.ForTask(connection, transaction, extensionId, providerId!, taskId))
+            {
+                cancellation.ThrowIfCancellationRequested();
+                var source = manual.Read(item.Reference);
+                var document = source.Document;
+                if (document.OperationId.ToString("D") != item.OperationId || document.ExtensionId != extensionId ||
+                    document.ProviderId != providerId || document.Task.TaskId != taskId) throw ManualWorkCodec.Invalid();
+                if ((document.Invocation.RunId, document.Invocation.AttemptId) == identity)
+                    RecordManual(ManualWorkRows.Read(manual, connection, transaction, source), item.Ordinal);
+            }
+            var evidence = new ScheduledProviderEvidence(instance, contracts);
+            foreach (var item in ScheduledProviderRows.TaskCandidates(connection, transaction, extensionId, providerId!))
+            {
+                cancellation.ThrowIfCancellationRequested();
+                var source = evidence.ReadSource(item.Reference);
+                var document = source.Document;
+                if (document.OperationId.ToString("D") != item.OperationId ||
+                    document.ExtensionId != extensionId || document.ProviderId != providerId) throw ScheduledProviderCodec.Invalid();
+                if (OwnerTask(document) == taskId && (document.Invocation.RunId, document.Invocation.AttemptId) == identity)
+                    RecordScheduled(evidence.Read(source, connection, transaction), item.Ordinal);
+            }
+        }
+        else
+        {
+            foreach (var taskId in selected!)
+                foreach (var item in ManualWorkRows.RecentOrPending(connection, transaction, extensionId, providerId!, taskId, RecentRunLimit))
+                {
+                    cancellation.ThrowIfCancellationRequested();
+                    var state = ManualWorkRows.Read(instance, contracts, connection, transaction, item.Reference);
+                    if (state.Source.Document.OperationId.ToString("D") != item.OperationId) throw ManualWorkCodec.Invalid();
+                    RecordManual(state, item.Ordinal);
+                }
+            var remaining = selected!.ToDictionary(taskId => taskId, _ => RecentRunLimit);
+            var unfilled = remaining.Count;
+            var evidence = new ScheduledProviderEvidence(instance, contracts);
+            foreach (var item in ScheduledProviderRows.TaskCandidates(connection, transaction, extensionId, providerId!))
+            {
+                cancellation.ThrowIfCancellationRequested();
+                if (!item.NeedsProof && unfilled == 0) continue;
+                var source = evidence.ReadSource(item.Reference);
+                var document = source.Document;
+                if (document.OperationId.ToString("D") != item.OperationId ||
+                    document.ExtensionId != extensionId || document.ProviderId != providerId) throw ScheduledProviderCodec.Invalid();
+                var taskId = OwnerTask(document);
+                if (!remaining.TryGetValue(taskId, out var count) || !item.NeedsProof && count == 0) continue;
+                RecordScheduled(evidence.Read(source, connection, transaction), item.Ordinal);
+                if (count > 0)
+                {
+                    remaining[taskId] = count - 1;
+                    if (count == 1) unfilled--;
+                }
+            }
+        }
+        transaction.Commit();
+        return result;
+
+        void RecordManual(ManualWorkState state, long? ordinal = null)
         {
             cancellation.ThrowIfCancellationRequested(); var source = state.Source.Document;
             if (source.ExtensionId != extensionId || providerId is not null && source.ProviderId != providerId || selected is not null && !selected.Contains(source.Task.TaskId)) return;
             var fact = Fact(source.OperationId, source.Invocation, source.Task.Revision, "manual", source.ObservedAtUtc,
                 state.Begin is not null, state.Result?.Completion, state.Result?.Returned, state.Result?.ObservedAtUtc, state.Result?.ReasonCode);
-            result.Add(new(source.Task.TaskId, source.ProviderId, Ordinal(connection, transaction, source.OperationId), state.Begin is not null,
+            result.Add(new(source.Task.TaskId, source.ProviderId, ordinal ?? Ordinal(connection, transaction, source.OperationId), state.Begin is not null,
                 Stopped(state.Result is not null, source.Creator), source.Creator, source.OwnerGeneration, fact));
-        });
-        ScheduledProviderInventory.Visit(instance, database, contracts, state =>
+        }
+
+        void RecordScheduled(ScheduledProviderState state, long? ordinal = null)
         {
             cancellation.ThrowIfCancellationRequested(); var source = state.Source.Document;
-            var taskId = source.ManualTask?.TaskId ?? source.Task.TaskId;
+            var taskId = OwnerTask(source);
             if (source.ExtensionId != extensionId || providerId is not null && source.ProviderId != providerId || selected is not null && !selected.Contains(taskId)) return;
             var fact = Fact(source.OperationId, source.Invocation, source.Task.Revision, "schedule", source.ObservedAtUtc,
                 state.Begin is not null, state.Result?.Completion, state.Result?.Returned, state.Result?.ObservedAtUtc, state.Result?.ReasonCode);
-            result.Add(new(taskId, source.ProviderId, Ordinal(connection, transaction, source.OperationId), state.Begin is not null,
+            result.Add(new(taskId, source.ProviderId, ordinal ?? Ordinal(connection, transaction, source.OperationId), state.Begin is not null,
                 Stopped(state.Result is not null, source.Creator), source.Creator, source.OwnerGeneration, fact));
-        });
-        return result;
+        }
     }
+
+    private static Guid OwnerTask(ScheduledProviderDocument source) => source.ManualTask?.TaskId ?? source.Task.TaskId;
 
     private static WorkRunFact Fact(Guid operationId, FrozenScheduledInvocation invocation, long revision, string trigger,
         DateTimeOffset acceptedAt, bool begun, string? completion, ScheduledBusinessResult? returned, DateTimeOffset? completedAt, string? reason) =>

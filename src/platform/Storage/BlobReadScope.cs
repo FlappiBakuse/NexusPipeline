@@ -27,6 +27,9 @@ public sealed class BlobReadScope : IDisposable
 
     internal static BlobReadScope Capture(RuntimeInstance instance, Action<string> capture) => new(instance, capture);
 
+    internal bool Retains(BlobReference reference) => !_disposed && _thread == Environment.CurrentManagedThreadId &&
+        _held.ContainsKey(Path.GetFullPath(Path.Combine(_root, reference.RelativePath)));
+
     internal static void Track(string path)
     {
         if (_current is not { } scope) return;

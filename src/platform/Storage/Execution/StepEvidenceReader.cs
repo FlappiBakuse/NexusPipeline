@@ -28,7 +28,7 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
     {
         using var history = JournalReadScope.HoldAttempt(instance, contracts, database, binding.ParentJournalId);
         var retirement = VerifiedRecordRetirement.ForArtifact(instance, database, contracts, binding, "process", artifact);
-        var document = ReadDocument(binding, artifact, collected, context, verifyContents: true, 0, retirement: retirement);
+        var (document, _) = ReadDocument(binding, artifact, collected, context, verifyContents: true, 0, retirement: retirement);
         return new(artifact, document.Engine, document.Business, document.Generation, document.ReasonCode);
     }
 
@@ -43,10 +43,14 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
     {
         // The caller owns the validated snapshot; this path verifies its artifacts and current SQL bindings.
         var references = new List<BlobReference>();
-        var document = StepEvidenceCodec.Read(_blobs, binding, artifact);
-        _ = ReadDocument(binding, artifact, document.Stage == "collected", context, verifyContents: false, 0, references, terminal: terminal);
+        _ = ReadDocument(binding, artifact, null, context, verifyContents: false, 0, references, terminal: terminal);
         return references.Distinct().ToArray();
     }
+
+    internal (StepEvidenceDocument Document, (BlobReference Reference, RawOutputManifest Raw)? Output) ReadValidatedEvidence(
+        StepEvidenceBinding binding, BlobReference artifact, (ExecutionPlan Total, StepWriterState Job, ProcessIdentity? Root) context,
+        Func<JournalDocument?>? terminal) =>
+        ReadDocument(binding, artifact, null, context, verifyContents: false, 0, references: [], terminal: terminal);
 
     internal (ExecutionPlan Total, StepWriterState Job, ProcessIdentity? Root) Context(StepEvidenceBinding binding, string role = "process")
     {
@@ -144,13 +148,15 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
         return bundle.Scripts.Single(item => item.Id == scriptId);
     }
 
-    private StepEvidenceDocument ReadDocument(StepEvidenceBinding binding, BlobReference artifact, bool collected,
+    private (StepEvidenceDocument Document, (BlobReference Reference, RawOutputManifest Raw)? Output) ReadDocument(
+        StepEvidenceBinding binding, BlobReference artifact, bool? expectedCollected,
         (ExecutionPlan Total, StepWriterState Job, ProcessIdentity? Root) context, bool verifyContents, int depth,
         List<BlobReference>? references = null, VerifiedRecordRetirement? retirement = null, Func<JournalDocument?>? terminal = null)
     {
         if (depth > 2) throw Invalid();
         var document = StepEvidenceCodec.Read(_blobs, binding, artifact);
-        if ((document.Stage == "collected") != collected || document.Root != context.Root ||
+        var collected = document.Stage == "collected";
+        if (expectedCollected is { } required && collected != required || document.Root != context.Root ||
             document.Stage == "observed" && document.Business == BusinessOutcome.Unverified && document.Engine is EngineOutcome.Running or EngineOutcome.Unknown)
             throw Invalid();
         if (collected)
@@ -162,9 +168,10 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
                 context.Job.ClosedElapsedMilliseconds is null || (document.Engine == EngineOutcome.NotStarted) != !closure.WasExecuted) throw Invalid();
         }
         StepEvidenceDocument? prior = null;
+        (BlobReference Reference, RawOutputManifest Raw)? outputEvidence = null;
         if (document.PreviousObservation is { } previous)
         {
-            prior = ReadDocument(binding, previous, false, context, verifyContents, depth + 1, references, retirement, terminal);
+            (prior, outputEvidence) = ReadDocument(binding, previous, false, context, verifyContents, depth + 1, references, retirement, terminal);
             if (document.Engine != prior.Engine && prior.Engine is not (EngineOutcome.Running or EngineOutcome.Unknown) ||
                 document.Business != prior.Business && prior.Business != BusinessOutcome.Unverified) throw Invalid();
         }
@@ -172,6 +179,7 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
         if (document.RawOutput is { } output)
         {
             raw = RawOutputCodec.Read(_blobs, binding, output);
+            outputEvidence = (output, raw);
             var baseline = verifyContents ? FileLogEvidence.Require(instance, contracts, _blobs, context.Total, binding, context.Job.FileLogBaseline, raw) :
                 raw.FileLogBaseline is { } baselineReference && baselineReference == context.Job.FileLogBaseline
                     ? LogBaselineCodec.Read(_blobs, baselineReference, binding.ParentJournalId, binding.StepId, binding.JobName,
@@ -224,7 +232,8 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
             references?.Add(judgementReference);
             references?.AddRange(JudgementEvidenceCodec.References(_blobs, scriptEvidence));
         }
-        if (!verifyContents) return document;
+        var evidence = (document, outputEvidence);
+        if (!verifyContents) return evidence;
         var definition = Judgement(context.Total, binding.StepId);
         if (document.ReasonCode == "execution_completion_missing")
         {
@@ -243,12 +252,12 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
             if (document.ReasonCode == "execution_completion_missing")
             {
                 if (decision is { Outcome: not BusinessOutcome.Unverified }) throw Invalid();
-                return document;
+                return evidence;
             }
             if (document.Business != BusinessOutcome.Unverified && prior?.Business != document.Business &&
                 (decision is null || decision.Outcome != document.Business ||
                     decision.ReasonCode != document.ReasonCode && document.ReasonCode != document.Stop?.ReasonCode)) throw Invalid();
-            return document;
+            return evidence;
         }
         if (scriptEvidence is not null || document.Generation != 0) throw Invalid();
         var judgement = new AttemptBusinessJudgement(binding.AttemptId, definition);
@@ -274,7 +283,7 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
                 adapterObservation is null || raw is null) throw Invalid();
             var decision = DailyAdapterEvidence.Decide(step, adapterObservation, raw, document.Engine, prior?.Engine == EngineOutcome.Succeeded);
             if (decision.Outcome != document.Business || decision.ReasonCode != document.ReasonCode) throw Invalid();
-            return document;
+            return evidence;
         }
         if (judgement.Mode == ExecutionJudgementMode.None && document.TaskAdapter is not null &&
             document.Business != BusinessOutcome.Unverified && prior?.Business != document.Business)
@@ -284,25 +293,25 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
             var decision = AdapterBusinessPolicy.Decide(step.Tasks.Select(TaskAdapterProtocol.ReadTask).ToImmutableArray(), observed.Observations);
             if (document.Root is null || document.Stage != "collected" || document.Business != decision.Outcome ||
                 document.ReasonCode != decision.ReasonCode && document.ReasonCode != document.Stop?.ReasonCode) throw Invalid();
-            return document;
+            return evidence;
         }
         if (document.Business == BusinessOutcome.NotApplicable)
         {
             if (judgement.Mode != ExecutionJudgementMode.None || document.Root is null || document.Stage != "collected" && document.ExitCode is null ||
                 context.Total.Steps.Single(item => item.StepId == binding.StepId) is { Adapter: not null, Purpose: not "initialization" } ||
                 document.ReasonCode != "execution_judgement_not_applicable" && document.ReasonCode != document.Stop?.ReasonCode) throw Invalid();
-            return document;
+            return evidence;
         }
         if (document.ReasonCode == "execution_completion_missing")
         {
             if (!retiredRaw && (!continuous || (replay?.Business ?? judgement.Business) != BusinessOutcome.Unverified)) throw Invalid();
-            return document;
+            return evidence;
         }
         if (document.Business != BusinessOutcome.Unverified && prior?.Business != document.Business &&
             !retiredRaw && (!continuous || (replay?.ReasonCode ?? judgement.Decision?.ReasonCode) is not { } reason ||
                 (replay?.Business ?? judgement.Business) != document.Business || reason != document.ReasonCode)) throw Invalid();
         if (document.Business == BusinessOutcome.Partial && prior?.Business != BusinessOutcome.Partial) throw Invalid();
-        return document;
+        return evidence;
     }
 
     private bool IsPublishedResult(StepEvidenceBinding binding, BlobReference artifact)

@@ -5,11 +5,13 @@ namespace NexusPipeline.Platform.Storage.Sqlite;
 
 internal static class DatabaseConnections
 {
+    private const string RuntimeReadSnapshot = "SELECT rootpage FROM main.sqlite_schema LIMIT 1;";
+
     private sealed class ConnectionState
     {
         internal DatabaseDomain Domains = DatabaseDomain.Runtime;
         internal bool Initialized;
-        internal string ReadSnapshotSql = "SELECT rootpage FROM main.sqlite_schema LIMIT 1;";
+        internal string ReadSnapshotSql = RuntimeReadSnapshot;
     }
     private static readonly ConditionalWeakTable<SQLitePCL.sqlite3, ConnectionState> States = new();
 
@@ -54,16 +56,21 @@ internal static class DatabaseConnections
         catch { connection.Dispose(); throw; }
     }
 
-    internal static SqliteTransaction BeginRead(SqliteConnection connection)
+    internal static SqliteTransaction BeginRead(SqliteConnection connection) => BeginRead(connection, null);
+
+    internal static SqliteTransaction BeginRead(SqliteConnection connection, DatabaseDomain? domains)
     {
         if (connection.Handle is not { } handle || !States.TryGetValue(handle, out var state))
             throw new IOException("database_read_snapshot_unbound");
+        var selected = domains is { } requested ? DatabaseLayout.Normalize(requested) : state.Domains;
+        if ((selected & state.Domains) != selected) throw new IOException("database_read_snapshot_unbound");
         var transaction = connection.BeginTransaction(deferred: true);
         try
         {
             using var command = connection.CreateCommand(); command.Transaction = transaction;
             // One statement acquires shared snapshots in SQLite database-index order before business reads.
-            command.CommandText = state.ReadSnapshotSql; command.ExecuteScalar();
+            command.CommandText = selected == state.Domains ? state.ReadSnapshotSql : ReadSnapshotSql(selected);
+            command.ExecuteScalar();
             return transaction;
         }
         catch { transaction.Dispose(); throw; }
@@ -95,8 +102,7 @@ internal static class DatabaseConnections
         }
         if (!changed) return;
         var selected = DatabaseLayout.Domains.Where(domain => (state.Domains & domain) != 0).ToArray();
-        state.ReadSnapshotSql = "SELECT " + string.Join(",", selected.Select(domain =>
-            "(SELECT rootpage FROM " + DatabaseLayout.Alias(domain) + ".sqlite_schema LIMIT 1)")) + ";";
+        state.ReadSnapshotSql = ReadSnapshotSql(state.Domains);
         int Weight(DatabaseDomain domain) => selected.Length <= 3 ? 1 : domain switch
         { DatabaseDomain.Runtime => 4, DatabaseDomain.Configuration => 3, _ => 1 };
         var unit = cacheBudgetKiB / selected.Sum(Weight);
@@ -111,6 +117,10 @@ internal static class DatabaseConnections
             command.CommandText = "PRAGMA query_only=ON;"; command.ExecuteNonQuery();
         }
     }
+
+    private static string ReadSnapshotSql(DatabaseDomain domains) => domains == DatabaseDomain.Runtime ? RuntimeReadSnapshot :
+        "SELECT " + string.Join(",", DatabaseLayout.Domains.Where(domain => (domains & domain) != 0).Select(domain =>
+            "(SELECT rootpage FROM " + DatabaseLayout.Alias(domain) + ".sqlite_schema LIMIT 1)")) + ";";
 
     private static void ConfigureWriter(SqliteCommand command, string alias)
     {

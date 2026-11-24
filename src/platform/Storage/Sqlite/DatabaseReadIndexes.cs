@@ -30,7 +30,9 @@ internal static class DatabaseReadIndexes
         ["configuration_edits_active_read"] = ("configuration_edit_sessions",
             "CREATE INDEX configuration_edits_active_read ON configuration_edit_sessions(session_id) WHERE phase IN (0,1)"),
         ["file_effects_pending_read"] = ("file_effects",
-            "CREATE INDEX file_effects_pending_read ON file_effects(journal_id) WHERE state='pending'")
+            "CREATE INDEX file_effects_pending_read ON file_effects(journal_id) WHERE state='pending'"),
+        ["notification_publication_revision_read"] = ("notification_publications",
+            "CREATE INDEX notification_publication_revision_read ON notification_publications(after_revision,operation_id)")
     };
 
     internal static bool Recognize(string type, string name, string table, string? sql)

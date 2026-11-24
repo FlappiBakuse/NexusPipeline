@@ -25,16 +25,43 @@ internal sealed record JudgementWorkerInvocation(string Format, int Version, Jud
 {
     public long ProbeEvidenceAllowance { get; init; } = 2L * 1024 * 1024;
 }
+
+internal sealed class JudgementInvocationFrame(JudgementWorkerInvocation invocation) : IDisposable
+{
+    private byte[]? _bytes;
+    private bool _disposed;
+    internal JudgementWorkerInvocation Invocation { get; } = invocation;
+    internal ReadOnlyMemory<byte> Bytes
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return _bytes ??= JudgementWorkerProtocol.Encode(Invocation);
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        if (_bytes is not { } bytes) return;
+        _bytes = null;
+        CryptographicOperations.ZeroMemory(bytes);
+    }
+}
+
 internal sealed record JudgementPythonRequest(string Script, JsonElement Input, JudgementWorkerIdentity Identity,
     long Generation, string InputSha256, long ProbeEvidenceAllowance);
 internal sealed record JudgementWorkerResponse(string Format, int Version, JudgementWorkerIdentity Identity,
     long Generation, bool IsFinal, string InputSha256, BusinessJudgementResult? Result, string? FaultCode)
 {
     public IReadOnlyList<JudgementConsoleEntry> Console { get; init; } = [];
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<JudgementFailure>? Diagnostics { get; init; }
     public int ProbeCount { get; init; }
     public string ProbeTranscriptSha256 { get; init; } = JudgementProbeProtocol.Hash([]);
 }
-internal sealed record JudgementPythonResponse(BusinessJudgementResult? Result, string? FaultCode, IReadOnlyList<JudgementConsoleEntry> Console);
+internal sealed record JudgementPythonResponse(BusinessJudgementResult? Result, string? FaultCode,
+    string? FailureType, IReadOnlyList<JudgementConsoleEntry> Console);
 internal sealed record JudgementWorkerReady(string Format, int Version, JudgementWorkerIdentity Identity, ProcessIdentity Process);
 internal sealed record WorkerChildReady(string Format, int Version, JudgementWorkerIdentity Identity,
     long Generation, ProcessIdentity Process);
@@ -66,6 +93,15 @@ internal static class JudgementWorkerProtocol
 
     internal static byte[] Encode<T>(T value) => BoundedJson.Serialize(value, Options, FrameLimit(typeof(T)));
 
+    internal sealed class DispatchFrame(ReadOnlyMemory<byte> bytes) : IDisposable
+    {
+        private readonly JsonDocument _document = StrictJson.Parse(bytes);
+        internal int Length { get; } = bytes.Length;
+        internal string? Format => _document.RootElement.TryGetProperty("format", out var formatValue) ? formatValue.GetString() : null;
+        internal T Decode<T>() => DecodeRoot<T>(_document.RootElement);
+        public void Dispose() => _document.Dispose();
+    }
+
     internal static T Decode<T>(ReadOnlyMemory<byte> bytes)
     {
         var limit = FrameLimit(typeof(T));
@@ -73,29 +109,34 @@ internal static class JudgementWorkerProtocol
             ? MaximumLogBytes : typeof(T) == typeof(JudgementProbeReply) || typeof(T) == typeof(JudgementProbeExchange)
                 ? JudgementProbeProtocol.MaximumBodyStringBytes : StrictJson.MaximumStringBytes;
         using var document = StrictJson.Parse(bytes, limit, strings);
-        var value = document.RootElement.Deserialize<T>(Options) ?? throw Invalid();
+        return DecodeRoot<T>(document.RootElement);
+    }
+
+    private static T DecodeRoot<T>(JsonElement root)
+    {
+        var value = root.Deserialize<T>(Options) ?? throw Invalid();
         if (value is JudgementWorkerInvocation invocation)
         {
             var empty = JsonSerializer.SerializeToElement(new { });
-            var envelope = document.RootElement.EnumerateObject().ToDictionary(property => property.Name,
+            var envelope = root.EnumerateObject().ToDictionary(property => property.Name,
                 property => property.Name == "input" ? empty : property.Value, StringComparer.Ordinal);
             if (!JsonElement.DeepEquals(JsonSerializer.SerializeToElement(envelope),
                 JsonSerializer.SerializeToElement(invocation with { Input = empty }, Options))) throw Invalid();
         }
         else if (value is JudgementProbeReply reply)
         {
-            if (!JsonElement.DeepEquals(ProbeEnvelope(document.RootElement), JsonSerializer.SerializeToElement(
+            if (!JsonElement.DeepEquals(ProbeEnvelope(root), JsonSerializer.SerializeToElement(
                 reply with { Result = reply.Result.HasValue ? JsonSerializer.SerializeToElement(new { }) : null }, Options))) throw Invalid();
         }
         else if (value is JudgementProbeExchange exchange)
         {
             if (exchange.Request is null || exchange.Reply is null) throw Invalid();
-            var envelope = document.RootElement.EnumerateObject().ToDictionary(property => property.Name,
+            var envelope = root.EnumerateObject().ToDictionary(property => property.Name,
                 property => property.Name == "reply" ? ProbeEnvelope(property.Value) : property.Value, StringComparer.Ordinal);
             if (!JsonElement.DeepEquals(JsonSerializer.SerializeToElement(envelope), JsonSerializer.SerializeToElement(
                 exchange with { Reply = exchange.Reply with { Result = exchange.Reply.Result.HasValue ? JsonSerializer.SerializeToElement(new { }) : null } }, Options))) throw Invalid();
         }
-        else if (!JsonElement.DeepEquals(document.RootElement, JsonSerializer.SerializeToElement(value, Options))) throw Invalid();
+        else if (!JsonElement.DeepEquals(root, JsonSerializer.SerializeToElement(value, Options))) throw Invalid();
         return value;
     }
 
@@ -131,6 +172,7 @@ internal static class JudgementWorkerProtocol
         if (value.ProbeCount is < 0 or > JudgementProbeProtocol.MaximumCalls || !FileTreePolicy.Digest(value.ProbeTranscriptSha256) ||
             value.ProbeCount == 0 && value.ProbeTranscriptSha256 != JudgementProbeProtocol.Hash([])) throw Invalid();
         JudgementConsole.Require(value.Console);
+        JudgementDiagnostics.Require(value.Diagnostics);
         if (Encode(value).Length > MaximumResponseBytes) throw Invalid();
         if (value.Result is { } result) RequireResult(result);
         if (value.FaultCode is { } fault && (fault.Length is < 1 or > 80 || fault.Any(character =>
@@ -142,13 +184,14 @@ internal static class JudgementWorkerProtocol
         var result = Decode<BusinessJudgementResult>(bytes); RequireResult(result); return result;
     }
 
-    internal static JudgementPythonResponse ReadPythonResponse(ReadOnlyMemory<byte> bytes)
+    internal static JudgementPythonResponse ReadPythonResponse(DispatchFrame frame)
     {
-        var value = Decode<JudgementPythonResponse>(bytes);
-        if ((value.Result is null) == (value.FaultCode is null) || value.FaultCode is not (null or "judgement_worker_execution_failed")) throw Invalid();
+        var value = frame.Decode<JudgementPythonResponse>();
+        if ((value.Result is null) == (value.FaultCode is null) || value.FaultCode is not (null or "judgement_worker_execution_failed") ||
+            (value.FaultCode is null ? value.FailureType is not null : !JudgementDiagnostics.IsPythonType(value.FailureType))) throw Invalid();
         JudgementConsole.Require(value.Console);
         if (value.Result is { } result) RequireResult(result);
-        if (bytes.Length > MaximumResponseBytes) throw Invalid();
+        if (frame.Length > MaximumResponseBytes) throw Invalid();
         return value;
     }
 

@@ -37,7 +37,6 @@ internal static class ReceiptProgressRows
             "UPDATE notifications.notification_receipt_progress SET next_ordinal=next_ordinal+1 " +
             "WHERE operation_id=$0 AND next_ordinal=$1 AND route_count=$2 AND next_ordinal<route_count;",
             operationId.ToString("D"), ordinal, routeCount);
-        if (update.ExecuteNonQuery() != 1 || Require(connection, transaction, operationId, routeCount) != ordinal + 1)
-            throw NotificationReceiptCodec.Invalid();
+        if (update.ExecuteNonQuery() != 1) throw NotificationReceiptCodec.Invalid();
     }
 }

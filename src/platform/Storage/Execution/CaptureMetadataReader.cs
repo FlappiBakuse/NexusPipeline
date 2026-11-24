@@ -269,7 +269,7 @@ internal sealed class CaptureMetadataReader(RuntimeInstance instance, StateDatab
         var bytes = new byte[checked((int)input.Length)]; input.ReadExactly(bytes);
         using var json = StrictJson.Parse(bytes);
         var result = json.RootElement.Deserialize<T>(StepResultCodec.Options) ?? throw Invalid();
-        if (!Same(json.RootElement, JsonSerializer.SerializeToElement(result, StepResultCodec.Options))) throw Invalid();
+        if (!JsonElement.DeepEquals(json.RootElement, JsonSerializer.SerializeToElement(result, StepResultCodec.Options))) throw Invalid();
         return result;
     }
 

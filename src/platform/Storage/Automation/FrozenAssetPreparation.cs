@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using NexusPipeline.Extensibility.Protocol;
 
@@ -6,9 +7,18 @@ namespace NexusPipeline.Platform.Storage.Automation;
 public sealed class FrozenAssetPreparation
 {
     private readonly byte[] _bytes;
+    private string? _digest;
     internal FrozenAssetPreparation(byte[] bytes) => _bytes = bytes.ToArray();
     public AssetPreparationPlan ReadWire() => JsonSerializer.Deserialize<AssetPreparationPlan>(_bytes)!;
     public byte[] Export() => _bytes.ToArray();
+
+    internal string Digest => Volatile.Read(ref _digest) ?? ComputeDigest();
+
+    private string ComputeDigest()
+    {
+        var digest = Convert.ToHexStringLower(SHA256.HashData(_bytes));
+        return Interlocked.CompareExchange(ref _digest, digest, null) ?? digest;
+    }
 }
 
 public sealed class PreparedAssetPreparation : IDisposable

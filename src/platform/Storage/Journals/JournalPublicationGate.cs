@@ -4,13 +4,18 @@ internal sealed class JournalPublicationGate : IDisposable
 {
     private readonly Mutex _mutex;
 
-    private JournalPublicationGate(string name)
+    private JournalPublicationGate(string name, Guid journalId, IJournalPublicationObserver? observer)
     {
         _mutex = new(false, name, new NamedWaitHandleOptions { CurrentUserOnly = true, CurrentSessionOnly = false });
         try
         {
             try
             {
+                if (observer is not null)
+                {
+                    if (_mutex.WaitOne(0)) return;
+                    observer.ReadBlocked(journalId);
+                }
                 if (!_mutex.WaitOne(TimeSpan.FromSeconds(30))) throw new IOException("journal_publication_busy");
             }
             catch (AbandonedMutexException)
@@ -21,7 +26,8 @@ internal sealed class JournalPublicationGate : IDisposable
         catch { _mutex.Dispose(); throw; }
     }
 
-    internal static JournalPublicationGate Acquire(RuntimeInstance instance, Guid journalId) => new(Name(instance, journalId));
+    internal static JournalPublicationGate Acquire(RuntimeInstance instance, Guid journalId, IJournalPublicationObserver? reader = null) =>
+        new(Name(instance, journalId), journalId, reader);
 
     internal static string Name(RuntimeInstance instance, Guid journalId)
     {
@@ -40,4 +46,5 @@ internal sealed class JournalPublicationGate : IDisposable
 internal interface IJournalPublicationObserver
 {
     void RevisionCreated(string path);
+    void ReadBlocked(Guid journalId) { }
 }

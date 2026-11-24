@@ -11,20 +11,24 @@ internal sealed record ScheduledProviderState(ScheduledProviderSnapshot Source, 
 
 internal sealed class ScheduledProviderEvidence(RuntimeInstance instance, ContractReader contracts)
 {
-    internal ScheduledProviderState Read(BlobReference reference, SqliteConnection connection, SqliteTransaction transaction)
+    private readonly ScheduledProviderCodec _codec = new(instance, contracts);
+
+    internal ScheduledProviderSnapshot ReadSource(BlobReference reference) => _codec.Read(reference);
+
+    internal ScheduledProviderState Read(BlobReference reference, SqliteConnection connection, SqliteTransaction transaction) =>
+        Read(ReadSource(reference), connection, transaction);
+
+    internal ScheduledProviderState Read(ScheduledProviderSnapshot source, SqliteConnection connection, SqliteTransaction transaction)
     {
-        var codec = new ScheduledProviderCodec(instance, contracts); var source = codec.Read(reference);
-        ScheduledProviderRows.RequireSaved(connection, transaction, source);
+        var operation = ScheduledProviderRows.RequireSaved(connection, transaction, source);
         var id = source.Document.Invocation.OccurrenceId;
         var beginRef = ScheduledProviderRows.Leaf(connection, transaction, id, "begin");
         var closeRef = ScheduledProviderRows.Leaf(connection, transaction, id, "close");
         var resultRef = ScheduledProviderRows.Leaf(connection, transaction, id, "result");
-        var begin = beginRef is null ? null : codec.ReadDocument<ScheduledProviderBegin>(beginRef);
-        var close = closeRef is null ? null : codec.ReadDocument<ScheduledProviderClose>(closeRef);
-        var result = resultRef is null ? null : codec.ReadDocument<ScheduledProviderResult>(resultRef);
+        var begin = beginRef is null ? null : _codec.ReadDocument<ScheduledProviderBegin>(beginRef);
+        var close = closeRef is null ? null : _codec.ReadDocument<ScheduledProviderClose>(closeRef);
+        var result = resultRef is null ? null : _codec.ReadDocument<ScheduledProviderResult>(resultRef);
         Require(source, beginRef, begin, close, result);
-        var operation = OperationRows.ReadExisting(connection, transaction, ScheduledProviderRows.Identity(source)) ??
-            throw ScheduledProviderCodec.Invalid();
         if (operation.Status != (result is null ? "accepted" : "completed")) throw ScheduledProviderCodec.Invalid();
         using var pending = DatabaseConnections.Command(connection, transaction,
             "SELECT trigger_utc_minute FROM main.scheduled_provider_pending WHERE occurrence_id=$0;", id.ToString("D"));

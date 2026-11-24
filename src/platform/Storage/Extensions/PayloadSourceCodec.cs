@@ -1,15 +1,26 @@
-using System.Collections.Immutable;
-using System.Runtime.Versioning;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using NexusPipeline.Core.Extensions;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Platform.Extensions;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
+using System.Collections.Immutable;
+using System.Runtime.Versioning;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace NexusPipeline.Platform.Storage.Extensions;
+
+internal sealed record CatalogPackageSource(ExtensionCatalogSaved Catalog, ExtensionCatalogEntry Entry,
+    BlobReference Archive);
+internal sealed record ExtensionPayloadSource(string Format, int Version, Guid InstanceId, Guid OperationId, Guid JournalId,
+    string ExtensionId, PayloadAction Action, long ExpectedInstalledRevision, BlobReference? OriginalFootprint,
+    CatalogPackageSource? Package, long SettingsRevision, bool DesiredEnabled, ImmutableArray<ResourceClaim> Claims,
+    bool InitializeEnabledPreference)
+{
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public string? RemovalReason { get; init; }
+}
 
 internal sealed class PayloadSourceCodec(RuntimeInstance instance, ContractReader contracts)
 {
@@ -28,10 +39,12 @@ internal sealed class PayloadSourceCodec(RuntimeInstance instance, ContractReade
         return _blobs.PersistPlan(JsonSerializer.SerializeToUtf8Bytes(source, Options));
     }
 
-    internal ExtensionPayloadSource ReadMetadata(BlobReference reference)
+    internal ExtensionPayloadSource ReadMetadata(BlobReference reference, List<FileStream>? held = null)
     {
         RequirePlan(reference);
-        using var input = _blobs.OpenVerified(reference);
+        var input = _blobs.OpenVerified(reference);
+        using var local = held is null ? input : null;
+        held?.Add(input);
         var bytes = new byte[checked((int)input.Length)]; input.ReadExactly(bytes);
         using var strict = StrictJson.Parse(bytes);
         var source = JsonSerializer.Deserialize<ExtensionPayloadSource>(bytes, Options) ?? throw Invalid();

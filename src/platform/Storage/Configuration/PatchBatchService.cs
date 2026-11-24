@@ -54,7 +54,8 @@ public sealed class PatchBatchService
             var changes = ImmutableArray.CreateBuilder<ConfigurationRevisionChange>();
             foreach (var group in request.Documents.GroupBy(document => document.Input.Address))
             {
-                var before = _revisions.Read(group.Key) ?? throw new ConfigurationException("configuration_required");
+                var observed = _revisions.ReadStored(group.Key) ?? throw new ConfigurationException("configuration_required");
+                var before = observed.Revision;
                 ConfigurationRevisionPolicy.RequireCurrentContract(before, group.First().Input.Contract);
                 var replacements = new Dictionary<string, FileTreeEntry>(StringComparer.Ordinal);
                 foreach (var document in group)
@@ -62,8 +63,7 @@ public sealed class PatchBatchService
                     var item = document.Input;
                     if (document.Patch.Binding.Revision != before.Revision)
                         throw new ConfigurationException("configuration_patch_binding_conflict");
-                    var preview = _patches.Preview(subject, item.Address, item.ExpectedBindingRevision, item.Contract,
-                        item.RelativePath, item.Syntax, item.Access, item.PatchBytes);
+                    var preview = _patches.PreviewOwned(subject, document, before);
                     documents.Add(preview);
                     var replacement = preview.Use((change, _, _) =>
                     {
@@ -75,6 +75,7 @@ public sealed class PatchBatchService
                     });
                     replacements.Add(item.RelativePath, replacement);
                 }
+                _revisions.RequirePatchPreviewCurrent(observed);
                 var first = group.First().Input;
                 var tree = before.Tree with { Entries = Array.AsReadOnly(before.Tree.Entries.Select(entry =>
                     replacements.GetValueOrDefault(entry.RelativePath) ?? entry).ToArray()) };

@@ -1,10 +1,18 @@
-using System.Text.Json;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Sqlite;
+using System.Text.Json;
 
 namespace NexusPipeline.Platform.Storage.Journals;
+
+internal static class ConfigurationFileEffects
+{
+    internal static FileEffect[] Create(Guid journalId, string planDigest) => new[] {
+        ("preserve-original", FileEffectAction.PreserveOriginal), ("install-candidate", FileEffectAction.InstallCandidate),
+        ("retire-candidate", FileEffectAction.RetireCandidate), ("restore-original", FileEffectAction.RestoreOriginal)
+    }.Select(item => new FileEffect(journalId, item.Item1, item.Item2, FileEffectState.Pending, planDigest, null)).ToArray();
+}
 
 internal sealed class InitialConfigurationJournal(RuntimeInstance instance, ContractReader contracts, StateDatabase database)
 {

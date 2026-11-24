@@ -42,8 +42,16 @@ public sealed class ExtensionDetailsReader(RuntimeInstance instance, StateDataba
 
     internal static NexusPipeline.Extensibility.Protocol.ExtensionManifest ReadListing(BoundExtensionInstallation installed, ContractReader contracts)
     {
-        using var held = TreeReadLease.AcquireMetadata(installed.Footprint.TargetPath, installed.Footprint.ParentIdentity, installed.Footprint.Payload);
-        return ReadHeldListing(installed, contracts);
+        var (tree, manifest) = HoldListing(installed, contracts);
+        using (tree) return manifest;
+    }
+
+    internal static (TreeReadLease Tree, NexusPipeline.Extensibility.Protocol.ExtensionManifest Manifest) HoldListing(
+        BoundExtensionInstallation installed, ContractReader contracts)
+    {
+        var tree = TreeReadLease.AcquireMetadata(installed.Footprint.TargetPath, installed.Footprint.ParentIdentity, installed.Footprint.Payload);
+        try { return (tree, ReadHeldListing(installed, contracts)); }
+        catch { tree.Dispose(); throw; }
     }
 
     internal static NexusPipeline.Extensibility.Protocol.ExtensionManifest ReadArchivedListing(RuntimeInstance instance,

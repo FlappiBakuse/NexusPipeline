@@ -74,9 +74,21 @@ internal sealed class ScheduledProviderPublication(RuntimeInstance instance, Sta
     internal bool ReconcilePriorOwners()
     {
         Require();
-        var pending = new List<ScheduledProviderState>(); var known = true;
+        var pending = new List<ScheduledProviderState>();
         ScheduledProviderInventory.Visit(instance, database, contracts, state =>
         { if (state.Result is null) pending.Add(state); });
+        return Reconcile(pending);
+    }
+
+    internal bool ReconcilePendingOwners()
+    {
+        Require();
+        return Reconcile(ScheduledProviderInventory.ReadPending(instance, database, contracts));
+    }
+
+    private bool Reconcile(IReadOnlyList<ScheduledProviderState> pending)
+    {
+        var known = true;
         foreach (var before in pending)
         {
             if (NexusPipeline.Platform.Processes.WriterStopEvidence.ObserveProcess(before.Source.Document.Creator.Process) != WriterState.Stopped)

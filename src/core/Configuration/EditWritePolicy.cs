@@ -40,8 +40,11 @@ public static class EditWriteRules
 
     public static void RequireOutput(EditWritePolicy policy, FileTreeSnapshot before, FileTreeSnapshot after)
     {
-        policy = Freeze(policy); before = FileTreePolicy.Freeze(before); after = FileTreePolicy.Freeze(after);
-        if (!policy.ResultShapes.Contains(after.Shape) || FileTreeDelta.Compare(before, after).Changes.Any(change => !Allows(policy, change.RelativePath)))
+        policy = Freeze(policy);
+        var original = FileTreePolicy.Prepare(before);
+        var current = FileTreePolicy.Prepare(after);
+        if (!policy.ResultShapes.Contains(current.Snapshot.Shape) ||
+            FileTreeDelta.Compare(original, current).Changes.Any(change => !Allows(policy, change.RelativePath)))
             throw new ConfigurationException("configuration_edit_write_scope_exceeded");
     }
 }

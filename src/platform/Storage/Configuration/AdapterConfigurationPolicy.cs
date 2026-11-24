@@ -30,10 +30,26 @@ public static class AdapterConfigurationPolicy
     public static ConfigurationRevision RequireSaved(AutomationBinding binding, AutomationScript script,
         AutomationAdapterResource resource, ConfigurationRevisionStore revisions)
     {
+        var address = RequireAddress(binding, script, resource);
+        return RequireRevision(binding, script, resource, address, revisions.Read(address));
+    }
+
+    internal static ConfigurationRevision RequireStored(AutomationBinding binding, AutomationScript script,
+        AutomationAdapterResource resource, StoredConfigurationRevision stored) =>
+        RequireRevision(binding, script, resource, RequireAddress(binding, script, resource), stored.Revision);
+
+    private static ConfigurationAddress RequireAddress(AutomationBinding binding, AutomationScript script, AutomationAdapterResource resource)
+    {
         if (binding.ScriptId != script.Id) throw new ConfigurationException("configuration_adapter_owner_unbound");
-        var saved = revisions.Read(new(binding.Id, resource.ResourceId));
+        return new(binding.Id, resource.ResourceId);
+    }
+
+    private static ConfigurationRevision RequireRevision(AutomationBinding binding, AutomationScript script,
+        AutomationAdapterResource resource, ConfigurationAddress address, ConfigurationRevision? saved)
+    {
         ConfigurationRevisionPolicy.RequireCurrentContract(saved, Contract(script, resource));
-        if (saved!.UserId != binding.UserId || saved.ScriptId != script.Id) throw new ConfigurationException("configuration_owner_changed");
+        if (saved!.Address != address || saved.UserId != binding.UserId || saved.ScriptId != script.Id)
+            throw new ConfigurationException("configuration_owner_changed");
         if (!saved.Tree.Entries.Any(entry => entry.Kind == FileObjectKind.File && entry.RelativePath == resource.RelativePath))
             throw new ConfigurationException("configuration_adapter_source_missing");
         return saved;

@@ -20,20 +20,21 @@ public sealed class ExecutionLogReader(RuntimeInstance instance, StateDatabase d
             database.RuntimeRoot != instance.RuntimeRoot) throw Invalid();
         using var saved = Context(runId, attemptId);
         var blobs = new ImmutableBlobStore(instance, contracts);
-        var main = saved.Main;
+        var main = saved.Results.Main;
         var lifecycle = StepResultCodec.Coverage(saved.Journal.Root, saved.Total).ToDictionary(item => item.StepId);
         var skipped = BindingSkipCodec.Read(saved.Journal.Root, saved.Total).Select(item => item.StepId).ToHashSet(StringComparer.Ordinal);
         var steps = saved.Total.Steps.Select(step =>
         {
-            main.TryGetValue(step.StepId, out var result);
+            main.TryGetValue(step.StepId, out var history);
+            var result = history?.Latest;
+            StepEvidenceDocument? evidence = null;
             IReadOnlyList<AdapterTaskObservation> observations = [];
             if (result is not null)
             {
                 var reader = new StepEvidenceReader(instance, database, contracts);
                 var context = reader.ContextFromValidatedRead(result.Binding, saved.Registered, saved.Attempt, saved.Total, saved.Journal);
-                _ = reader.ReadValidatedReferences(result.Binding, result.Latest.Artifact, context, saved.Terminal);
-                var document = StepEvidenceCodec.Read(blobs, result.Binding, result.Latest.Artifact);
-                observations = DailyAdapterEvidence.Project(blobs, step, document);
+                evidence = reader.ReadValidatedEvidence(result.Binding, result.Latest.Artifact, context, saved.Terminal).Document;
+                observations = DailyAdapterEvidence.Project(blobs, step, evidence);
             }
             var tasks = step.Tasks.Select(task =>
             {
@@ -52,10 +53,9 @@ public sealed class ExecutionLogReader(RuntimeInstance instance, StateDatabase d
                     (result?.Latest.Business == BusinessOutcome.Unverified && saved.Receipt.Facts.Lifecycle == LifecycleOutcome.Cancelled
                         ? DispatchIntentCodec.Reason : result?.Latest.ReasonCode),
                 MaximumInvocations = checked((int)(step.MaximumAttempts ?? 1)),
-                Invocations = ExecutionInvocationCodec.Views(saved.Journal.Root).SelectMany(view => StepResultCodec.Read(view, saved.Total))
-                    .Where(item => item.Binding.StepId == step.StepId && item.IsCollected)
-                    .GroupBy(item => item.Binding.JobName).Select(group => group.Last()).Select(item =>
-                        Invocation(item, ExecutionInvocationCodec.OrdinalForJob(saved.Journal.Root, step.StepId, item.Binding.JobName), blobs))
+                Invocations = history is null ? [] : history.Collected.Select(item =>
+                        Invocation(item, ExecutionInvocationCodec.OrdinalForJob(saved.Journal.Root, step.StepId, item.Binding.JobName),
+                            blobs, item == result ? evidence : null))
                     .OrderBy(item => item.Ordinal).ToArray()
             };
         }).ToArray();
@@ -67,10 +67,10 @@ public sealed class ExecutionLogReader(RuntimeInstance instance, StateDatabase d
         };
     }
 
-    private ExecutionInvocationView Invocation(StepResultState item, int ordinal, ImmutableBlobStore blobs)
+    private ExecutionInvocationView Invocation(StepResultState item, int ordinal, ImmutableBlobStore blobs, StepEvidenceDocument? validated)
     {
         var binding = item.Binding;
-        var document = StepEvidenceCodec.Read(blobs, binding, item.Latest.Artifact);
+        var document = validated ?? StepEvidenceCodec.Read(blobs, binding, item.Latest.Artifact);
         var closure = new JobClosureStore(instance, database, contracts).ReadForExecutionEvidence(
             binding.ParentJournalId, binding.WriterId, binding.JobName, binding.SessionId, document.Closure ?? throw Invalid()) ?? throw Invalid();
         if (closure.Root != document.Root) throw Invalid();
@@ -177,77 +177,74 @@ public sealed class ExecutionLogReader(RuntimeInstance instance, StateDatabase d
     private ExecutionLogContent? ReadSource(RunLogKey key, SavedContext savedContext, bool materialize = false)
     {
         var sources = new List<(int Ordinal, BlobReference Reference, RawOutputManifest Raw)>();
-        var views = ExecutionInvocationCodec.Views(savedContext.Journal.Root);
         if (key.Role == RunLogRole.Main)
         {
-            foreach (var result in views.SelectMany(view => StepResultCodec.Read(view, savedContext.Total))
-                .Where(item => item.Binding.StepId == key.StepId && item.IsCollected).GroupBy(item => item.Binding.JobName).Select(group => group.Last()))
-                Add(result.Binding, ReadPhysicalSource(key, savedContext, result, null));
+            if (savedContext.Results.Main.TryGetValue(key.StepId, out var history))
+                foreach (var result in history.Collected)
+                    Add(result.Binding, result, null);
         }
         else
         {
             var role = key.Role == RunLogRole.PreHook ? "preHook" : "postHook";
-            foreach (var hook in views.SelectMany(view => HookResultCodec.Read(view, savedContext.Total))
-                .Where(item => item.StepId == key.StepId && item.Role == role).GroupBy(item => item.Binding.JobName).Select(group => group.Last()))
-                Add(hook.Binding, ReadPhysicalSource(key, savedContext, null, hook));
+            if (savedContext.Results.Hooks.TryGetValue((key.StepId, role), out var invocations))
+                foreach (var hook in invocations)
+                    Add(hook.Binding, null, hook);
         }
         return sources.Count == 0 ? null : ExecutionLogAggregation.Create(new(instance, contracts), key, sources, materialize);
 
-        void Add(StepEvidenceBinding binding, (BlobReference Reference, RawOutputManifest Raw)? source)
+        void Add(StepEvidenceBinding binding, StepResultState? result, HookResultIntent? hook)
         {
-            if (source is not { } item) return;
-            var ordinal = ExecutionInvocationCodec.Ordinal(ExecutionInvocationCodec.ForJob(savedContext.Journal.Root, savedContext.Total, binding.JobName), key.StepId);
-            if (key.InvocationOrdinal is null || key.InvocationOrdinal == ordinal)
-                sources.Add((ordinal, item.Reference, item.Raw));
+            int? ordinal = null;
+            if (key.InvocationOrdinal is { } requested)
+            {
+                ordinal = Ordinal(binding);
+                if (ordinal != requested) return;
+            }
+            if (ReadPhysicalSource(key, savedContext, result, hook) is { } item)
+                sources.Add((ordinal ?? Ordinal(binding), item.Reference, item.Raw));
         }
+
+        int Ordinal(StepEvidenceBinding binding) =>
+            ExecutionInvocationCodec.Ordinal(
+                ExecutionInvocationCodec.ForJob(savedContext.Journal.Root, savedContext.Total, binding.JobName), key.StepId);
     }
 
     private (BlobReference Reference, RawOutputManifest Raw)? ReadPhysicalSource(RunLogKey key, SavedContext savedContext,
         StepResultState? physicalMain, HookResultIntent? physicalHook)
     {
         var (receipt, registered, attempt, total, journal) = savedContext;
-        BlobReference? output;
-        StepEvidenceBinding binding;
+        (BlobReference Reference, RawOutputManifest Raw)? output;
         if (key.Role == RunLogRole.Main)
         {
             var result = physicalMain;
             if (result is null || !result.IsCollected) throw Invalid();
-            binding = result.Binding;
+            var binding = result.Binding;
             var reader = new StepEvidenceReader(instance, database, contracts);
             var context = reader.ContextFromValidatedRead(binding, registered, attempt, total, journal);
-            _ = reader.ReadValidatedReferences(binding, result.Latest.Artifact, context, savedContext.Terminal);
-            var document = StepEvidenceCodec.Read(new(instance, contracts), binding, result.Latest.Artifact);
-            for (var depth = 0; document.RawOutput is null && document.PreviousObservation is { } previous; depth++)
-            {
-                if (depth >= 2) throw Invalid();
-                document = StepEvidenceCodec.Read(new(instance, contracts), binding, previous);
-                if (document.Stage != "observed") throw Invalid();
-            }
-            output = document.RawOutput;
+            output = reader.ReadValidatedEvidence(binding, result.Latest.Artifact, context, savedContext.Terminal).Output;
         }
         else
         {
             var role = key.Role == RunLogRole.PreHook ? "preHook" : "postHook";
             var hook = physicalHook ?? throw Invalid();
-            binding = hook.Binding;
+            var binding = hook.Binding;
             var context = new StepEvidenceReader(instance, database, contracts)
                 .ContextFromValidatedRead(binding, registered, attempt, total, journal, role);
             output = new HookEvidenceReader(instance, database, contracts)
-                .ReadFromValidatedContext(binding, role, hook.Artifact, context, verifyContents: false).RawOutput;
+                .ReadValidatedOutput(binding, role, hook.Artifact, context);
         }
-        if (output is null) return null;
-        var raw = RawOutputCodec.Read(new(instance, contracts), binding, output);
-        if (raw.Binding.RunId != key.RunId || raw.Binding.AttemptId != key.AttemptId) throw Invalid();
-        return (output, raw);
+        if (output is { } resolved && (resolved.Raw.Binding.RunId != key.RunId || resolved.Raw.Binding.AttemptId != key.AttemptId)) throw Invalid();
+        return output;
     }
 
 
-    internal LogCatalogSnapshot CaptureCatalog(NexusPipeline.Core.Execution.AttemptReceipt expected, bool materialize = false)
+    internal LogCatalogSnapshot CaptureCatalog(NexusPipeline.Core.Execution.AttemptReceipt expected, bool materialize = false,
+        LogCatalogQuery? page = null)
     {
         if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot) throw Invalid();
         using var context = Context(expected.Facts.RunId, expected.Facts.AttemptId);
         if (context.Receipt != expected) throw Invalid();
-        return CaptureCatalog(expected, context, materialize);
+        return CaptureCatalog(expected, context, materialize, page);
     }
 
     internal LogCatalogSnapshot CaptureValidatedCatalog(NexusPipeline.Core.Execution.AttemptReceipt expected, AttemptWriterState state)
@@ -289,27 +286,31 @@ public sealed class ExecutionLogReader(RuntimeInstance instance, StateDatabase d
         return CaptureCatalog(expected, new(expected, current, attempt, total, journal), materialize: false);
     }
 
-    private LogCatalogSnapshot CaptureCatalog(NexusPipeline.Core.Execution.AttemptReceipt expected, SavedContext context, bool materialize)
+    private LogCatalogSnapshot CaptureCatalog(NexusPipeline.Core.Execution.AttemptReceipt expected, SavedContext context, bool materialize,
+        LogCatalogQuery? page = null)
     {
-        var main = context.Main;
-        var hooks = context.Hooks;
+        var main = context.Results.Main;
+        var hooks = context.Results.Hooks;
         var entries = new List<LogCatalogEntry>();
         var retirement = new RecordRetirementContents(instance, database, contracts, expected.Facts.RunId);
         var availability = new Dictionary<int, RecordContentAvailability>();
         foreach (var step in context.Total.Steps)
             foreach (var role in new[] { RunLogRole.PreHook, RunLogRole.Main, RunLogRole.PostHook })
             {
-                if (role == RunLogRole.Main ? !main.TryGetValue(step.StepId, out var current) || !current.IsCollected :
+                if (role == RunLogRole.Main ? !main.TryGetValue(step.StepId, out var current) || !current.Latest.IsCollected :
                     !hooks.ContainsKey((step.StepId, role == RunLogRole.PreHook ? "preHook" : "postHook"))) continue;
                 var key = new RunLogKey(expected.Facts.RunId, expected.Facts.AttemptId, step.StepId, role);
                 if (ReadSource(key, context, materialize) is not { } saved) continue;
-                var raw = saved;
-                var candidates = raw.Parts.Select(part => part.Content).Distinct().ToArray();
-                var retired = retirement.Read(candidates).Count;
-                availability.Add(entries.Count, retired == 0 ? RecordContentAvailability.Available :
-                    retired == candidates.Length ? RecordContentAvailability.Retired : RecordContentAvailability.PartiallyRetired);
-                entries.Add(new(new(entries.Count, key, saved.Reference.Sha256, raw.ObservedBytes,
-                    raw.Parts.Sum(item => item.Content.SizeBytes), raw.DiscardedBytes, raw.IsComplete, raw.Parts.Length), saved.Reference));
+                var position = entries.Count;
+                if (page is null || position > page.AfterPosition && position <= page.AfterPosition + page.Limit)
+                {
+                    var candidates = saved.Parts.Select(part => part.Content).Distinct().ToArray();
+                    var retired = retirement.Read(candidates).Count;
+                    availability.Add(position, retired == 0 ? RecordContentAvailability.Available :
+                        retired == candidates.Length ? RecordContentAvailability.Retired : RecordContentAvailability.PartiallyRetired);
+                }
+                entries.Add(new(new(position, key, saved.Reference.Sha256, saved.ObservedBytes,
+                    saved.Parts.Sum(item => item.Content.SizeBytes), saved.DiscardedBytes, saved.IsComplete, saved.Parts.Length), saved.Reference));
             }
         if (entries.Count > 4096) throw Invalid();
         return new(expected, context.Journal.Revision,
@@ -323,12 +324,24 @@ public sealed class ExecutionLogReader(RuntimeInstance instance, StateDatabase d
         internal Func<JournalDocument?>? Terminal { get; init; }
         public void Dispose() => History?.Dispose();
 
-        internal IReadOnlyDictionary<string, StepResultState> Main { get; } =
-            ExecutionInvocationCodec.Views(Journal.Root).SelectMany(view => StepResultCodec.Read(view, Total))
-                .GroupBy(item => item.Binding.StepId).ToDictionary(group => group.Key, group => group.Last(), StringComparer.Ordinal);
-        internal IReadOnlyDictionary<(string, string), HookResultIntent> Hooks { get; } =
-            ExecutionInvocationCodec.Views(Journal.Root).SelectMany(view => HookResultCodec.Read(view, Total))
-                .GroupBy(item => (item.StepId, item.Role)).ToDictionary(group => group.Key, group => group.Last());
+        internal SavedResults Results { get; } = SavedResults.Read(Journal.Root, Total);
+    }
+
+    private sealed record SavedStepResults(StepResultState Latest, StepResultState[] Collected);
+
+    private sealed record SavedResults(IReadOnlyDictionary<string, SavedStepResults> Main,
+        IReadOnlyDictionary<(string StepId, string Role), HookResultIntent[]> Hooks)
+    {
+        internal static SavedResults Read(AttemptJournalView journal, ExecutionPlan total)
+        {
+            var views = ExecutionInvocationCodec.Views(journal);
+            var main = views.SelectMany(view => StepResultCodec.Read(view, total)).GroupBy(item => item.Binding.StepId)
+                .ToDictionary(group => group.Key, group => new SavedStepResults(group.Last(), group.Where(item => item.IsCollected)
+                    .GroupBy(item => item.Binding.JobName).Select(invocation => invocation.Last()).ToArray()), StringComparer.Ordinal);
+            var hooks = views.SelectMany(view => HookResultCodec.Read(view, total)).GroupBy(item => (item.StepId, item.Role))
+                .ToDictionary(group => group.Key, group => group.GroupBy(item => item.Binding.JobName).Select(invocation => invocation.Last()).ToArray());
+            return new(main, hooks);
+        }
     }
 
     private RunLogDescription Description(RunLogKey key, ExecutionLogContent source)

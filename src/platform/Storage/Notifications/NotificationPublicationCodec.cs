@@ -42,7 +42,8 @@ internal sealed class NotificationPublicationCodec(RuntimeInstance instance, Con
         return Read(reference);
     }
 
-    internal NotificationPublicationSnapshot Read(BlobReference reference)
+    internal NotificationPublicationSnapshot Read(BlobReference reference,
+        (NotificationCatalogSnapshot Snapshot, BlobReadScope Scope)? predecessor = null)
     {
         var codec = new NotificationCatalogCodec(instance, contracts);
         var document = codec.ReadDocument<NotificationPublicationDocument>(reference);
@@ -53,7 +54,10 @@ internal sealed class NotificationPublicationCodec(RuntimeInstance instance, Con
         _ = Identity(document);
         if (Digest(document.InstanceId, document.SubjectId, document.Request, document.Secrets) != document.RequestDigest)
             throw new IOException("notification_publication_request_unbound");
-        var before = codec.Read(document.Before); var after = codec.Read(document.After);
+        var before = predecessor is { } prior && prior.Snapshot.Reference == document.Before &&
+            prior.Scope.Retains(document.Before) && prior.Snapshot.Document.Tasks.All(item => prior.Scope.Retains(item.Definition))
+            ? prior.Snapshot : codec.Read(document.Before);
+        var after = codec.Read(document.After);
         var expected = Apply(before.Catalog, document.Request);
         if (!NotificationCatalogCodec.Encode(expected).AsSpan().SequenceEqual(NotificationCatalogCodec.Encode(after.Catalog)))
             throw new IOException("notification_publication_catalog_unbound");

@@ -26,7 +26,7 @@ internal static class AutomationTemplateIdentity
                 Roots = source.Definitions.Roots.Select(value => value with { Id = roots[value.Id] }).ToImmutableArray(),
                 Scripts = source.Definitions.Scripts.Select(value => value with
                 {
-                    Target = RemapTarget(value.Target, Map),
+                    Target = RemapTarget(value.Target, Map, roots),
                     Id = Derive(operationId, "script", value.Id), RootId = roots[value.RootId], Executable = Map(value.Executable),
                     ConfigurationPaths = value.ConfigurationPaths.Select(Map).ToImmutableArray(), LogPaths = value.LogPaths.Select(Map).ToImmutableArray()
                 }).ToImmutableArray()
@@ -35,10 +35,16 @@ internal static class AutomationTemplateIdentity
         };
     }
 
-    private static AutomationTarget? RemapTarget(AutomationTarget? target, Func<AutomationPath, AutomationPath> map) => target is null ? null : target with
+    private static AutomationTarget? RemapTarget(AutomationTarget? target, Func<AutomationPath, AutomationPath> map,
+        IReadOnlyDictionary<Guid, Guid> roots) => target is null ? null : target with
     {
         Pc = target.Pc is not { } pc ? null : pc with { LaunchExecutable = map(pc.LaunchExecutable), ReadyExecutable = map(pc.ReadyExecutable) },
-        Android = target.Android is not { } android ? null : android with { Tool = map(android.Tool) }
+        Android = target.Android is not { } android ? null : android with
+        {
+            Tool = map(android.Tool),
+            ScreenshotTool = android.ScreenshotTool is { } screenshot ? map(screenshot) : null,
+            Emulator = android.Emulator is { } emulator ? emulator with { RootId = roots[emulator.RootId] } : null
+        }
     };
 
     private static Guid Derive(Guid operationId, string kind, Guid sourceId)

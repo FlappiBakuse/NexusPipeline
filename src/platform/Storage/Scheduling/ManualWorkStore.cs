@@ -22,12 +22,28 @@ internal sealed class ManualWorkStore
 
     internal ManualWorkStore(RuntimeInstance instance, StateDatabase database, InstanceLease lease, ResourceLeaseManager resources,
         ContractReader contracts, TimeProvider clock)
+        : this(instance, database, lease, resources, contracts, clock, new(instance, contracts))
+    {
+        ManualWorkInventory.Visit(instance, database, contracts, _ => { });
+    }
+
+    private ManualWorkStore(RuntimeInstance instance, StateDatabase database, InstanceLease lease, ResourceLeaseManager resources,
+        ContractReader contracts, TimeProvider clock, ManualWorkCodec codec)
     {
         lease.VerifyHeld(instance);
         if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot) throw ManualWorkCodec.Invalid();
         _instance = instance; _database = database; _lease = lease; _resources = resources; _contracts = contracts; _clock = clock;
-        _codec = new(instance, contracts);
-        ManualWorkInventory.Visit(instance, database, contracts, _ => { });
+        _codec = codec;
+    }
+
+    internal static (ManualWorkStore Store, IReadOnlyList<ManualWorkState> Pending) OpenWithStartupAudit(
+        RuntimeInstance instance, StateDatabase database, InstanceLease lease,
+        ResourceLeaseManager resources, ContractReader contracts, TimeProvider clock)
+    {
+        var store = new ManualWorkStore(instance, database, lease, resources, contracts, clock, new(instance, contracts));
+        var pending = new List<ManualWorkState>();
+        WorkEffectInventory.Verify(instance, database, contracts, pendingManual: pending);
+        return (store, pending);
     }
 
     internal ManualWorkState? Lookup(Guid operationId, string caller, string extensionId, string providerId, Guid taskId, long revision)
@@ -153,8 +169,20 @@ internal sealed class ManualWorkStore
     internal bool ReconcilePriorOwners()
     {
         _lease.VerifyHeld(_instance);
-        var pending = new List<ManualWorkState>(); var verified = true;
+        var pending = new List<ManualWorkState>();
         ManualWorkInventory.Visit(_instance, _database, _contracts, state => { if (state.Result is null) pending.Add(state); });
+        return Reconcile(pending);
+    }
+
+    internal bool ReconcilePendingOwners(IReadOnlyList<ManualWorkState> pending)
+    {
+        _lease.VerifyHeld(_instance);
+        return Reconcile(pending);
+    }
+
+    private bool Reconcile(IReadOnlyList<ManualWorkState> pending)
+    {
+        var verified = true;
         foreach (var state in pending)
         {
             if (WriterStopEvidence.ObserveProcess(state.Source.Document.Creator.Process) != WriterState.Stopped)

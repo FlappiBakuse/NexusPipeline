@@ -20,7 +20,7 @@ internal static class AutomationRows
             row => Script(row, paths));
         var users = Rows(connection, transaction, "SELECT user_id,revision,name,user_order,binding_overrides_json," +
             "notes,avatar" + " FROM automation.users ORDER BY user_order,user_id LIMIT 4097;",
-            row => new AutomationUser(Id(row, 0), row.GetInt64(1), row.GetString(2), row.GetInt32(3)) { BindingOverrides = BindingPolicyCodec.Decode(row.GetString(4)), Notes = row.GetString(5), Avatar = UserAvatar.Require(row.GetString(6)) });
+            row => new AutomationUser(Id(row, 0), row.GetInt64(1), row.GetString(2), row.GetInt32(3)) { BindingOverrides = AutomationPolicyCodec.Decode(row.GetString(4)), Notes = row.GetString(5), Avatar = UserAvatar.Require(row.GetString(6)) });
         var bindings = Rows(connection, transaction, "SELECT binding_id,revision,user_id,automation_id,enabled,priority,pre_hook_json,post_hook_json,pre_once_after_success,post_final_only,notify_enabled,notification_task_ids_json,run_days,maximum_successful_runs_per_day FROM automation.bindings ORDER BY binding_id LIMIT 4097;",
             row => new AutomationBinding(Id(row, 0), row.GetInt64(1), Id(row, 2), Id(row, 3), row.GetInt64(4) == 1, row.GetInt32(5))
             {
@@ -33,7 +33,7 @@ internal static class AutomationRows
         var queues = Rows(connection, transaction, "SELECT queue_id,revision,name,completion_action,run_on_startup,notify_enabled,notification_task_ids_json,success_dependencies_json,queue_order," +
             "schedule_enabled" + " FROM automation.queues ORDER BY queue_order,queue_id LIMIT 4097;",
             row => new AutomationQueue(Id(row, 0), row.GetInt64(1), row.GetString(2),
-                queueItems.GetValueOrDefault(Id(row, 0), []), (AutomationCompletionAction)row.GetInt32(3)) { Order = row.GetInt32(8), ScheduleEnabled = Flag(row, 9), SuccessDependencies = BindingPolicyCodec.DecodeDependencies(row.GetString(7)), RunOnStartup = Flag(row, 4), NotifyEnabled = Flag(row, 5), NotificationTaskIds = NotificationIds(row, 6) });
+                queueItems.GetValueOrDefault(Id(row, 0), []), (AutomationCompletionAction)row.GetInt32(3)) { Order = row.GetInt32(8), ScheduleEnabled = Flag(row, 9), SuccessDependencies = AutomationPolicyCodec.DecodeDependencies(row.GetString(7)), RunOnStartup = Flag(row, 4), NotifyEnabled = Flag(row, 5), NotificationTaskIds = NotificationIds(row, 6) });
         var schedules = Rows(connection, transaction, "SELECT schedule_id,revision,queue_id,enabled,time_zone_id,weekdays_json,local_minute," +
             "schedule_order" + " FROM automation.schedules ORDER BY schedule_order,schedule_id LIMIT 4097;",
             row => new AutomationSchedule(Id(row, 0), row.GetInt64(1), Id(row, 2), row.GetInt64(3) == 1, row.GetString(4), Array<int>(row, 5), row.GetInt32(6)) { Order = row.GetInt32(7) });

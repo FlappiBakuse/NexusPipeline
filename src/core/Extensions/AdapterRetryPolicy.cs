@@ -8,62 +8,65 @@ public static class AdapterRetryPolicy
 {
     public static AdapterRetryTasks Select(ImmutableArray<AdapterTask> tasks, ImmutableArray<AdapterTaskObservation> previous,
         ImmutableArray<string> proposed)
+        => Select(AdapterTaskPolicy.Validate(tasks), previous, proposed);
+
+    private static AdapterRetryTasks Select(AdapterTaskPolicy.ValidatedTasks index, ImmutableArray<AdapterTaskObservation> previous,
+        ImmutableArray<string> proposed)
     {
-        tasks = AdapterTaskPolicy.Freeze(tasks);
-        AdapterTaskPolicy.RequireOriginalResults(tasks, previous, proposed);
-        if (proposed.IsEmpty) return new([], []);
-        if (tasks.Any(task => proposed.Contains(task.TaskId, StringComparer.Ordinal) && !task.NativeResumeScope.IsEmpty))
-            return SelectNative(tasks, previous, proposed);
+        index.RequireResults(previous, proposed, out var targets);
+        if (targets.Count == 0) return new([], []);
+        var tasks = index.Tasks;
+        if (targets.Any(id => !index.Task(id).NativeResumeScope.IsEmpty))
+            return SelectNative(tasks, previous, targets);
         // Unprojected cleanup keeps its original lifecycle configuration on every invocation.
         if (tasks.Any(task => task.IsEnabled && task.Projection is null &&
             (task.WorkflowRole != AdapterWorkflowRole.Cleanup || !task.IsRetrySafe))) throw Invalid();
-        var selected = new HashSet<string>(StringComparer.Ordinal);
-        var byId = tasks.ToDictionary(task => task.TaskId, StringComparer.Ordinal);
-        foreach (var id in proposed)
-        {
-            if (tasks.Any(task => task.IsSelected && task.WorkflowRole == AdapterWorkflowRole.Business && task.Dependencies.Contains(id, StringComparer.Ordinal)))
-                throw Invalid();
-            Include(byId[id]);
-        }
-        return new(tasks.Where(task => proposed.Contains(task.TaskId, StringComparer.Ordinal)).Select(task => task.TaskId).ToImmutableArray(),
-            tasks.Where(task => selected.Contains(task.TaskId)).Select(task => task.TaskId).ToImmutableArray());
+        var prerequisites = tasks.Where(task => task.IsSelected && task.WorkflowRole == AdapterWorkflowRole.Business)
+            .SelectMany(task => task.Dependencies).ToHashSet(StringComparer.Ordinal);
+        if (targets.Overlaps(prerequisites)) throw Invalid();
 
-        void Include(AdapterTask task)
+        var selected = new HashSet<string>(targets, StringComparer.Ordinal);
+        var pending = new Stack<AdapterTask>(proposed.Reverse().Select(index.Task));
+        while (pending.TryPop(out var task))
         {
-            if (!task.IsSelected || !task.IsEnabled || !task.IsRetrySafe || task.Projection is null || task.WorkflowRole == AdapterWorkflowRole.Cleanup)
-                throw Invalid();
-            if (!selected.Add(task.TaskId)) return;
-            foreach (var dependency in task.Dependencies)
+            if (!task.IsSelected || !task.IsEnabled || !task.IsRetrySafe || task.Projection is null ||
+                task.WorkflowRole == AdapterWorkflowRole.Cleanup) throw Invalid();
+            for (var indexInTask = task.Dependencies.Length - 1; indexInTask >= 0; indexInTask--)
             {
-                if (!task.RetryPrerequisites.Contains(dependency, StringComparer.Ordinal)) throw Invalid();
-                Include(byId[dependency]);
+                var dependency = task.Dependencies[indexInTask];
+                if (task.RetryPrerequisites.BinarySearch(dependency, StringComparer.Ordinal) < 0) throw Invalid();
+                if (selected.Add(dependency)) pending.Push(index.Task(dependency));
             }
         }
+        return new(tasks.Where(task => targets.Contains(task.TaskId)).Select(task => task.TaskId).ToImmutableArray(),
+            tasks.Where(task => selected.Contains(task.TaskId)).Select(task => task.TaskId).ToImmutableArray());
     }
 
     private static AdapterRetryTasks SelectNative(ImmutableArray<AdapterTask> tasks,
-        ImmutableArray<AdapterTaskObservation> previous, ImmutableArray<string> proposed)
+        ImmutableArray<AdapterTaskObservation> previous, IReadOnlySet<string> targets)
     {
         var scope = tasks.Where(task => task.IsSelected && task.IsEnabled).Select(task => task.TaskId).ToImmutableArray();
+        var scopeIds = scope.ToHashSet(StringComparer.Ordinal);
         // Native continuation consumes persisted upstream progress through the unchanged entry and selection.
         if (tasks.Any(task => task.Projection is not null || task.IsEnabled && !task.IsSelected) ||
             previous.Any(item => item.State == AdapterObservationState.Partial) ||
-            tasks.Where(task => proposed.Contains(task.TaskId, StringComparer.Ordinal)).Any(task =>
-                !task.NativeResumeScope.ToHashSet(StringComparer.Ordinal).SetEquals(scope))) throw Invalid();
-        return new(tasks.Where(task => proposed.Contains(task.TaskId, StringComparer.Ordinal)).Select(task => task.TaskId).ToImmutableArray(), scope);
+            tasks.Where(task => targets.Contains(task.TaskId)).Any(task =>
+                task.NativeResumeScope.Length != scope.Length || !task.NativeResumeScope.All(scopeIds.Contains))) throw Invalid();
+        return new(tasks.Where(task => targets.Contains(task.TaskId)).Select(task => task.TaskId).ToImmutableArray(), scope);
     }
 
     public static ImmutableArray<AdapterTaskObservation> Merge(ImmutableArray<AdapterTask> tasks,
         ImmutableArray<AdapterTaskObservation> previous, AdapterRetryTasks selection, ImmutableArray<AdapterTaskObservation> current)
     {
         if (selection is null) throw Invalid();
-        var expected = Select(tasks, previous, selection.Targets);
+        var index = AdapterTaskPolicy.Validate(tasks);
+        var expected = Select(index, previous, selection.Targets);
         if (expected.Targets.IsEmpty || !expected.Targets.SequenceEqual(selection.Targets) || !expected.SelectedIds.SequenceEqual(selection.SelectedIds)) throw Invalid();
-        AdapterTaskPolicy.RequireOriginalResults(tasks, current, []);
-        var observed = current.ToDictionary(item => item.TaskId, StringComparer.Ordinal);
-        var result = previous.Select(item => expected.SelectedIds.Contains(item.TaskId, StringComparer.Ordinal)
+        var observed = index.RequireResults(current, [], out _);
+        var selected = expected.SelectedIds.ToHashSet(StringComparer.Ordinal);
+        var result = previous.Select(item => selected.Contains(item.TaskId)
             ? AdapterRepetitionPolicy.Merge(item, observed[item.TaskId]) : item).ToImmutableArray();
-        AdapterTaskPolicy.RequireOriginalResults(tasks, result, []);
+        index.RequireResults(result, [], out _);
         return result;
     }
 

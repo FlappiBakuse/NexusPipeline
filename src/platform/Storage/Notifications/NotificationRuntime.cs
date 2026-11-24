@@ -227,8 +227,7 @@ public sealed class NotificationRuntime : IAttemptTerminalObserver, IAsyncDispos
         var epoch = _activity.ReadReleaseEpoch();
         if (epoch is null) return false;
         using var root = _activity.Continue(Guid.NewGuid());
-        if (root is null || _queue.HasIndexedPending()) return false;
-        _queue.VerifyProjection();
+        if (root is null || !_queue.VerifySettled()) return false;
         return _activity.TryRelease(epoch.Value);
     }
 
@@ -282,37 +281,54 @@ public sealed class NotificationRuntime : IAttemptTerminalObserver, IAsyncDispos
 
 internal sealed class NotificationRuntimeQueue(RuntimeInstance instance, StateDatabase database, ContractReader contracts)
 {
+    private static readonly string FullProjection = ProjectionQuery(changedOnly: false);
+    private static readonly string ChangedProjection = ProjectionQuery(changedOnly: true);
+
     internal bool HasIndexedPending()
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications);
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM notifications.notification_delivery_pending) OR " +
-            "EXISTS(SELECT 1 FROM notifications.notification_receipt_progress INDEXED BY ix_notification_receipt_pending WHERE next_ordinal<route_count);";
+        return HasIndexedPending(connection, null);
+    }
+
+    private static bool HasIndexedPending(SqliteConnection connection, SqliteTransaction? transaction)
+    {
+        using var command = DatabaseConnections.Command(connection, transaction,
+            "SELECT EXISTS(SELECT 1 FROM notifications.notification_delivery_pending) OR " +
+            "EXISTS(SELECT 1 FROM notifications.notification_receipt_progress INDEXED BY ix_notification_receipt_pending WHERE next_ordinal<route_count);");
         return (long)command.ExecuteScalar()! != 0;
     }
 
-    internal void VerifyProjection()
+    internal bool VerifySettled()
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Notifications);
-        using var transaction = DatabaseConnections.BeginRead(connection);
-        NotificationReferenceInventory.RequireNoOrphans(connection, transaction);
-        using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM notifications.notification_deliveries d " +
-            "LEFT JOIN notifications.notification_delivery_transitions t ON t.operation_id=d.operation_id AND " +
-            "t.ordinal=(SELECT max(ordinal) FROM notifications.notification_delivery_transitions WHERE operation_id=d.operation_id) " +
-            "LEFT JOIN notifications.notification_delivery_pending p ON p.operation_id=d.operation_id WHERE t.operation_id IS NULL OR " +
-            "json_type(t.document_json,'$.state') IS NOT 'text' OR " +
-            "json_extract(t.document_json,'$.state') NOT IN ('queued','sending','unknown','succeeded','failed','skipped') OR " +
-            "(json_extract(t.document_json,'$.state') IN ('queued','sending','unknown') AND " +
-            "(p.operation_id IS NULL OR p.state<>json_extract(t.document_json,'$.state'))) OR " +
-            "(json_extract(t.document_json,'$.state') IN ('succeeded','failed','skipped') AND p.operation_id IS NOT NULL)) " +
-            "OR EXISTS(SELECT 1 FROM notifications.notification_receipt_progress p WHERE p.next_ordinal<0 OR p.next_ordinal>p.route_count " +
-            "OR p.next_ordinal<>(SELECT count(*) FROM notifications.notification_receipt_routes r WHERE r.operation_id=p.operation_id) " +
-            "OR (p.next_ordinal>0 AND ((SELECT min(ordinal) FROM notifications.notification_receipt_routes r WHERE r.operation_id=p.operation_id)<>0 " +
-            "OR (SELECT max(ordinal) FROM notifications.notification_receipt_routes r WHERE r.operation_id=p.operation_id)<>p.next_ordinal-1)));";
+        using var connection = DatabaseConnections.Open(database.DatabasePath);
+        using var transaction = DatabaseConnections.BeginRead(connection, DatabaseDomain.Runtime | DatabaseDomain.Notifications);
+        if (HasIndexedPending(connection, transaction)) return false;
+        var changes = NotificationProjectionChanges.ReadInside(connection, transaction);
+        NotificationReferenceInventory.RequireNoOrphans(connection, transaction, changes.Incremental);
+        using var command = DatabaseConnections.Command(connection, transaction, changes.Incremental ? ChangedProjection : FullProjection);
         if ((long)command.ExecuteScalar()! != 0) throw NotificationReceiptCodec.Invalid();
+        changes.RecordVerifiedInside(connection, transaction);
         transaction.Commit();
+        return true;
     }
+
+    private static string ProjectionQuery(bool changedOnly) => $"""
+        SELECT EXISTS(SELECT 1 FROM {NotificationProjectionChanges.Rows("notifications.notification_deliveries", "d", changedOnly)}
+            LEFT JOIN notifications.notification_delivery_transitions t ON t.operation_id=d.operation_id AND
+                t.ordinal=(SELECT max(ordinal) FROM notifications.notification_delivery_transitions WHERE operation_id=d.operation_id)
+            LEFT JOIN notifications.notification_delivery_pending p ON p.operation_id=d.operation_id
+            WHERE t.operation_id IS NULL OR json_type(t.document_json,'$.state') IS NOT 'text'
+               OR json_extract(t.document_json,'$.state') NOT IN ('queued','sending','unknown','succeeded','failed','skipped')
+               OR (json_extract(t.document_json,'$.state') IN ('queued','sending','unknown') AND
+                   (p.operation_id IS NULL OR p.state<>json_extract(t.document_json,'$.state')))
+               OR (json_extract(t.document_json,'$.state') IN ('succeeded','failed','skipped') AND p.operation_id IS NOT NULL))
+        OR EXISTS(SELECT 1 FROM {NotificationProjectionChanges.Rows("notifications.notification_receipt_progress", "p", changedOnly)}
+            WHERE p.next_ordinal<0 OR p.next_ordinal>p.route_count
+               OR p.next_ordinal<>(SELECT count(*) FROM notifications.notification_receipt_routes r WHERE r.operation_id=p.operation_id)
+               OR (p.next_ordinal>0 AND (
+                   (SELECT min(ordinal) FROM notifications.notification_receipt_routes r WHERE r.operation_id=p.operation_id)<>0 OR
+                   (SELECT max(ordinal) FROM notifications.notification_receipt_routes r WHERE r.operation_id=p.operation_id)<>p.next_ordinal-1)));
+        """;
 
     internal IReadOnlyList<(Guid Operation, BlobReference Reference)> Read(string state, Guid? after = null,
         NotificationAttemptReads? reads = null)
@@ -331,9 +347,8 @@ internal sealed class NotificationRuntimeQueue(RuntimeInstance instance, StateDa
         foreach (var item in result)
         {
             reads?.HoldDelivery(item.Operation);
-            var saved = new NotificationDeliveryEvidence(instance, database, contracts).ReadFromSnapshot(item.Reference, connection, transaction);
-            if (saved.Document.OperationId != item.Operation ||
-                NotificationDeliveryRows.ReadState(connection, transaction, item.Operation).State.ToString().ToLowerInvariant() != state)
+            var saved = new NotificationDeliveryEvidence(instance, database, contracts).ReadFromSnapshot(item.Reference, connection, transaction, out var transition);
+            if (saved.Document.OperationId != item.Operation || transition.State.ToString().ToLowerInvariant() != state)
                 throw new IOException("notification_pending_source_unbound");
         }
         transaction.Commit(); return result;

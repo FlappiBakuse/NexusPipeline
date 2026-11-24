@@ -1,10 +1,13 @@
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Operations;
+using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
+using System.Security.Cryptography;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 
 namespace NexusPipeline.Platform.Storage.Execution;
 
@@ -33,7 +36,7 @@ internal sealed class ExecutionCancellationStore(RuntimeInstance instance, State
         var state = AttemptWriterState.Read(instance, database, contracts, parentJournalId);
         if (state.Cancellation is { } existing)
             return AcceptClose(existing.Identity, parentJournalId, DateTimeOffset.UtcNow, existing.ReasonCode);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var command = connection.CreateCommand(); command.CommandText = "SELECT subject_id FROM main.operations WHERE operation_id=$operation;";
         command.Parameters.AddWithValue("$operation", state.Journal.OperationId.ToString("D"));
         var subject = command.ExecuteScalar() as string ?? throw new IOException("execution_writer_operation_unbound");
@@ -45,7 +48,7 @@ internal sealed class ExecutionCancellationStore(RuntimeInstance instance, State
     private ExecutionCancellationResult AcceptClose(OperationIdentity identity, Guid parentJournalId, DateTimeOffset acceptedAt, string reason)
     {
         lease.VerifyHeld(instance);
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime))
         using (var transaction = DatabaseConnections.BeginRead(connection)) _ = OperationRows.ReadExisting(connection, transaction, identity);
         if (identity.Kind != DispatchIntentCodec.Kind(reason)) throw new OperationConflictException();
         var state = AttemptWriterState.Read(instance, database, contracts, parentJournalId);
@@ -122,7 +125,7 @@ internal sealed class ExecutionCancellationStore(RuntimeInstance instance, State
     {
         if (pageSize is < 1 or > 128) throw new ArgumentOutOfRangeException(nameof(pageSize));
         VerifyTargets(database);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = DatabaseConnections.BeginRead(connection);
         const string targets = "(c.operation_kind IN ('execution.cancel','execution.close') OR j.operation_kind='runAttempt' AND c.operation_id<>j.operation_id AND c.operation_kind<>'execution.retry.cancel')";
         var after = "";
@@ -154,4 +157,83 @@ internal sealed class ExecutionCancellationStore(RuntimeInstance instance, State
         if ((long)command.ExecuteScalar()! != 0) throw new IOException("execution_cancel_operation_unbound");
         transaction.Commit();
     }
+}
+
+internal sealed record DispatchCloseIntent(string Format, int Version, Guid ParentOperationId, Guid ParentJournalId,
+    string ParentPlanDigest, Guid RunId, Guid AttemptId, Guid CancellationOperationId, string SubjectId, string ReasonCode);
+
+internal static class DispatchIntentCodec
+{
+    internal const string Format = "nexus.execution.dispatch-close";
+    internal const string OperationKind = "execution.cancel";
+    internal const string Reason = "execution_cancel_requested";
+    internal const string CompletionReason = "execution_completion_requested";
+    internal const string InterruptionReason = "host_interrupted";
+    internal const string BudgetReason = "execution_total_budget_exhausted";
+    internal const string TargetReason = "execution_target_readiness_unverified";
+    private static readonly JsonSerializerOptions Options = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase, UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
+    };
+
+    internal static OperationIdentity Identity(Guid operationId, string subject, Guid parentJournalId, Guid parentOperationId, Guid runId, Guid attemptId,
+        string reasonCode = Reason)
+    {
+        if (parentJournalId == Guid.Empty || parentOperationId == Guid.Empty || runId == Guid.Empty || attemptId == Guid.Empty || operationId == parentOperationId)
+            throw new ArgumentException("execution_cancel_identity_invalid");
+        var kind = Kind(reasonCode);
+        var bytes = BoundedJson.Serialize(new { operationKind = kind, parentJournalId = parentJournalId.ToString("D"), parentOperationId = parentOperationId.ToString("D"),
+            runId = runId.ToString("D"), attemptId = attemptId.ToString("D"), subject, reasonCode });
+        return new(operationId, subject, Convert.ToHexStringLower(SHA256.HashData(bytes)), kind);
+    }
+
+    internal static string Kind(string reason) => reason switch
+    {
+        Reason => OperationKind,
+        CompletionReason or InterruptionReason or BudgetReason or TargetReason => "execution.close",
+        _ => throw new ArgumentException("execution_dispatch_reason_unrecognized")
+    };
+
+    internal static bool IsParticipant(JsonElement participant)
+    {
+        if (!ExecutionParticipantText.MatchesFormat(participant, Format)) return false;
+        _ = Decode(participant); return true;
+    }
+
+    internal static DispatchCloseIntent? Read(AttemptJournalView journal, ExecutionPlan total)
+    {
+        DispatchCloseIntent? result = null;
+        foreach (var participant in journal.Participants)
+        {
+            if (!ExecutionParticipantText.MatchesFormat(participant, Format)) continue;
+            var item = Decode(participant);
+            if (result is not null || item.ParentOperationId != journal.Root.GetProperty("operationId").GetGuid() ||
+                item.ParentJournalId != journal.Root.GetProperty("journalId").GetGuid() || item.ParentPlanDigest != journal.Root.GetProperty("planDigest").GetString() ||
+                item.RunId != journal.Root.GetProperty("runId").GetGuid() || item.AttemptId != journal.Root.GetProperty("attemptId").GetGuid() ||
+                participant.GetProperty("resourceKey").GetString() != "automation:" + total.Steps[0].ScriptId) throw Invalid();
+            result = item;
+        }
+        return result;
+    }
+
+    internal static JsonObject Participant(DispatchCloseIntent item, string scriptId) => new()
+    {
+        ["participantId"] = item.CancellationOperationId.ToString("D"), ["kind"] = "database", ["resourceKey"] = "automation:" + scriptId,
+        ["identity"] = JsonSerializer.SerializeToNode(item, Options)
+    };
+
+    private static DispatchCloseIntent Decode(JsonElement participant)
+    {
+        var identity = participant.GetProperty("identity");
+        var item = identity.Deserialize<DispatchCloseIntent>(Options) ?? throw Invalid();
+        if (!JsonElement.DeepEquals(identity, JsonSerializer.SerializeToElement(item, Options)) || item.Format != Format || item.Version != 1 ||
+            item.ParentOperationId == Guid.Empty || item.ParentJournalId == Guid.Empty || item.RunId == Guid.Empty || item.AttemptId == Guid.Empty ||
+            item.CancellationOperationId == Guid.Empty || item.CancellationOperationId == item.ParentOperationId ||
+            !FileTreePolicy.Digest(item.ParentPlanDigest) || item.ReasonCode is not (Reason or CompletionReason or InterruptionReason or BudgetReason or TargetReason) ||
+            string.IsNullOrWhiteSpace(item.SubjectId) || item.SubjectId.Length > 256 ||
+            participant.GetProperty("participantId").GetGuid() != item.CancellationOperationId || participant.GetProperty("kind").GetString() != "database") throw Invalid();
+        return item;
+    }
+
+    private static JsonException Invalid() => new("execution_dispatch_close_intent_unrecognized");
 }

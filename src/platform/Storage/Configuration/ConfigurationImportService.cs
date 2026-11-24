@@ -128,10 +128,11 @@ public sealed class ConfigurationImportService(RuntimeInstance instance, StateDa
                 GenericConfigurationPolicy.ResourceId(item) == selected.ResourceId)
                     ?? throw new ConfigurationException("configuration_resource_missing") : script.ConfigurationPaths[adapter.DeclarationIndex];
             var address = new ConfigurationAddress(binding.Id, selected.ResourceId);
-            if ((revisions.Read(address)?.Revision ?? 0) != selected.ExpectedRevision)
+            var stored = revisions.ReadStored(address);
+            if ((stored?.Revision.Revision ?? 0) != selected.ExpectedRevision)
                 throw new ConfigurationException("configuration_revision_conflict");
             if (declaration is not null && selected.ExpectedRevision > 0)
-                _ = ProviderConfigurationPolicy.RequireSaved(binding, script, declaration, provider!, revisions);
+                _ = ProviderConfigurationPolicy.RequireStored(binding, script, declaration, provider!, stored!);
             var root = catalog.Roots.Single(item => item.Id == path.RootId);
             var parent = PhysicalPathPolicy.NormalizeWithoutLinks(root.Path);
             if (!AutomationCatalogPolicy.RelativePath(path.RelativePath)) throw new ConfigurationException("configuration_import_path_invalid");

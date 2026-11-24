@@ -1,5 +1,4 @@
 using System.Runtime.Versioning;
-using System.Text.Json;
 using NexusPipeline.Platform.Processes;
 
 namespace NexusPipeline.Platform.Execution.Judgement;
@@ -19,9 +18,10 @@ internal sealed class JudgementWorkerClient
     private readonly Func<ProcessIdentity, CancellationToken, Task> _admitInterpreter;
     private readonly Func<Func<CancellationToken, Task>, CancellationToken, Task> _admitInvocation;
     private readonly Func<JudgementProbeRequest, CancellationToken, Task<JudgementProbeReply>> _observeProbe;
-    private readonly List<JudgementProbeExchange> _probes = [];
+    private readonly List<JudgementProbeFrame> _probes = [];
+    private JudgementWorkerInvocation? _probeInvocation;
     private long _probeBytes;
-    internal IReadOnlyList<JudgementProbeExchange> Probes => _probes.ToArray();
+    internal IReadOnlyList<JudgementProbeExchange> Probes => _probes.Select(frame => frame.Exchange).ToArray();
     private long _generation;
     private int _busy;
     private bool _ready;
@@ -65,8 +65,9 @@ internal sealed class JudgementWorkerClient
         finally { Volatile.Write(ref _busy, 0); }
     }
 
-    internal async Task<JudgementWorkerExchange> InvokeAsync(JudgementWorkerInvocation invocation, CancellationToken cancellationToken)
+    internal async Task<JudgementWorkerExchange> InvokeAsync(JudgementInvocationFrame frame, CancellationToken cancellationToken)
     {
+        var invocation = frame.Invocation;
         Enter();
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(TimeSpan.FromSeconds(_initialization.InvocationTimeoutSeconds));
@@ -76,21 +77,23 @@ internal sealed class JudgementWorkerClient
             if (!_ready || _final || _generation >= _initialization.MaximumInvocations)
                 throw new IOException("judgement_worker_invocation_unavailable");
             JudgementWorkerProtocol.Require(invocation, _initialization.Identity, checked(_generation + 1));
-            _probes.Clear(); _probeBytes = 0;
+            ReleaseProbeFrames();
+            _probeInvocation = invocation;
             _generation = invocation.Generation;
             _final = invocation.IsFinal;
-            await _admitInvocation(token => JudgementWorkerHost.WriteAsync(_output.StandardInput, invocation, token), cancellation).ConfigureAwait(false);
+            using (frame)
+                await _admitInvocation(token => JudgementWorkerFraming.WriteAsync(_output.StandardInput, frame.Bytes, token,
+                    JudgementWorkerProtocol.MaximumInvocationBytes), cancellation).ConfigureAwait(false);
             var children = new List<ProcessIdentity>(1);
             while (true)
             {
-                var bytes = await ReadAsync(cancellation).ConfigureAwait(false);
-                using var document = Serialization.StrictJson.Parse(bytes);
-                var format = document.RootElement.TryGetProperty("format", out var field) ? field.GetString() : null;
+                using var received = new JudgementWorkerProtocol.DispatchFrame(await ReadAsync(cancellation).ConfigureAwait(false));
+                var format = received.Format;
                 if (format == JudgementWorkerProtocol.ChildReadyFormat)
                 {
                     if (_initialization.Language != "python" || children.Count != 0 || _probes.Count != 0)
                         throw new IOException("judgement_python_child_out_of_order");
-                    var child = JudgementWorkerProtocol.Decode<WorkerChildReady>(bytes);
+                    var child = received.Decode<WorkerChildReady>();
                     RequireChild(child, invocation);
                     await _admitInterpreter(child.Process, cancellation).ConfigureAwait(false);
                     children.Add(child.Process);
@@ -103,12 +106,12 @@ internal sealed class JudgementWorkerClient
                 {
                     if (_initialization.Language == "python" && children.Count != 1)
                         throw new IOException("judgement_python_child_not_admitted");
-                    await ObserveProbeAsync(JudgementWorkerProtocol.Decode<JudgementProbeRequest>(bytes), invocation, cancellation).ConfigureAwait(false);
+                    await ObserveProbeAsync(received.Decode<JudgementProbeRequest>(), invocation, cancellation).ConfigureAwait(false);
                     continue;
                 }
-                var response = JudgementWorkerProtocol.Decode<JudgementWorkerResponse>(bytes);
+                var response = received.Decode<JudgementWorkerResponse>();
                 JudgementWorkerProtocol.Require(response, invocation);
-                if (response.ProbeCount != _probes.Count || response.ProbeTranscriptSha256 != JudgementProbeProtocol.Hash(_probes))
+                if (response.ProbeCount != _probes.Count || response.ProbeTranscriptSha256 != JudgementProbeProtocol.HashFrames(_probes))
                     throw new IOException("judgement_probe_transcript_mismatch");
                 if (_initialization.Language == "python" && response.Result is not null && children.Count != 1)
                     throw new IOException("judgement_python_child_not_admitted");
@@ -126,17 +129,38 @@ internal sealed class JudgementWorkerClient
         var reply = await _observeProbe(request, cancellation).ConfigureAwait(false);
         cancellation.ThrowIfCancellationRequested();
         JudgementProbeProtocol.Require(reply, request);
-        var exchange = new JudgementProbeExchange(request, reply);
-        var size = JudgementWorkerProtocol.Encode(exchange).LongLength;
+        var exchange = new JudgementProbeFrame(new(request, reply));
         var remainingFaults = (JudgementProbeProtocol.MaximumCalls - _probes.Count - 1L) * JudgementProbeProtocol.FaultExchangeBytes;
-        if (size > invocation.ProbeEvidenceAllowance - remainingFaults - _probeBytes)
+        if (exchange.Bytes.Length > invocation.ProbeEvidenceAllowance - remainingFaults - _probeBytes)
         {
+            exchange.Dispose();
             reply = JudgementProbeProtocol.Fault(request, "judgement_probe_budget_exceeded");
-            exchange = new(request, reply); size = JudgementWorkerProtocol.Encode(exchange).LongLength;
+            exchange = new(new(request, reply));
         }
-        if (size > invocation.ProbeEvidenceAllowance - _probeBytes) throw new IOException("judgement_probe_budget_exceeded");
-        _probeBytes = checked(_probeBytes + size); _probes.Add(exchange);
+        if (exchange.Bytes.Length > invocation.ProbeEvidenceAllowance - _probeBytes)
+        {
+            exchange.Dispose();
+            throw new IOException("judgement_probe_budget_exceeded");
+        }
+        _probeBytes = checked(_probeBytes + exchange.Bytes.Length);
+        _probes.Add(exchange);
         await _admitInvocation(token => JudgementWorkerHost.WriteAsync(_output.StandardInput, reply, token), cancellation).ConfigureAwait(false);
+    }
+
+    internal void UseProbeFrames(JudgementWorkerInvocation invocation, Action<JudgementProbeFrame> use)
+    {
+        if (!ReferenceEquals(_probeInvocation, invocation)) return;
+        try
+        {
+            foreach (var frame in _probes) use(frame);
+        }
+        finally { ReleaseProbeFrames(); }
+    }
+
+    private void ReleaseProbeFrames()
+    {
+        foreach (var frame in _probes) frame.Dispose();
+        _probes.Clear(); _probeInvocation = null; _probeBytes = 0;
     }
 
     internal async Task CompleteAsync(CancellationToken cancellationToken)
@@ -149,7 +173,7 @@ internal sealed class JudgementWorkerClient
                 throw new IOException("judgement_worker_extra_output");
             await _errors.ConfigureAwait(false);
         }
-        finally { _faulted = true; Volatile.Write(ref _busy, 0); }
+        finally { ReleaseProbeFrames(); _faulted = true; Volatile.Write(ref _busy, 0); }
     }
 
     internal void RequireHealthy()
@@ -161,6 +185,7 @@ internal sealed class JudgementWorkerClient
     internal async Task DrainAfterStopAsync()
     {
         if (Volatile.Read(ref _busy) != 0) throw new InvalidOperationException("judgement_worker_transport_busy");
+        ReleaseProbeFrames();
         await _errors.ConfigureAwait(false);
     }
 

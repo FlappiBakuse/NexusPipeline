@@ -49,6 +49,8 @@ internal sealed class ReceiptRouteCodec(RuntimeInstance instance, StateDatabase 
         foreach (var target in document.Targets.Where(item => item.Disposition == "queued"))
         {
             var delivery = new NotificationDeliveryCodec(instance, contracts).Read(target.Delivery!);
+            if (delivery.Document.OperationId != target.DeliveryOperationId || delivery.Document.Task.TaskId != target.TaskId)
+                throw NotificationReceiptCodec.Invalid();
             RequireDelivery(delivery, source, document.Ordinal);
             NotificationDeliveryRows.RequireSaved(connection, transaction, delivery);
             ReceiptRouteRows.RequireMembership(connection, transaction, delivery);

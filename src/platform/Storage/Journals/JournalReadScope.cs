@@ -94,10 +94,7 @@ internal sealed class JournalReadScope : IDisposable
     // Every reader uses the same embedded schemas; the instance and protected journal identify these bytes.
     private bool Matches(JournalStore store, Guid journalId) => Owner._journalId == journalId && Owner._store.Instance == store.Instance;
 
-    internal static IReadOnlyList<JournalDocument>? Read(JournalStore requested, Guid journalId) =>
-        _current is { } scope && scope.Matches(requested, journalId) ? scope.Owner._store.ReadProtectedHistory(journalId) : null;
-
-    internal static JournalStore? WriteOwner(JournalStore requested, Guid journalId) =>
+    internal static JournalStore? ProtectedOwner(JournalStore requested, Guid journalId) =>
         _current is { } scope && scope.Matches(requested, journalId) && scope.Owner._store.ProtectedJournalId == journalId ? scope.Owner._store : null;
 
     internal JournalDocument? ReadTerminal(JournalDocument expected)

@@ -15,9 +15,8 @@ internal static class NotificationReferenceMetadata
         using var transaction = DatabaseConnections.BeginRead(connection);
         foreach (var item in NotificationReferenceInventory.Pages(connection, transaction, "notification_receipt_sources"))
         {
-            var source = new NotificationReceiptCodec(instance, database, contracts).ReadMetadata(item.Reference, connection, transaction);
+            var source = new NotificationReceiptCodec(instance, database, contracts).ReadMetadata(item.Reference, connection, transaction, out var next);
             if (source.Document.OperationId != item.OperationId) throw NotificationReceiptCodec.Invalid();
-            var next = ReceiptProgressRows.Require(connection, transaction, item.OperationId, source.Document.RouteCount);
             using var command = NotificationDeliveryRows.Command(connection, transaction,
                 "SELECT ordinal,relative_path,size_bytes,sha256 FROM notifications.notification_receipt_routes WHERE operation_id=$0 ORDER BY ordinal;",
                 item.OperationId.ToString("D"));
@@ -53,9 +52,9 @@ internal static class NotificationReferenceMetadata
         }
         foreach (var item in NotificationReferenceInventory.Pages(connection, transaction, "notification_deliveries"))
         {
-            var delivery = new NotificationDeliveryEvidence(instance, database, contracts).ReadMetadata(item.Reference, connection, transaction);
+            var delivery = new NotificationDeliveryEvidence(instance, database, contracts).ReadMetadata(item.Reference, connection, transaction, out var transition);
             if (delivery.Document.OperationId != item.OperationId) throw NotificationReceiptCodec.Invalid();
-            deliveryVisit(delivery, NotificationDeliveryRows.ReadState(connection, transaction, item.OperationId));
+            deliveryVisit(delivery, transition);
         }
         NotificationReferenceInventory.RequireNoOrphans(connection, transaction);
         transaction.Commit();

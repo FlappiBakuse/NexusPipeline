@@ -79,19 +79,39 @@ public sealed class ExecutionPlanExplanation
     internal ExecutionPlanExplanation(ExecutionSelection selection, ImmutableArray<ExecutionItemExplanation> items, string reasonCode)
     {
         Selection = selection; Items = items; ReasonCode = reasonCode;
-        Groups = selection.Queue is null ? [] : selection.Queue.ScriptIds.Select((script, index) =>
+        Groups = selection.Queue is { } queue ? DescribeGroups(queue, items) : [];
+    }
+
+    private static ImmutableArray<ExecutionGroupExplanation> DescribeGroups(AutomationQueue queue, ImmutableArray<ExecutionItemExplanation> items)
+    {
+        var repetitions = queue.ScriptIds.GroupBy(id => id).ToDictionary(group => group.Key, group => group.Count());
+        var members = items.GroupBy(item => item.Source.Script.Id).ToDictionary(group => group.Key, group => group.ToArray());
+        var offsets = new Dictionary<Guid, int>();
+        var groups = ImmutableArray.CreateBuilder<ExecutionGroupExplanation>(queue.ScriptIds.Length);
+        foreach (var script in queue.ScriptIds)
         {
-            var matching = items.Where(item => item.Source.Script.Id == script).ToArray();
-            var count = matching.Length / selection.Queue.ScriptIds.Count(id => id == script);
-            var prior = selection.Queue.ScriptIds.Take(index).Count(id => id == script);
-            var group = matching.Skip(prior * count).Take(count).ToArray();
-            if (group.Length == 0) return new ExecutionGroupExplanation(script, ExecutionExplanationDisposition.Skipped, "execution_no_enabled_bindings");
-            var disposition = group.Any(item => item.Disposition == ExecutionExplanationDisposition.Blocked) ? ExecutionExplanationDisposition.Blocked
-                : group.Any(item => item.Disposition == ExecutionExplanationDisposition.Runnable) ? ExecutionExplanationDisposition.Runnable : ExecutionExplanationDisposition.Skipped;
-            var reason = group.All(item => item.Disposition == ExecutionExplanationDisposition.Runnable) ? "execution_inputs_verified"
-                : disposition == ExecutionExplanationDisposition.Runnable ? "execution_group_partial" : group.First(item => item.Disposition == disposition).ReasonCode;
-            return new(script, disposition, reason);
-        }).ToImmutableArray();
+            var group = members.GetValueOrDefault(script);
+            var count = (group?.Length ?? 0) / repetitions[script];
+            var offset = offsets.GetValueOrDefault(script);
+            groups.Add(DescribeGroup(script, group.AsSpan(offset, count)));
+            offsets[script] = offset + count;
+        }
+        return groups.MoveToImmutable();
+    }
+
+    private static ExecutionGroupExplanation DescribeGroup(Guid script, ReadOnlySpan<ExecutionItemExplanation> group)
+    {
+        if (group.IsEmpty) return new(script, ExecutionExplanationDisposition.Skipped, "execution_no_enabled_bindings");
+        var runnable = 0;
+        foreach (var item in group)
+        {
+            if (item.Disposition == ExecutionExplanationDisposition.Blocked)
+                return new(script, ExecutionExplanationDisposition.Blocked, item.ReasonCode);
+            if (item.Disposition == ExecutionExplanationDisposition.Runnable) runnable++;
+        }
+        return runnable == 0 ? new(script, ExecutionExplanationDisposition.Skipped, group[0].ReasonCode) :
+            new(script, ExecutionExplanationDisposition.Runnable,
+                runnable == group.Length ? ExecutionSelectionPolicy.InputsVerified : "execution_group_partial");
     }
 }
 
@@ -109,6 +129,7 @@ public static class ExecutionSelectionPolicy
         var bindings = catalog.Bindings.ToDictionary(item => item.Id);
         var users = catalog.Users.ToDictionary(item => item.Id);
         var scripts = catalog.Scripts.ToDictionary(item => item.Id);
+        var roots = catalog.Roots.ToDictionary(item => item.Id);
         var sources = new List<ExecutionSelectionRevision>();
         AutomationQueue? queue = null;
         string? unavailable = null;
@@ -144,26 +165,42 @@ public static class ExecutionSelectionPolicy
                 sources.AddRange(queue.ScriptIds.Select(id => new ExecutionSelectionRevision(AutomationDefinitionKind.Script, id, scripts[id].Revision)));
                 var queueRoots = queue.ScriptIds.Select(id => scripts[id]).SelectMany(value => value.ConfigurationPaths.Concat(value.LogPaths)
                     .Append(value.Executable).Concat(AutomationTargetPolicy.Paths(value.Target)).Select(path => path.RootId).Append(value.RootId)).ToHashSet();
-                sources.AddRange(catalog.Roots.Where(root => queueRoots.Contains(root.Id)).Select(root =>
+                sources.AddRange(queueRoots.Select(id => roots.GetValueOrDefault(id)).OfType<AutomationRoot>().Select(root =>
                     new ExecutionSelectionRevision(AutomationDefinitionKind.Root, root.Id, root.Revision)));
-                selected = queue.ScriptIds.SelectMany(id => catalog.Bindings.Where(binding => binding.ScriptId == id &&
-                    AutomationBindingPolicy.Resolve(users[binding.UserId], binding).IsEnabled)
-                    .OrderBy(binding => users[binding.UserId].Order).ThenBy(binding => binding.UserId.ToString("D"), StringComparer.Ordinal));
                 break;
         }
-        var items = selected.Select((binding, ordinal) => Item(catalog, settings, binding, ordinal, successfulRunsToday?.GetValueOrDefault(binding.Id) ?? 0, request.Target is ProjectInitializationTarget)).ToImmutableArray();
-        if (queue is not null)
+        IEnumerable<(AutomationBinding Source, AutomationBinding Effective)> resolved;
+        if (queue is null) resolved = selected.Select(ResolveBinding);
+        else
         {
-            var projected = items.ToArray();
-            foreach (var item in items.Where(item => item.Disposition == ExecutionSelectionDisposition.Candidate))
+            var queueScripts = queue.ScriptIds.ToHashSet();
+            var byScript = catalog.Bindings.Where(binding => queueScripts.Contains(binding.ScriptId)).Select(ResolveBinding)
+                .Where(binding => binding.Effective.IsEnabled)
+                .OrderBy(binding => users[binding.Source.UserId].Order)
+                .ThenBy(binding => binding.Source.UserId.ToString("D"), StringComparer.Ordinal)
+                .ToLookup(binding => binding.Source.ScriptId);
+            resolved = queue.ScriptIds.SelectMany(id => byScript[id]);
+        }
+        var items = resolved.Select((binding, ordinal) => Item(roots, settings,
+            BindingScriptSource.Resolve(scripts[binding.Source.ScriptId], binding.Source), users[binding.Source.UserId],
+            binding.Effective, ordinal, successfulRunsToday?.GetValueOrDefault(binding.Source.Id) ?? 0,
+            request.Target is ProjectInitializationTarget)).ToImmutableArray();
+        if (queue is { SuccessDependencies.IsEmpty: false })
+        {
+            var dependencies = queue.SuccessDependencies.ToDictionary(item => item.ScriptId, item => item.RequiredScriptIds);
+            var prior = new Dictionary<Guid, bool>();
+            var projected = ImmutableArray.CreateBuilder<ExecutionSelectionItem>(items.Length);
+            foreach (var item in items)
             {
-                var required = queue.SuccessDependencies.SingleOrDefault(value => value.ScriptId == item.Script.Id)?.RequiredScriptIds ?? [];
-                if (required.Any(id => !projected.Any(prior => prior.Script.Id == id && prior.Ordinal < item.Ordinal) ||
-                    projected.Any(prior => prior.Script.Id == id && prior.Ordinal < item.Ordinal && prior.Disposition != ExecutionSelectionDisposition.Candidate)))
-                    projected[item.Ordinal] = new(item.Ordinal, item.Script, item.User, item.Binding, item.Roots, item.SourceRevisions,
+                var script = item.Script.Id;
+                var current = item;
+                if (item.Disposition == ExecutionSelectionDisposition.Candidate && HasUnsuccessfulDependency(dependencies, prior, script))
+                    current = new(item.Ordinal, item.Script, item.User, item.Binding, item.Roots, item.SourceRevisions,
                         ExecutionSelectionDisposition.Skipped, "execution_queue_dependency_not_successful", item.SuccessfulRunsToday);
+                prior[script] = prior.GetValueOrDefault(script, true) && current.Disposition == ExecutionSelectionDisposition.Candidate;
+                projected.Add(current);
             }
-            items = projected.ToImmutableArray();
+            items = projected.MoveToImmutable();
         }
         var reason = unavailable ?? (items.Any(item => item.Disposition == ExecutionSelectionDisposition.Candidate) ? "execution_inputs_required" :
             items.Any(item => item.Disposition == ExecutionSelectionDisposition.Blocked) ? "execution_no_runnable_targets" :
@@ -172,6 +209,9 @@ public static class ExecutionSelectionPolicy
                 ? "execution_daily_success_limit" : "execution_no_enabled_bindings");
         return new(request, catalog.Revision, settings.Revision, queue, items,
             Revisions(sources.Concat(items.SelectMany(item => item.SourceRevisions))), reason);
+
+        (AutomationBinding Source, AutomationBinding Effective) ResolveBinding(AutomationBinding binding)
+            => (binding, AutomationBindingPolicy.Resolve(users[binding.UserId], binding));
     }
 
     public static ExecutionPlanExplanation Explain(ExecutionSelection selection, ImmutableArray<ExecutionItemReadiness> readiness, bool blockAll = false)
@@ -195,26 +235,34 @@ public static class ExecutionSelectionPolicy
             _ => new ExecutionItemExplanation(item, byOrdinal[item.Ordinal].IsReady ? ExecutionExplanationDisposition.Runnable :
                 selection.Queue is null || blockAll ? ExecutionExplanationDisposition.Blocked : ExecutionExplanationDisposition.Skipped, byOrdinal[item.Ordinal].ReasonCode)
         }).ToImmutableArray();
-        if (selection.Queue is { } queue)
+        if (selection.Queue is { SuccessDependencies.IsEmpty: false } queue)
         {
-            var projected = items.ToArray();
-            foreach (var item in items.Where(item => item.Disposition == ExecutionExplanationDisposition.Runnable))
+            var dependencies = queue.SuccessDependencies.ToDictionary(item => item.ScriptId, item => item.RequiredScriptIds);
+            var prior = new Dictionary<Guid, bool>();
+            var projected = ImmutableArray.CreateBuilder<ExecutionItemExplanation>(items.Length);
+            foreach (var item in items)
             {
-                var required = queue.SuccessDependencies.SingleOrDefault(value => value.ScriptId == item.Source.Script.Id)?.RequiredScriptIds ?? [];
-                if (required.Any(id => !projected.Any(prior => prior.Source.Script.Id == id && prior.Source.Ordinal < item.Source.Ordinal) ||
-                    projected.Any(prior => prior.Source.Script.Id == id && prior.Source.Ordinal < item.Source.Ordinal && prior.Disposition != ExecutionExplanationDisposition.Runnable)))
-                    projected[item.Source.Ordinal] = item with { Disposition = ExecutionExplanationDisposition.Skipped, ReasonCode = "execution_queue_dependency_not_successful" };
+                var script = item.Source.Script.Id;
+                var current = item;
+                if (item.Disposition == ExecutionExplanationDisposition.Runnable && HasUnsuccessfulDependency(dependencies, prior, script))
+                    current = item with { Disposition = ExecutionExplanationDisposition.Skipped, ReasonCode = "execution_queue_dependency_not_successful" };
+                prior[script] = prior.GetValueOrDefault(script, true) && current.Disposition == ExecutionExplanationDisposition.Runnable;
+                projected.Add(current);
             }
-            items = projected.ToImmutableArray();
+            items = projected.MoveToImmutable();
         }
         var reason = items.Any(item => item.Disposition == ExecutionExplanationDisposition.Runnable) ? "execution_has_runnable_items" :
             items.Any(item => item.Disposition == ExecutionExplanationDisposition.Blocked) ? "execution_no_runnable_targets" : selection.ReasonCode;
         return new(selection, items, reason);
     }
 
-    private static ExecutionSelectionItem Item(AutomationCatalog catalog, HostSettingsSnapshot settings, AutomationBinding binding, int ordinal, int successesToday, bool initialize)
+    private static bool HasUnsuccessfulDependency(IReadOnlyDictionary<Guid, ImmutableArray<Guid>> dependencies,
+        IReadOnlyDictionary<Guid, bool> prior, Guid script)
+        => dependencies.TryGetValue(script, out var required) && required.Any(id => !prior.GetValueOrDefault(id));
+
+    private static ExecutionSelectionItem Item(IReadOnlyDictionary<Guid, AutomationRoot> rootsById, HostSettingsSnapshot settings,
+        AutomationScript original, AutomationUser user, AutomationBinding binding, int ordinal, int successesToday, bool initialize)
     {
-        var original = BindingScriptSource.Resolve(catalog.Scripts.Single(item => item.Id == binding.ScriptId), binding);
         var script = original with
         {
             Target = AutomationTargetPolicy.Freeze(original.Target),
@@ -228,13 +276,13 @@ public static class ExecutionSelectionPolicy
                 FailureKeywords = original.Judgement.FailureKeywords.Select(value => value).ToImmutableArray()
             }
         };
-        var user = catalog.Users.Single(item => item.Id == binding.UserId) with { };
-        binding = AutomationBindingPolicy.Resolve(user, binding);
+        user = user with { };
         var frozenBinding = binding with { PreHook = FreezeHook(binding.PreHook), PostHook = FreezeHook(binding.PostHook) };
         var hookPaths = new[] { frozenBinding.PreHook, frozenBinding.PostHook }.OfType<AutomationHook>().Select(hook => hook.Executable);
         var rootIds = script.ConfigurationPaths.Concat(script.LogPaths).Append(script.Executable).Concat(hookPaths).Concat(AutomationTargetPolicy.Paths(script.Target))
             .Select(path => path.RootId).Append(script.RootId).ToHashSet();
-        var roots = catalog.Roots.Where(root => rootIds.Contains(root.Id)).OrderBy(root => root.Id.ToString("D"), StringComparer.Ordinal)
+        var roots = rootIds.Select(id => rootsById.GetValueOrDefault(id)).OfType<AutomationRoot>()
+            .OrderBy(root => root.Id.ToString("D"), StringComparer.Ordinal)
             .Select(root => root with { }).ToImmutableArray();
         var revisions = Revisions(roots.Select(root => new ExecutionSelectionRevision(AutomationDefinitionKind.Root, root.Id, root.Revision)).Concat([
             new(AutomationDefinitionKind.Script, script.Id, script.Revision), new(AutomationDefinitionKind.User, user.Id, user.Revision),

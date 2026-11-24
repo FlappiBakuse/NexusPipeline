@@ -1,4 +1,5 @@
 using NexusPipeline.Core.Automation;
+using System.Collections.Immutable;
 
 namespace NexusPipeline.Core.Execution;
 
@@ -125,3 +126,47 @@ public sealed class AttemptBusinessJudgement
     private static bool Valid(System.Collections.Immutable.ImmutableArray<string> values) => !values.IsDefault && values.Length <= 64 &&
         values.All(value => !string.IsNullOrEmpty(value) && value.Length <= 4096 && !value.Contains('\0'));
 }
+
+internal sealed class KeywordJudgementRules
+{
+    private readonly List<HashSet<string>> _groups = [];
+    internal bool IsConfigured => _groups.Count != 0;
+
+    internal KeywordJudgementRules(ImmutableArray<string> expressions)
+    {
+        foreach (var expression in expressions)
+            foreach (var rawLine in expression.Split('\n'))
+            {
+                var words = rawLine.Trim().Split([',', '，'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (words.Length != 0) _groups.Add(new(words, StringComparer.OrdinalIgnoreCase));
+            }
+    }
+
+    internal int? Consume(string line)
+    {
+        int? firstCompletion = null;
+        foreach (var pending in _groups)
+        {
+            if (pending.Count == 0) continue;
+            var hits = new List<(string Word, int Position)>();
+            foreach (var word in pending)
+            {
+                var position = line.IndexOf(word, StringComparison.OrdinalIgnoreCase);
+                if (position >= 0) hits.Add((word, position));
+            }
+            foreach (var hit in hits) pending.Remove(hit.Word);
+            if (pending.Count != 0 || hits.Count == 0) continue;
+            // Earlier lines already supplied other words; this group becomes true at its last missing word on this line.
+            var completion = hits.Max(hit => hit.Position);
+            firstCompletion = firstCompletion is null ? completion : Math.Min(firstCompletion.Value, completion);
+        }
+        return firstCompletion;
+    }
+}
+
+public enum ExecutionJudgementMode { None, Keywords, Script }
+
+public sealed record JudgementInputIdentity(Guid AttemptId, Guid OwnerId);
+public sealed record JudgementInvocation(Guid AttemptId, long Generation, bool IsFinal, Guid OwnerId);
+public sealed record BusinessJudgementResult(BusinessOutcome Outcome, string Reason);
+public sealed record BusinessJudgementDecision(BusinessOutcome Outcome, string ReasonCode, string Reason);

@@ -120,7 +120,7 @@ internal sealed class PayloadTreeEffects(FileTreeScanner scanner, FileTreeArchiv
 
     internal IDisposable HoldInstalled(FrozenPayloadApply plan, PayloadTreeScene saved)
     {
-        var result = new HeldTrees();
+        var result = new HeldStorageResources();
         try
         {
             var work = PayloadWorkspacePath.For(plan);
@@ -132,7 +132,7 @@ internal sealed class PayloadTreeEffects(FileTreeScanner scanner, FileTreeArchiv
             result.Add(TreeReadLease.Acquire(Path.Combine(work, "before"), saved.WorkspaceIdentity!, plan.Before));
             return result;
         }
-        catch { result.Dispose(); throw; }
+        catch (Exception error) { result.Release(error); throw; }
     }
 
     internal (bool RetireCandidate, bool RestoreOriginal) ObserveRestoration(FrozenPayloadApply plan,
@@ -148,9 +148,13 @@ internal sealed class PayloadTreeEffects(FileTreeScanner scanner, FileTreeArchiv
         using var held = StableDirectoryLease.Acquire(work);
         RequireWorkspace(plan, saved, ["candidate", "before", "spent"]);
         var before = Path.Combine(work, "before"); var candidate = Path.Combine(work, "candidate"); var spent = Path.Combine(work, "spent");
-        var originalHere = Matches(plan.TargetPath, plan.Before.Snapshot, plan.Before.OriginalObjects);
+        var installed = scanner.Capture(plan.TargetPath, CancellationToken.None);
+        IReadOnlyList<PhysicalTreeObject>? installedObjects = null;
+        bool MatchesInstalled(FileTreeSnapshot expected, IReadOnlyList<PhysicalTreeObject> objects) => SameTree(installed, expected) &&
+            (installedObjects ??= ReadIdentities(plan.TargetPath, installed)).SequenceEqual(objects);
+        var originalHere = MatchesInstalled(plan.Before.Snapshot, plan.Before.OriginalObjects);
         var hasCandidate = !saved.CandidateObjects.IsEmpty;
-        var candidateHere = hasCandidate && Matches(plan.TargetPath, plan.Candidate.Snapshot, saved.CandidateObjects);
+        var candidateHere = hasCandidate && MatchesInstalled(plan.Candidate.Snapshot, saved.CandidateObjects);
         var candidateReady = hasCandidate && Matches(candidate, plan.Candidate.Snapshot, saved.CandidateObjects);
         var candidateRetired = hasCandidate && Matches(spent, plan.Candidate.Snapshot, saved.CandidateObjects);
         if (!candidateReady) RequireMissing(candidate);
@@ -180,7 +184,7 @@ internal sealed class PayloadTreeEffects(FileTreeScanner scanner, FileTreeArchiv
     {
         var actual = ObserveRestoration(plan, saved);
         if (actual != (false, false)) throw Invalid();
-        var held = new HeldTrees();
+        var held = new HeldStorageResources();
         try
         {
             held.Add(StableDirectoryLease.Acquire(Path.GetDirectoryName(plan.TargetPath)!));
@@ -199,7 +203,7 @@ internal sealed class PayloadTreeEffects(FileTreeScanner scanner, FileTreeArchiv
             }
             return held;
         }
-        catch { held.Dispose(); throw; }
+        catch (Exception error) { held.Release(error); throw; }
     }
 
     private void RequireWorkspace(FrozenPayloadApply plan, PayloadTreeScene saved, IReadOnlyList<string> allowed)
@@ -234,22 +238,18 @@ internal sealed class PayloadTreeEffects(FileTreeScanner scanner, FileTreeArchiv
     private bool Matches(string path, FileTreeSnapshot snapshot, IReadOnlyList<PhysicalTreeObject> objects)
     {
         var actual = scanner.Capture(path, CancellationToken.None);
-        if (actual.Shape != snapshot.Shape || !actual.Entries.SequenceEqual(snapshot.Entries)) return false;
+        return SameTree(actual, snapshot) && ReadIdentities(path, actual).SequenceEqual(objects);
+    }
+    private static bool SameTree(FileTreeSnapshot actual, FileTreeSnapshot expected)
+        => actual.Shape == expected.Shape && actual.Entries.SequenceEqual(expected.Entries);
+
+    private static IReadOnlyList<PhysicalTreeObject> ReadIdentities(string path, FileTreeSnapshot actual)
+    {
         PhysicalTreeIdentity.RequireSingleLinks(path, actual);
-        return PhysicalTreeIdentity.Capture(path, actual).SequenceEqual(objects);
+        return PhysicalTreeIdentity.Capture(path, actual);
     }
     private bool IsMissing(string path) => scanner.Capture(path, CancellationToken.None).Shape == FileObjectKind.Missing;
     private void RequireMissing(string path) { if (!IsMissing(path)) throw Invalid(); }
     private static IOException Invalid() => new("extension_payload_tree_changed");
 
-    private sealed class HeldTrees : IDisposable
-    {
-        private readonly List<IDisposable> _held = [];
-        internal void Add(IDisposable item) => _held.Add(item);
-        public void Dispose()
-        {
-            for (var index = _held.Count - 1; index >= 0; index--) _held[index].Dispose();
-            _held.Clear();
-        }
-    }
 }

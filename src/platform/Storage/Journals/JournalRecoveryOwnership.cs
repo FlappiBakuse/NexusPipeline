@@ -59,7 +59,8 @@ public sealed class JournalRecoveryOwnership(StateDatabase database) : IRecovery
 
     private bool CanIsolateExecution(RegisteredJournal journal)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true,
+            domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration);
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT j.journal_id FROM main.operation_journals j JOIN main.operations o ON o.operation_id=j.operation_id " +
             "WHERE j.journal_id=$id AND j.operation_kind='runAttempt' AND o.operation_kind='execution.start' AND o.initial_journal_id=j.journal_id " +
@@ -101,7 +102,7 @@ public sealed class JournalRecoveryOwnership(StateDatabase database) : IRecovery
 
     private ImmutableArray<JournalWriter> ReadExtensionWriters(Guid journalId)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.All);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = DatabaseConnections.BeginRead(connection);
         var result = ReadExtensionWritersInside(connection, transaction, journalId);
         transaction.Commit();
@@ -256,7 +257,16 @@ public sealed class JournalRecoveryOwnership(StateDatabase database) : IRecovery
         internal bool Same(MaintenanceWriterSet other) => Writers.SequenceEqual(other.Writers) && Jobs.SequenceEqual(other.Jobs);
     }
 
-    private static MaintenanceWriterSet ReadMaintenanceWriters(SqliteConnection connection, SqliteTransaction transaction, Guid journal)
+    private static MaintenanceWriterSet ReadMaintenanceWriters(StateDatabase database, Guid journal)
+    {
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
+        using var transaction = DatabaseConnections.BeginRead(connection);
+        var value = ReadMaintenanceWritersInside(connection, transaction, journal);
+        transaction.Commit();
+        return value;
+    }
+
+    private static MaintenanceWriterSet ReadMaintenanceWritersInside(SqliteConnection connection, SqliteTransaction transaction, Guid journal)
     {
         var registered = RecoveryJournalRegistry.ReadJournalInside(connection, transaction, journal);
         if (registered.Kind != JournalKind.UpdateApply) throw new IOException("maintenance_recovery_kind_unbound");
@@ -308,17 +318,11 @@ public sealed class JournalRecoveryOwnership(StateDatabase database) : IRecovery
                 expected.InstanceId != instance.InstanceId || expected.RuntimeRoot != instance.RuntimeRoot ||
                 !StringComparer.OrdinalIgnoreCase.Equals(Path.GetFullPath(expected.DatabasePath),
                     Path.Combine(instance.RuntimeRoot, "state", "runtime.db"))) throw Invalid();
-            MaintenanceWriterSet Read()
-            {
-                using var connection = DatabaseConnections.Open(expected.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-                using var transaction = DatabaseConnections.BeginRead(connection);
-                var value = ReadMaintenanceWriters(connection, transaction, journal); transaction.Commit(); return value;
-            }
-            var before = Read();
+            var before = ReadMaintenanceWriters(expected, journal);
             if (before.Writers.SingleOrDefault(item => item.WriterId == executor)?.Process != JournalWriterStore.CurrentWriter.Process)
                 throw Invalid();
             var observed = owner.Observe(journal);
-            if (!observed.IsComplete || observed.State != WriterState.Stopped || !before.Same(Read())) throw Invalid();
+            if (!observed.IsComplete || observed.State != WriterState.Stopped || !before.Same(ReadMaintenanceWriters(expected, journal))) throw Invalid();
             return new(owner, instance, lease, journal, executor, before);
         }
 
@@ -329,17 +333,11 @@ public sealed class JournalRecoveryOwnership(StateDatabase database) : IRecovery
             if (!ReferenceEquals(owner.Database, expected) || expected.InstanceId != instance.InstanceId ||
                 expected.RuntimeRoot != instance.RuntimeRoot || !StringComparer.OrdinalIgnoreCase.Equals(
                     Path.GetFullPath(expected.DatabasePath), Path.Combine(instance.RuntimeRoot, "state", "runtime.db"))) throw Invalid();
-            MaintenanceWriterSet Read()
-            {
-                using var connection = DatabaseConnections.Open(expected.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);
-                using var transaction = DatabaseConnections.BeginRead(connection);
-                var value = ReadMaintenanceWriters(connection, transaction, failure.JournalId); transaction.Commit(); return value;
-            }
-            var before = Read();
+            var before = ReadMaintenanceWriters(expected, failure.JournalId);
             if (before.Writers.SingleOrDefault(item => item.WriterId == failure.Facts.Writer.WriterId) != failure.Facts.Writer ||
                 !before.Jobs.Any(item => item.WriterId == failure.Facts.Writer.WriterId && item.Name == failure.Facts.JobName)) throw Invalid();
             failure.Require(instance, expected, lease, failure.JournalId);
-            if (!before.Same(Read())) throw Invalid();
+            if (!before.Same(ReadMaintenanceWriters(expected, failure.JournalId))) throw Invalid();
             return new(owner, instance, lease, failure.JournalId, failure.Facts.Writer.WriterId, before, failure);
         }
 
@@ -350,7 +348,7 @@ public sealed class JournalRecoveryOwnership(StateDatabase database) : IRecovery
             if (journal != _journal || _failure is null && _owner._executing != _executor ||
                 !DatabaseConnections.IsBound(connection, Path.Combine(_instance.RuntimeRoot, "state", "runtime.db")) ||
                 !ReferenceEquals(connection, transaction.Connection) ||
-                !_set.Same(ReadMaintenanceWriters(connection, transaction, journal))) throw Invalid();
+                !_set.Same(ReadMaintenanceWritersInside(connection, transaction, journal))) throw Invalid();
         }
         private static IOException Invalid() => new("maintenance_recovery_writer_stop_unconfirmed");
     }

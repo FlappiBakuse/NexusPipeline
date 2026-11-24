@@ -22,6 +22,7 @@ public sealed class InstanceLease : IDisposable
     internal Guid StartupGeneration { get; } = Guid.NewGuid();
     internal Execution.RunBudgetOwner RunBudgets { get; }
     internal Execution.LiveLogHub LiveLogs { get; }
+    internal Notifications.NotificationPublicationProof NotificationPublications { get; } = new();
 
     private InstanceLease(RuntimeInstance instance, FileStream instanceLock, FileStream identity, StableDirectoryLease? identityDirectory)
     {
@@ -78,11 +79,15 @@ public sealed class InstanceLease : IDisposable
         {
             _attemptReads.Dispose(); RunBudgets.Close(); LiveLogs.Close();
             lock (_executorGate) if (OperatingSystem.IsWindows()) _executor?.Dispose();
-            try { lock (_databaseGate) _databaseReads?.Dispose(); }
+            try { NotificationPublications.Dispose(); }
             finally
             {
-                try { _directories?.Dispose(); _lock.Dispose(); _identity.Dispose(); }
-                finally { _identityDirectory?.Dispose(); }
+                try { lock (_databaseGate) _databaseReads?.Dispose(); }
+                finally
+                {
+                    try { _directories?.Dispose(); _lock.Dispose(); _identity.Dispose(); }
+                    finally { _identityDirectory?.Dispose(); }
+                }
             }
         });
     }
@@ -156,6 +161,7 @@ public sealed class InstanceLease : IDisposable
     internal void RequirePublicationEntry() => _executionPublications.RequireNotReentrant();
     internal int ExecutionPublicationCount => _executionPublications.PendingCount;
     internal Task WhenExecutionPublicationsReleased => _executionPublications.Released;
+    internal Task WaitForNextExecutionPublication() => _executionPublications.WaitForNextEnqueue();
 
     internal T PublishExecution<T>(Func<T> callback)
     {

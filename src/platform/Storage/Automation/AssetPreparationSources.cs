@@ -10,7 +10,7 @@ public sealed class AssetPreparationSources : IDisposable
 
     public AssetPreparationSources(FrozenAssetPreparation frozen, IReadOnlyDictionary<Guid, string> selectedFiles)
     {
-        _planDigest = Convert.ToHexStringLower(SHA256.HashData(frozen.Export()));
+        _planDigest = frozen.Digest;
         var assets = frozen.ReadWire().Assets;
         if (selectedFiles.Count != assets.Count || assets.Any(asset => !selectedFiles.ContainsKey(Guid.Parse(asset.AssetId))))
             throw new IOException("asset_sources_incomplete");
@@ -39,7 +39,7 @@ public sealed class AssetPreparationSources : IDisposable
     internal void VerifyBound(FrozenAssetPreparation frozen)
     {
         ObjectDisposedException.ThrowIf(_sources is null, this);
-        if (Convert.ToHexStringLower(SHA256.HashData(frozen.Export())) != _planDigest) throw new IOException("asset_sources_plan_unbound");
+        if (frozen.Digest != _planDigest) throw new IOException("asset_sources_plan_unbound");
     }
 
     internal PhysicalObjectIdentity CopyNew(AssetPreparationDefsAsset asset, string destination, CancellationToken cancellationToken)

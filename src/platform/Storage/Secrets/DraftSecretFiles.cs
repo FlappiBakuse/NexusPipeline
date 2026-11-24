@@ -20,7 +20,7 @@ internal sealed class DraftSecretFiles : IDisposable
         {
             foreach (var value in candidates.SelectMany(candidate => candidate.Payloads)) Install(value.Id, value.Payload);
         }
-        catch { Dispose(); throw; }
+        catch (Exception error) { Release(error); throw; }
     }
 
     private void Install(Guid id, ProtectedSecretPayload payload)
@@ -87,9 +87,13 @@ internal sealed class DraftSecretFiles : IDisposable
         File.Delete(marker);
     }
 
-    public void Dispose()
+    public void Dispose() => Release();
+
+    internal void Release(Exception? primary = null)
     {
-        foreach (var hold in _holds) hold.Dispose();
-        foreach (var marker in _markers) Cleanup(_instance, _database, marker);
+        var failures = new CleanupFailures();
+        foreach (var hold in _holds) failures.Attempt(hold.Dispose);
+        foreach (var marker in _markers) failures.Attempt(() => Cleanup(_instance, _database, marker));
+        failures.Preserve(primary);
     }
 }

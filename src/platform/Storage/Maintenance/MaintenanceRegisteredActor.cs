@@ -9,7 +9,7 @@ using NexusPipeline.Platform.Storage.Sqlite;
 namespace NexusPipeline.Platform.Storage.Maintenance;
 
 [SupportedOSPlatform("windows")]
-internal sealed class MaintenanceRegisteredActor : IDisposable
+internal sealed class MaintenanceRegisteredActor
 {
     private readonly MaintenanceBootstrapPayload _bootstrap;
     private SafeKernelHandle? _jobLifetime;
@@ -223,6 +223,12 @@ internal sealed class MaintenanceRegisteredActor : IDisposable
     private static bool RecognizedJobName(string value) => value is { Length: 50 } && value.StartsWith("Local\\NexusWorker-", StringComparison.Ordinal) &&
         Guid.TryParseExact(value[18..], "N", out _);
 
-    public void Dispose() => Interlocked.Exchange(ref _jobLifetime, null)?.Dispose();
+    internal void ReleaseJobToProcessExit()
+    {
+        // Leave the native handle to Windows process rundown. Closing the last kill-on-close
+        // handle during managed cleanup would terminate the helper before it returns its exit code.
+        Interlocked.Exchange(ref _jobLifetime, null)?.SetHandleAsInvalid();
+    }
+
     private static IOException Invalid() => new("maintenance_helper_actor_unbound");
 }

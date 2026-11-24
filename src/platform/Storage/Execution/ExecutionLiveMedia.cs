@@ -6,10 +6,12 @@ namespace NexusPipeline.Platform.Storage.Execution;
 [SupportedOSPlatform("windows")]
 public sealed class ExecutionLiveMedia : IRunMediaAuthorization, IMediaFrameSource
 {
+    [ThreadStatic] private static Grant? _opening;
     private readonly object _gate = new();
     private readonly Guid _instanceId;
     private readonly Dictionary<RunMediaContext, Step> _steps = [];
     private readonly Dictionary<Guid, Grant> _grants = [];
+    private readonly HashSet<Grant> _pendingOpens = [];
     public MediaPreviewRegistry Previews { get; }
 
     public ExecutionLiveMedia(Guid instanceId)
@@ -35,58 +37,117 @@ public sealed class ExecutionLiveMedia : IRunMediaAuthorization, IMediaFrameSour
 
     public ExecutionLivePreview OpenPreview(string serverSubject, RunMediaContext context, string extensionId, string providerId)
     {
+        Grant grant;
+        TaskCompletionSource task;
         lock (_gate)
         {
-            if (!_steps.TryGetValue(context, out var step) || step.Closing || step.Subject != serverSubject || _grants.Count >= 128)
+            if (!_steps.TryGetValue(context, out var step) || step.Closing || step.Subject != serverSubject ||
+                _grants.Count + _pendingOpens.Count >= 128)
                 throw Denied();
-            step.RequireLive();
-            var grant = new Grant(step, extensionId);
-            // Core performs authorization during Open; a provisional grant exists only while this lock is held.
-            step.Opening = grant;
-            try
+            grant = new Grant(step, extensionId);
+            _pendingOpens.Add(grant);
+            task = Track(grant);
+        }
+        var previous = _opening;
+        MediaPreview? preview = null;
+        try
+        {
+            grant.Step.RequireLive();
+            lock (_gate) RequirePending(grant);
+            // Core authorizes synchronously during Open. Only this call can use its pending grant.
+            _opening = grant;
+            preview = Previews.Open(context, extensionId, providerId);
+            lock (_gate)
             {
-                var preview = Previews.Open(context, extensionId, providerId);
+                RequirePending(grant);
                 grant.Preview = preview;
                 _grants.Add(preview.PreviewId, grant);
-                return new(this, grant);
+                _pendingOpens.Remove(grant);
             }
-            finally { step.Opening = null; }
+            return new(this, grant);
+        }
+        finally
+        {
+            _opening = previous;
+            bool abandoned;
+            lock (_gate) abandoned = _pendingOpens.Remove(grant);
+            try
+            {
+                if (abandoned)
+                {
+                    try { preview?.Dispose(); }
+                    finally { grant.Stopping.Dispose(); }
+                }
+            }
+            finally { Leave(grant, task); }
         }
     }
 
     public void AssertAllowed(RunMediaContext context, string extensionId)
     {
+        Step step;
+        TaskCompletionSource task;
         lock (_gate)
         {
-            if (!_steps.TryGetValue(context, out var step) || step.Closing ||
-                !(step.Opening?.ExtensionId == extensionId || _grants.Values.Any(grant =>
-                    ReferenceEquals(grant.Step, step) && grant.ExtensionId == extensionId && !grant.Closed))) throw Denied();
-            step.RequireLive();
+            step = RequireAllowedStep(context, extensionId);
+            task = Track(step);
         }
+        try
+        {
+            step.RequireLive();
+            lock (_gate)
+                if (!ReferenceEquals(step, RequireAllowedStep(context, extensionId))) throw Denied();
+        }
+        finally { lock (_gate) Complete(step, task); }
+    }
+
+    private Step RequireAllowedStep(RunMediaContext context, string extensionId)
+    {
+        if (!_steps.TryGetValue(context, out var step) || step.Closing) throw Denied();
+        // Core authorizes the step and extension. A different open grant can still authorize that pair.
+        if (_opening is { } pending && ReferenceEquals(pending.Step, step) &&
+            pending.ExtensionId == extensionId && _pendingOpens.Contains(pending)) return step;
+        if (_grants.Values.Any(grant => ReferenceEquals(grant.Step, step) && grant.ExtensionId == extensionId && !grant.Closed))
+            return step;
+        throw Denied();
     }
 
     public ValueTask<PreviewImage> CaptureAsync(MediaCaptureRequest request, CancellationToken cancellationToken)
     {
         Grant grant;
+        TaskCompletionSource task;
         lock (_gate)
         {
             if (!_grants.TryGetValue(request.PreviewId, out grant!) || grant.Step.Context != request.Context || grant.ExtensionId != request.ExtensionId ||
-                request.RequestId == Guid.Empty || request.Sequence <= grant.Sequence || request.Sequence > 9007199254740991 ||
-                grant.SourceBusy) throw Denied();
-            Require(grant); grant.Sequence = request.Sequence; grant.SourceBusy = true;
+                request.RequestId == Guid.Empty || request.Sequence > 9007199254740991) throw Denied();
+            RequireCurrent(grant);
+            RequireSequence(grant, request.Sequence);
+            task = Track(grant);
         }
-        return CaptureSourceAsync(grant, cancellationToken);
-    }
-
-    private async ValueTask<PreviewImage> CaptureSourceAsync(Grant grant, CancellationToken cancellation)
-    {
-        var task = Enter(grant);
         try
         {
+            grant.Step.RequireLive();
+            lock (_gate)
+            {
+                RequireCurrent(grant);
+                RequireSequence(grant, request.Sequence);
+                grant.Sequence = request.Sequence;
+                grant.SourceBusy = true;
+            }
+        }
+        catch { Leave(grant, task); throw; }
+        return CaptureSourceAsync(grant, task, cancellationToken);
+    }
+
+    private async ValueTask<PreviewImage> CaptureSourceAsync(Grant grant, TaskCompletionSource task, CancellationToken cancellation)
+    {
+        try
+        {
+            RequireLive(grant);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellation, grant.Step.Stopping.Token, grant.Stopping.Token);
             var image = await grant.Step.Capture(linked.Token).ConfigureAwait(false);
             linked.Token.ThrowIfCancellationRequested();
-            lock (_gate) Require(grant);
+            RequireLive(grant);
             return image;
         }
         finally { lock (_gate) grant.SourceBusy = false; Leave(grant, task); }
@@ -97,10 +158,11 @@ public sealed class ExecutionLiveMedia : IRunMediaAuthorization, IMediaFrameSour
         var task = Enter(grant);
         try
         {
+            RequireLive(grant);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellation, grant.Step.Stopping.Token, grant.Stopping.Token);
             var frame = await grant.Preview!.CaptureAsync(linked.Token).ConfigureAwait(false);
             linked.Token.ThrowIfCancellationRequested();
-            lock (_gate) Require(grant);
+            RequireLive(grant);
             return frame;
         }
         finally { Leave(grant, task); }
@@ -110,21 +172,70 @@ public sealed class ExecutionLiveMedia : IRunMediaAuthorization, IMediaFrameSour
     {
         lock (_gate)
         {
-            Require(grant);
-            var task = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            grant.Step.Active.Add(task); grant.Active.Add(task); return task;
+            RequireCurrent(grant);
+            return Track(grant);
         }
     }
 
-    private void Leave(Grant grant, TaskCompletionSource task)
-    { lock (_gate) { grant.Step.Active.Remove(task); grant.Active.Remove(task); task.TrySetResult(); } }
+    private static TaskCompletionSource Track(Grant grant)
+    {
+        var task = Track(grant.Step);
+        grant.Active.Add(task);
+        return task;
+    }
 
-    private void Require(Grant grant)
+    private static TaskCompletionSource Track(Step step)
+    {
+        var task = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        step.Active.Add(task);
+        return task;
+    }
+
+    private void Leave(Grant grant, TaskCompletionSource task)
+    {
+        lock (_gate)
+        {
+            grant.Active.Remove(task);
+            Complete(grant.Step, task);
+        }
+    }
+
+    private static void Complete(Step step, TaskCompletionSource task)
+    {
+        step.Active.Remove(task);
+        task.TrySetResult();
+    }
+
+    private void RequireLive(Grant grant)
+    {
+        lock (_gate) RequireCurrent(grant);
+        grant.Step.RequireLive();
+        lock (_gate) RequireCurrent(grant);
+    }
+
+    private void RequirePending(Grant grant)
+    {
+        RequireStep(grant);
+        if (!_pendingOpens.Contains(grant)) throw Denied();
+    }
+
+    private void RequireStep(Grant grant)
     {
         if (grant.Closed || grant.Step.Closing || !_steps.TryGetValue(grant.Step.Context, out var step) ||
-            !ReferenceEquals(step, grant.Step) || grant.Preview is null ||
+            !ReferenceEquals(step, grant.Step)) throw Denied();
+    }
+
+    private void RequireCurrent(Grant grant)
+    {
+        RequireStep(grant);
+        if (ReferenceEquals(_opening, grant) && _pendingOpens.Contains(grant)) return;
+        if (grant.Preview is null ||
             !_grants.TryGetValue(grant.Preview.PreviewId, out var current) || !ReferenceEquals(current, grant)) throw Denied();
-        step.RequireLive();
+    }
+
+    private static void RequireSequence(Grant grant, long sequence)
+    {
+        if (sequence <= grant.Sequence || grant.SourceBusy) throw Denied();
     }
 
     internal async ValueTask CloseAsync(Grant grant)
@@ -191,7 +302,6 @@ public sealed class ExecutionLiveMedia : IRunMediaAuthorization, IMediaFrameSour
         internal Func<CancellationToken, ValueTask<PreviewImage>> Capture { get; } = capture;
         internal readonly HashSet<TaskCompletionSource> Active = [];
         internal readonly CancellationTokenSource Stopping = new();
-        internal Grant? Opening;
         internal bool Closing, Closed;
         internal Task CloseAsync(TimeSpan timeout) => owner.CloseStepAsync(this, timeout);
         public ValueTask DisposeAsync() => new(CloseAsync(TimeSpan.FromSeconds(15)));

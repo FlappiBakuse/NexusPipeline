@@ -30,8 +30,7 @@ internal static class StepResultCodec
 
     internal static bool IsParticipant(JsonElement participant)
     {
-        var identity = participant.GetProperty("identity");
-        if (!identity.TryGetProperty("format", out var format) || format.GetString() != Format) return false;
+        if (!ExecutionParticipantText.MatchesFormat(participant, Format)) return false;
         _ = Decode(participant); return true;
     }
 
@@ -43,8 +42,9 @@ internal static class StepResultCodec
         var jobs = WriterIntentCodec.Read(journal, total).ToDictionary(item => item.StepId);
         var results = new Dictionary<string, StepResultState>(StringComparer.Ordinal);
         var observations = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var participant in journal.Participants.Where(IsParticipant))
+        foreach (var participant in journal.Participants)
         {
+            if (!ExecutionParticipantText.MatchesFormat(participant, Format)) continue;
             var item = Decode(participant); var binding = item.Binding;
             var step = total.Steps.SingleOrDefault(value => value.StepId == binding.StepId) ?? throw Invalid();
             if (!jobs.TryGetValue(binding.StepId, out var job) || binding != Binding(journal, job) ||
@@ -69,24 +69,25 @@ internal static class StepResultCodec
 
     internal static bool IsUndispatchedParticipant(JsonElement participant)
     {
-        var identity = participant.GetProperty("identity");
-        if (!identity.TryGetProperty("format", out var format) || format.GetString() != UndispatchedFormat) return false;
+        if (!ExecutionParticipantText.MatchesFormat(participant, UndispatchedFormat)) return false;
         _ = DecodeUndispatched(participant); return true;
     }
 
     internal static ExecutionUndispatchedSteps? ReadUndispatched(AttemptJournalView journal, ExecutionPlan total)
     {
-        var participants = journal.Participants.Where(IsUndispatchedParticipant).ToArray();
+        var participants = journal.Participants.Where(participant => ExecutionParticipantText.MatchesFormat(participant, UndispatchedFormat))
+            .Select(participant => (Item: DecodeUndispatched(participant), Participant: participant)).ToArray();
         if (participants.Length == 0) return null;
         if (participants.Length != 1) throw Invalid();
-        var item = DecodeUndispatched(participants[0]); var close = DispatchIntentCodec.Read(journal, total);
+        var (item, participant) = participants[0];
+        var close = DispatchIntentCodec.Read(journal, total);
         var jobs = BindingSkipCodec.Processed(journal, total, WriterIntentCodec.ReadJobs(journal, total));
         if (close is null || item.ParentJournalId != journal.Root.GetProperty("journalId").GetGuid() ||
             item.ParentOperationId != journal.Root.GetProperty("operationId").GetGuid() || item.PlanDigest != journal.Root.GetProperty("planDigest").GetString() ||
             item.DispatchOperationId != close.CancellationOperationId || item.ReasonCode != close.ReasonCode ||
             jobs.Length >= total.Steps.Count ||
             !item.StepIds.SequenceEqual(total.Steps.Skip(jobs.Length).Select(step => step.StepId)) ||
-            participants[0].GetProperty("resourceKey").GetString() != "automation:" + total.Steps[jobs.Length].ScriptId) throw Invalid();
+            participant.GetProperty("resourceKey").GetString() != "automation:" + total.Steps[jobs.Length].ScriptId) throw Invalid();
         return item;
     }
 
@@ -147,7 +148,8 @@ internal static class StepResultCodec
         journal.Root.GetProperty("runId").GetGuid(), journal.Root.GetProperty("attemptId").GetGuid(), job.StepId, job.JobName, job.WriterId, job.SessionId,
         journal.Root.GetProperty("planDigest").GetString()!);
 
-    internal static IReadOnlyList<StepResultIntent> ReadAll(AttemptJournalView journal) => journal.Participants.Where(IsParticipant).Select(Decode).ToArray();
+    internal static IReadOnlyList<StepResultIntent> ReadAll(AttemptJournalView journal) =>
+        journal.Participants.Where(participant => ExecutionParticipantText.MatchesFormat(participant, Format)).Select(Decode).ToArray();
 
     internal static JsonObject Participant(StepResultIntent item, string scriptId) => new()
     {

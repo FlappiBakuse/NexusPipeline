@@ -70,9 +70,9 @@ public sealed class NativeEditorService(RuntimeInstance instance, StateDatabase 
             var path = script.ConfigurationPaths.SingleOrDefault(item => GenericConfigurationPolicy.ResourceId(item) == selected.ResourceId)
                 ?? throw new ConfigurationException("configuration_resource_missing");
             var address = new ConfigurationAddress(binding.Id, selected.ResourceId);
-            var saved = draft is null ? revisions.Read(address) : null;
-            if ((saved?.Revision ?? 0) != selected.ExpectedRevision) throw new ConfigurationException("configuration_revision_conflict");
-            if (saved is not null) _ = GenericConfigurationPolicy.RequireSaved(binding, script, path, revisions);
+            var stored = draft is null ? revisions.ReadStored(address) : null;
+            if ((stored?.Revision.Revision ?? 0) != selected.ExpectedRevision) throw new ConfigurationException("configuration_revision_conflict");
+            if (stored is not null) _ = GenericConfigurationPolicy.RequireStored(binding, script, path, stored);
             var declaredRoot = catalog.Roots.Single(item => item.Id == path.RootId);
             targets.Add(new(address, selected.ExpectedRevision, GenericConfigurationPolicy.Contract(path),
                 ConfigurationTargetPaths.Canonical(Resolve(declaredRoot, path.RelativePath)))

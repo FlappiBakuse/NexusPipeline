@@ -1,0 +1,288 @@
+using NexusPipeline.Core.Configuration;
+using NexusPipeline.Core.Execution;
+using NexusPipeline.Platform.Serialization;
+using NexusPipeline.Platform.Storage.Extensions;
+using NexusPipeline.Platform.Storage.Sqlite;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+
+namespace NexusPipeline.Platform.Storage.Journals;
+
+public sealed class CleanupRecoveryHandler(RuntimeInstance instance, ContractReader contracts, StateDatabase database,
+    Func<Guid, CleanupWriterObservation> writers, ICleanupPersistenceObserver? observer = null, PayloadApplyRoots? payloadRoots = null,
+    InstanceLease? executionLease = null, JournalRecoveryOwnership? recoveryOwnership = null) : IJournalRecoveryHandler
+{
+    public JournalKind Kind => JournalKind.FileCleanup;
+
+    public IJournalRecoveryWork Prepare(RegisteredJournal journal)
+    {
+        var frozen = journal with { ResourceKeys = Array.AsReadOnly(journal.ResourceKeys.ToArray()) };
+        Verify(frozen);
+        return new Work(() =>
+        {
+            Verify(frozen);
+            var path = JournalPath(frozen.JournalId);
+            if (!Directory.Exists(path)) new FileCleanupAcceptance(instance, contracts, database).MaterializeInitial(frozen);
+            var plan = CleanupJournalBinding.ReadPlan(instance, contracts, frozen, database, payloadRoots);
+            ExtensionWorkExecution? work = null;
+            if (plan.ExtensionWork is { } origin && frozen.Phase != JournalPhase.Committed && executionLease is not null && recoveryOwnership is not null)
+            {
+                if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
+                work = ExtensionWorkExecution.Recovery(instance, database, executionLease, contracts,
+                    payloadRoots ?? throw new IOException("extension_work_roots_required"), origin, recoveryOwnership, new(frozen.PlanPath,
+                        new FileInfo(Path.Combine(instance.RuntimeRoot, frozen.PlanPath)).Length, frozen.PlanDigest));
+            }
+            return new(instance, frozen.JournalId, contracts, database, () => writers(frozen.JournalId), observer, payloadRoots, work);
+        });
+    }
+
+    private void Verify(RegisteredJournal expected)
+    {
+        if (database.InstanceId != instance.InstanceId) throw new IOException("cleanup_recovery_instance_unbound");
+        var snapshot = new RecoveryJournalRegistry(database).ReadSnapshot(expected.JournalId);
+        var actual = snapshot.Journals.Single(item => item.JournalId == expected.JournalId);
+        if (actual.OperationId != expected.OperationId || actual.Kind != expected.Kind || actual.Phase != expected.Phase || actual.Revision != expected.Revision ||
+            actual.PlanPath != expected.PlanPath || actual.PlanDigest != expected.PlanDigest || !actual.ResourceKeys.SequenceEqual(expected.ResourceKeys))
+            throw new IOException("cleanup_recovery_registration_changed");
+        var path = JournalPath(expected.JournalId);
+        if (Directory.Exists(path)) { _ = CleanupJournalBinding.Read(instance, contracts, snapshot, expected.JournalId, database, payloadRoots); return; }
+        if (File.Exists(path) || expected.Phase != JournalPhase.Prepared || expected.Revision != 1)
+            throw new IOException("missing_cleanup_journal_not_initial");
+        var plan = CleanupJournalBinding.ReadPlan(instance, contracts, expected, database, payloadRoots);
+        var effects = snapshot.FileEffects.Where(item => item.JournalId == expected.JournalId).ToArray();
+        if (effects.Length != FileCleanupItems.Steps(plan).Count || effects.Any(effect => effect.State != FileEffectState.Pending ||
+            effect.Action != FileEffectAction.RemoveOwned || effect.IntentDigest != expected.PlanDigest || !FileCleanupItems.Steps(plan).Contains(effect.StepId)))
+            throw new IOException("missing_cleanup_journal_effects_unbound");
+    }
+
+    private string JournalPath(Guid journalId) => PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(instance.RuntimeRoot, "journals", journalId.ToString("D")));
+
+    private sealed class Work(Func<CleanupRecoverySession> open) : IJournalRecoveryWork
+    {
+        public JournalRecoveryResult Execute() => new FileCleanupRecovery(open()).Recover() switch
+        {
+            FileCleanupResult.NotExecuted => JournalRecoveryResult.NotExecuted,
+            FileCleanupResult.Cleaned => JournalRecoveryResult.Completed,
+            FileCleanupResult.Quarantined => JournalRecoveryResult.Quarantined,
+            FileCleanupResult.AlreadyCompleted => JournalRecoveryResult.AlreadyCompleted,
+            _ => throw new InvalidOperationException("cleanup_result_unrecognized")
+        };
+    }
+}
+
+public sealed record CleanupWriterObservation(Guid InstanceId, Guid JournalId, bool IsComplete, WriterState State);
+
+public sealed class CleanupRecoverySession : ICleanupRecoverySession
+{
+    private readonly RuntimeInstance _instance;
+    private readonly FrozenFileCleanup _plan;
+    private readonly JournalStore _store;
+    private readonly RecoveryJournalRegistry _registry;
+    private readonly FileEffectOutbox _outbox;
+    private readonly FileCleanupProjection _projection;
+    private readonly BlobCleanup _cleanup;
+    private readonly Func<CleanupWriterObservation> _writers;
+    private readonly ICleanupPersistenceObserver? _observer;
+    private readonly JsonObject _journal;
+    private readonly WorkCleanupItems? _work;
+    private readonly PhysicalObjectDeletion.FileLease? _held;
+    private readonly InstanceLease? _executionLease;
+
+    public CleanupRecoverySession(RuntimeInstance instance, Guid journalId, ContractReader contracts, StateDatabase database,
+        Func<CleanupWriterObservation> writers, ICleanupPersistenceObserver? observer = null, PayloadApplyRoots? payloadRoots = null)
+        : this(instance, journalId, contracts, database, writers, observer, payloadRoots, null) { }
+
+    internal CleanupRecoverySession(RuntimeInstance instance, Guid journalId, ContractReader contracts, StateDatabase database,
+        Func<CleanupWriterObservation> writers, ICleanupPersistenceObserver? observer, PayloadApplyRoots? payloadRoots,
+        ExtensionWorkExecution? workExecution, PhysicalObjectDeletion.FileLease? held = null, BlobCleanup? cleanup = null,
+        InstanceLease? executionLease = null)
+    {
+        if (database.InstanceId != instance.InstanceId) throw new IOException("cleanup_database_unbound");
+        executionLease?.VerifyHeld(instance);
+        _executionLease = executionLease;
+        _instance = instance; _writers = writers; _observer = observer; _held = held;
+        _store = new(instance, contracts); _registry = new(database); _outbox = new(database);
+        var bound = CleanupJournalBinding.Read(instance, contracts, _registry.ReadSnapshot(journalId), journalId, database, payloadRoots);
+        _plan = bound.Plan; _journal = bound.Document;
+        if (_plan.ExtensionWork is not null)
+            _work = new(instance, database, contracts, payloadRoots ?? throw new IOException("extension_work_roots_required"), _plan, workExecution);
+        _projection = new(_store, _registry, _outbox, observer, database, workExecution);
+        var blobs = new ImmutableBlobStore(instance, contracts);
+        _cleanup = cleanup ?? new(instance, blobs, new(instance, contracts, database, blobs, payloadRoots));
+    }
+
+    internal IDisposable ProtectReadHistory() => _store.ProtectCleanupHistory(_plan.JournalId,
+        _plan.ExtensionWork?.Page.Indices.Length ?? _plan.Items.Count);
+
+    public FileCleanupInspection Inspect() => InspectItems(readReferences: true);
+
+    public FileCleanupInspection InspectRecovery() => InspectItems(readReferences: Phase != JournalPhase.Prepared);
+
+    private FileCleanupInspection InspectItems(bool readReferences)
+    {
+        var registered = _registry.ReadJournal(_plan.JournalId);
+        var agrees = registered.Phase == Phase && registered.Revision == Revision;
+        var observed = Observe();
+        var inspected = _work is null ? _cleanup.Inspect(_plan.Items.Where(item =>
+            !_journal["receipts"]!.AsArray().Any(node => node!["stepId"]!.GetValue<string>() == item.StepId &&
+                node["effect"]!.GetValue<string>() is "completed" or "notExecuted")).ToArray(), _held, readReferences) : null;
+        IReadOnlyList<CleanupItemInspection> items = _work is not null ? _work.InspectItems(_journal) :
+            Array.AsReadOnly(_plan.Items.Select(item => new CleanupItemInspection(item.StepId, InspectItem(item, inspected!))).ToArray());
+        // A durable cancellation marks items skipped; its proof still comes from their current physical inventory.
+        var noEffects = Phase == JournalPhase.Prepared &&
+            (_work is null ? inspected!.Values.All(state => state is CleanupItemState.VerifiedUnreferenced or CleanupItemState.Referenced) :
+                items.All(item => item.State == CleanupItemState.VerifiedUnreferenced)) &&
+            _outbox.Read(_plan.JournalId).All(item => item.State is FileEffectState.Pending or FileEffectState.NotExecuted) &&
+            _journal["receipts"]!.AsArray().All(node => node!["stepId"]!.GetValue<string>() == "verify-no-effect");
+        var reconciles = Phase == JournalPhase.Committed && items.All(item => item.State is CleanupItemState.DeletedWithEvidence or CleanupItemState.SkippedWithEvidence);
+        return new(Phase, agrees, observed.IsComplete, observed.State, noEffects, reconciles, items);
+    }
+
+    public void CommitNoEffects()
+    {
+        RequireStopped();
+        if (!InspectRecovery().CanProveNoEffects) throw new IOException("cleanup_no_effect_unverified");
+        Synchronize(false);
+        if (_journal["receipts"]!.AsArray().Count == 0)
+            Save(JournalPhase.Prepared, "verify-no-effect", "notExecuted", "cleanup_no_effect");
+        Save(JournalPhase.Committed, "verify-no-effect", "notExecuted", "cleanup_no_effect");
+    }
+
+    public void BeginApplying(bool hasVerifiedRecoveryEvidence)
+    {
+        RequireStopped();
+        if (Inspect().Items.Any(item => item.State == CleanupItemState.Unknown)) throw new IOException("cleanup_inventory_unverified");
+        Synchronize(hasVerifiedRecoveryEvidence);
+        foreach (var step in _work?.PendingCompletions(_journal) ?? [])
+            Save(JournalPhase.Applying, step, "completed", "cleanup_deleted", hasVerifiedRecoveryEvidence);
+        Save(JournalPhase.Applying, "begin-cleanup", "started", "cleanup_applying", hasVerifiedRecoveryEvidence);
+    }
+
+    public CleanupStepResult RemoveVerified(string stepId)
+    {
+        RequireStopped();
+        if (Phase != JournalPhase.Applying) throw new IOException("cleanup_not_applying");
+        var previous = _journal["receipts"]!.AsArray().LastOrDefault(node => node!["stepId"]!.GetValue<string>() == stepId);
+        if (previous is null) Save(JournalPhase.Applying, stepId, "started", "cleanup_removal_started");
+        else if (previous["effect"]!.GetValue<string>() != "started") throw new IOException("cleanup_removal_already_terminal");
+        CleanupStepResult result;
+        try
+        {
+            result = _work is null ? _cleanup.RemoveVerified(_plan.Items.Single(item => item.StepId == stepId), _held) :
+                _work.Remove(stepId, _journal);
+        }
+        catch (IOException) { return CleanupStepResult.Unknown; }
+        if (result == CleanupStepResult.Deleted)
+        {
+            _observer?.Reached(CleanupPersistencePoint.FileRemoved, _plan.JournalId, Revision, Phase);
+            Save(JournalPhase.Applying, stepId, "completed", "cleanup_deleted");
+        }
+        return result;
+    }
+
+    public void RecordReferencedSkip(string stepId)
+    {
+        RequireStopped();
+        if (_work is not null) throw new IOException("extension_work_referenced_skip_rejected");
+        var item = _plan.Items.Single(item => item.StepId == stepId);
+        if (_cleanup.Inspect(item, _held) == CleanupItemState.Unknown) throw new IOException("cleanup_referenced_object_unverified");
+        Save(JournalPhase.Applying, stepId, "notExecuted", "cleanup_referenced");
+    }
+
+    public void MarkApplied()
+    {
+        RequireStopped();
+        RequireTerminalItems();
+        Save(JournalPhase.Applied, "finish-cleanup", "completed", "cleanup_applied");
+    }
+
+    public void CommitCleanup()
+    {
+        RequireStopped();
+        RequireTerminalItems();
+        Publish(() => _projection.Synchronize(_plan, false));
+        Save(JournalPhase.Committed, "commit-cleanup", "completed", "cleanup_committed");
+    }
+
+    public void Quarantine(string reasonCode)
+    {
+        Publish(() => _projection.Synchronize(_plan, false));
+        Save(JournalPhase.Quarantined, "isolate-cleanup", "unknown", reasonCode);
+    }
+
+    public void ReconcileRecordedCommit()
+    {
+        RequireStopped();
+        if (!Inspect().CanReconcileRecordedCommit) throw new IOException("cleanup_recorded_commit_unverified");
+        Publish(() => _projection.Synchronize(_plan, false));
+    }
+
+    private CleanupItemState InspectItem(FrozenCleanupItem item, IReadOnlyDictionary<string, CleanupItemState> inspected)
+    {
+        var receipt = _journal["receipts"]!.AsArray().LastOrDefault(node => node!["stepId"]!.GetValue<string>() == item.StepId);
+        if (receipt?["effect"]!.GetValue<string>() == "notExecuted") return CleanupItemState.SkippedWithEvidence;
+        if (receipt?["effect"]!.GetValue<string>() == "completed")
+        {
+            try
+            {
+                var path = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(_instance.RuntimeRoot, item.Blob.RelativePath));
+                return !File.Exists(path) && !Directory.Exists(path) && PhysicalObjectIdentity.Read(Path.GetDirectoryName(path)!) == item.ParentIdentity ?
+                    CleanupItemState.DeletedWithEvidence : CleanupItemState.Unknown;
+            }
+            catch (IOException) { return CleanupItemState.Unknown; }
+        }
+        var current = inspected[item.StepId];
+        if (current != CleanupItemState.Unknown && _journal["receipts"]!.AsArray().Any(node => node!["stepId"]!.GetValue<string>() == "verify-no-effect"))
+            return CleanupItemState.SkippedWithEvidence;
+        return current;
+    }
+
+    private void RequireTerminalItems()
+    {
+        if (Inspect().Items.Any(item => item.State is not (CleanupItemState.DeletedWithEvidence or CleanupItemState.SkippedWithEvidence)))
+            throw new IOException("cleanup_items_not_closed");
+    }
+
+    private CleanupWriterObservation Observe()
+    {
+        var observation = _writers();
+        return observation.InstanceId == _instance.InstanceId && observation.JournalId == _plan.JournalId ? observation :
+            new(_instance.InstanceId, _plan.JournalId, false, WriterState.Unknown);
+    }
+
+    private void RequireStopped()
+    {
+        if (Observe() is not { IsComplete: true, State: WriterState.Stopped }) throw new IOException("cleanup_writer_stop_unconfirmed");
+    }
+
+    private void Synchronize(bool verifiedRecovery) => Publish(() => _projection.Synchronize(_plan, verifiedRecovery));
+
+    private void Save(JournalPhase phase, string step, string effect, string detail, bool verifiedRecovery = false) =>
+        Publish(() => SaveCore(phase, step, effect, detail, verifiedRecovery));
+
+    private void Publish(Action action)
+    {
+        if (_work is not null) _work.Publish(action);
+        else if (_executionLease is not null) _executionLease.PublishExecution(action);
+        else action();
+    }
+
+    private void SaveCore(JournalPhase phase, string step, string effect, string detail, bool verifiedRecovery)
+    {
+        var previous = Revision;
+        _journal["revision"] = previous + 1; _journal["phase"] = phase.ToString().ToLowerInvariant();
+        _journal["updatedAt"] = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'");
+        _journal["receipts"]!.AsArray().Add(new JsonObject
+        {
+            ["receiptId"] = Guid.NewGuid().ToString("D"), ["recordedAt"] = _journal["updatedAt"]!.GetValue<string>(),
+            ["stepId"] = step, ["effect"] = effect, ["detailCode"] = detail
+        });
+        var noEffects = step == "verify-no-effect" ? new NoEffectEvidence(true, false, false, false) : null;
+        var next = _store.Append(_plan.JournalId, previous, JsonSerializer.SerializeToUtf8Bytes(_journal), noEffects, verifiedRecovery);
+        _observer?.Reached(CleanupPersistencePoint.JournalFlushed, _plan.JournalId, next.Revision, next.Phase);
+        _projection.Synchronize(_plan, verifiedRecovery, next);
+    }
+
+    private long Revision => _journal["revision"]!.GetValue<long>();
+    private JournalPhase Phase => Enum.Parse<JournalPhase>(_journal["phase"]!.GetValue<string>(), true);
+}

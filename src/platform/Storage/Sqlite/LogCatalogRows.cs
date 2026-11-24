@@ -58,14 +58,6 @@ internal static class LogCatalogRows
         if (index != expected.Entries.Count) throw Invalid();
     }
 
-    internal static SqliteCommand PageCommand(SqliteConnection connection, SqliteTransaction transaction, LogCatalogQuery query)
-    {
-        LogCatalogPolicy.Validate(query);
-        return Command(connection, transaction,
-            SelectEntries + "WHERE attempt_id=$0 AND position>$1 ORDER BY position LIMIT $2;",
-            query.AttemptId.ToString("D"), query.AfterPosition, query.Limit + 1);
-    }
-
     internal static LogCatalogEntry ReadEntry(SqliteDataReader row, Guid run, Guid attempt)
     {
         var position = row.GetInt32(0); var step = row.GetString(1); var role = (RunLogRole)row.GetInt32(2);

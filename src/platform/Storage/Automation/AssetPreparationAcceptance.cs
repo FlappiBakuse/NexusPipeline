@@ -82,7 +82,7 @@ public sealed class AssetPreparationAcceptance(RuntimeInstance instance, Contrac
         input.ReadExactly(bytes);
         var selected = plan.Roots.ToDictionary(value => Guid.Parse(value.SourceRootId), value => value.Path);
         var parsed = new AutomationBundleCodec(contracts).Decode(bytes, selected, plan.ExpectedCatalogRevision);
-        return AutomationTemplateIdentity.Remap(parsed, Guid.Parse(plan.OperationId));
+        return AssetDefinitionRevisions.Restore(AutomationTemplateIdentity.Remap(parsed, Guid.Parse(plan.OperationId)), plan.DefinitionRevisions);
     }
 
     internal static AssetAcceptanceResult ReadAccepted(SqliteConnection connection, SqliteTransaction transaction, Guid operationId, bool isNew)

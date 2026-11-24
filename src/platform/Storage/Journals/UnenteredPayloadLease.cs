@@ -5,7 +5,7 @@ namespace NexusPipeline.Platform.Storage.Journals;
 
 internal sealed class UnenteredPayloadLease : IDisposable
 {
-    private readonly List<IDisposable> _held = [];
+    private readonly HeldStorageResources _held = new();
 
     internal static UnenteredPayloadLease Acquire(RuntimeInstance instance, FrozenPayloadApply plan, ImmutableBlobStore blobs, BlobReference planReference)
     {
@@ -30,12 +30,8 @@ internal sealed class UnenteredPayloadLease : IDisposable
             if (scanner.Capture(adjacent, default).Shape != FileObjectKind.Missing) throw new IOException("payload_adjacent_workspace_unknown");
             return lease;
         }
-        catch { lease.Dispose(); throw; }
+        catch (Exception error) { lease._held.Release(error); throw; }
     }
 
-    public void Dispose()
-    {
-        for (var index = _held.Count - 1; index >= 0; index--) _held[index].Dispose();
-        _held.Clear();
-    }
+    public void Dispose() => _held.Dispose();
 }

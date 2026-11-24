@@ -1,6 +1,6 @@
-using System.Security.Cryptography;
 using NexusPipeline.Core.Automation;
 using NexusPipeline.Core.Configuration;
+using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
@@ -12,6 +12,8 @@ internal sealed class AssetRecoverySession : IAssetRecoverySession, IDisposable
     private readonly StateDatabase _database;
     private readonly RuntimeInstance _instance;
     private readonly FrozenAssetPreparation _frozen;
+    private readonly AssetPreparationPlan _plan;
+    private readonly Dictionary<string, AssetPreparationDefsAsset> _newAssets;
     private readonly BlobReference _reference;
     private readonly AssetPreparationJournal _journal;
     private readonly AssetPreparationInspection _inspection;
@@ -32,10 +34,10 @@ internal sealed class AssetRecoverySession : IAssetRecoverySession, IDisposable
             _reference = new(expected.PlanPath, new FileInfo(path).Length, expected.PlanDigest);
             _held.Add(blobs.OpenVerified(_reference));
             _frozen = new AssetPlanCodec(instance, contracts, blobs).Read(_reference);
-            var plan = _frozen.ReadWire();
-            _held.Add(blobs.OpenVerified(AssetPlanCodec.Reference(plan.Input)));
-            if (expected.Kind.ToString() != "AssetPrepare" || expected.JournalId.ToString("D") != plan.JournalId ||
-                expected.OperationId.ToString("D") != plan.OperationId || !expected.ResourceKeys.SequenceEqual(plan.ResourceKeys))
+            _plan = _frozen.ReadWire();
+            _held.Add(blobs.OpenVerified(AssetPlanCodec.Reference(_plan.Input)));
+            if (expected.Kind.ToString() != "AssetPrepare" || expected.JournalId.ToString("D") != _plan.JournalId ||
+                expected.OperationId.ToString("D") != _plan.OperationId || !expected.ResourceKeys.SequenceEqual(_plan.ResourceKeys))
                 throw new IOException("asset_recovery_registration_unbound");
             _journal = new(instance, contracts, database, _frozen, _reference);
             _publication = new(instance, contracts, database);
@@ -55,6 +57,8 @@ internal sealed class AssetRecoverySession : IAssetRecoverySession, IDisposable
                 throw new IOException("asset_recovery_result_unbound");
             _inspection = new(instance, contracts, database, _frozen, _reference, _journal.Workspace(physical), !closed);
             _held.Add(_inspection);
+            _newAssets = _plan.Assets.Where(asset => !asset.WasPresent).DistinctBy(asset => asset.Content.Sha256)
+                .ToDictionary(asset => AssetPreparationAcceptance.Step(asset.Content.Sha256), StringComparer.Ordinal);
             VerifyEffects(physical);
             if (!closed && physical?.Phase == JournalPhase.Committed &&
                 !(AssetPreparationJournal.HasNoEffects(physical) ? _inspection.NoEffects : _inspection.AllContentReady))
@@ -138,7 +142,7 @@ internal sealed class AssetRecoverySession : IAssetRecoverySession, IDisposable
 
     private void CloseNoEffects(JournalDocument document)
     {
-        var digest = Convert.ToHexStringLower(SHA256.HashData(document.Export()));
+        var digest = document.Sha256;
         var outbox = new FileEffectOutbox(_database);
         foreach (var effect in outbox.Read(_journal.Id).Where(value => value.State == FileEffectState.Pending))
             outbox.Record(_journal.Id, effect.StepId, FileEffectState.Pending, FileEffectState.NotExecuted, digest, new(true, false, false, false));
@@ -150,7 +154,7 @@ internal sealed class AssetRecoverySession : IAssetRecoverySession, IDisposable
         var outbox = new FileEffectOutbox(_database);
         foreach (var effect in outbox.Read(_journal.Id))
         {
-            var asset = _frozen.ReadWire().Assets.First(value => AssetPreparationAcceptance.Step(value.Content.Sha256) == effect.StepId);
+            if (!_newAssets.TryGetValue(effect.StepId, out var asset)) throw new IOException("asset_outbox_step_unbound");
             var receipts = _inspection.Evidence?.Receipts ?? throw new IOException("asset_publication_receipts_missing");
             var started = receipts[AssetEvidenceStore.FileName(asset, "started")];
             var completed = receipts[AssetEvidenceStore.FileName(asset, "completed")];
@@ -166,13 +170,11 @@ internal sealed class AssetRecoverySession : IAssetRecoverySession, IDisposable
 
     private void VerifyEffects(JournalDocument? physical)
     {
-        var expected = _frozen.ReadWire().Assets.Where(value => !value.WasPresent).DistinctBy(value => value.Content.Sha256).ToArray();
         var effects = new FileEffectOutbox(_database).Read(_journal.Id);
-        if (effects.Count != expected.Length) throw new IOException("asset_outbox_inventory_unbound");
+        if (effects.Count != _newAssets.Count) throw new IOException("asset_outbox_inventory_unbound");
         foreach (var effect in effects)
         {
-            var asset = expected.SingleOrDefault(value => AssetPreparationAcceptance.Step(value.Content.Sha256) == effect.StepId)
-                ?? throw new IOException("asset_outbox_step_unbound");
+            if (!_newAssets.TryGetValue(effect.StepId, out var asset)) throw new IOException("asset_outbox_step_unbound");
             if (effect.Action != FileEffectAction.InstallCandidate || effect.IntentDigest != _reference.Sha256)
                 throw new IOException("asset_outbox_intent_unbound");
             var name = effect.State == FileEffectState.Completed ? "completed" : "started";
@@ -180,7 +182,7 @@ internal sealed class AssetRecoverySession : IAssetRecoverySession, IDisposable
                 (_inspection.Evidence is null || !_inspection.Evidence.Receipts.TryGetValue(AssetEvidenceStore.FileName(asset, name), out var receipt) ||
                  receipt.Sha256 != effect.ReceiptDigest)) throw new IOException("asset_outbox_receipt_unbound");
             if (effect.State == FileEffectState.NotExecuted && (!AssetPreparationJournal.HasNoEffects(physical) ||
-                effect.ReceiptDigest != Convert.ToHexStringLower(SHA256.HashData(physical!.Export()))))
+                effect.ReceiptDigest != physical!.Sha256))
                 throw new IOException("asset_outbox_no_effect_unbound");
             if (effect.State == FileEffectState.Quarantined || physical is null && effect.State != FileEffectState.Pending)
                 throw new IOException("asset_outbox_state_unrecognized");
@@ -191,15 +193,14 @@ internal sealed class AssetRecoverySession : IAssetRecoverySession, IDisposable
     {
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Automation);
         using var transaction = DatabaseConnections.BeginRead(connection);
-        return AssetPreparationAcceptance.ReadAccepted(connection, transaction, Guid.Parse(_frozen.ReadWire().OperationId), false).Result;
+        return AssetPreparationAcceptance.ReadAccepted(connection, transaction, Guid.Parse(_plan.OperationId), false).Result;
     }
 
     private bool StillNoEffects()
     {
         if (!_inspection.NoEffects) return false;
-        var plan = _frozen.ReadWire();
-        var paths = plan.Assets.Where(value => !value.WasPresent).Select(value => value.Content.RelativePath)
-            .Append(AssetEvidenceCodec.WorkspacePath(plan));
+        var paths = _plan.Assets.Where(value => !value.WasPresent).Select(value => value.Content.RelativePath)
+            .Append(AssetEvidenceCodec.WorkspacePath(_plan));
         return paths.All(relative =>
         {
             var path = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(_instance.RuntimeRoot, relative));

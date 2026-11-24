@@ -46,7 +46,7 @@ internal sealed class MuMuCaptureClient : IDisposable
             if (root is null) throw MuMuCaptureProtocol.Invalid();
             var reply = await MuMuCaptureProtocol.ReadAsync<MuMuCommandReply>(input, cancellation).ConfigureAwait(false);
             MuMuCaptureProtocol.Require(reply, _request, sequence);
-            byte[]? mapping = null;
+            VerifiedOutput? mapping = null;
             ExecutionCaptureOutput stdout;
             if (sequence == 2)
             {
@@ -57,11 +57,12 @@ internal sealed class MuMuCaptureClient : IDisposable
             }
             else
             {
-                mapping = await ReadAsync(input, reply.StandardOutputBytes, MuMuCaptureSequence.MaximumInfoBytes,
+                var captured = await ReadVerifiedOutputAsync(input, reply.StandardOutputBytes, MuMuCaptureSequence.MaximumInfoBytes,
                     reply.StandardOutputSha256, cancellation).ConfigureAwait(false);
-                stdout = Save(mapping, MuMuCaptureSequence.MaximumInfoBytes);
+                mapping = captured;
+                stdout = Save(captured, MuMuCaptureSequence.MaximumInfoBytes);
             }
-            var error = await ReadAsync(input, reply.StandardErrorBytes, MuMuCaptureSequence.MaximumErrorBytes,
+            var error = await ReadVerifiedOutputAsync(input, reply.StandardErrorBytes, MuMuCaptureSequence.MaximumErrorBytes,
                 reply.StandardErrorSha256, cancellation).ConfigureAwait(false);
             var document = new CaptureCommandObserved(ExecutionCaptureCodec.Format + "-command-observed", 1,
                 _request.Binding, root, reply.Completion, reply.ExitCode, stdout,
@@ -70,13 +71,13 @@ internal sealed class MuMuCaptureClient : IDisposable
             _pending = (child, document); publish(Observed.Take(this)); count++;
             if (reply.Completion != "natural-root-exit-and-eof-before-stop" || reply.ExitCode != 0)
             { expectedReason = "execution_capture_helper_failed"; break; }
-            if (mapping is not null)
+            if (mapping is { } verifiedMapping)
             {
                 try
                 {
                     var utf8 = new UTF8Encoding(false, true);
-                    if (!string.IsNullOrWhiteSpace(utf8.GetString(error))) throw MuMuCaptureProtocol.Invalid();
-                    MuMuInfoParser.RequireCaptureMapping(utf8.GetString(mapping), _request.Index, _request.Endpoint);
+                    if (!string.IsNullOrWhiteSpace(utf8.GetString(error.Bytes))) throw MuMuCaptureProtocol.Invalid();
+                    MuMuInfoParser.RequireCaptureMapping(utf8.GetString(verifiedMapping.Bytes), _request.Index, _request.Endpoint);
                 }
                 catch (Exception failure) when (failure is IOException or System.Text.Json.JsonException or DecoderFallbackException)
                 { expectedReason = "execution_capture_mapping_unverified"; break; }
@@ -91,18 +92,21 @@ internal sealed class MuMuCaptureClient : IDisposable
         return complete;
     }
 
-    private ExecutionCaptureOutput Save(byte[] bytes, int maximum) => new(bytes.LongLength,
-        Convert.ToHexStringLower(SHA256.HashData(bytes)), bytes.Length == 0 ? [] :
-        JudgementFrameParts.Write(_blobs, bytes, maximum, reference => _held.Add(_blobs.OpenVerified(reference))));
+    private readonly record struct VerifiedOutput(byte[] Bytes, string Sha256);
 
-    private static async Task<byte[]> ReadAsync(Stream input, long size, int maximum, string hash, CancellationToken cancellation)
+    private ExecutionCaptureOutput Save(VerifiedOutput output, int maximum) => new(output.Bytes.LongLength,
+        output.Sha256, output.Bytes.Length == 0 ? [] :
+        JudgementFrameParts.Write(_blobs, output.Bytes, maximum, reference => _held.Add(_blobs.OpenVerified(reference))));
+
+    private static async Task<VerifiedOutput> ReadVerifiedOutputAsync(Stream input, long size, int maximum, string hash, CancellationToken cancellation)
     {
         using var bytes = new MemoryStream();
         await MuMuCaptureProtocol.ReadBytesAsync(input, size, maximum,
             chunk => bytes.WriteAsync(chunk, cancellation).AsTask(), cancellation).ConfigureAwait(false);
         var result = bytes.ToArray();
-        if (Convert.ToHexStringLower(SHA256.HashData(result)) != hash) throw MuMuCaptureProtocol.Invalid();
-        return result;
+        var digest = Convert.ToHexStringLower(SHA256.HashData(result));
+        if (digest != hash) throw MuMuCaptureProtocol.Invalid();
+        return new(result, digest);
     }
 
     internal sealed class Observed

@@ -9,16 +9,47 @@ namespace NexusPipeline.Platform.Storage.Automation;
 
 internal static class SpecializedScriptPolicy
 {
-    internal static void Require(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
+    internal static IDisposable? HoldAndRequire(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
         PayloadApplyRoots? roots, IEnumerable<AutomationScript> scripts)
     {
-        foreach (var script in scripts.Where(script => script.Kind == AutomationKind.Specialized))
+        Listings? listings = null;
+        try
         {
-            var installed = new ExtensionInstalledEvidence(instance, database, contracts,
-                roots ?? throw new IOException("automation_extension_roots_required")).ReadCurrent(script.ExtensionId!)
-                ?? throw new IOException("automation_extension_missing");
-            if (!installed.Metadata.IsInstalled) throw new IOException("automation_extension_missing");
-            Require(script, ExtensionDetailsReader.ReadListing(installed, contracts));
+            foreach (var script in scripts.Where(script => script.Kind == AutomationKind.Specialized))
+            {
+                listings ??= new(instance, database, contracts, roots ?? throw new IOException("automation_extension_roots_required"));
+                Require(script, listings.ReadCurrent(script.ExtensionId!));
+            }
+            return listings;
+        }
+        catch { listings?.Dispose(); throw; }
+    }
+
+    private sealed class Listings(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
+        PayloadApplyRoots roots) : IDisposable
+    {
+        private readonly ExtensionInstalledEvidence _installed = new(instance, database, contracts, roots);
+        private readonly Dictionary<ExtensionInstalledMetadata, (TreeReadLease Tree, ExtensionManifest Manifest)> _verified = [];
+        private readonly List<TreeReadLease> _held = [];
+
+        internal ExtensionManifest ReadCurrent(string extensionId)
+        {
+            var installed = _installed.ReadCurrent(extensionId);
+            if (installed?.Metadata.IsInstalled != true) throw new IOException("automation_extension_missing");
+            if (_verified.TryGetValue(installed.Metadata, out var listing))
+            {
+                listing.Tree.RequireNamespace();
+                return listing.Manifest;
+            }
+            listing = ExtensionDetailsReader.HoldListing(installed, contracts);
+            _held.Add(listing.Tree);
+            _verified.Add(installed.Metadata, listing);
+            return listing.Manifest;
+        }
+
+        public void Dispose()
+        {
+            for (var index = _held.Count - 1; index >= 0; index--) _held[index].Dispose();
         }
     }
 

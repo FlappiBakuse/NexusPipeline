@@ -40,7 +40,7 @@ public sealed class AutomationImportService(RuntimeInstance instance, ContractRe
         var preview = Preview(operationId, ownedInput, roots, expectedRevision);
         AutomationImportPreviewer.RequireSamePreview(preview, digest, previewDigest);
         cancellationToken.ThrowIfCancellationRequested();
-        SpecializedScriptPolicy.Require(instance, database, contracts, payloadRoots, parsed.Definitions.Scripts);
+        using var listings = SpecializedScriptPolicy.HoldAndRequire(instance, database, contracts, payloadRoots, parsed.Definitions.Scripts);
         if (!parsed.Attachments.IsEmpty)
         {
             using var prepared = new AssetPlanCodec(instance, contracts, new(instance, contracts)).Freeze(preview, ownedInput, Guid.NewGuid());

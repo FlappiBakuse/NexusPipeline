@@ -47,9 +47,10 @@ public sealed class AutomationDefinitionService(RuntimeInstance instance, Contra
             ? "automation_resource_conflict" : "automation_host_unavailable");
         try
         {
-            SpecializedScriptPolicy.Require(instance, database, contracts, payloadRoots, changes.Scripts);
-            var result = ids is null ? store.Commit(operation, changes, acceptedAt)
-                : store.CommitDrafts(operation, changes, acceptedAt, ids, drafts!);
+            AutomationChangeResult result;
+            using (SpecializedScriptPolicy.HoldAndRequire(instance, database, contracts, payloadRoots, changes.Scripts))
+                result = ids is null ? store.Commit(operation, changes, acceptedAt)
+                    : store.CommitDrafts(operation, changes, acceptedAt, ids, drafts!);
             if (!result.CleanupJournalIds.IsEmpty)
             {
                 var evidence = new JournalRecoveryEvidence(instance, new(instance, contracts), database);

@@ -12,21 +12,17 @@ public sealed class LogCatalogReader(RuntimeInstance instance, StateDatabase dat
         var receipt = new AttemptReceiptStore(database).Read(query.AttemptId) ?? throw LogCatalogRows.Invalid();
         if (receipt.Facts.RunId != query.RunId) throw LogCatalogRows.Invalid();
         var original = new ExecutionLogReader(instance, database, contracts);
-        var expected = original.CaptureCatalog(receipt);
-        var selected = new List<LogCatalogEntry>();
+        var expected = original.CaptureCatalog(receipt, page: query);
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var transaction = DatabaseConnections.BeginRead(connection))
         {
-            if (AttemptReceiptStore.ReadInside(connection, transaction, query.AttemptId) != receipt) throw LogCatalogRows.Invalid();
             LogCatalogRows.RequireSaved(connection, transaction, expected);
-            using var command = LogCatalogRows.PageCommand(connection, transaction, query);
-            using (var rows = command.ExecuteReader())
-                while (rows.Read()) selected.Add(LogCatalogRows.ReadEntry(rows, query.RunId, query.AttemptId));
             transaction.Commit();
         }
-        var more = selected.Count > query.Limit;
-        if (more) selected.RemoveAt(selected.Count - 1);
-        return new(selected.Select(entry => entry.Item with { ContentAvailability = expected.ContentAvailability[entry.Item.Position] }).ToArray(), more ? selected[^1].Item.Position : null);
+        var start = query.AfterPosition + 1;
+        var items = expected.Entries.Skip(start).Take(query.Limit)
+            .Select(entry => entry.Item with { ContentAvailability = expected.ContentAvailability[entry.Item.Position] }).ToArray();
+        return new(items, expected.Entries.Count > start + query.Limit ? items[^1].Position : null);
     }
 
 }

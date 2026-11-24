@@ -3,9 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using System.Security.Cryptography;
 using NexusPipeline.Core.Execution;
-using NexusPipeline.Platform.Storage;
 
 namespace NexusPipeline.Platform.Processes;
 
@@ -21,13 +19,13 @@ internal sealed class PreparedRecoveryObservation : IDisposable
     private readonly ProcessIdentity _creator;
     private readonly ProcessIdentity? _root;
     private readonly SafeKernelHandle? _job;
-    private readonly FileStream? _image;
+    private readonly ProcessIdentityLease? _image;
     private readonly ImmutableArray<Member> _members;
     private readonly TargetRecoveryObservation _observed;
     private bool _disposed;
 
     private PreparedRecoveryObservation(string name, int session, ProcessIdentity creator, ProcessIdentity? root,
-        SafeKernelHandle? job, FileStream? image, ImmutableArray<Member> members, TargetRecoveryObservation observed)
+        SafeKernelHandle? job, ProcessIdentityLease? image, ImmutableArray<Member> members, TargetRecoveryObservation observed)
     { _name = name; _session = session; _creator = creator; _root = root;
         _job = job; _image = image; _members = members; _observed = observed; }
 
@@ -43,7 +41,7 @@ internal sealed class PreparedRecoveryObservation : IDisposable
             RequireRootStopped(root);
             return new(name, session, creator, root, null, null, [], new("missing", null, null, []));
         }
-        FileStream? image = null; var members = ImmutableArray.CreateBuilder<Member>();
+        ProcessIdentityLease? image = null; var members = ImmutableArray.CreateBuilder<Member>();
         try
         {
             var before = JobStateReader.Accounting(job);
@@ -56,7 +54,9 @@ internal sealed class PreparedRecoveryObservation : IDisposable
                 return new(name, session, creator, root, job, null, [], new("empty", before, flags, []));
             }
             if (retainedImage is null || flags != 0 || before.ActiveProcesses > 4096) throw Invalid();
-            image = HoldImage(retainedImage);
+            try { image = ProcessIdentityLease.HoldImage(retainedImage); }
+            catch (IOException error) when (error.Message == "process_image_identity_changed")
+            { throw new IOException("execution_target_recovery_native_unverified", error); }
             var ids = JobStateReader.ActiveProcessIds(job).Order().ToArray();
             if (ids.Length != before.ActiveProcesses || ids.Distinct().Count() != ids.Length) throw Invalid();
             foreach (var pid in ids)
@@ -66,9 +66,8 @@ internal sealed class PreparedRecoveryObservation : IDisposable
                 {
                     if (handle.IsInvalid || JobNative.WaitForSingleObject(handle, 0) != 258 ||
                         !JobNative.IsProcessInJob(handle, job, out var member) || !member) throw Invalid();
-                    var identity = ProcessIdentityReader.Read(handle, pid);
-                    if (identity.ProcessId != pid || !StringComparer.OrdinalIgnoreCase.Equals(identity.ImagePath, retainedImage.Path) ||
-                        identity.ImageSha256 != retainedImage.Sha256 || JobNative.WaitForSingleObject(handle, 0) != 258) throw Invalid();
+                    var identity = image.Read(handle, pid);
+                    if (JobNative.WaitForSingleObject(handle, 0) != 258) throw Invalid();
                     members.Add(new(identity, handle)); handle = null!;
                 }
                 finally { handle?.Dispose(); }
@@ -105,23 +104,10 @@ internal sealed class PreparedRecoveryObservation : IDisposable
             if (_observed.Kind == "empty") RequireRootStopped(root);
             foreach (var member in _members)
                 if (JobNative.WaitForSingleObject(member.Handle, 0) != 258 ||
-                    ProcessIdentityReader.Read(member.Handle, member.Identity.ProcessId) != member.Identity ||
+                    _image!.Read(member.Handle, member.Identity.ProcessId) != member.Identity ||
                     !JobNative.IsProcessInJob(member.Handle, _job, out var owned) || !owned) throw Invalid();
         }
         return callback(_observed);
-    }
-
-    private static FileStream HoldImage(PcTargetImage image)
-    {
-        var path = PhysicalPathPolicy.NormalizeWithoutLinks(image.Path);
-        var held = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        try
-        {
-            if (held.Length != image.SizeBytes || PhysicalObjectIdentity.Read(held.SafeFileHandle) != image.Identity ||
-                Convert.ToHexStringLower(SHA256.HashData(held)) != image.Sha256) throw Invalid();
-            return held;
-        }
-        catch { held.Dispose(); throw; }
     }
 
     private static void RequireNamespace(string name, int session)

@@ -4,8 +4,10 @@ namespace NexusPipeline.Platform.Storage.Journals;
 
 internal sealed class JournalHistoryProtection : IDisposable
 {
-    private const int MaximumProtectedRevisions = 256;
-    private const long MaximumProtectedBytes = 16777216;
+    internal const int DefaultRevisions = 256;
+    internal const long DefaultBytes = 16777216;
+    private readonly int _maximumRevisions;
+    private readonly long _maximumBytes;
     private readonly string _directory;
     private readonly List<FileStream> _revisions = [];
     private readonly List<string> _names = [];
@@ -19,20 +21,23 @@ internal sealed class JournalHistoryProtection : IDisposable
     internal Guid JournalId { get; private set; }
     internal long TotalBytes { get; private set; }
 
-    private JournalHistoryProtection(string directory, bool requireFreshInventory)
+    private JournalHistoryProtection(string directory, bool requireFreshInventory, int maximumRevisions, long maximumBytes)
     {
         _directory = directory;
         _requireFreshInventory = requireFreshInventory;
+        _maximumRevisions = maximumRevisions;
+        _maximumBytes = maximumBytes;
         _directoryLease = StableDirectoryLease.Acquire(directory);
     }
 
-    internal static JournalHistoryProtection? TryAcquire(string directory, bool requireFreshInventory = false)
+    internal static JournalHistoryProtection? TryAcquire(string directory, bool requireFreshInventory = false,
+        int maximumRevisions = DefaultRevisions, long maximumBytes = DefaultBytes)
     {
-        var names = Directory.EnumerateFileSystemEntries(directory).Take(MaximumProtectedRevisions + 1)
+        var names = Directory.EnumerateFileSystemEntries(directory).Take(maximumRevisions + 1)
             .Order(StringComparer.Ordinal).ToArray();
-        if (names.Length > MaximumProtectedRevisions) return null;
+        if (names.Length > maximumRevisions) return null;
         using var paths = JournalStore.HoldHistoryDirectory(directory, names.Length);
-        var result = new JournalHistoryProtection(directory, requireFreshInventory);
+        var result = new JournalHistoryProtection(directory, requireFreshInventory, maximumRevisions, maximumBytes);
         try
         {
             foreach (var path in names)
@@ -41,7 +46,7 @@ internal sealed class JournalHistoryProtection : IDisposable
                 var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
                 result._revisions.Add(input); result._names.Add(Path.GetFileName(path));
                 result.TotalBytes = checked(result.TotalBytes + input.Length);
-                if (result.TotalBytes > MaximumProtectedBytes)
+                if (result.TotalBytes > maximumBytes)
                 { result.Dispose(); return null; }
             }
             return result;
@@ -72,13 +77,21 @@ internal sealed class JournalHistoryProtection : IDisposable
         return input;
     }
 
-    internal bool CanRetain(long nextBytes) => _documents.Count < MaximumProtectedRevisions &&
-        nextBytes >= 0 && nextBytes <= MaximumProtectedBytes - TotalBytes;
+    internal bool CanRetain(long nextBytes) => _documents.Count < _maximumRevisions &&
+        nextBytes >= 0 && nextBytes <= _maximumBytes - TotalBytes;
 
     internal IReadOnlyList<JournalDocument> Read()
     {
+        _ = ReadHead();
+        if (_view is not null) return _view;
+        using var timing = StartupProfile.Measure("history.protected-view");
+        return _view = Array.AsReadOnly(_documents.ToArray());
+    }
+
+    internal JournalDocument ReadHead()
+    {
         if (_requireFreshInventory || DirectoryAttributeScope.FirstRead(this)) RequireInventory();
-        return _view ??= Array.AsReadOnly(_documents.ToArray());
+        return _documents[^1];
     }
 
     internal void RequireAppend() => RequireInventory();
@@ -109,7 +122,7 @@ internal sealed class JournalHistoryProtection : IDisposable
     private void RequireInventory()
     {
         // Read handles protect prior bytes; a new sibling entry still requires a fresh name inventory.
-        if (!Directory.EnumerateFileSystemEntries(_directory).Take(MaximumProtectedRevisions + 1)
+        if (!Directory.EnumerateFileSystemEntries(_directory).Take(_maximumRevisions + 1)
             .Select(Path.GetFileName).Order(StringComparer.Ordinal).SequenceEqual(_names)) throw Invalid();
     }
 

@@ -14,18 +14,19 @@ internal static class AdapterLogReader
         var bytes = 0;
         var continuous = RawOutputReplay.Read(blobs, raw, _ => { }, observeSource: (source, line) =>
         {
-            var size = Encoding.UTF8.GetByteCount(line);
+            var size = line is null ? 0 : Encoding.UTF8.GetByteCount(line);
             if (events.Count == 256 || bytes + size > 65536)
             {
                 consume(events.ToArray(), false); events.Clear(); bytes = 0;
             }
             var epoch = source >= 0 ? raw.FileSources.Single(item => item.Id == source) : null;
-            var sequence = sequences.GetValueOrDefault(source) + 1;
+            // An unreadable supplemental pipe ends its original epoch without invalidating file evidence.
+            var sequence = line is null ? 1 : sequences.GetValueOrDefault(source) + 1;
             sequences[source] = sequence;
             events.Add(new()
             {
                 SourceId = epoch is null ? source == -2 ? "stdout" : "stderr" : "file:" + epoch.DeclarationIndex,
-                Epoch = epoch?.Id ?? 0, Sequence = sequence, Text = line
+                Epoch = line is null ? 1 : epoch?.Id ?? 0, Sequence = sequence, Text = line ?? ""
             });
             bytes += size;
         });

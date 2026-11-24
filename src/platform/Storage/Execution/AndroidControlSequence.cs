@@ -19,13 +19,14 @@ internal static class AndroidControlSequence
         if (!target.LaunchByHost) throw Invalid();
         var reader = new AndroidControlEvidence(instance, database, contracts);
         var observations = new List<(AndroidCommandRegistration Request, ExecutionAndroidObservation Meaning)>();
+        string? subject = null;
         for (var index = 0; index < prefix.Count; index++)
         {
             var prior = prefix[index];
             var reference = index + 1 < prefix.Count ? prefix[index + 1].PreviousObservation : previousObservation;
             if (reference is null) throw Invalid();
-            var native = reader.Observation(state, prior, reference, verifyContent: true);
-            var meaning = ExecutionAndroidObservations.ReadSaved(reader, reader.Request(state, prior), native, reference);
+            var (priorRequest, native) = reader.ReadStartupObservation(state, prior, reference, subject ??= reader.Subject(state));
+            var meaning = ExecutionAndroidObservations.ReadSaved(reader, priorRequest, native, reference);
             if (meaning.State is ExecutionAndroidState.Unknown or ExecutionAndroidState.Failed ||
                 meaning.Interpretation is TargetCommandObservation.Incomplete or TargetCommandObservation.Contradictory or
                     TargetCommandObservation.Unverified) throw Invalid();

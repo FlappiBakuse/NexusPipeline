@@ -29,15 +29,15 @@ internal static class ProviderConfigurationPolicy
     });
 
     [SupportedOSPlatform("windows")]
-    internal static ConfigurationRevision RequireSaved(AutomationBinding binding, AutomationScript script,
+    internal static ConfigurationRevision RequireStored(AutomationBinding binding, AutomationScript script,
         ProviderConfigurationDeclaration declaration, ExecutionProviderRegistry.PreparedExecutionProvider provider,
-        ConfigurationRevisionStore revisions) => provider.Use(package =>
+        StoredConfigurationRevision stored) => provider.Use(package =>
     {
         if (binding.ScriptId != script.Id || !Declarations(script, provider).Contains(declaration))
             throw new ConfigurationException("configuration_provider_owner_unbound");
-        var saved = revisions.Read(new(binding.Id, declaration.ResourceId));
+        var saved = stored.Revision;
         ConfigurationRevisionPolicy.RequireCurrentContract(saved, Contract(provider.ExtensionId, package.Declaration.EntryId, declaration));
-        if (saved!.UserId != binding.UserId || saved.ScriptId != script.Id)
+        if (saved.Address != new ConfigurationAddress(binding.Id, declaration.ResourceId) || saved.UserId != binding.UserId || saved.ScriptId != script.Id)
             throw new ConfigurationException("configuration_owner_changed");
         return saved;
     });

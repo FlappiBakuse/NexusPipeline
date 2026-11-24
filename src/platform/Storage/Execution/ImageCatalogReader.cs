@@ -12,34 +12,38 @@ public sealed class ImageCatalogReader(RuntimeInstance instance, StateDatabase d
     {
         ImageCatalogPolicy.Validate(query);
         var expected = Read(query.RunId, query.AttemptId);
-        var selected = new List<ImageCatalogItem>();
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content))
         using (var transaction = DatabaseConnections.BeginRead(connection))
         {
             ImageCatalogRows.RequireSaved(connection, transaction, expected);
-            using var command = ImageCatalogRows.PageCommand(connection, transaction, query);
-            using var rows = command.ExecuteReader();
-            while (rows.Read()) selected.Add(ImageCatalogRows.ReadEntry(rows, query.RunId, query.AttemptId).Item);
             transaction.Commit();
         }
-        var more = selected.Count > query.Limit;
-        if (more) selected.RemoveAt(selected.Count - 1);
+        var start = Math.Min(query.AfterPosition + 1, expected.Entries.Count);
+        var count = Math.Min(query.Limit, expected.Entries.Count - start);
+        var more = start + count < expected.Entries.Count;
         var retirements = new VerifiedImageRetirement.ReadScope(instance, database, contracts, query.RunId);
-        var entries = expected.Entries.ToDictionary(value => value.Item.Key);
         var journal = new Journals.JournalStore(instance, contracts).Read(expected.Receipt.JournalId);
-        if (journal.Revision != expected.TerminalRevision || Convert.ToHexStringLower(
-            System.Security.Cryptography.SHA256.HashData(journal.Export())) != expected.TerminalSha256)
+        if (journal.Revision != expected.TerminalRevision || journal.Sha256 != expected.TerminalSha256)
             throw ImageCatalogRows.Invalid();
-        var items = selected.Select(item =>
+        var ordinals = new Dictionary<(string StepId, string JobName), int>();
+        var items = new ImageCatalogItem[count];
+        for (var index = 0; index < count; index++)
         {
-            var entry = entries[item.Key];
+            var entry = expected.Entries[start + index];
+            var item = entry.Item;
             var binding = expected.Bindings[item.Key.CaptureId];
-            return item with
+            var job = (item.Key.StepId, binding.Primary.JobName);
+            if (!ordinals.TryGetValue(job, out var ordinal))
             {
-                InvocationOrdinal = ExecutionInvocationCodec.OrdinalForJob(journal.Root, item.Key.StepId, binding.Primary.JobName),
+                ordinal = ExecutionInvocationCodec.OrdinalForJob(journal.Root, job.StepId, job.JobName);
+                ordinals.Add(job, ordinal);
+            }
+            items[index] = item with
+            {
+                InvocationOrdinal = ordinal,
                 ContentAvailability = retirements.ForEntry(binding, entry) is null ? item.ContentAvailability : RecordContentAvailability.Retired
             };
-        }).ToArray();
+        }
         return new(Array.AsReadOnly(items), more ? items[^1].Position : null);
     }
 

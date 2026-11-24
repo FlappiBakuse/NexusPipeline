@@ -18,16 +18,16 @@ internal static class AttemptResultCodec
     internal const string Step = "complete-attempt";
     internal static bool IsParticipant(JsonElement participant)
     {
-        var identity = participant.GetProperty("identity");
-        if (!identity.TryGetProperty("format", out var format) || format.GetString() != Format) return false;
+        if (!ExecutionParticipantText.MatchesFormat(participant, Format)) return false;
         _ = Decode(participant); return true;
     }
 
     internal static AttemptResultIntent? Read(JsonElement journal, RunAttemptPlan plan)
     {
         AttemptResultIntent? result = null;
-        foreach (var participant in journal.GetProperty("participants").EnumerateArray().Where(IsParticipant))
+        foreach (var participant in journal.GetProperty("participants").EnumerateArray())
         {
+            if (!ExecutionParticipantText.MatchesFormat(participant, Format)) continue;
             var item = Decode(participant); var facts = item.Facts;
             if (result is not null || item.ParentJournalId != Guid.Parse(plan.JournalId) || item.ParentOperationId != Guid.Parse(plan.OperationId) ||
                 item.PlanDigest != journal.GetProperty("planDigest").GetString() || facts.RunId != Guid.Parse(plan.RunId) ||

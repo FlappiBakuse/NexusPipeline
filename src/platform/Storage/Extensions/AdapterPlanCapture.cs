@@ -1,13 +1,27 @@
+using NexusPipeline.Core.Configuration;
+using NexusPipeline.Core.Execution;
+using NexusPipeline.Core.Extensions;
+using NexusPipeline.Core.Maintenance;
+using NexusPipeline.Extensibility.Protocol;
+using NexusPipeline.Platform.Extensions;
+using NexusPipeline.Platform.Serialization;
+using NexusPipeline.Platform.Storage.Configuration;
 using System.Collections.Immutable;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text.Json;
-using NexusPipeline.Core.Extensions;
-using NexusPipeline.Extensibility.Protocol;
-using NexusPipeline.Platform.Extensions;
-using NexusPipeline.Platform.Serialization;
 
 namespace NexusPipeline.Platform.Storage.Extensions;
+
+internal sealed record AdapterPlanSource(IReadOnlyList<ConfigurationRevision> Configurations,
+    AdapterDiscovery Discovery, ExecutionAdapter Descriptor, ExecutionPlanExtensionLocksItem Lock,
+    IReadOnlyDictionary<string, byte[]> Inputs)
+{
+    internal ImmutableArray<ExecutionPlanExtensionLocksItem> CompilerLocks { get; init; } = [];
+    internal bool ExclusiveProgram { get; init; }
+    internal bool ExclusiveProgramInUserSession { get; init; }
+    internal ExecutionProviderUse? ExecutionProvider { get; init; }
+}
 
 [SupportedOSPlatform("windows")]
 internal sealed class AdapterPlanCapture(ExtensionActivator activator, SecretAccessPolicy secrets,

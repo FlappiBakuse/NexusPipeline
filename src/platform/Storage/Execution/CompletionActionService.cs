@@ -28,7 +28,9 @@ public sealed class CompletionActionService : IAttemptTerminalObserver, IComplet
     private Guid? _countdownOperation;
     private Task _loop = Task.CompletedTask;
     private int _started;
+    private bool _processingPulse;
     public string? FailureCode { get; private set; }
+    internal bool HasQueuedOrRunningPulse => _pulse.Reader.TryPeek(out _) || Volatile.Read(ref _processingPulse);
 
     public CompletionActionService(RuntimeInstance instance, StateDatabase database, ContractReader contracts, InstanceLease lease,
         HostLifecycle lifecycle, ResourceLeaseManager resources, RecoveryIndex recovery, ExecutionRunFinality finality, ICompletionLocalAuthorization authorization,
@@ -115,52 +117,60 @@ public sealed class CompletionActionService : IAttemptTerminalObserver, IComplet
         {
             while (await _pulse.Reader.WaitToReadAsync(_stopping.Token).ConfigureAwait(false))
             {
-                while (_pulse.Reader.TryRead(out _)) { }
-                while (!_stopping.IsCancellationRequested && FailureCode is null)
-                {
-                    _store.BeginPending();
-                    if (_store.PendingOperationId is not { } operation)
-                    {
-                        if (!_candidates.HasPending()) break;
-                        await Task.Delay(TimeSpan.FromSeconds(1), _clock, _stopping.Token).ConfigureAwait(false); continue;
-                    }
-                    if (_store.HasEnteredOrFinished) break;
-                    if (!_store.IsReadyToPrepare())
-                    { await Task.Delay(TimeSpan.FromMilliseconds(100), _clock, _stopping.Token).ConfigureAwait(false); continue; }
-                    var pending = _candidates.ReadPending();
-                    using var countdown = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
-                    lock (_gate) { _countdown = countdown; _countdownOperation = operation; }
-                    CompletionAuthorizationContext? authorizationContext = null;
-                    try
-                    {
-                        CompletionActionGroup group;
-                        try { group = CompletionActionPolicy.Combine(pending.Select(item => item.Intent).ToArray()); }
-                        catch (InvalidOperationException error) when (error.Message == "completion_action_conflict")
-                        {
-                            using var rejected = _store.Prepare(operation, CompletionActionStore.HostSubject, pending.Select(item => item.Intent).ToArray());
-                            break;
-                        }
-                        var context = authorizationContext = CompletionActionStore.Context(group, pending);
-                        if (!await _authorization.RequestApprovalAsync(context, countdown.Token).ConfigureAwait(false))
-                        { _store.RejectUnapproved(operation); break; }
-                        using var prepared = _store.Prepare(operation, CompletionActionStore.HostSubject, pending.Select(item => item.Intent).ToArray());
-                        if (prepared is null) break;
-                        await ExecuteAsync(prepared, countdown.Token).ConfigureAwait(false);
-                        if (prepared.Snapshot.Phase == CompletionEffectPhase.Unknown) ReportFailure("completion_native_outcome_unknown");
-                    }
-                    catch (OperationCanceledException) when (countdown.IsCancellationRequested) { }
-                    finally
-                    {
-                        if (authorizationContext is not null) _authorization.Forget(authorizationContext);
-                        lock (_gate) { _countdown = null; _countdownOperation = null; }
-                    }
-                    break;
-                }
+                Volatile.Write(ref _processingPulse, true);
+                await ProcessPulseAsync().ConfigureAwait(false);
+                Volatile.Write(ref _processingPulse, false);
             }
         }
         catch (OperationCanceledException) when (_stopping.IsCancellationRequested) { }
         catch (Exception error) when (IsMetadataFailure(error))
         { ReportFailure("completion_reconciliation_required"); }
+        finally { Volatile.Write(ref _processingPulse, false); }
+    }
+
+    private async Task ProcessPulseAsync()
+    {
+        while (_pulse.Reader.TryRead(out _)) { }
+        while (!_stopping.IsCancellationRequested && FailureCode is null)
+        {
+            _store.BeginPending();
+            if (_store.PendingOperationId is not { } operation)
+            {
+                if (!_candidates.HasPending()) break;
+                await Task.Delay(TimeSpan.FromSeconds(1), _clock, _stopping.Token).ConfigureAwait(false); continue;
+            }
+            if (_store.HasEnteredOrFinished) break;
+            if (!_store.IsReadyToPrepare())
+            { await Task.Delay(TimeSpan.FromMilliseconds(100), _clock, _stopping.Token).ConfigureAwait(false); continue; }
+            var pending = _candidates.ReadPending();
+            using var countdown = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
+            lock (_gate) { _countdown = countdown; _countdownOperation = operation; }
+            CompletionAuthorizationContext? authorizationContext = null;
+            try
+            {
+                CompletionActionGroup group;
+                try { group = CompletionActionPolicy.Combine(pending.Select(item => item.Intent).ToArray()); }
+                catch (InvalidOperationException error) when (error.Message == "completion_action_conflict")
+                {
+                    using var rejected = _store.Prepare(operation, CompletionActionStore.HostSubject, pending.Select(item => item.Intent).ToArray());
+                    break;
+                }
+                var context = authorizationContext = CompletionActionStore.Context(group, pending);
+                if (!await _authorization.RequestApprovalAsync(context, countdown.Token).ConfigureAwait(false))
+                { _store.RejectUnapproved(operation); break; }
+                using var prepared = _store.Prepare(operation, CompletionActionStore.HostSubject, pending.Select(item => item.Intent).ToArray());
+                if (prepared is null) break;
+                await ExecuteAsync(prepared, countdown.Token).ConfigureAwait(false);
+                if (prepared.Snapshot.Phase == CompletionEffectPhase.Unknown) ReportFailure("completion_native_outcome_unknown");
+            }
+            catch (OperationCanceledException) when (countdown.IsCancellationRequested) { }
+            finally
+            {
+                if (authorizationContext is not null) _authorization.Forget(authorizationContext);
+                lock (_gate) { _countdown = null; _countdownOperation = null; }
+            }
+            break;
+        }
     }
 
     private void ReportFailure(string reason)

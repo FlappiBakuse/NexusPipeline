@@ -16,8 +16,12 @@ internal sealed class NotificationSendingStore(RuntimeInstance instance, StateDa
             using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Records | DatabaseDomain.Notifications | DatabaseDomain.System))
             using (var transaction = DatabaseConnections.BeginRead(connection))
             {
-                _ = new NotificationDeliveryEvidence(instance, database, contracts).ReadFromSnapshot(snapshot.Reference, connection, transaction);
-                NotificationDeliveryOrigins.RequireRegistered(instance, database, contracts, snapshot, connection, transaction);
+                var saved = new NotificationDeliveryEvidence(instance, database, contracts).ReadFromSnapshot(snapshot.Reference, connection, transaction);
+                if (NotificationDeliveryOrigins.Reference(snapshot.Document) is null)
+                    throw new IOException("notification_delivery_registration_required");
+                if (snapshot.Document != saved.Document &&
+                    !NotificationCatalogCodec.Encode(snapshot.Document).AsSpan().SequenceEqual(NotificationCatalogCodec.Encode(saved.Document)))
+                    throw new IOException("notification_delivery_source_unbound");
                 transaction.Commit();
             }
             return database.Write((connection, transaction) =>

@@ -21,9 +21,11 @@ internal sealed class InstallerTransition(InstallerPaths paths, string profile)
         {
             var target = new InstallerTargetTree(frame).Stage(payloadRoot);
             try { frame = _store.FreezeTarget(root, transactionId, target); }
-            catch
+            catch (Exception error)
             {
-                new InstallerTargetTree(frame with { TargetApplication = target }).RemoveTarget();
+                var cleanup = new CleanupFailures();
+                cleanup.Attempt(new InstallerTargetTree(frame with { TargetApplication = target }).RemoveTarget);
+                cleanup.Preserve(error);
                 throw;
             }
         }

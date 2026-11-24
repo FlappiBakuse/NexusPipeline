@@ -27,8 +27,14 @@ internal static class TaskRetryEvidence
         var observed = AdapterObservationCodec.Read(blobs, result.Binding, evidence.RawOutput, step, evidence.TaskAdapter);
         AdapterRetryTasks selection;
         try { selection = AdapterRetryPolicy.Select(Tasks(step), observed.Observations, observed.ProposedRetry); }
-        catch (ArgumentException) { return false; }
-        if (selection.Targets.IsEmpty) return false;
+        catch (ArgumentException error)
+        {
+            ExecutionFailureTrace.Record(blobs.Instance.InstanceId, state.Journal.OperationId, "task-retry-selection",
+                new InvalidOperationException("execution_task_retry_selection_rejected", error));
+            return false;
+        }
+        if (selection.Targets.IsEmpty || step.Provider is null && step.Tasks.Any(task => task.RepetitionLimit is not null &&
+            selection.SelectedIds.Contains(task.TaskId, StringComparer.Ordinal) && task.Projection?.RepetitionSelector is null)) return false;
         retry = new(result.Binding, evidence.RawOutput, evidence.TaskAdapter, selection);
         return true;
     }
@@ -75,6 +81,21 @@ internal static class TaskRetryEvidence
     internal static ImmutableArray<string> Selected(ExecutionPlanStep step, RunTaskRule rule, ExecutionTaskRetry? retry) =>
         retry is null ? ExecutionTaskProjection.InitialIds(step, rule).ToImmutableArray() :
             retry.Selection.SelectedIds.Where(id => rule.Declaration.AuthorizedIds.Contains(id, StringComparer.Ordinal)).ToImmutableArray();
+
+    internal static RunTaskRule ApplySelection(RunTaskRule rule, AdapterRetryTasks selection, IReadOnlyList<TaskDefinitionsRepetitionOffset>? offsets)
+    {
+        var selected = selection.SelectedIds.Where(id => rule.Declaration.AuthorizedIds.Contains(id, StringComparer.Ordinal)).ToImmutableArray();
+        var completed = offsets?.ToDictionary(item => item.TaskId, item => checked((int)item.CompletedRepetitions), StringComparer.Ordinal);
+        return RunTaskPolicy.Freeze(rule with { SelectedIds = selected,
+            Repetitions = rule.Repetitions.Select(item => item with { InvocationCount = RemainingCount(item) }).ToImmutableArray() });
+
+        int RemainingCount(RunTaskRepetition item)
+        {
+            if (!selected.Contains(item.TaskId, StringComparer.Ordinal)) return item.OriginalCount;
+            if (completed is null || !completed.TryGetValue(item.TaskId, out var count)) throw ExecutionInvocationCodec.Invalid();
+            return item.OriginalCount - count;
+        }
+    }
 
     internal static bool Same<T>(T left, T right) =>
         JsonElement.DeepEquals(JsonSerializer.SerializeToElement(left), JsonSerializer.SerializeToElement(right));

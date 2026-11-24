@@ -158,14 +158,15 @@ internal static class TargetRootFacts
 
     internal static void InsertCommandInside(SqliteConnection connection, SqliteTransaction transaction,
         AttemptWriterState state, AndroidCommandRegistration registration,
-        AndroidCommandRequest request, ProcessIdentity root)
+        AndroidCommandRequest request, ProcessIdentity root, AndroidControlClock clock)
     {
+        AndroidControlRows.RequireRegisteredInside(connection, transaction, registration);
+        clock.Require(AndroidControlAdmission.IsCleanup(request.Purpose));
         if (!OperatingSystem.IsWindows() || registration.Binding.OwnerWriterId != JournalWriterStore.CurrentWriter.WriterId ||
             ProcessIdentityReader.Read(Environment.ProcessId) != JournalWriterStore.CurrentWriter.Process ||
             registration.Binding != request.Binding || registration.RequestDigest != AndroidCommandIdentity.Digest(request) ||
             !StringComparer.OrdinalIgnoreCase.Equals(root.ImagePath, request.Tool.Path) || root.ImageSha256 != request.Tool.Sha256)
             throw new IOException("execution_android_native_root_unbound");
-        AndroidControlRows.RequireRegisteredInside(connection, transaction, registration);
         var previous = ReadCommandInside(connection, transaction, registration);
         if (previous is not null)
         {

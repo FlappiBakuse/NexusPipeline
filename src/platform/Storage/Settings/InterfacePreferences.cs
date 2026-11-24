@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Platform.Serialization;
 
@@ -64,16 +65,71 @@ public sealed class InterfacePreferences
             var next = new Saved("nexus.interface.preferences", 1, _owner.Instance.InstanceId, expectedRevision + 1,
                 values, operationId, subject, digest);
             var staging = PhysicalPathPolicy.NormalizeWithoutLinks(_path + "." + Guid.NewGuid().ToString("N") + ".tmp");
-            try
-            {
-                using (var output = new FileStream(staging, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
-                { JsonSerializer.Serialize(output, next, Json); output.Flush(flushToDisk: true); }
-                PhysicalPathPolicy.NormalizeWithoutLinks(_path);
-                File.Move(staging, _path, overwrite: true);
-            }
-            finally { if (File.Exists(staging)) File.Delete(staging); }
+            Publish(staging, _path, output => JsonSerializer.Serialize(output, next, Json));
             return Observe(next);
         });
+    }
+
+    internal static void Publish(string staging, string path, Action<FileStream> write)
+    {
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
+        staging = PhysicalPathPolicy.NormalizeWithoutLinks(staging);
+        path = PhysicalPathPolicy.NormalizeWithoutLinks(path);
+        var stagingParent = Path.GetDirectoryName(staging)!;
+        var targetParent = Path.GetDirectoryName(path)!;
+        using var parents = StableDirectoryLease.Acquire(stagingParent);
+        using var target = StringComparer.OrdinalIgnoreCase.Equals(stagingParent, targetParent) ? null : StableDirectoryLease.Acquire(targetParent);
+        using var directory = PhysicalDirectoryHandle.Open(stagingParent);
+        var parentIdentity = directory.ReadIdentity();
+        using var owned = directory.CreateNewOwnedFile(Path.GetFileName(staging), writeThrough: true);
+        using var output = new FileStream(owned, FileAccess.ReadWrite, bufferSize: 1);
+        var identity = PhysicalObjectIdentity.Read(owned);
+        FileObjectDeletion? deletion = null;
+        try
+        {
+            write(output);
+            output.Flush(flushToDisk: true);
+            output.Position = 0;
+            deletion = new(staging, parentIdentity, identity, FileObjectKind.File,
+                output.Length, Convert.ToHexStringLower(SHA256.HashData(output)));
+            output.Dispose();
+            using var ready = OpenReadyStage(deletion);
+            File.Move(staging, path, overwrite: true);
+            if (PhysicalObjectIdentity.Read(path) != identity) throw new IOException("interface_stage_publication_unknown");
+        }
+        catch (Exception error)
+        {
+            var failures = new CleanupFailures();
+            failures.Attempt(() =>
+            {
+                if (!owned.IsClosed) PhysicalObjectDeletion.DeleteNewlyCreatedFile(owned);
+                else if (Path.Exists(staging))
+                {
+                    if (deletion is null || PhysicalObjectIdentity.Read(staging) != identity)
+                        throw new IOException("interface_stage_cleanup_unknown");
+                    PhysicalObjectDeletion.DeleteVerified(deletion);
+                }
+            });
+            failures.Attempt(output.Dispose);
+            failures.Preserve(error);
+            throw;
+        }
+    }
+
+    internal static FileStream OpenReadyStage(FileObjectDeletion stage)
+    {
+        var path = PhysicalPathPolicy.NormalizeWithoutLinks(stage.Path);
+        var ready = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+        try
+        {
+            if (PhysicalObjectIdentity.Read(Path.GetDirectoryName(path)!) != stage.ParentIdentity ||
+                PhysicalObjectIdentity.Read(ready.SafeFileHandle) != stage.Identity || PhysicalObjectIdentity.Read(path) != stage.Identity ||
+                ready.Length != stage.SizeBytes || Convert.ToHexStringLower(SHA256.HashData(ready)) != stage.Sha256)
+                throw new IOException("interface_stage_publication_unknown");
+            ready.Position = 0;
+            return ready;
+        }
+        catch { ready.Dispose(); throw; }
     }
 
     private InterfaceSnapshot Observe(Saved saved)

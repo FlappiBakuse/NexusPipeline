@@ -48,8 +48,6 @@ internal static class NotificationDeliveryRows
         }
         else
         {
-            NotificationReceiptRows.RequireSaved(connection, transaction, registration);
-            NotificationReceiptRows.RequireReferences(connection, transaction, registration);
             if (document.Registration != registration.Reference || document.AcceptanceId != registration.Document.OperationId ||
                 document.Source.Receipt != registration.Document.Receipt || document.Catalog != registration.Document.Catalog ||
                 document.CatalogRevision != registration.Document.CatalogRevision || document.SubjectId != registration.Document.SubjectId)

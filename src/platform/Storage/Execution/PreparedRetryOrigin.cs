@@ -22,14 +22,7 @@ internal sealed class PreparedRetryOrigin
     private readonly string _totalDigest;
     private readonly ImmutableDictionary<string, ImmutableDictionary<ConfigurationAddress, ConfigurationRetrySource>> _sources;
     internal ExecutionTaskRetry? TaskRetry { get; private init; }
-
-    [SupportedOSPlatform("windows")]
-    private PreparedRetryOrigin(RuntimeInstance instance, PreparedExecutionRetry retry,
-        ImmutableDictionary<string, ImmutableDictionary<ConfigurationAddress, ConfigurationRetrySource>> sources)
-    {
-        _instance = instance; _nextOperation = retry.Frozen.NextOperationId; _previousJournal = retry.Intent.PreviousJournalId;
-        _subject = retry.Intent.SubjectId; _totalDigest = retry.Intent.TotalPlan.Sha256; _sources = sources;
-    }
+    internal IReadOnlyList<TaskDefinitionsRepetitionOffset>? RepetitionOffsets { get; private init; }
 
     private PreparedRetryOrigin(RuntimeInstance instance, Guid operation, Guid previousJournal, string subject,
         string totalDigest, ImmutableDictionary<string, ImmutableDictionary<ConfigurationAddress, ConfigurationRetrySource>> sources)
@@ -40,14 +33,19 @@ internal sealed class PreparedRetryOrigin
         new(instance, state.Journal.OperationId, state.Journal.JournalId, subject, state.Attempt.ExecutionPlan.Sha256,
             ReadSources(instance, database, contracts, state.Journal.JournalId, state.Journal.OperationId, subject,
                 state.Attempt.AttemptId, AttemptPlanCodec.Reference(state.Attempt.ExecutionPlan), state.Total, stepId,
-                ExecutionInvocationCodec.Ordinal(state.Latest.Root, stepId), state.Attempt)) { TaskRetry = taskRetry };
+                ExecutionInvocationCodec.Ordinal(state.Latest.Root, stepId), state.Attempt))
+        {
+            TaskRetry = taskRetry,
+            RepetitionOffsets = TaskRetryEvidence.RepetitionOffsets(new(instance, contracts), state.Total.Steps.Single(step => step.StepId == stepId), taskRetry)
+        };
 
     [SupportedOSPlatform("windows")]
     internal static PreparedRetryOrigin Capture(RuntimeInstance instance, StateDatabase database,
-        ContractReader contracts, InstanceLease lease, PreparedExecutionRetry retry)
+        ContractReader contracts, InstanceLease lease, ExecutionRetryIntent retry, ExecutionPlan total)
     {
         lease.VerifyHeld(instance);
-        return new(instance, retry, ReadSources(instance, database, contracts, retry.Intent, retry.Plan.ReadWire()));
+        return new(instance, retry.Frozen.NextOperationId, retry.PreviousJournalId, retry.SubjectId,
+            retry.TotalPlan.Sha256, ReadSources(instance, database, contracts, retry, total));
     }
 
     private static ImmutableDictionary<string, ImmutableDictionary<ConfigurationAddress, ConfigurationRetrySource>> ReadSources(
@@ -63,6 +61,8 @@ internal sealed class PreparedRetryOrigin
         var sources = ImmutableDictionary.CreateBuilder<string, ImmutableDictionary<ConfigurationAddress, ConfigurationRetrySource>>(StringComparer.Ordinal);
         var steps = total.Steps.Where(step => step.ConfigurationTargets.Count != 0 && (onlyStep is null || step.StepId == onlyStep)).ToArray();
         if (steps.Length == 0) return sources.ToImmutable();
+        var slotCounts = total.ConfigurationSlots.GroupBy(slot => slot.StepId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
         var sessions = new List<(string Step, Guid Id, ConfigurationRunStatus Session)>();
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration))
         using (var transaction = DatabaseConnections.BeginRead(connection))
@@ -83,7 +83,9 @@ internal sealed class PreparedRetryOrigin
         var bindings = sessions.Select(item =>
         {
             var evidence = verifiedParent is null ? null : RunBindingEvidence.Read(instance, database, contracts, item.Session, verifiedParent, total);
-            return (item.Step, item.Id, item.Session, Bound: ConfigurationRunBinding.Read(instance, database, contracts, item.Session, evidence));
+            var bound = ConfigurationRunBinding.Read(instance, database, contracts, item.Session, evidence);
+            return (item.Step, item.Id, item.Session, bound.Evidence,
+                Resources: bound.Resources.ToDictionary(resource => resource.State.Source.Address, resource => resource.State));
         }).ToArray();
         var publications = new Dictionary<(Guid Session, ConfigurationAddress Address), StoredConfigurationRevision>();
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Content))
@@ -91,8 +93,7 @@ internal sealed class PreparedRetryOrigin
         {
             foreach (var item in bindings)
             {
-                ConfigurationRunHistory.Verify(connection, transaction, item.Session, subject,
-                    item.Bound.Resources.ToDictionary(resource => resource.State.Source.Address, resource => resource.State), snapshots);
+                ConfigurationRunHistory.Verify(connection, transaction, item.Session, subject, item.Resources, snapshots);
                 foreach (var resource in item.Session.Resources)
                     publications.Add((item.Id, resource.Address), ConfigurationRevisionRows.Read(connection, transaction,
                         resource.Address, resource.CurrentRevision, snapshots));
@@ -101,21 +102,20 @@ internal sealed class PreparedRetryOrigin
         }
         foreach (var item in bindings)
         {
-            var bound = item.Bound;
-            if (bound.Evidence.AttemptId != previousAttempt || bound.Evidence.TotalPlan != totalReference) throw Invalid();
+            if (item.Evidence.AttemptId != previousAttempt || item.Evidence.TotalPlan != totalReference) throw Invalid();
             var items = ImmutableDictionary.CreateBuilder<ConfigurationAddress, ConfigurationRetrySource>();
             foreach (var resource in item.Session.Resources)
             {
-                var original = bound.Resources.Single(candidate => candidate.State.Source.Address == resource.Address);
+                if (!item.Resources.TryGetValue(resource.Address, out var original)) throw Invalid();
                 var publication = publications[(item.Id, resource.Address)];
-                if (publication.Revision.UserId != original.State.Source.UserId || publication.Revision.ScriptId != original.State.Source.ScriptId ||
-                    publication.Revision.Contract != original.State.Source.Contract || publication.Revision.Tree.Shape != original.State.Source.Tree.Shape)
+                if (publication.Revision.UserId != original.Source.UserId || publication.Revision.ScriptId != original.Source.ScriptId ||
+                    publication.Revision.Contract != original.Source.Contract || publication.Revision.Tree.Shape != original.Source.Tree.Shape)
                     throw Invalid();
                 var child = new BlobReference(resource.PlanPath, new FileInfo(Path.Combine(instance.RuntimeRoot, resource.PlanPath)).Length, resource.PlanDigest);
-                var input = invocation is null ? null : RetryConfigurationInput.Read(instance, database, contracts, resource, original.State);
-                items.Add(resource.Address, new(original.State, publication, item.Id, child, input));
+                var input = invocation is null ? null : RetryConfigurationInput.Read(instance, database, contracts, resource, original);
+                items.Add(resource.Address, new(original, publication, item.Id, child, input));
             }
-            if (items.Count != total.ConfigurationSlots.Count(slot => slot.StepId == item.Step)) throw Invalid();
+            if (items.Count != slotCounts.GetValueOrDefault(item.Step)) throw Invalid();
             sources.Add(item.Step, items.ToImmutable());
         }
         return sources.ToImmutable();
@@ -124,9 +124,7 @@ internal sealed class PreparedRetryOrigin
     internal IReadOnlyDictionary<ConfigurationAddress, ConfigurationRetrySource> ForStep(RuntimeInstance instance,
         Guid nextOperation, FrozenExecutionPlan execution, string stepId, ConfigurationRunRequest request)
     {
-        var totalBytes = execution.Export();
-        if (instance != _instance || nextOperation != _nextOperation ||
-            totalBytes.LongLength < 1 || Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(totalBytes)) != _totalDigest ||
+        if (instance != _instance || nextOperation != _nextOperation || !execution.HasDigest(_totalDigest) ||
             !_sources.TryGetValue(stepId, out var sources) || !sources.Keys.ToHashSet().SetEquals(request.Resources.Select(item => item.Target.Address)))
             throw Invalid();
         foreach (var resource in request.Resources)
@@ -152,19 +150,25 @@ internal sealed class PreparedRetryOrigin
             var previous = expected[pair.Key];
             if (pair.Value.OwnerOperationId != _nextOperation || pair.Value.InitialPublicationRevision != previous.Publication.Revision.Revision)
                 throw Invalid();
-            RunStateCodec.RequireRetrySource(pair.Value, previous.State, TaskRetry, previous.Publication, previous.Input);
+            RunStateCodec.RequireRetrySource(pair.Value, previous.State, TaskRetry, previous.Publication, previous.Input, RepetitionOffsets);
         }
     }
 
     internal void RequireCurrentInside(SqliteConnection connection, SqliteTransaction transaction)
     {
+        var sessions = new Dictionary<Guid, (ConfigurationRunStatus Status, Dictionary<ConfigurationAddress, RunResourceStatus> Resources)>();
         foreach (var step in _sources)
         foreach (var item in step.Value)
         {
             var source = item.Value;
-            var session = ConfigurationRunRows.Read(connection, transaction, source.PreviousSessionId, _subject) ?? throw Invalid();
-            RequireCompleted(session, _previousJournal, step.Key, source.State.OwnerOperationId);
-            var resource = session.Resources.SingleOrDefault(resource => resource.Address == item.Key) ?? throw Invalid();
+            if (!sessions.TryGetValue(source.PreviousSessionId, out var session))
+            {
+                var status = ConfigurationRunRows.Read(connection, transaction, source.PreviousSessionId, _subject) ?? throw Invalid();
+                session = (status, status.Resources.ToDictionary(resource => resource.Address));
+                sessions.Add(source.PreviousSessionId, session);
+            }
+            RequireCompleted(session.Status, _previousJournal, step.Key, source.State.OwnerOperationId);
+            if (!session.Resources.TryGetValue(item.Key, out var resource)) throw Invalid();
             if (resource.CurrentRevision != source.Publication.Revision.Revision || resource.PlanPath != source.PreviousChild.RelativePath ||
                 resource.PlanDigest != source.PreviousChild.Sha256) throw Invalid();
             ConfigurationRevisionRows.RequireHistoricalFrozen(connection, transaction, source.State.Source, source.State.BindingRevision,
@@ -188,7 +192,8 @@ internal sealed class PreparedRetryOrigin
         }
         if (parent.AttemptOrdinal == 1)
         {
-            if (states.Values.Any(state => state.InitialPublicationRevision != state.Source.Revision)) throw Invalid();
+            if (states.Values.Any(state => state.InitialPublicationRevision != state.Source.Revision ||
+                state.Tasks.Any(item => item.Rule.Repetitions.Any(task => task.InvocationCount != task.OriginalCount)))) throw Invalid();
             return;
         }
         ExecutionRetryIntent intent;
@@ -228,10 +233,12 @@ internal sealed class PreparedRetryOrigin
         var previous = ReadSources(instance, database, contracts, Guid.Parse(parent.JournalId), Guid.Parse(parent.OperationId), subject,
             parent.AttemptId, AttemptPlanCodec.Reference(parent.ExecutionPlan), total, invocation.StepId, invocation.Ordinal - 1, parent)[invocation.StepId];
         if (!previous.Keys.ToHashSet().SetEquals(states.Keys)) throw Invalid();
+        var offsets = TaskRetryEvidence.RepetitionOffsets(new(instance, contracts), total.Steps.Single(step => step.StepId == invocation.StepId), invocation.TaskRetry);
         foreach (var pair in states)
         {
             if (pair.Value.InitialPublicationRevision != previous[pair.Key].Publication.Revision.Revision) throw Invalid();
-            RunStateCodec.RequireRetrySource(pair.Value, previous[pair.Key].State, invocation.TaskRetry, previous[pair.Key].Publication, previous[pair.Key].Input);
+            RunStateCodec.RequireRetrySource(pair.Value, previous[pair.Key].State, invocation.TaskRetry, previous[pair.Key].Publication,
+                previous[pair.Key].Input, offsets);
         }
     }
 

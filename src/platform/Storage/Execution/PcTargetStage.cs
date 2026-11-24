@@ -1,14 +1,14 @@
-using System.Collections.Immutable;
-using System.Diagnostics;
-using System.Runtime.Versioning;
+using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Maintenance;
-using NexusPipeline.Core.Configuration;
-using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Serialization;
+using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
+using System.Collections.Immutable;
+using System.Diagnostics;
+using System.Runtime.Versioning;
 
 namespace NexusPipeline.Platform.Storage.Execution;
 
@@ -374,5 +374,47 @@ internal sealed class PcTargetStage : IDisposable
         if (_disposed) return;
         if (!_cleanupFinished) throw new IOException("execution_target_stage_collection_pending");
         _process?.Dispose(); _readiness?.Dispose(); _captureReadiness?.Dispose(); _store.Dispose(); _disposed = true;
+    }
+}
+
+[SupportedOSPlatform("windows")]
+internal sealed class PreparedPcStage
+{
+    private readonly PcTargetStage _owner;
+    internal PcStageBinding Binding { get; }
+    internal TargetExecutionOutcome Outcome { get; }
+    internal string ReasonCode { get; }
+
+    internal PreparedPcStage(PcTargetStage owner, PcStageBinding binding,
+        TargetExecutionOutcome outcome, string reasonCode)
+    { _owner = owner; Binding = binding; Outcome = outcome; ReasonCode = reasonCode; }
+
+    internal T Use<T>(PcStageBinding expected, Func<PcStageDocument, T> callback) =>
+        _owner.UseProof(this, expected, callback);
+}
+
+internal sealed record PcWindowFacts(PcStageBinding Binding,
+    TargetExecutionOutcome Ownership, BlobReference ReadyArtifact, ProcessIdentity Process,
+    long WindowHandle, int Width, int Height);
+
+[SupportedOSPlatform("windows")]
+internal sealed class PreparedPcWindow : IDisposable
+{
+    private readonly PcTargetStage _owner;
+    private int _disposed;
+    internal PcWindowFacts Facts { get; }
+
+    internal PreparedPcWindow(PcTargetStage owner, PcWindowFacts facts)
+    { _owner = owner; Facts = facts; }
+
+    internal T Use<T>(Func<PcWindowFacts, T> effect)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        return _owner.UseWindow(this, effect);
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) == 0) _owner.ReleaseWindow(this);
     }
 }

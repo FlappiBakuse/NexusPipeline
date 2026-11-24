@@ -1,18 +1,18 @@
-using System.Text.Json;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Extensions;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Configuration;
+using System.Text.Json;
 
 namespace NexusPipeline.Platform.Storage.Execution;
 
 internal static class ExecutionProviderBinding
 {
-    internal static IReadOnlyList<BlobReference> Require(ExecutionPlan total, ImmutableBlobStore blobs,
-        ContractReader contracts, IReadOnlyDictionary<string, byte[]>? previewManifests = null)
+    internal static void Require(ExecutionPlan total, ImmutableBlobStore blobs, ContractReader contracts,
+        List<IDisposable> held, IReadOnlyDictionary<string, byte[]>? previewManifests)
     {
-        var references = new List<BlobReference>();
+        Dictionary<(BlobReference Reference, string ExtensionId), ExtensionManifest>? manifests = null;
         foreach (var step in total.Steps)
         {
             if (step.EngineKind == "process")
@@ -25,18 +25,13 @@ internal static class ExecutionProviderBinding
                 throw new IOException("execution_provider_unbound");
             ExecutionPlanSources.RequireCanonicalId(provider.ActivationId);
             var reference = Reference(provider.Manifest);
-            byte[] bytes;
-            if (previewManifests is not null && previewManifests.TryGetValue(provider.Manifest.Sha256, out var preview))
-                bytes = preview.ToArray();
-            else
+            var verified = manifests ??= [];
+            var key = (reference, provider.ExtensionId);
+            if (!verified.TryGetValue(key, out var manifest))
             {
-                using var input = blobs.OpenVerified(reference);
-                bytes = new byte[checked((int)input.Length)]; input.ReadExactly(bytes);
+                manifest = ReadManifest(reference, provider.ExtensionId, blobs, contracts, held, previewManifests);
+                verified.Add(key, manifest);
             }
-            if (bytes.LongLength != reference.SizeBytes ||
-                Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes)) != reference.Sha256)
-                throw new IOException("execution_provider_manifest_unbound");
-            var manifest = new ExtensionManifestAdmission(contracts).ReadCurrent(bytes, provider.ExtensionId);
             var declaration = manifest.Execution ?? throw new IOException("execution_provider_descriptor_missing");
             var locked = total.ExtensionLocks.SingleOrDefault(item => item.ExtensionId == provider.ExtensionId)
                 ?? throw new IOException("execution_provider_lock_unbound");
@@ -76,9 +71,28 @@ internal static class ExecutionProviderBinding
                     throw new IOException("execution_provider_launcher_unbound");
                 RequireImage(launcher.Image, provider.PackageRoot);
             }
-            references.Add(reference);
         }
-        return references.Distinct().ToArray();
+    }
+
+    private static ExtensionManifest ReadManifest(BlobReference reference, string extensionId,
+        ImmutableBlobStore blobs, ContractReader contracts, List<IDisposable> held,
+        IReadOnlyDictionary<string, byte[]>? previewManifests)
+    {
+        byte[] bytes;
+        if (previewManifests is not null && previewManifests.TryGetValue(reference.Sha256, out var preview))
+            bytes = preview.ToArray();
+        else
+        {
+            var input = blobs.OpenVerified(reference);
+            held.Add(input);
+            bytes = new byte[checked((int)input.Length)];
+            input.ReadExactly(bytes);
+        }
+        if (bytes.LongLength != reference.SizeBytes ||
+            Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes)) != reference.Sha256)
+            throw new IOException("execution_provider_manifest_unbound");
+        var admission = new ExtensionManifestAdmission(contracts);
+        return admission.ReadCurrent(bytes, extensionId);
     }
 
     internal static IEnumerable<BlobReference> References(ExecutionPlan plan) =>
@@ -111,4 +125,23 @@ internal static class ExecutionProviderBinding
                 Path.Combine(Path.GetDirectoryName(image.Path)!, file.RelativePath)).Replace('\\', '/'));
         }
     }
+}
+
+internal static class ExecutionProviderRelationship
+{
+    internal static void Require(ExtensionManifest consumer, ExecutionPlanStep step)
+    {
+        if (step.Adapter is null || step.ExtensionId != consumer.ExtensionId || consumer.Kind is not ("data-specialized" or "managed-code")) throw Invalid();
+        var use = consumer.Specialized?.ExecutionProvider;
+        if (use is null)
+        {
+            if (step.Provider is not null || step.EngineKind != "process") throw Invalid();
+            return;
+        }
+        if (step.EngineKind != "extensionWorker" || step.Provider is not { } provider ||
+            provider.ExtensionId != use.ExtensionId || provider.EntryId != use.EntryId ||
+            step.EntryId != use.EntryId || consumer.Kind == "data-specialized" && provider.ExtensionId == consumer.ExtensionId) throw Invalid();
+    }
+
+    private static IOException Invalid() => new("execution_provider_relationship_unbound");
 }

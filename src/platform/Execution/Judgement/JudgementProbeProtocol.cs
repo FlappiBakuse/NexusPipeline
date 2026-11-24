@@ -9,6 +9,20 @@ internal sealed record JudgementProbeReply(string Format, int Version, Judgement
     long Generation, string InputSha256, int Ordinal, JsonElement? Result, string? FaultCode);
 internal sealed record JudgementProbeExchange(JudgementProbeRequest Request, JudgementProbeReply Reply);
 
+internal sealed class JudgementProbeFrame(JudgementProbeExchange exchange) : IDisposable
+{
+    private byte[]? _bytes = JudgementWorkerProtocol.Encode(exchange);
+    internal JudgementProbeExchange Exchange { get; } = exchange;
+    internal ReadOnlyMemory<byte> Bytes => _bytes ?? throw new ObjectDisposedException(nameof(JudgementProbeFrame));
+
+    public void Dispose()
+    {
+        if (_bytes is not { } bytes) return;
+        _bytes = null;
+        CryptographicOperations.ZeroMemory(bytes);
+    }
+}
+
 internal static class JudgementProbeProtocol
 {
     internal const string RequestFormat = "nexus.execution.judgement-probe-request";
@@ -77,10 +91,16 @@ internal static class JudgementProbeProtocol
         }
     }
 
-    internal static string Hash(IReadOnlyList<JudgementProbeExchange> exchanges)
+    internal static string Hash(IReadOnlyList<JudgementProbeExchange> exchanges) =>
+        HashBytes(exchanges.Select(exchange => (ReadOnlyMemory<byte>)JudgementWorkerProtocol.Encode(exchange)));
+
+    internal static string HashFrames(IReadOnlyList<JudgementProbeFrame> frames) =>
+        HashBytes(frames.Select(frame => frame.Bytes));
+
+    private static string HashBytes(IEnumerable<ReadOnlyMemory<byte>> frames)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        foreach (var exchange in exchanges) hash.AppendData(JudgementWorkerProtocol.Encode(exchange));
+        foreach (var frame in frames) hash.AppendData(frame.Span);
         return Convert.ToHexStringLower(hash.GetHashAndReset());
     }
 

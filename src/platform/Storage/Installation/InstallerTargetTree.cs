@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using System.Security.Cryptography;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Platform.Storage.Journals;
 
@@ -12,7 +13,7 @@ internal sealed class InstallerTargetTree(InstallerCheckpoint frame)
     private PhysicalObjectIdentity TargetIdentity => Target.Objects.Single(item => item.RelativePath.Length == 0).Identity;
     private ArchivedFileTree TargetTree => InstallerApplicationObjects.Tree(Target.Snapshot, Target.Objects);
 
-    internal InstallerApplicationTarget Stage(string payloadRoot)
+    internal InstallerApplicationTarget Stage(string payloadRoot, Action? fileStaged = null)
     {
         InstallerRuntimeGate.RequireHeld(frame.Root);
         var workspace = InstallerPayloadTree.Workspace(frame);
@@ -21,18 +22,39 @@ internal sealed class InstallerTargetTree(InstallerCheckpoint frame)
         var manifest = InstallerTargetManifest.Read(frame);
         using var source = InstallationPayload.Open(payloadRoot, frame.ManifestSha256, frame.Profile, exclusiveRoot: true);
         manifest.RequireInstalled(source.Snapshot);
-        ExclusiveDirectory.Create(DirectoryPath);
-        var identity = PhysicalObjectIdentity.Read(DirectoryPath);
+        var owned = new List<FileObjectDeletion>();
+        var directories = new Dictionary<string, PhysicalObjectIdentity>(StringComparer.OrdinalIgnoreCase) { [workspace] = frame.PayloadIdentity! };
         try
         {
+            var identity = CreateDirectory(DirectoryPath);
             foreach (var entry in source.Snapshot.Entries.Where(entry => entry.Kind == FileObjectKind.File))
             {
                 var path = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(DirectoryPath, entry.RelativePath));
-                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                var parent = Path.GetDirectoryName(path)!;
+                var parentIdentity = CreateDirectory(parent);
+                using var parentHandle = PhysicalDirectoryHandle.Open(parent, parentIdentity);
                 using var input = File.OpenRead(Path.Combine(source.Root, entry.RelativePath));
-                using var destination = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough);
-                input.CopyTo(destination);
-                destination.Flush(flushToDisk: true);
+                using var destination = new FileStream(parentHandle.CreateNewFile(Path.GetFileName(path), writeThrough: true), FileAccess.ReadWrite);
+                var fileIdentity = PhysicalObjectIdentity.Read(destination.SafeFileHandle);
+                try
+                {
+                    input.CopyTo(destination);
+                    destination.Flush(flushToDisk: true);
+                    owned.Add(new(path, parentIdentity, fileIdentity, FileObjectKind.File, entry.SizeBytes, entry.Sha256));
+                }
+                catch (Exception error)
+                {
+                    var cleanup = new CleanupFailures();
+                    cleanup.Attempt(() =>
+                    {
+                        destination.Position = 0;
+                        var digest = Convert.ToHexStringLower(SHA256.HashData(destination));
+                        owned.Add(new(path, parentIdentity, fileIdentity, FileObjectKind.File, destination.Length, digest));
+                    });
+                    cleanup.Preserve(error);
+                    throw;
+                }
+                fileStaged?.Invoke();
             }
             using var verified = source.Borrow();
             using var payload = InstallationPayload.Open(DirectoryPath, frame.ManifestSha256, frame.Profile, exclusiveRoot: true);
@@ -40,13 +62,29 @@ internal sealed class InstallerTargetTree(InstallerCheckpoint frame)
             if (payload.RootIdentity != identity) throw InstallationIdentityCodec.Invalid();
             return new(payload.Snapshot, payload.Objects.ToArray());
         }
-        catch
+        catch (Exception error)
         {
-            if (PhysicalObjectIdentity.Read(DirectoryPath) != identity) throw InstallationIdentityCodec.Invalid();
-            var snapshot = new FileTreeScanner(SnapshotBudget.Default).Capture(DirectoryPath, default);
-            InstallerApplicationObjects.DeleteRemaining(DirectoryPath, frame.PayloadIdentity!,
-                InstallerApplicationObjects.Tree(snapshot, PhysicalTreeIdentity.Capture(DirectoryPath, snapshot)));
+            var cleanup = new CleanupFailures();
+            for (var index = owned.Count - 1; index >= 0; index--)
+            {
+                var item = owned[index];
+                cleanup.Attempt(() => PhysicalObjectDeletion.DeleteVerified(item));
+            }
+            cleanup.Preserve(error);
             throw;
+        }
+
+        PhysicalObjectIdentity CreateDirectory(string path)
+        {
+            if (directories.TryGetValue(path, out var existing)) return existing;
+            var parent = Path.GetDirectoryName(path)!;
+            var parentIdentity = CreateDirectory(parent);
+            using var parentHandle = PhysicalDirectoryHandle.Open(parent, parentIdentity);
+            using var directory = parentHandle.CreateNewDirectory(Path.GetFileName(path));
+            var identity = directory.ReadIdentity();
+            directories.Add(path, identity);
+            owned.Add(new(path, parentIdentity, identity, FileObjectKind.Directory, 0, null));
+            return identity;
         }
     }
 

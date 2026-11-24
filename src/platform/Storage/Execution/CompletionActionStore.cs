@@ -100,14 +100,15 @@ internal sealed class CompletionActionStore(StateDatabase database, InstanceLeas
 
     internal TimeSpan Remaining(IPreparedCompletionAction action)
     {
-        lock (_gate)
-        {
-            var reservation = Require(action);
-            var wait = reservation.Current.Frozen.Action == AutomationCompletionAction.Exit ? TimeSpan.Zero : TimeSpan.FromSeconds(60);
-            var elapsed = clock.GetElapsedTime(reservation.CountdownTimestamp);
-            if (elapsed < TimeSpan.Zero) throw new IOException("completion_clock_unverified");
-            return elapsed >= wait ? TimeSpan.Zero : wait - elapsed;
-        }
+        lock (_gate) return RemainingCore(Require(action));
+    }
+
+    private TimeSpan RemainingCore(Reservation reservation)
+    {
+        var wait = reservation.Current.Frozen.Action == AutomationCompletionAction.Exit ? TimeSpan.Zero : TimeSpan.FromSeconds(60);
+        var elapsed = clock.GetElapsedTime(reservation.CountdownTimestamp);
+        if (elapsed < TimeSpan.Zero) throw new IOException("completion_clock_unverified");
+        return elapsed >= wait ? TimeSpan.Zero : wait - elapsed;
     }
 
     private CompletionActionSnapshot? EnterEffect(IPreparedCompletionAction action)
@@ -116,7 +117,7 @@ internal sealed class CompletionActionStore(StateDatabase database, InstanceLeas
         {
             var reservation = Require(action);
             if (reservation.Current.Phase == CompletionEffectPhase.Cancelled) return null;
-            if (reservation.Current.Phase != CompletionEffectPhase.Countdown || Remaining(action) != TimeSpan.Zero)
+            if (reservation.Current.Phase != CompletionEffectPhase.Countdown || RemainingCore(reservation) != TimeSpan.Zero)
                 throw new IOException("completion_countdown_pending");
             var pending = reservation.Current.Frozen.Intents;
             foreach (var intent in pending)
@@ -219,6 +220,7 @@ internal sealed class CompletionActionStore(StateDatabase database, InstanceLeas
     {
         if (action is not Reservation reservation || !ReferenceEquals(reservation.Owner, this) || !ReferenceEquals(_reservation, reservation) || reservation.Disposed)
             throw new IOException("completion_reservation_unbound");
+        using var timing = StartupProfile.Measure("completion.require");
         var saved = Read(reservation.Current.OperationId, reservation.Current.SubjectId) ?? throw CompletionActionCodec.Invalid();
         if (CompletionActionCodec.Encode(saved) != CompletionActionCodec.Encode(reservation.Current)) throw CompletionActionCodec.Invalid();
         return reservation;

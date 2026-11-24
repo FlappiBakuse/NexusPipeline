@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Sqlite;
 
@@ -19,7 +20,15 @@ internal static class ManualWorkInventory
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime);
         using var transaction = DatabaseConnections.BeginRead(connection);
+        Visit(instance, contracts, connection, transaction, visit);
+        transaction.Commit();
+    }
+
+    internal static void Visit(RuntimeInstance instance, ContractReader contracts, SqliteConnection connection,
+        SqliteTransaction transaction, Action<ManualWorkState> visit)
+    {
         var after = "";
+        var pendingCount = 0;
         while (true)
         {
             using var command = DatabaseConnections.Command(connection, transaction,
@@ -32,6 +41,7 @@ internal static class ManualWorkInventory
             {
                 var state = ManualWorkRows.Read(instance, contracts, connection, transaction, item.Reference);
                 if (state.Source.Document.OperationId.ToString("D") != item.Id) throw ManualWorkCodec.Invalid();
+                if (state.Result is null && ++pendingCount > 4096) throw ManualWorkCodec.Invalid();
                 visit(state);
             }
             after = page[^1].Id;
@@ -39,9 +49,7 @@ internal static class ManualWorkInventory
         using var orphans = DatabaseConnections.Command(connection, transaction,
             "SELECT EXISTS(SELECT 1 FROM main.operations o LEFT JOIN main.manual_work_runs m ON m.operation_id=o.operation_id WHERE o.operation_kind='manual.work-run' AND m.operation_id IS NULL) " +
             "OR EXISTS(SELECT 1 FROM main.manual_work_begin b LEFT JOIN main.manual_work_runs m ON m.operation_id=b.operation_id WHERE m.operation_id IS NULL) " +
-            "OR EXISTS(SELECT 1 FROM main.manual_work_result r LEFT JOIN main.manual_work_runs m ON m.operation_id=r.operation_id WHERE m.operation_id IS NULL) " +
-            "OR (SELECT COUNT(*) FROM main.manual_work_runs m LEFT JOIN main.manual_work_result r ON r.operation_id=m.operation_id WHERE r.operation_id IS NULL)>4096;");
+            "OR EXISTS(SELECT 1 FROM main.manual_work_result r LEFT JOIN main.manual_work_runs m ON m.operation_id=r.operation_id WHERE m.operation_id IS NULL);");
         if ((long)orphans.ExecuteScalar()! != 0) throw ManualWorkCodec.Invalid();
-        transaction.Commit();
     }
 }

@@ -12,6 +12,8 @@ public sealed record SnapshotBudget(int MaximumEntries, long MaximumTotalBytes)
 
 public sealed class FileTreeScanner(SnapshotBudget budget)
 {
+    private const int BufferedCaptureBytes = 65536;
+
     public FileTreeSnapshot Capture(string selectedRoot, CancellationToken cancellationToken)
     {
         RequireBudget(cancellationToken);
@@ -65,8 +67,7 @@ public sealed class FileTreeScanner(SnapshotBudget budget)
         {
             using var temporary = sources is null ? new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read) : null;
             var source = temporary ?? sources!.OpenFile(path, relative);
-            using var timing = sources is null ? default : StartupProfile.Measure(sources.HashMeasurement);
-            result.Add(ReadFile(source, relative, ref total, cancellationToken));
+            result.Add(ReadFile(source, relative, ref total, cancellationToken, sources));
             return;
         }
         sources?.HoldDirectory(path, relative);
@@ -82,12 +83,50 @@ public sealed class FileTreeScanner(SnapshotBudget budget)
         }
     }
 
-    private FileTreeEntry ReadFile(FileStream source, string relative, ref long total, CancellationToken cancellationToken)
+    private FileTreeEntry ReadFile(FileStream source, string relative, ref long total, CancellationToken cancellationToken,
+        TreeReadLease.CaptureSources? sources)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var length = source.Length;
         total = checked(total + length);
         if (total > budget.MaximumTotalBytes) throw new IOException("snapshot_byte_limit");
+        if (sources?.Blobs is { } blobs)
+        {
+            if (length <= BufferedCaptureBytes)
+                return CaptureBufferedFile(source, relative, (int)length, blobs, sources.HashMeasurement, cancellationToken);
+            var archived = blobs.PersistCapturedContent(source, length, cancellationToken);
+            return new(relative, FileObjectKind.File, length, archived.Sha256);
+        }
+
+        string digest;
+        using (var timing = sources is null ? default : StartupProfile.Measure(sources.HashMeasurement))
+            digest = HashFile(source, length, cancellationToken);
+        return new(relative, FileObjectKind.File, length, digest);
+    }
+
+    private static FileTreeEntry CaptureBufferedFile(FileStream source, string relative, int length, ImmutableBlobStore blobs,
+        string hashMeasurement, CancellationToken cancellationToken)
+    {
+        var bytes = ArrayPool<byte>.Shared.Rent(Math.Max(1, length));
+        try
+        {
+            string digest;
+            using (StartupProfile.Measure(hashMeasurement))
+            {
+                var content = bytes.AsSpan(0, length);
+                try { source.ReadExactly(content); }
+                catch (EndOfStreamException) { throw new IOException("snapshot_source_changed"); }
+                if (source.Length != length) throw new IOException("snapshot_source_changed");
+                digest = Convert.ToHexStringLower(SHA256.HashData(content));
+            }
+            blobs.PersistCapturedBuffer(bytes, length, digest, cancellationToken);
+            return new(relative, FileObjectKind.File, length, digest);
+        }
+        finally { ArrayPool<byte>.Shared.Return(bytes, clearArray: true); }
+    }
+
+    private static string HashFile(FileStream source, long length, CancellationToken cancellationToken)
+    {
         using var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         var buffer = ArrayPool<byte>.Shared.Rent((int)Math.Clamp(length, 1, 65536));
         try
@@ -103,9 +142,8 @@ public sealed class FileTreeScanner(SnapshotBudget budget)
             }
         }
         finally { ArrayPool<byte>.Shared.Return(buffer, clearArray: true); }
-        var hash = Convert.ToHexStringLower(hasher.GetHashAndReset());
         if (source.Length != length) throw new IOException("snapshot_source_changed");
-        return new(relative, FileObjectKind.File, length, hash);
+        return Convert.ToHexStringLower(hasher.GetHashAndReset());
     }
 
     internal static void ValidateRelativePath(string relative)

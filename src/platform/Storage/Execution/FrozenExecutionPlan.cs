@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using NexusPipeline.Extensibility.Protocol;
 
@@ -6,9 +7,19 @@ namespace NexusPipeline.Platform.Storage.Execution;
 public sealed class FrozenExecutionPlan
 {
     private readonly byte[] _bytes;
+    private string? _digest;
     internal FrozenExecutionPlan(byte[] bytes) => _bytes = bytes.ToArray();
     public ExecutionPlan ReadWire() => JsonSerializer.Deserialize<ExecutionPlan>(_bytes)!;
     public byte[] Export() => _bytes.ToArray();
+
+    internal bool HasDigest(string digest) => _bytes.Length != 0 &&
+        StringComparer.Ordinal.Equals(Volatile.Read(ref _digest) ?? ComputeDigest(), digest);
+
+    private string ComputeDigest()
+    {
+        var digest = Convert.ToHexStringLower(SHA256.HashData(_bytes));
+        return Interlocked.CompareExchange(ref _digest, digest, null) ?? digest;
+    }
 }
 
 public sealed class PreparedExecutionPlan : IDisposable

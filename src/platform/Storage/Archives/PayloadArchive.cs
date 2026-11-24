@@ -18,13 +18,13 @@ internal sealed class PayloadArchive : IDisposable
     private readonly PayloadArchiveBudget _budget;
     private readonly Func<IOException> _rejection;
     private readonly ZipArchive _zip;
-    private readonly ImmutableDictionary<string, ZipArchiveEntry> _entries;
+    private readonly ImmutableDictionary<string, (ZipArchiveEntry Entry, PayloadArchiveFile File)> _entries;
     private readonly PayloadArchiveKind _kind;
     private string ManifestPath => _kind == PayloadArchiveKind.Application ? ApplicationTree.ManifestPath : "manifest.json";
     internal ImmutableArray<PayloadArchiveFile> Files { get; }
     internal ImmutableArray<string> Directories { get; }
 
-    private PayloadArchive(ZipArchive zip, ImmutableDictionary<string, ZipArchiveEntry> entries,
+    private PayloadArchive(ZipArchive zip, ImmutableDictionary<string, (ZipArchiveEntry Entry, PayloadArchiveFile File)> entries,
         ImmutableArray<PayloadArchiveFile> files, ImmutableArray<string> directories, PayloadArchiveBudget budget,
         Func<IOException> rejection, PayloadArchiveKind kind)
     { _zip = zip; _entries = entries; Files = files; Directories = directories; _budget = budget; _rejection = rejection; _kind = kind; }
@@ -34,14 +34,25 @@ internal sealed class PayloadArchive : IDisposable
     {
         cancellation.ThrowIfCancellationRequested();
         if (!Enum.IsDefined(kind) || budget.MaximumFiles is < 1 or > 4096 || budget.MaximumBytes is < 1 or > 1073741824) throw rejection();
+        Dictionary<string, FileTreeEntry>? expectedByPath = null;
+        if (expected is not null)
+        {
+            if (expected.Count > ExtensionZipMetadata.MaximumEntries) throw rejection();
+            expectedByPath = new(expected.Count, StringComparer.Ordinal);
+            foreach (var item in expected)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                if (!expectedByPath.TryAdd(item.RelativePath, item)) throw rejection();
+            }
+        }
         var headers = ExtensionZipMetadata.Read(actualArchive, cancellation, budget.MaximumBytes);
         var zip = new ZipArchive(actualArchive, ZipArchiveMode.Read, leaveOpen: true);
         try
         {
             if (zip.Entries.Count != headers.Length) throw rejection();
             var paths = new PackagePathSet();
-            var entries = ImmutableDictionary.CreateBuilder<string, ZipArchiveEntry>(StringComparer.Ordinal);
-            var files = ImmutableArray.CreateBuilder<PayloadArchiveFile>(); long total = 0;
+            var entries = ImmutableDictionary.CreateBuilder<string, (ZipArchiveEntry Entry, PayloadArchiveFile File)>(StringComparer.Ordinal);
+            long total = 0;
             for (var index = 0; index < zip.Entries.Count; index++)
             {
                 cancellation.ThrowIfCancellationRequested();
@@ -51,16 +62,17 @@ internal sealed class PayloadArchive : IDisposable
                 var name = paths.Add(entry);
                 total = checked(total + entry.Length);
                 if (total > budget.MaximumBytes) throw rejection();
-                var frozen = expected?.SingleOrDefault(item => item.RelativePath == name);
-                if (expected is not null && (frozen is null || frozen.SizeBytes != entry.Length ||
+                var frozen = expectedByPath?.GetValueOrDefault(name);
+                if (expectedByPath is not null && (frozen is null || frozen.SizeBytes != entry.Length ||
                     frozen.Kind != (entry.FullName.EndsWith('/') ? FileObjectKind.Directory : FileObjectKind.File))) throw rejection();
-                var checksum = expected is null ? ReadEntry(entry, null, budget.MaximumBytes, rejection, cancellation) : frozen!.Sha256;
+                var checksum = frozen is null ? ReadEntry(entry, null, budget.MaximumBytes, rejection, cancellation) : frozen.Sha256;
                 if (entry.FullName.EndsWith('/')) continue;
-                if (files.Count >= budget.MaximumFiles) throw rejection();
-                entries.Add(name, entry); files.Add(new(name, entry.Length, checksum!, entry.Crc32));
+                if (entries.Count >= budget.MaximumFiles) throw rejection();
+                entries.Add(name, (entry, new(name, entry.Length, checksum!, entry.Crc32)));
             }
             if (!entries.ContainsKey(kind == PayloadArchiveKind.Application ? ApplicationTree.ManifestPath : "manifest.json")) throw rejection();
-            return new(zip, entries.ToImmutable(), files.OrderBy(file => file.RelativePath, StringComparer.Ordinal).ToImmutableArray(),
+            return new(zip, entries.ToImmutable(), entries.Values.Select(value => value.File)
+                .OrderBy(file => file.RelativePath, StringComparer.Ordinal).ToImmutableArray(),
                 paths.Directories.OrderBy(path => path, StringComparer.Ordinal).ToImmutableArray(), budget, rejection, kind);
         }
         catch { zip.Dispose(); throw; }
@@ -68,37 +80,49 @@ internal sealed class PayloadArchive : IDisposable
 
     internal byte[] ReadManifest(CancellationToken cancellation = default)
     {
-        var entry = _entries[ManifestPath];
+        var (entry, file) = _entries[ManifestPath];
         if (entry.Length is < 1 or > StrictJson.MaximumBytes) throw _rejection();
         using var bytes = new MemoryStream(checked((int)entry.Length));
         var digest = ReadEntry(entry, bytes, _budget.MaximumBytes, _rejection, cancellation);
-        if (digest != Files.Single(file => file.RelativePath == ManifestPath).Sha256) throw _rejection();
+        if (digest != file.Sha256) throw _rejection();
         return bytes.ToArray();
     }
 
     internal void CopyFile(string name, Stream destination, CancellationToken cancellation = default)
     {
-        if (!_entries.TryGetValue(name, out var entry)) throw _rejection();
+        if (!_entries.TryGetValue(name, out var member)) throw _rejection();
+        var (entry, file) = member;
         var digest = ReadEntry(entry, destination, _budget.MaximumBytes, _rejection, cancellation);
-        if (digest != Files.Single(file => file.RelativePath == name).Sha256) throw _rejection();
+        if (digest != file.Sha256) throw _rejection();
     }
 
     internal byte[]? ReadDocument(string name, int maximumBytes, CancellationToken cancellation = default)
     {
-        if (!_entries.TryGetValue(name, out var entry)) return null;
+        if (!_entries.TryGetValue(name, out var member)) return null;
+        var (entry, file) = member;
         if (entry.Length > maximumBytes) throw _rejection();
         using var bytes = new MemoryStream(checked((int)entry.Length));
         var digest = ReadEntry(entry, bytes, maximumBytes, _rejection, cancellation);
-        if (digest != Files.Single(file => file.RelativePath == name).Sha256) throw _rejection();
+        if (digest != file.Sha256) throw _rejection();
         return bytes.ToArray();
     }
 
     internal ArchivedFileTree CaptureCandidate(ImmutableBlobStore? blobs, CancellationToken cancellation)
     {
         var files = _kind == PayloadArchiveKind.Application ? Files.Where(file => !file.RelativePath.StartsWith("package-info/", StringComparison.Ordinal)).ToArray() : Files.ToArray();
-        var directories = _kind == PayloadArchiveKind.Application
-            ? Directories.Where(path => path.Length == 0 || files.Any(file => file.RelativePath.StartsWith(path + "/", StringComparison.Ordinal))).ToArray()
-            : Directories.ToArray();
+        IEnumerable<string> directories = Directories;
+        if (_kind == PayloadArchiveKind.Application)
+        {
+            var populated = new HashSet<string>(StringComparer.Ordinal) { "" };
+            foreach (var file in files)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                var path = file.RelativePath;
+                for (var slash = path.LastIndexOf('/'); slash > 0; slash = path.LastIndexOf('/', slash - 1))
+                    if (!populated.Add(path[..slash])) break;
+            }
+            directories = Directories.Where(populated.Contains);
+        }
         var contents = new List<BlobReference>();
         foreach (var file in files)
         {
@@ -106,7 +130,7 @@ internal sealed class PayloadArchive : IDisposable
             var reference = new BlobReference($"blobs/content/{file.Sha256}.bin", file.SizeBytes, file.Sha256);
             if (blobs is not null)
             {
-                using var input = _entries[file.RelativePath].Open();
+                using var input = _entries[file.RelativePath].Entry.Open();
                 blobs.PersistContent(input, reference, cancellation);
             }
             contents.Add(reference);
