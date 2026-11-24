@@ -4,13 +4,12 @@ using System.Text.Json;
 using NexusPipeline.Core.Control;
 using NexusPipeline.Core.Extensions;
 using NexusPipeline.Host.Control.Http;
-using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Configuration;
 
 namespace NexusPipeline.Host.Control.Configuration;
 
 [SupportedOSPlatform("windows")]
-internal sealed class AdapterUseCases(ITaskAdapterPort adapters, ContractReader contracts)
+internal sealed class AdapterUseCases(ITaskAdapterPort adapters)
 {
     internal async Task<object> ExecuteAsync(AuthenticatedControlRequest request, string action, JsonElement body, CancellationToken readCancellation)
     {
@@ -43,12 +42,13 @@ internal sealed class AdapterUseCases(ITaskAdapterPort adapters, ContractReader 
         }
     }
 
-    private AdapterSelection Selection(JsonElement value) => new(
+    private static AdapterSelection Selection(JsonElement value) => new(
         ControlRequestBody.Uuid(value.GetProperty("operationId")), ControlRequestBody.Uuid(value.GetProperty("bindingId")),
         value.GetProperty("expectedBindingRevision").GetInt64(), value.GetProperty("extensionId").GetString()!,
         value.GetProperty("expectedInstalledRevision").GetInt64(), value.GetProperty("resources").EnumerateArray().Select(item =>
             new AdapterResourceSelection(item.GetProperty("resourceId").GetString()!, item.GetProperty("expectedRevision").GetInt64(),
                 item.GetProperty("relativePath").GetString()!)).ToImmutableArray(),
+        // The adapter command schema validates each configuration intent by reference.
         value.TryGetProperty("configurationIntents", out var intents) ? intents.EnumerateArray()
-            .Select(item => new ConfigurationPatchReader(contracts).Read(JsonSerializer.SerializeToUtf8Bytes(item))).ToImmutableArray() : []);
+            .Select(ConfigurationPatchReader.DecodeValidated).ToImmutableArray() : []);
 }

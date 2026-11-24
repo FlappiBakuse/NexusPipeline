@@ -33,7 +33,7 @@ internal sealed class McpExecutionTools(ExecutionUseCases execution, ContractRea
         {
             RequireArguments(arguments, "operationId", "startOperationId", "cancellation");
             var cancellation = arguments.GetProperty("cancellation");
-            using var checkedBody = contracts.Read(JsonSerializer.SerializeToUtf8Bytes(cancellation), "control-execution-cancellation.schema.json");
+            contracts.RequireParsedSchema(cancellation, "control-execution-cancellation.schema.json");
             result = execution.Cancel(request, ControlRequestBody.Uuid(arguments.GetProperty("operationId")),
                 ControlRequestBody.Uuid(arguments.GetProperty("startOperationId")),
                 ControlRequestBody.Uuid(cancellation.GetProperty("runId")), ControlRequestBody.Uuid(cancellation.GetProperty("attemptId")));
@@ -42,7 +42,7 @@ internal sealed class McpExecutionTools(ExecutionUseCases execution, ContractRea
         {
             RequireArguments(arguments, name == "execution_start" ? ["operationId", "selection"] : ["selection"]);
             var selection = arguments.GetProperty("selection");
-            using var checkedBody = contracts.Read(JsonSerializer.SerializeToUtf8Bytes(selection), "control-execution-selection.schema.json");
+            contracts.RequireParsedSchema(selection, "control-execution-selection.schema.json");
             var selected = ExecutionControlCommand.Selection(selection);
             result = name == "execution_preview" ? execution.Preview(request, selected) :
                 execution.Start(request, ControlRequestBody.Uuid(arguments.GetProperty("operationId")), selected);

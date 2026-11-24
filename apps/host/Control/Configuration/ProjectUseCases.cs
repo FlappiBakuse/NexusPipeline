@@ -1,11 +1,11 @@
+using NexusPipeline.Core.Configuration;
+using NexusPipeline.Core.Control;
+using NexusPipeline.Host.Control.Http;
+using NexusPipeline.Platform.Serialization;
+using NexusPipeline.Platform.Storage.Configuration;
+using NexusPipeline.Platform.Storage.Extensions;
 using System.Runtime.Versioning;
 using System.Text.Json;
-using NexusPipeline.Core.Control;
-using NexusPipeline.Core.Configuration;
-using NexusPipeline.Host.Control.Http;
-using NexusPipeline.Platform.Storage.Extensions;
-using NexusPipeline.Platform.Storage.Configuration;
-using NexusPipeline.Platform.Serialization;
 
 namespace NexusPipeline.Host.Control.Configuration;
 
@@ -13,10 +13,31 @@ namespace NexusPipeline.Host.Control.Configuration;
 internal sealed class ProjectUseCases(ProjectCompilationService compilation, ProjectPreviewService previews, ContractReader contracts,
     ScriptProjectService? scripts = null)
 {
-    internal async ValueTask<object> ExecuteAsync(AuthenticatedControlRequest request, string action, JsonElement body, CancellationToken cancellation,
+    internal readonly struct Command
+    {
+        private Command(string action, JsonElement body, bool validated) { Action = action; Body = body; IsValidated = validated; }
+        internal string Action { get; }
+        internal JsonElement Body { get; }
+        internal bool IsValidated { get; }
+
+        internal static Command Borrow(string action, JsonElement body) => new(action, body, false);
+
+        internal static Command Read(ContractReader contracts, string action, JsonElement body)
+        {
+            contracts.RequireParsedSchema(body, "control-project-command.schema.json");
+            if (body.GetProperty("action").GetString() != action) throw new ControlRequestException(400, "project_action_mismatch");
+            return new(action, body, true);
+        }
+    }
+
+    internal Command Validate(string action, JsonElement body) => Command.Read(contracts, action, body);
+
+    internal async ValueTask<object> ExecuteAsync(AuthenticatedControlRequest request, Command command, CancellationToken cancellation,
         Action? requireOwner = null, string? previewSubject = null, CancellationToken ownerLifetime = default,
         ProjectBindingDraft? bindingDraft = null, BindingDrafts? drafts = null)
     {
+        var action = command.Action;
+        var body = command.Body;
         void Current()
         {
             request.Require(action == "select" ? ControlCapability.ConfigurationEdit : ControlCapability.ConfigurationRead);
@@ -29,8 +50,8 @@ internal sealed class ProjectUseCases(ProjectCompilationService compilation, Pro
             requireOwner?.Invoke();
         }
         Current();
-        using var verified = contracts.Read(JsonSerializer.SerializeToUtf8Bytes(body), "control-project-command.schema.json");
-        if (body.GetProperty("action").GetString() != action) throw new ControlRequestException(400, "project_action_mismatch");
+        // The direct HTTP route already validates the command before checking optional capabilities.
+        if (!command.IsValidated) _ = Validate(action, body);
         try
         {
             var subject = previewSubject ?? request.SubjectId;
@@ -115,5 +136,38 @@ internal sealed class ProjectUseCases(ProjectCompilationService compilation, Pro
         }
         catch (IOException error) when (error.Message.StartsWith("project_", StringComparison.Ordinal))
         { throw new ControlRequestException(409, error.Message); }
+    }
+}
+
+[SupportedOSPlatform("windows")]
+internal sealed class ScriptProjectCommands(ScriptProjectService scripts, ProjectPreviewService previews)
+{
+    internal async ValueTask<object> ExecuteAsync(AuthenticatedControlRequest request, string action, JsonElement body,
+        string subject, Action current, CancellationToken cancellation, CancellationToken ownerLifetime)
+    {
+        var script = ControlRequestBody.Uuid(body.GetProperty("scriptId"));
+        if (action == "context") return scripts.ReadContext(script, current);
+        var revision = body.GetProperty("expectedScriptRevision").GetInt64();
+        var extension = body.GetProperty("extensionId").GetString()!;
+        if (action == "discover") return await scripts.DiscoverAsync(script, revision, extension, body.GetProperty("selection"), current, cancellation);
+        if (action == "preview")
+        {
+            var selection = body.TryGetProperty("selection", out var draft) ? draft :
+                scripts.ReadContext(script, current).Selection ?? throw new IOException("project_selection_required");
+            return await previews.PrepareScriptAsync(scripts, subject, script, revision, extension, selection, current, cancellation, ownerLifetime);
+        }
+        var operation = ControlRequestBody.Uuid(body.GetProperty("operationId"));
+        var expected = body.GetProperty("expectedSelectionRevision").GetInt64();
+        var provider = body.TryGetProperty("providerId", out var named) ? named.GetString()! : scripts.ReadContext(script, current).ProviderId;
+        if (action == "result")
+        {
+            var result = scripts.ReadAccepted(operation, request.SubjectId, script, revision, expected, extension, provider, body.GetProperty("selection"), current);
+            return new { OperationId = operation, Found = result is not null, Pending = result is null,
+                Outcome = result is null ? "pending" : "committed", Revision = result?.Revision };
+        }
+        if (action != "select") throw new ControlRequestException(404, "control_not_found");
+        var saved = await scripts.SaveAsync(operation, request.SubjectId, script, revision, expected, extension,
+            body.GetProperty("selection"), current, cancellation, provider);
+        return new { saved.OperationId, saved.Revision, saved.IsNew };
     }
 }

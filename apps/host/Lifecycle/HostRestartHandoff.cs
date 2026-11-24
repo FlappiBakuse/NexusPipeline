@@ -1,15 +1,85 @@
-using System.IO.Pipes;
-using System.Runtime.Versioning;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using NexusPipeline.Core.Maintenance;
+using NexusPipeline.Host.Composition;
 using NexusPipeline.Platform.Networking;
 using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage;
+using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Maintenance;
+using System.IO.Pipes;
+using System.Runtime.Versioning;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace NexusPipeline.Host.Lifecycle;
+
+[SupportedOSPlatform("windows")]
+internal static class HostRestartStart
+{
+    internal static async Task<int> RunAsync(string[] args)
+    {
+        var stage = "arguments";
+        Guid operation = Guid.Empty;
+        RuntimeInstance? observed = null;
+        try
+        {
+            if (args.Length != 5 || !Guid.TryParseExact(args[2], "D", out operation) || operation == Guid.Empty ||
+                args[2] != operation.ToString("D") || !int.TryParse(args[3], out var parentPid) || parentPid <= 0 ||
+                !args[4].StartsWith("NexusRestart-", StringComparison.Ordinal) ||
+                !Guid.TryParseExact(args[4][13..], "N", out _)) throw Invalid();
+            stage = "parent-identity";
+            var parent = ProcessIdentityReader.Read(parentPid);
+            var current = ProcessIdentityReader.Read(Environment.ProcessId);
+            if (parent.UserSid != current.UserSid || parent.IsElevated != current.IsElevated ||
+                parent.ImagePath != current.ImagePath || parent.ImageSha256 != current.ImageSha256) throw Invalid();
+            using var producer = new NativeClientBinding(parent);
+            using var pipe = new NamedPipeClientStream(".", args[4], PipeDirection.InOut,
+                PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+            stage = "pipe-connect";
+            await pipe.ConnectAsync(deadline.Token);
+            MaintenanceStartupOrigin.RequirePipeParent(pipe, producer, parent);
+            stage = "frame-validation";
+            var bytes = await MaintenanceStartupFrames.ReadAsync(pipe, deadline.Token);
+            using var parsed = StrictJson.Parse(bytes);
+            var frame = parsed.RootElement.Deserialize<HostRestartFrame>(HostRestartHandoff.Json) ?? throw Invalid();
+            var instance = new InstanceRoot(new ContractReader()).OpenExisting(args[1]);
+            if (frame.Format != "nexus.host.restart" || frame.Version != 1 || frame.OperationId != operation ||
+                frame.InstanceId != instance.InstanceId || frame.Parent != parent) throw Invalid();
+            observed = instance;
+            stage = "job-handoff";
+            using var origin = frame.JobHandle is { } handle ? MaintenanceStartupOrigin.ReceiveRestartJob(producer, parent, handle) : null;
+            await pipe.WriteAsync(new byte[] { 2 }, deadline.Token);
+            await pipe.FlushAsync(deadline.Token);
+            var commit = new byte[1];
+            await pipe.ReadExactlyAsync(commit, deadline.Token);
+            if (commit[0] != 3) throw Invalid();
+            stage = "parent-exit";
+            await producer.WaitForExitAsync(deadline.Token);
+            origin?.RequireReleasedSuccessor();
+            pipe.Dispose(); producer.Dispose();
+            stage = "desktop-start";
+            return await NexusPipeline.Host.Desktop.DesktopStartup.RunAsync(instance.RuntimeRoot, null, maintenanceOrigin: origin, resumeWindow: frame.Window);
+        }
+        catch (Exception error) when (error is IOException or ArgumentException or JsonException or
+            System.ComponentModel.Win32Exception or UnauthorizedAccessException or OperationCanceledException or InvalidOperationException)
+        {
+            if (observed is not null) MaintenanceDiagnostic.Record(observed, operation, "restart", stage, error);
+            else
+            {
+                try
+                {
+                    Console.Error.WriteLine(JsonSerializer.Serialize(new { kind = "host_restart_startup_rejected",
+                        operationId = operation, stage, causes = ExecutionFailureTrace.Describe(error) }));
+                }
+                catch (Exception outputFailure) when (outputFailure is IOException or ObjectDisposedException) { }
+            }
+            return 1;
+        }
+    }
+
+    private static IOException Invalid() => new("host_restart_handoff_invalid");
+}
 
 internal sealed record HostRestartReply(Guid OperationId, Guid InstanceId, int ProcessId, int Port, string State);
 internal sealed record HostRestartFrame(string Format, int Version, Guid OperationId, Guid InstanceId,

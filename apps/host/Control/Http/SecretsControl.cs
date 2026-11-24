@@ -1,14 +1,28 @@
+using NexusPipeline.Core.Secrets;
 using System.Globalization;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using NexusPipeline.Core.Secrets;
 
 namespace NexusPipeline.Host.Control.Http;
 
-internal sealed class SecretsControl(ISecretFieldStore store)
+internal enum LocalControlCapability { SecretStatus, SecretRead, SecretWrite }
+
+internal static class LocalControlAccess
+{
+    public static bool IsAllowed(HttpContext context, LocalControlCapability capability)
+    {
+        if (!Enum.IsDefined(capability)) return false;
+        // Loopback operators share the Windows-user trust boundary; headers cannot grant this identity.
+        return context.Connection.RemoteIpAddress is { } peer && IPAddress.IsLoopback(peer)
+            && RequestAuthority.IsAllowed(context);
+    }
+}
+
+internal sealed class SecretsControl(ISecretFieldStore store, Guid instanceId)
 {
     private const string Route = "/control/v1/secrets/{extensionId}/{subjectId}/{field}";
     private static readonly JsonSerializerOptions StatusOptions = new(JsonSerializerDefaults.Web)
@@ -31,7 +45,8 @@ internal sealed class SecretsControl(ISecretFieldStore store)
             var status = await store.GetStateAsync(Key(context, extensionId, subjectId, field), context.RequestAborted);
             return Status(status);
         }
-        catch (Exception error) when (!context.RequestAborted.IsCancellationRequested) { return ControlErrors.Secret(error, true); }
+        catch (Exception error) when (!context.RequestAborted.IsCancellationRequested)
+        { return ControlErrors.Secret(error, true, instanceId: instanceId); }
     }
 
     private async Task<IResult> ChangeAsync(HttpContext context, string extensionId, string subjectId, string field)
@@ -58,7 +73,8 @@ internal sealed class SecretsControl(ISecretFieldStore store)
             return Status(status);
         }
         catch (SecretBodyException error) { return ControlErrors.Result(error.Status, error.Message, operationId); }
-        catch (Exception error) when (!context.RequestAborted.IsCancellationRequested) { return ControlErrors.Secret(error, false, operationId); }
+        catch (Exception error) when (!context.RequestAborted.IsCancellationRequested)
+        { return ControlErrors.Secret(error, false, operationId, instanceId); }
     }
 
     private async Task ReadAsync(HttpContext context, string extensionId, string subjectId, string field)
@@ -85,7 +101,7 @@ internal sealed class SecretsControl(ISecretFieldStore store)
         }
         catch (SecretBodyException error) { await ControlErrors.Result(error.Status, error.Message).ExecuteAsync(context); }
         catch (Exception error) when (!context.RequestAborted.IsCancellationRequested && !context.Response.HasStarted)
-        { await ControlErrors.Secret(error, true).ExecuteAsync(context); }
+        { await ControlErrors.Secret(error, true, instanceId: instanceId).ExecuteAsync(context); }
         finally { if (bytes is not null) CryptographicOperations.ZeroMemory(bytes); }
     }
 

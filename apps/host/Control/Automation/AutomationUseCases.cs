@@ -1,10 +1,10 @@
-using System.Text.Json;
+using System.Collections.Immutable;
 using System.Runtime.Versioning;
 using NexusPipeline.Core.Automation;
+using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Control;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Host.Control.Http;
-using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Automation;
 using NexusPipeline.Platform.Storage.Configuration;
 
@@ -17,11 +17,11 @@ internal sealed class AutomationUseCases(AutomationDefinitionService definitions
     {
         request.Require(ControlCapability.AutomationRead);
         var saved = definitions.Read();
-        using var wire = StrictJson.Parse(bundles.Encode(saved, DateTimeOffset.UtcNow));
+        var bundle = new EncodedControlJson(bundles.Encode(saved, DateTimeOffset.UtcNow));
         request.Require(ControlCapability.AutomationRead);
         return new
         {
-            catalogRevision = saved.Revision, bundle = wire.RootElement.Clone(),
+            catalogRevision = saved.Revision, bundle,
             roots = saved.Roots.Select(item => new { item.Id, item.Revision, item.Path }).ToArray(),
             revisions = saved.Roots.Select(item => new { kind = "root", item.Id, item.Revision })
                 .Concat(saved.Scripts.Select(item => new { kind = "script", item.Id, item.Revision }))
@@ -121,17 +121,29 @@ internal sealed class AutomationUseCases(AutomationDefinitionService definitions
                 request.Require(ControlCapability.AutomationDeclare);
     }
 
-    private static bool SameAccess(System.Collections.Immutable.ImmutableArray<AutomationAdapterResource> before,
-        System.Collections.Immutable.ImmutableArray<AutomationAdapterResource> after)
+    private static bool SameAccess(ImmutableArray<AutomationAdapterResource> before, ImmutableArray<AutomationAdapterResource> after)
     {
         if (before.Length != after.Length) return false;
         var previous = before.ToDictionary(item => item.ResourceId, StringComparer.Ordinal);
         foreach (var resource in after)
         {
             if (!previous.TryGetValue(resource.ResourceId, out var old) || old.Syntax != resource.Syntax ||
-                !JsonElement.DeepEquals(JsonSerializer.SerializeToElement(old.Access), JsonSerializer.SerializeToElement(resource.Access))) return false;
+                !SameAccess(old.Access, resource.Access)) return false;
         }
         return true;
     }
+
+    private static bool SameAccess(ConfigurationDocumentAccess before, ConfigurationDocumentAccess after) =>
+        SameGrants(before.Read, after.Read) && SameGrants(before.Write, after.Write) &&
+        before.Protected.Length == after.Protected.Length &&
+        before.Protected.Zip(after.Protected).All(pair => SameSelector(pair.First, pair.Second));
+
+    private static bool SameGrants(ImmutableArray<ConfigurationAccessGrant> before, ImmutableArray<ConfigurationAccessGrant> after) =>
+        before.Length == after.Length && before.Zip(after).All(pair =>
+            pair.First.Descendants == pair.Second.Descendants && SameSelector(pair.First.Selector, pair.Second.Selector));
+
+    private static bool SameSelector(ConfigurationSelector before, ConfigurationSelector after) =>
+        before.Steps.AsSpan().SequenceEqual(after.Steps.AsSpan());
+
     private static object Result(AutomationChangeResult value) => new { value.OperationId, value.CatalogRevision, value.IsNew };
 }

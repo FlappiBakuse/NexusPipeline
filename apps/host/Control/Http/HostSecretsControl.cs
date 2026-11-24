@@ -53,7 +53,7 @@ internal sealed class HostSecretsControl(ControlAuthentication authority, Secret
         { await ControlErrors.Result(403, "control_local_origin_required").ExecuteAsync(context); }
         catch (SecretBodyException error) { await ControlErrors.Result(error.Status, "secret_body_invalid").ExecuteAsync(context); }
         catch (Exception error) when (!context.RequestAborted.IsCancellationRequested && !context.Response.HasStarted)
-        { await ControlErrors.Secret(error, true).ExecuteAsync(context); }
+        { await ControlErrors.Secret(error, true, instanceId: instanceId).ExecuteAsync(context); }
         finally { if (bytes is not null) CryptographicOperations.ZeroMemory(bytes); }
     }
 
@@ -85,7 +85,8 @@ internal sealed class HostSecretsControl(ControlAuthentication authority, Secret
         }
         catch (UnauthorizedAccessException) { return ControlErrors.Result(403, "control_local_origin_required", operation); }
         catch (SecretBodyException error) { return ControlErrors.Result(error.Status, "secret_body_invalid", operation); }
-        catch (Exception error) when (!context.RequestAborted.IsCancellationRequested) { return ControlErrors.Secret(error, false, operation); }
+        catch (Exception error) when (!context.RequestAborted.IsCancellationRequested)
+        { return ControlErrors.Secret(error, false, operation, instanceId); }
     }
 
     private void Require(HttpContext context, ControlCapability capability)

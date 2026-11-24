@@ -2,11 +2,12 @@
 const crypto = require('node:crypto');
 const { readLogin, responseText } = require('./proof-reader.cjs');
 const { createLoginWindow } = require('./login-window.cjs');
+const { describeFailure, recordFailure } = require('./diagnostics.cjs');
 
 function installLoginBridge(config, parent, connect, generation) {
   const active = new Map();
   const stopping = new AbortController();
-  let ended = false; let timer; let polling;
+  let ended = false; let timer; let polling; let lastPollFailure;
   const identity = session => ({ format: 'nexus.desktop.login', version: 1, instanceId: session.instanceId,
     nativeClientId: session.clientId, sessionId: session.sessionId, correlationId: crypto.randomUUID() });
   async function post(request) {
@@ -17,20 +18,26 @@ function installLoginBridge(config, parent, connect, generation) {
     return readLogin(await responseText(response), config.verificationKey, request);
   }
   async function complete(state, status, values) {
+    const request = { ...identity(state.session), type: 'complete', captureId: state.offer.captureId, nonce: state.offer.nonce, status, values };
     try {
-      await post({ ...identity(state.session), type: 'complete', captureId: state.offer.captureId, nonce: state.offer.nonce, status, values });
+      await post(request);
       active.delete(state.offer.captureId);
-    } catch {
+    } catch (error) {
       state.cleaned = true; state.window = undefined;
+      const { type, reason } = describeFailure(error);
+      const failure = `${type}/${reason}`;
+      if (failure !== state.lastFailure) recordFailure('desktop-login', 'complete', error, request.correlationId);
+      state.lastFailure = failure;
     }
   }
   async function processOffer(offer, session, stale) {
     const prior = active.get(offer.captureId);
     if (prior && (prior.offer.nonce !== offer.nonce || prior.session.sessionId !== session.sessionId)) throw new Error('desktop_login_identity_changed');
     if (prior) {
-      if (prior.cleaned) await complete(prior, 'failed', Object.create(null));
-      else if (offer.isCanceled || stale) await prior.window.cancel();
-      else await prior.window.retry();
+      if (!prior.cleaned) {
+        if (offer.isCanceled || stale) await prior.window.cancel();
+        else await prior.window.retry();
+      }
       return;
     }
     if (active.size >= 128) throw new Error('desktop_login_limit');
@@ -43,12 +50,24 @@ function installLoginBridge(config, parent, connect, generation) {
   }
   async function poll() {
     if (ended) return;
+    let stage = 'connect'; let correlationId;
     try {
       const current = generation(); const session = await connect();
-      const response = await post({ ...identity(session), type: 'poll' });
+      const alreadyCleaned = [...active.values()].filter(state => state.cleaned);
+      const request = { ...identity(session), type: 'poll' };
+      correlationId = request.correlationId; stage = 'poll';
+      const response = await post(request);
+      stage = 'offer';
       for (const offer of response.offers) await processOffer(offer, session, ended || current !== generation());
-      for (const state of [...active.values()]) if (state.cleaned) await complete(state, 'failed', Object.create(null));
-    } catch {
+      for (const state of alreadyCleaned) await complete(state, 'failed', Object.create(null));
+      lastPollFailure = undefined;
+    } catch (error) {
+      if (!ended) {
+        const { type, reason } = describeFailure(error);
+        const failure = `${stage}/${type}/${reason}`;
+        if (failure !== lastPollFailure) recordFailure('desktop-login', stage, error, correlationId);
+        lastPollFailure = failure;
+      }
       for (const state of active.values()) if (state.window) void state.window.cancel();
     } finally { if (!ended) timer = setTimeout(() => { polling = poll(); }, 500); }
   }

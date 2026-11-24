@@ -1,13 +1,96 @@
-using System.Runtime.Versioning;
-using System.Text.Json;
 using NexusPipeline.Core.Control;
 using NexusPipeline.Core.Notifications;
-using NexusPipeline.Core.Records;
 using NexusPipeline.Core.Operations;
+using NexusPipeline.Core.Records;
 using NexusPipeline.Host.Control.Http;
 using NexusPipeline.Host.Control.Notifications;
+using System.Diagnostics;
+using System.Runtime.Versioning;
+using System.Text.Json;
 
 namespace NexusPipeline.Host.Control.Mcp;
+
+[SupportedOSPlatform("windows")]
+internal sealed class McpControlTools(McpNotificationTools notifications, McpRecordTools records, McpExecutionTools execution, McpAutomationTools automation, McpConfigurationTools configuration, McpProjectTools projects, McpOperationTools operations)
+{
+    internal object List(AuthenticatedControlRequest request) =>
+        new { tools = notifications.List(request).Concat(records.List(request)).Concat(execution.List(request)).Concat(automation.List(request)).Concat(configuration.List(request)).Concat(projects.List(request)).Concat(operations.List(request)).ToArray() };
+    internal Task<object> CallAsync(AuthenticatedControlRequest request, JsonElement parameters, CancellationToken cancellation)
+    {
+        ControlRequestBody.RequireMembers(parameters, "name", "arguments");
+        if (!parameters.TryGetProperty("name", out var value) || value.ValueKind != JsonValueKind.String)
+            throw new McpProtocolException(-32602, "tool_arguments_invalid");
+        var name = value.GetString();
+        if (name == "emulator_discover") return automation.DiscoverAsync(request, parameters);
+        if (name == "script_discover") return automation.DiscoverSourceAsync(request, parameters);
+        if (name is not null && McpProjectTools.Names.Contains(name)) return projects.CallAsync(request, parameters);
+        if (name is "operation_read" or "capabilities") return Task.FromResult(operations.Call(request, parameters));
+        if (name is "configuration_resources" or "configuration_import") return configuration.CallAsync(request, parameters, cancellation);
+        if (name is "automation_list" or "scheduling_list")
+            return Task.FromResult(automation.Call(request, parameters));
+        if (name is "execution_preview" or "execution_start" or "execution_cancel")
+            return Task.FromResult(execution.Call(request, parameters));
+        return name is "notifications_list" or "notifications_save" or "notifications_delete" or
+            "notifications_reorder" or "notifications_limit" or "notifications_test"
+                ? notifications.CallAsync(request, parameters) : Task.FromResult(records.Call(request, parameters));
+    }
+}
+
+internal sealed class McpSessions
+{
+    private const int MaximumSessions = 256;
+    private static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(10);
+    private readonly object _gate = new();
+    private readonly Dictionary<string, Session> _sessions = new(StringComparer.Ordinal);
+
+    internal string Initialize(string subject)
+    {
+        lock (_gate)
+        {
+            var now = Stopwatch.GetTimestamp();
+            foreach (var expired in _sessions.Where(pair => Stopwatch.GetElapsedTime(pair.Value.LastUse, now) >= Lifetime)
+                .Select(pair => pair.Key).ToArray()) _sessions.Remove(expired);
+            if (_sessions.Count >= MaximumSessions) throw new McpProtocolException(-32000, "session_capacity");
+            var id = Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+            _sessions.Add(id, new(subject, now)); return id;
+        }
+    }
+
+    internal void Require(string id, string subject, bool initialize = false)
+    {
+        lock (_gate)
+        {
+            if (!_sessions.TryGetValue(id, out var session) || session.Subject != subject ||
+                Stopwatch.GetElapsedTime(session.LastUse) >= Lifetime)
+            { _sessions.Remove(id); throw new McpProtocolException(-32001, "session_expired"); }
+            if (initialize) session.IsInitialized = true;
+            else if (!session.IsInitialized) throw new McpProtocolException(-32002, "initialization_required");
+            session.LastUse = Stopwatch.GetTimestamp();
+        }
+    }
+
+    internal void End(string id, string subject)
+    {
+        lock (_gate)
+        {
+            if (!_sessions.TryGetValue(id, out var session) || session.Subject != subject)
+                throw new McpProtocolException(-32001, "session_expired");
+            _sessions.Remove(id);
+        }
+    }
+
+    private sealed class Session(string subject, long created)
+    {
+        internal string Subject { get; } = subject;
+        internal long LastUse { get; set; } = created;
+        internal bool IsInitialized { get; set; }
+    }
+}
+
+internal sealed class McpProtocolException(int code, string reason) : Exception(reason)
+{
+    internal int Code { get; } = code;
+}
 
 [SupportedOSPlatform("windows")]
 internal sealed class McpControl(ControlAuthentication authority, McpControlTools tools)
@@ -78,7 +161,7 @@ internal sealed class McpControl(ControlAuthentication authority, McpControlTool
             {
                 "ping" => Empty(parameters),
                 "tools/list" => List(request, parameters),
-                "tools/call" => await CallAsync(request, parameters),
+                "tools/call" => await CallAsync(request, parameters, context.RequestAborted),
                 _ => throw new McpProtocolException(-32601, "method_unknown")
             };
             return Reply(id.Value, result);
@@ -108,9 +191,9 @@ internal sealed class McpControl(ControlAuthentication authority, McpControlTool
             serverInfo = new { name = "NexusPipeline", version = "0.18.0" } });
     }
 
-    private async Task<object> CallAsync(AuthenticatedControlRequest request, JsonElement parameters)
+    private async Task<object> CallAsync(AuthenticatedControlRequest request, JsonElement parameters, CancellationToken cancellation)
     {
-        try { return await tools.CallAsync(request, parameters); }
+        try { return await tools.CallAsync(request, parameters, cancellation); }
         catch (UnauthorizedAccessException) { return McpNotificationTools.Failure("access_denied"); }
         catch (OperationConflictException) { return McpNotificationTools.Failure("operation_conflict"); }
         catch (NotificationTaskException error) { return McpNotificationTools.Failure(error.Message); }

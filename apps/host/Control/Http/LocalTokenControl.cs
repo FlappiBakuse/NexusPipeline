@@ -8,7 +8,7 @@ using NexusPipeline.Platform.Storage.Secrets;
 namespace NexusPipeline.Host.Control.Http;
 
 [SupportedOSPlatform("windows")]
-internal sealed class LocalTokenControl(ControlAuthentication authority, ControlTokenService tokens)
+internal sealed class LocalTokenControl(ControlAuthentication authority, ControlTokenService tokens, Guid instanceId)
 {
     internal void Map(WebApplication app)
     {
@@ -73,7 +73,7 @@ internal sealed class LocalTokenControl(ControlAuthentication authority, Control
         { return ControlErrors.Result(400, "control_token_shape_invalid", operation); }
         catch (UnauthorizedAccessException) { return ControlErrors.Result(403, "access_denied", operation); }
         catch (Exception error) when (!context.RequestAborted.IsCancellationRequested)
-        { return ControlErrors.Secret(error, false, operation); }
+        { return ControlErrors.Secret(error, false, operation, instanceId); }
     }
 
     private async Task<IResult> CancelAsync(HttpContext context, string operationId)

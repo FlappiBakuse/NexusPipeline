@@ -19,7 +19,7 @@ internal sealed class ExecutionReadControl(ControlAuthentication authority, Exec
             return Results.Json(new { revision = execution.ProgressRevision, items = execution.ReadActive(request.SubjectId) }, NotificationUseCases.Json);
         });
         const string route = "/control/v1/execution/runs/{runId}/attempts/{attemptId}/logs/{stepId}/{role}/events";
-        app.MapGet(route, (Delegate)StreamAsync);
+        app.MapGet(route, (Delegate)StreamAsync).WithMetadata(ControlRequestLimits.ResponseStream);
     }
 
     private async Task StreamAsync(HttpContext context, string runId, string attemptId, string stepId, string role)

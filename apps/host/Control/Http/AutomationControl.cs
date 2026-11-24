@@ -1,11 +1,11 @@
-using System.Runtime.Versioning;
-using System.Text.Json;
 using NexusPipeline.Core.Control;
 using NexusPipeline.Host.Control.Automation;
+using NexusPipeline.Host.Control.Configuration;
 using NexusPipeline.Host.Control.Notifications;
-using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Automation;
 using NexusPipeline.Platform.Storage.Configuration;
+using System.Runtime.Versioning;
+using System.Text.Json;
 
 namespace NexusPipeline.Host.Control.Http;
 
@@ -50,13 +50,8 @@ internal sealed class AutomationControl(ControlAuthentication authority, Automat
             var request = authority.Require(context, ControlCapability.AutomationWrite);
             var query = new ControlQueryValues(context.Request.Query); query.Validate();
             using var body = await ControlRequestBody.ReadAsync(context);
-            var bytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(body.Root);
-            try
-            {
-                var command = codec.Read(bytes);
-                return Results.Json(useCases.Change(request, command), NotificationUseCases.Json);
-            }
-            finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(bytes); }
+            var command = codec.ReadParsed(body.Root);
+            return Results.Json(useCases.Change(request, command), NotificationUseCases.Json);
         });
         app.MapPost("/control/v1/automation/change-drafts", async (HttpContext context) =>
         {
@@ -70,13 +65,31 @@ internal sealed class AutomationControl(ControlAuthentication authority, Automat
                 values.GetArrayLength() is < 1 or > 32)
                 throw new ControlRequestException(400, "configuration_draft_selection_invalid");
             var ids = values.EnumerateArray().Select(value => ControlRequestBody.Uuid(value)).ToArray();
-            var bytes = JsonSerializer.SerializeToUtf8Bytes(change);
-            try
-            {
-                return Results.Json(useCases.Change(request, codec.Read(bytes), ids, drafts ??
-                    throw new ControlRequestException(503, "configuration_draft_unavailable")), NotificationUseCases.Json);
-            }
-            finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(bytes); }
+            return Results.Json(useCases.Change(request, codec.ReadParsed(change), ids, drafts ??
+                throw new ControlRequestException(503, "configuration_draft_unavailable")), NotificationUseCases.Json);
+        });
+    }
+}
+
+[SupportedOSPlatform("windows")]
+internal sealed class ScriptSourceControl(ControlAuthentication authority, SourceUseCases sources)
+{
+    internal void Map(WebApplication app)
+    {
+        app.MapPost("/control/v1/automation/scripts/root", async (HttpContext context) =>
+        {
+            var request = authority.Require(context, ControlCapability.AutomationRead);
+            new ControlQueryValues(context.Request.Query).Validate();
+            using var body = await ControlRequestBody.ReadAsync(context);
+            return Results.Json(sources.InspectRoot(request, body.Root, context.RequestAborted), NotificationUseCases.Json);
+        });
+        app.MapPost("/control/v1/automation/scripts/discover", async (HttpContext context) =>
+        {
+            var request = authority.Require(context, ControlCapability.ConfigurationRead);
+            new ControlQueryValues(context.Request.Query).Validate();
+            using var body = await ControlRequestBody.ReadAsync(context);
+            var result = await sources.DiscoverAsync(request, body.Root, context.RequestAborted);
+            return Results.Json(result, NotificationUseCases.Json);
         });
     }
 }

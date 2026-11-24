@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Platform.Networking;
@@ -10,6 +11,18 @@ using NexusPipeline.Platform.Storage.Maintenance;
 using NexusPipeline.Platform.Storage.Sqlite;
 
 namespace NexusPipeline.Host.Lifecycle;
+
+internal sealed record HostHandoffDiagnostic(Guid InstanceId, Guid OperationId, string Stage, HostCompletionActivity? Activity = null)
+{
+    private static readonly object Key = new();
+
+    internal static void Attach(Exception error, HostHandoffDiagnostic diagnostic)
+    {
+        if (!error.Data.IsReadOnly) error.Data[Key] = diagnostic;
+    }
+
+    internal static HostHandoffDiagnostic? Read(Exception error) => error.Data[Key] as HostHandoffDiagnostic;
+}
 
 [SupportedOSPlatform("windows")]
 internal sealed class HostMaintenanceController : IAsyncDisposable
@@ -28,7 +41,6 @@ internal sealed class HostMaintenanceController : IAsyncDisposable
     private readonly MaintenanceStartupOrigin? _inheritedOrigin;
     private readonly NexusPipeline.Platform.Storage.Scheduling.PersistentScheduleService? _scheduling;
     private readonly UpdateWindowIntent? _window;
-    private readonly ILogger? _logger;
     private readonly UpdateReleaseTrust? _trust = UpdateReleaseTrust.Configured();
     private PreparedUpdateHandoff? _handoff;
     private MaintenanceBootstrapPayload? _bootstrap;
@@ -51,13 +63,12 @@ internal sealed class HostMaintenanceController : IAsyncDisposable
         IHostApplicationLifetime application, NativeClientBinding? desktop, MaintenanceStartupOrigin? inheritedOrigin,
         NexusPipeline.Host.Desktop.OwnedDesktop? ownedDesktop = null,
         NexusPipeline.Platform.Storage.Scheduling.PersistentScheduleService? scheduling = null,
-        UpdateWindowIntent? window = null, ILogger? logger = null)
+        UpdateWindowIntent? window = null)
     {
         _instance = instance; _database = database; _lease = lease; _contracts = contracts; _roots = roots;
         _lifecycle = lifecycle; _resources = resources; _application = application; _desktop = desktop;
         _inheritedOrigin = inheritedOrigin; _ownedDesktop = ownedDesktop; _scheduling = scheduling;
         _window = window;
-        _logger = logger;
     }
 
     internal async Task<HostRestartReply> RestartAsync(Guid operationId, CancellationToken cancellation)
@@ -108,21 +119,30 @@ internal sealed class HostMaintenanceController : IAsyncDisposable
                 _application.StopApplication();
                 return _restart.Reply;
             }
-            catch
+            catch (Exception primary)
             {
-                if (_restart is not null && !_restart.Stop())
-                    throw new IOException("host_restart_stop_unconfirmed");
-                _restart?.Dispose(); _restart = null;
-                _restartRoot?.Dispose(); _restartRoot = null;
-                if (!_drain.ReleaseFinishedEffect() && !_drain.TryCancel()) throw Invalid();
-                _drain = null;
+                try
+                {
+                    if (_restart is not null && !_restart.Stop())
+                        throw new IOException("host_restart_stop_unconfirmed");
+                    _restart?.Dispose(); _restart = null;
+                    _restartRoot?.Dispose(); _restartRoot = null;
+                    if (!_drain.ReleaseFinishedEffect() && !_drain.TryCancel()) throw Invalid();
+                    _drain = null;
+                }
+                catch (Exception secondary)
+                {
+                    var code = secondary is IOException { Message: "host_restart_stop_unconfirmed" }
+                        ? "host_restart_stop_unconfirmed" : "host_restart_cleanup_failed";
+                    throw new IOException(code, new AggregateException(primary, secondary));
+                }
                 throw;
             }
         }
         catch (Exception error)
         {
-            _logger?.LogWarning("Host restart rejected during {Stage} ({FailureType})", stage, error.GetType().Name);
-            if (stage == "drain") _logger?.LogWarning("Host restart activity: {Activity}", _lifecycle.ReadCompletionActivity());
+            HostHandoffDiagnostic.Attach(error, new(_instance.InstanceId, operationId, stage,
+                stage == "drain" ? _lifecycle.ReadCompletionActivity() : null));
             throw;
         }
         finally { _serial.Release(); }
@@ -158,6 +178,7 @@ internal sealed class HostMaintenanceController : IAsyncDisposable
         NativeClientBinding? window = null)
     {
         await _serial.WaitAsync(cancellation);
+        var stage = "update-admission";
         try
         {
             if (_stopping) throw Invalid();
@@ -171,7 +192,9 @@ internal sealed class HostMaintenanceController : IAsyncDisposable
             if (_desktop is not null && _ownedDesktop is null) throw new IOException("maintenance_desktop_family_proof_required");
             if (_trust is null) throw new IOException("maintenance_release_trust_unavailable");
             var store = Store();
+            stage = "update-origin";
             var origin = _inheritedOrigin ?? (_ownedOrigin ??= MaintenanceStartupOrigin.CaptureUnjobbedProcess());
+            stage = "update-drain";
             _drain = _lease.PublishExecution(() =>
             {
                 var idle = current.Timing == HostUpdateTiming.WhenIdle;
@@ -182,17 +205,30 @@ internal sealed class HostMaintenanceController : IAsyncDisposable
             try
             {
                 if (!_drain.TryReserve() || !_drain.TryEnterEffect()) throw Invalid();
+                stage = "update-prepare-handoff";
                 _handoff = store.BeginHandoff(operationId, subject, _drain, cancellation);
                 var accepted = Read(operationId, subject) ?? throw Invalid();
                 var windowExit = window is null ? Task.CompletedTask : WaitForWindowAsync(window);
                 _flight = Task.Run(() => CloseDesktopAsync(origin, windowExit));
                 return accepted;
             }
-            catch
+            catch (Exception primary)
             {
-                await AbortUnhandedAsync();
+                try { await AbortUnhandedAsync(); }
+                catch (Exception secondary)
+                {
+                    FailureCode = "maintenance_handoff_blocked";
+                    var cleanup = new CleanupFailures();
+                    cleanup.Add(secondary); cleanup.Preserve(primary);
+                }
                 throw;
             }
+        }
+        catch (Exception error)
+        {
+            HostHandoffDiagnostic.Attach(error, new(_instance.InstanceId, operationId, stage,
+                stage == "update-drain" ? _lifecycle.ReadCompletionActivity() : null));
+            throw;
         }
         finally { _serial.Release(); }
     }
@@ -206,17 +242,21 @@ internal sealed class HostMaintenanceController : IAsyncDisposable
 
     private async Task CloseDesktopAsync(MaintenanceStartupOrigin origin, Task windowExit)
     {
+        var stage = "desktop-exit";
         try
         {
             await windowExit;
+            stage = "bootstrap";
             _bootstrap = MaintenanceBootstrapPayload.Prepare(_handoff ?? throw Invalid(), _lease, _database, _contracts, _roots,
                 new(_contracts, _trust!.Policy), _application.ApplicationStopping);
             if (_ownedDesktop is not null)
             {
+                stage = "desktop-family-exit";
                 using var prepared = _resources.PrepareDesktopExit(_drain!, _handoff!.Root);
                 await _ownedDesktop.ExitForMaintenanceAsync(prepared, _application.ApplicationStopping);
             }
             var handoff = _handoff ?? throw Invalid();
+            stage = "helper-start";
             var bootstrap = _bootstrap ?? throw Invalid();
             _ready = new(handoff, _lease, bootstrap);
             _helper = new(origin, _ => { });
@@ -229,17 +269,15 @@ internal sealed class HostMaintenanceController : IAsyncDisposable
                 actual => writerId = MaintenanceRegisteredActor.RegisterSuspended(handoff, _lease, bootstrap, _helper, actual));
             await ObserveHelperAsync(root, writerId);
         }
-        catch (Exception error) when (error is IOException or OperationCanceledException or System.ComponentModel.Win32Exception or InvalidOperationException)
+        catch (Exception error) when (IsHandoffFailure(error))
         {
-            FailureCode = "maintenance_desktop_or_helper_not_ready";
-            try { await AbortUnhandedAsync(); }
-            catch (Exception blocked) when (blocked is IOException or InvalidOperationException or System.ComponentModel.Win32Exception)
-            { FailureCode = "maintenance_handoff_blocked"; }
+            await RecordUnhandedFailureAsync("maintenance_desktop_or_helper_not_ready", stage, error);
         }
     }
 
     private async Task ObserveHelperAsync(OwnedWorkerIdentity root, Guid writerId)
     {
+        int? exitCode = null;
         try
         {
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -247,23 +285,35 @@ internal sealed class HostMaintenanceController : IAsyncDisposable
             while (!ready.IsCompleted)
             {
                 if (await _helper!.AwaitRootAsync(root, TimeSpan.FromMilliseconds(100)) is not { } exit) continue;
+                exitCode = exit;
                 deadline.Cancel();
+                Exception? readiness = null;
                 try { await ready; }
-                catch (Exception stopped) when (stopped is IOException or OperationCanceledException or System.ComponentModel.Win32Exception) { }
-                Console.Error.WriteLine("maintenance_helper_exit_" + exit.ToString(System.Globalization.CultureInfo.InvariantCulture));
-                throw new IOException("maintenance_helper_exited_before_ready");
+                catch (OperationCanceledException) when (deadline.IsCancellationRequested) { }
+                catch (Exception stopped) when (IsHandoffFailure(stopped)) { readiness = stopped; }
+                throw new IOException("maintenance_helper_exited_before_ready", readiness);
             }
             await ready;
             _handedOff = true;
             _application.StopApplication();
         }
-        catch (Exception error) when (error is IOException or OperationCanceledException or System.ComponentModel.Win32Exception or InvalidOperationException)
+        catch (Exception error) when (IsHandoffFailure(error))
         {
-            FailureCode = "maintenance_helper_not_ready";
-            try { await AbortUnhandedAsync(); }
-            catch (Exception blocked) when (blocked is IOException or InvalidOperationException or System.ComponentModel.Win32Exception)
-            { FailureCode = "maintenance_handoff_blocked"; }
+            await RecordUnhandedFailureAsync("maintenance_helper_not_ready", "helper-ready", error, exitCode);
         }
+    }
+
+    private async Task RecordUnhandedFailureAsync(string code, string stage, Exception error, int? exitCode = null)
+    {
+        FailureCode = code;
+        Exception? cleanup = null;
+        try { await AbortUnhandedAsync(); }
+        catch (Exception blocked) when (IsHandoffFailure(blocked))
+        {
+            FailureCode = "maintenance_handoff_blocked";
+            cleanup = blocked;
+        }
+        MaintenanceDiagnostic.Record(_instance, _operationId, "controller", stage, error, cleanup, exitCode);
     }
 
     private async Task AbortUnhandedAsync()
@@ -301,11 +351,13 @@ internal sealed class HostMaintenanceController : IAsyncDisposable
 
     private void ReleaseInputs()
     {
-        _ready?.Dispose(); _ready = null;
-        _helper?.Dispose(); _helper = null;
-        _bootstrap?.Dispose(); _bootstrap = null;
-        _handoff?.Dispose(); _handoff = null;
-        _ownedOrigin?.Dispose(); _ownedOrigin = null;
+        var cleanup = new CleanupFailures();
+        cleanup.Attempt(() => { _ready?.Dispose(); _ready = null; });
+        cleanup.Attempt(() => { _helper?.Dispose(); _helper = null; });
+        cleanup.Attempt(() => { _bootstrap?.Dispose(); _bootstrap = null; });
+        cleanup.Attempt(() => { _handoff?.Dispose(); _handoff = null; });
+        cleanup.Attempt(() => { _ownedOrigin?.Dispose(); _ownedOrigin = null; });
+        cleanup.Preserve();
     }
 
     public async ValueTask DisposeAsync()
@@ -318,5 +370,8 @@ internal sealed class HostMaintenanceController : IAsyncDisposable
         _restart?.Dispose(); _restartRoot?.Dispose();
         ReleaseInputs(); _drain?.Dispose(); _serial.Dispose();
     }
+    private static bool IsHandoffFailure(Exception error) => error is IOException or OperationCanceledException or
+        System.ComponentModel.Win32Exception or InvalidOperationException or SqliteException or System.Text.Json.JsonException or
+        UnauthorizedAccessException or System.Security.Cryptography.CryptographicException or ArgumentException;
     private static IOException Invalid() => new("maintenance_handoff_unavailable");
 }

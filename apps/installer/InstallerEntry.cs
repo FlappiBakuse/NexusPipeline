@@ -3,6 +3,7 @@ using System.Runtime.Versioning;
 using System.Text.Json;
 using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Storage;
+using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Installation;
 
 namespace NexusPipeline.Installer;
@@ -99,12 +100,18 @@ internal static class InstallerEntry
             System.ComponentModel.Win32Exception or System.Security.SecurityException or NexusPipeline.Core.Settings.HostSettingsException or
             System.Runtime.InteropServices.COMException)
         {
-            var reason = error.Message.Length is > 0 and <= 96 && error.Message.All(character => char.IsAsciiLetterLower(character) || character is '_' or >= '0' and <= '9')
+            var reason = error.Message.StartsWith("installer_", StringComparison.Ordinal) && error.Message.Length <= 96 &&
+                error.Message.All(character => char.IsAsciiLetterLower(character) || character is '_' or >= '0' and <= '9')
                 ? error.Message : error.GetType().Name;
             var origin = new StackTrace(error).GetFrames().Select(frame => frame.GetMethod())
                 .FirstOrDefault(method => method?.DeclaringType?.Namespace?.StartsWith("NexusPipeline.", StringComparison.Ordinal) == true);
-            Console.Error.WriteLine(JsonSerializer.Serialize(new { code = "installer_entry_rejected", reason,
-                origin = origin is null ? null : origin.DeclaringType!.Name + "." + origin.Name, error.HResult }));
+            try
+            {
+                Console.Error.WriteLine(JsonSerializer.Serialize(new { code = "installer_entry_rejected", reason,
+                    origin = origin is null ? null : origin.DeclaringType!.Name + "." + origin.Name, error.HResult,
+                    causes = ExecutionFailureTrace.Describe(error) }));
+            }
+            catch (Exception loggingFailure) when (loggingFailure is IOException or ObjectDisposedException) { }
             return 1;
         }
     }

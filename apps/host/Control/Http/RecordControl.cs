@@ -1,9 +1,12 @@
-using System.Runtime.Versioning;
 using NexusPipeline.Core.Control;
 using NexusPipeline.Core.Records;
 using NexusPipeline.Host.Control.Notifications;
 using NexusPipeline.Host.Control.Records;
 using NexusPipeline.Platform.Serialization;
+using NexusPipeline.Platform.Storage.Execution;
+using NexusPipeline.Platform.Storage.Records;
+using NexusPipeline.Platform.Storage.Sqlite;
+using System.Runtime.Versioning;
 
 namespace NexusPipeline.Host.Control.Http;
 
@@ -59,7 +62,7 @@ internal sealed class RecordControl(ControlAuthentication authority, RecordUseCa
                 ControlQueryValues.Id(captureId));
             return Results.Stream(useCases.ImageOriginal(request, key, query.Digest("resultSha256")),
                 "image/png", "capture.png", enableRangeProcessing: false);
-        });
+        }).WithMetadata(ControlRequestLimits.ResponseStream);
         app.MapPost("/control/v1/records/{runId}/retire/{kind}", RetireAsync);
     }
 
@@ -83,7 +86,7 @@ internal sealed class RecordControl(ControlAuthentication authority, RecordUseCa
             var query = Query(context, "snapshotSha256", "invocationOrdinal");
             return Results.Stream(useCases.LogOriginal(request, Key(runId, attemptId, stepId, role) with { InvocationOrdinal = Invocation(query) }, query.Digest("snapshotSha256")),
                 "application/octet-stream", "original.log", enableRangeProcessing: false);
-        });
+        }).WithMetadata(ControlRequestLimits.ResponseStream);
         app.MapGet(prefix + "/parts/{index}", (HttpContext context, string runId, string attemptId, string stepId, string role, string index) =>
         {
             var request = authority.Require(context, ControlCapability.LogsRead);
@@ -93,7 +96,7 @@ internal sealed class RecordControl(ControlAuthentication authority, RecordUseCa
                 throw new ControlRequestException(400, "query_invalid");
             return Results.Stream(useCases.LogPart(request, Key(runId, attemptId, stepId, role) with { InvocationOrdinal = Invocation(query) },
                 query.Digest("snapshotSha256"), part), "application/octet-stream", "part.log", enableRangeProcessing: false);
-        });
+        }).WithMetadata(ControlRequestLimits.ResponseStream);
     }
 
     private async Task<IResult> RetireAsync(HttpContext context, string runId, string kind)
@@ -102,9 +105,7 @@ internal sealed class RecordControl(ControlAuthentication authority, RecordUseCa
         using var body = await ControlRequestBody.ReadAsync(context, 4096);
         body.RequireSchema(contracts, "control-record-retirement.schema.json");
         var root = body.Root;
-        ControlRequestBody.RequireMembers(root, "format", "version", "operationId", "afterSha256", "limit");
-        if (new[] { "format", "version", "operationId", "afterSha256", "limit" }.Any(name => !root.TryGetProperty(name, out _)) ||
-            root.GetProperty("format").GetString() != "nexus.control.record-retirement" || root.GetProperty("version").GetInt32() != 1)
+        if (root.GetProperty("version").GetInt32() != 1)
             throw new ControlRequestException(400, "record_retirement_request_invalid");
         var operation = ControlRequestBody.Uuid(root.GetProperty("operationId"));
         var after = root.GetProperty("afterSha256").GetString() ?? throw new ControlRequestException(400, "query_invalid");
@@ -123,4 +124,65 @@ internal sealed class RecordControl(ControlAuthentication authority, RecordUseCa
     private static RunLogKey Key(string runId, string attemptId, string stepId, string role) =>
         new(ControlQueryValues.Id(runId), ControlQueryValues.Id(attemptId), stepId, ControlQueryValues.Role(role));
     private static IResult Json(object value) => Results.Json(value, NotificationUseCases.Json);
+}
+
+[SupportedOSPlatform("windows")]
+internal sealed class RecordSummaryControl(ControlAuthentication authority, RecordSummaryReader records, RecordDisplayReader display)
+{
+    internal void Map(WebApplication app)
+    {
+        app.MapGet("/control/v1/records/{runId}/display", (HttpContext context, string runId) =>
+        {
+            authority.Require(context, ControlCapability.RecordsRead);
+            new ControlQueryValues(context.Request.Query).Validate();
+            var value = display.Read(ControlQueryValues.Id(runId));
+            return value is null ? ControlErrors.Result(404, "record_display_unavailable") : Results.Json(value, NotificationUseCases.Json);
+        });
+        app.MapGet("/control/v1/records/summary", (HttpContext context) =>
+        {
+            authority.Require(context, ControlCapability.RecordsRead);
+            return Results.Json(records.Read(Query(context)), NotificationUseCases.Json);
+        });
+        app.MapGet("/control/v1/records/summary/days", (HttpContext context) =>
+        {
+            authority.Require(context, ControlCapability.RecordsRead);
+            return Results.Json(records.ReadDays(Query(context)), NotificationUseCases.Json);
+        });
+        app.MapGet("/control/v1/records/summary/users", (HttpContext context) =>
+        {
+            authority.Require(context, ControlCapability.RecordsRead);
+            return Results.Json(records.ReadUsers(Query(context)), NotificationUseCases.Json);
+        });
+        app.MapGet("/control/v1/records/{runId}", (HttpContext context, string runId) =>
+        {
+            authority.Require(context, ControlCapability.RecordsRead);
+            var query = new ControlQueryValues(context.Request.Query, "userId"); query.Validate();
+            var record = records.Read(ControlQueryValues.Id(runId), query.OptionalId("userId"));
+            return record is null ? ControlErrors.Result(404, "record_not_found") : Results.Json(record, NotificationUseCases.Json);
+        });
+    }
+
+    private static RecordSummaryQuery Query(HttpContext context)
+    {
+        var query = new ControlQueryValues(context.Request.Query, "endedFromInclusive", "endedUntilExclusive",
+            "offsetMinutes", "userId", "business", "afterUserId", "lifecycle"); query.Validate();
+        return new(query.Utc("endedFromInclusive") ?? throw new ControlRequestException(400, "query_invalid"),
+            query.Utc("endedUntilExclusive") ?? throw new ControlRequestException(400, "query_invalid"),
+            query.Integer("offsetMinutes", 0), query.OptionalId("userId"), query.Business("business"),
+            query.OptionalId("afterUserId"), query.Lifecycle("lifecycle"));
+    }
+}
+
+[SupportedOSPlatform("windows")]
+internal sealed class ExecutionReportControl(ControlAuthentication authority, ExecutionLogReader reader)
+{
+    internal void Map(WebApplication app)
+    {
+        app.MapGet("/control/v1/records/{runId}/attempts/{attemptId}/report", (HttpContext context, string runId, string attemptId) =>
+        {
+            _ = authority.Require(context, ControlCapability.RecordsRead);
+            new ControlQueryValues(context.Request.Query).Validate();
+            return Results.Json(reader.ReadReport(ControlQueryValues.Id(runId), ControlQueryValues.Id(attemptId)), NotificationUseCases.Json);
+        });
+    }
 }

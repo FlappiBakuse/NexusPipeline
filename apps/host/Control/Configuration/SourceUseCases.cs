@@ -15,7 +15,7 @@ internal sealed class SourceUseCases(ScriptSourceService sources, ContractReader
     {
         void Current() => request.Require(ControlCapability.AutomationRead);
         Current();
-        var command = contracts.Read<ControlScriptRoot>(JsonSerializer.SerializeToUtf8Bytes(body), "control-script-root.schema.json");
+        var command = contracts.ReadParsed<ControlScriptRoot>(body, "control-script-root.schema.json");
         var exists = sources.IsRootDirectory(command.RootPath, Current, cancellation);
         return new { rootPath = command.RootPath, isDirectory = exists };
     }
@@ -27,7 +27,7 @@ internal sealed class SourceUseCases(ScriptSourceService sources, ContractReader
             request.Require(ControlCapability.ConfigurationRead);
         }
         Current();
-        var command = contracts.Read<ControlScriptSource>(JsonSerializer.SerializeToUtf8Bytes(body), "control-script-source.schema.json");
+        var command = contracts.ReadParsed<ControlScriptSource>(body, "control-script-source.schema.json");
         try
         {
             var result = await sources.DiscoverAsync(Guid.Parse(command.OperationId), command.ExtensionId,

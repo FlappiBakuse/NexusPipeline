@@ -12,10 +12,10 @@ namespace NexusPipeline.Host.Control.Configuration;
 [SupportedOSPlatform("windows")]
 internal sealed class ImportUseCases(ConfigurationImportService service, ContractReader contracts, BindingSourceImport? sources = null)
 {
-    internal object Execute(AuthenticatedControlRequest request, JsonElement body, CancellationToken cancellation)
+    internal async ValueTask<object> ExecuteAsync(AuthenticatedControlRequest request, JsonElement body, CancellationToken cancellation)
     {
         request.Require(ControlCapability.ConfigurationEdit);
-        using var verified = contracts.Read(BoundedJson.Serialize(body), "control-configuration-import.schema.json");
+        contracts.RequireParsedSchema(body, "control-configuration-import.schema.json");
         var selection = new ConfigurationImportRequest(ControlRequestBody.Uuid(body.GetProperty("operationId")),
             ControlRequestBody.Uuid(body.GetProperty("bindingId")), body.GetProperty("expectedBindingRevision").GetInt64(),
             body.GetProperty("expectedScriptRevision").GetInt64(), body.GetProperty("resources").EnumerateArray().Select(item =>
@@ -25,8 +25,8 @@ internal sealed class ImportUseCases(ConfigurationImportService service, Contrac
             };
         request.Require(ControlCapability.ConfigurationEdit);
         var result = selection.CandidateId is null ? service.Import(request.SubjectId, selection, DateTimeOffset.UtcNow, cancellation) :
-            (sources ?? throw new ConfigurationException("configuration_source_unavailable")).ImportAsync(request.SubjectId, selection,
-                () => request.Require(ControlCapability.ConfigurationEdit), cancellation).AsTask().GetAwaiter().GetResult();
+            await (sources ?? throw new ConfigurationException("configuration_source_unavailable")).ImportAsync(request.SubjectId, selection,
+                () => request.Require(ControlCapability.ConfigurationEdit), cancellation);
         return new { result.OperationId, result.IsNew,
             resources = result.Items.Select(item => new { item.Saved.Address, item.Saved.Revision, item.HasChanges }).ToArray() };
     }

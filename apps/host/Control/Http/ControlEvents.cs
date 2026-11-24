@@ -56,7 +56,7 @@ internal sealed class ControlEvents(ControlAuthentication authority, ControlEven
                 }
             }
             catch (OperationCanceledException) when (deadline.IsCancellationRequested) { }
-        });
+        }).WithMetadata(ControlRequestLimits.EventSubscription);
     }
     private static ControlQueryValues Query(HttpContext context, params string[] names)
     { var query = new ControlQueryValues(context.Request.Query, names); query.Validate(); return query; }

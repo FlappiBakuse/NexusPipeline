@@ -15,8 +15,10 @@ internal static class WebAssets
 
     internal static void Map(WebApplication app)
     {
-        foreach (var path in Pages) app.MapGet(path, (HttpContext context) => Serve(context, "/index.html"));
-        foreach (var path in Assets.Keys) app.MapGet(path, (HttpContext context) => Serve(context, path));
+        foreach (var path in Pages)
+            app.MapGet(path, (HttpContext context) => Serve(context, "/index.html")).WithMetadata(ControlRequestLimits.ResponseStream);
+        foreach (var path in Assets.Keys)
+            app.MapGet(path, (HttpContext context) => Serve(context, path)).WithMetadata(ControlRequestLimits.ResponseStream);
     }
 
     private static IResult Serve(HttpContext context, string path)

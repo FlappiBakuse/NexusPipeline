@@ -18,37 +18,47 @@ internal static class ControlRequestBody
             content.Parameters.Count > 1 || content.Parameters.Any(value => !value.Name.Equals("charset", StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(value.Value?.Trim('"'), "utf-8", StringComparison.OrdinalIgnoreCase)))
             throw new ControlRequestException(415, "request_media_type_invalid");
-        if (context.Request.ContentLength > maximum) throw new ControlRequestException(413, "request_too_large");
-        var initial = context.Request.ContentLength is { } length && length >= 0 ? (int)length + 1 : 8192;
-        var bytes = ArrayPool<byte>.Shared.Rent(Math.Min(maximum + 1, initial));
+        using var body = await ReadBytesAsync(context.Request, maximum, context.RequestAborted);
+        var owned = body.Content.ToArray();
+        try { return new(StrictJson.Parse(owned), owned); }
+        catch { CryptographicOperations.ZeroMemory(owned); throw; }
+    }
+
+    internal static async Task<PooledControlBody> ReadBytesAsync(HttpRequest request, int maximum, CancellationToken cancellationToken)
+    {
+        if (request.ContentLength > maximum) throw new ControlRequestException(413, "request_too_large");
+        var initial = request.ContentLength is { } length && length >= 0 ? (int)length + 1 : 8192;
+        var bytes = ArrayPool<byte>.Shared.Rent(Math.Min(maximum, initial));
         var count = 0;
         try
         {
-            while (count <= maximum)
+            while (count < maximum)
             {
                 if (count == bytes.Length)
                 {
-                    var expanded = ArrayPool<byte>.Shared.Rent(Math.Min(maximum + 1, bytes.Length * 2));
+                    var expanded = ArrayPool<byte>.Shared.Rent(Math.Min(maximum, bytes.Length * 2));
                     bytes.AsSpan(0, count).CopyTo(expanded);
-                    CryptographicOperations.ZeroMemory(bytes);
-                    ArrayPool<byte>.Shared.Return(bytes);
+                    PooledControlBody.Return(bytes);
                     bytes = expanded;
                 }
-                var read = await context.Request.Body.ReadAsync(bytes.AsMemory(count,
-                    Math.Min(bytes.Length - count, maximum + 1 - count)), context.RequestAborted);
+                var read = await request.Body.ReadAsync(bytes.AsMemory(count,
+                    Math.Min(bytes.Length - count, maximum - count)), cancellationToken);
                 if (read == 0) break;
                 count += read;
             }
-            if (count > maximum) throw new ControlRequestException(413, "request_too_large");
-            var owned = bytes.AsSpan(0, count).ToArray();
-            try { return new(StrictJson.Parse(owned), owned); }
-            catch { CryptographicOperations.ZeroMemory(owned); throw; }
+            if (count == maximum)
+            {
+                var extra = new byte[1];
+                try
+                {
+                    if (await request.Body.ReadAsync(extra.AsMemory(), cancellationToken) != 0)
+                        throw new ControlRequestException(413, "request_too_large");
+                }
+                finally { CryptographicOperations.ZeroMemory(extra); }
+            }
+            return new(bytes, count);
         }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(bytes);
-            ArrayPool<byte>.Shared.Return(bytes);
-        }
+        catch { PooledControlBody.Return(bytes); throw; }
     }
 
     internal static void RequireMembers(JsonElement value, params string[] names)
@@ -73,6 +83,22 @@ internal sealed class ControlJsonBody(JsonDocument document, byte[] owned) : IDi
     {
         document.Dispose();
         CryptographicOperations.ZeroMemory(owned);
+    }
+}
+
+internal sealed class PooledControlBody(byte[] bytes, int count) : IDisposable
+{
+    private byte[]? _bytes = bytes;
+    internal ReadOnlyMemory<byte> Content => (_bytes ?? throw new ObjectDisposedException(nameof(PooledControlBody))).AsMemory(0, count);
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _bytes, null) is { } previous) Return(previous);
+    }
+
+    internal static void Return(byte[] bytes)
+    {
+        CryptographicOperations.ZeroMemory(bytes);
+        ArrayPool<byte>.Shared.Return(bytes);
     }
 }
 

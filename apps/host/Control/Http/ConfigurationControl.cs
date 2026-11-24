@@ -1,8 +1,9 @@
-using System.Runtime.Versioning;
 using NexusPipeline.Core.Control;
 using NexusPipeline.Host.Control.Configuration;
 using NexusPipeline.Host.Control.Notifications;
 using NexusPipeline.Platform.Serialization;
+using NexusPipeline.Platform.Storage.Configuration;
+using System.Runtime.Versioning;
 
 namespace NexusPipeline.Host.Control.Http;
 
@@ -36,7 +37,7 @@ internal sealed class ConfigurationValueControl(ControlAuthentication authority,
             return Results.Stream(values.OpenOriginal(request, ControlQueryValues.Id(bindingId), resourceId, revision,
                 query.Text("relativePath") ?? "", query.Digest("sourceSha256")),
                 "application/octet-stream", "configuration.bin", enableRangeProcessing: false);
-        });
+        }).WithMetadata(ControlRequestLimits.ResponseStream);
         app.MapGet("/control/v1/configuration/generic/{bindingId}/{resourceId}/document",
             (HttpContext context, string bindingId, string resourceId) =>
         {
@@ -60,4 +61,34 @@ internal sealed class ConfigurationValueControl(ControlAuthentication authority,
     }
     private static ControlQueryValues Query(HttpContext context, params string[] names)
     { var query = new ControlQueryValues(context.Request.Query, names); query.Validate(1024); return query; }
+}
+
+[SupportedOSPlatform("windows")]
+internal sealed class ConfigurationReadControl(ControlAuthentication authority, ConfigurationOverviewReader reader)
+{
+    internal void Map(WebApplication app)
+    {
+        app.MapGet("/control/v1/configuration/bindings/{bindingId}/resources", (HttpContext context, string bindingId) =>
+        {
+            authority.Require(context, ControlCapability.ConfigurationRead);
+            new ControlQueryValues(context.Request.Query).Validate();
+            return Results.Json(reader.Read(ControlQueryValues.Id(bindingId)), NotificationUseCases.Json);
+        });
+    }
+}
+
+[SupportedOSPlatform("windows")]
+internal sealed class ConfigurationImportControl(ControlAuthentication authority, ImportUseCases imports)
+{
+    internal void Map(WebApplication app)
+    {
+        app.MapPost("/control/v1/configuration/import", async (HttpContext context) =>
+        {
+            var request = authority.Require(context, ControlCapability.ConfigurationEdit);
+            new ControlQueryValues(context.Request.Query).Validate();
+            using var body = await ControlRequestBody.ReadAsync(context, 16384);
+            var result = await imports.ExecuteAsync(request, body.Root, context.RequestAborted);
+            return Results.Json(result, NotificationUseCases.Json);
+        });
+    }
 }

@@ -1,4 +1,5 @@
 using NexusPipeline.Core.Maintenance;
+using NexusPipeline.Host.Control.Http;
 using NexusPipeline.Platform.Networking;
 
 namespace NexusPipeline.Host.Lifecycle;
@@ -43,9 +44,7 @@ internal sealed class DesktopExitWatch(NativeClientBinding binding, HostLifecycl
         }
         catch (Exception exception) when (exception is IOException or System.ComponentModel.Win32Exception or InvalidOperationException)
         {
-            var reason = exception is IOException && exception.Message.StartsWith("worker_stopped_family_", StringComparison.Ordinal)
-                ? exception.Message : exception.GetType().Name;
-            Console.Error.WriteLine("desktop_exit_unverified:" + reason);
+            ControlErrors.RecordLifetime("desktop-exit-unverified", permit.SessionId, exception, correlationId: permit.CorrelationId);
         }
         finally
         {

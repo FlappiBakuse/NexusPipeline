@@ -1,10 +1,10 @@
+using NexusPipeline.Core.Control;
+using NexusPipeline.Core.Settings;
+using NexusPipeline.Platform.Storage.Secrets;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Runtime.Versioning;
 using System.Security.Principal;
-using NexusPipeline.Core.Control;
-using NexusPipeline.Core.Settings;
-using NexusPipeline.Platform.Storage.Secrets;
 
 namespace NexusPipeline.Host.Control.Http;
 
@@ -20,6 +20,9 @@ internal sealed class ControlAuthentication
     private readonly ControlBearerVerifier _bearer;
     private readonly string _localSubject;
     private readonly ControlAuthenticationThrottle _throttle;
+    private readonly TimeProvider _clock;
+    private long _nextDependencyDiagnostic;
+    internal Guid InstanceId => _instanceId;
 
     internal ControlAuthentication(Guid instanceId, bool effectiveRemoteListener, int? effectiveMcpPort,
         Func<HostSettingsSnapshot> settings, ControlBearerVerifier bearer, TimeProvider clock)
@@ -30,7 +33,7 @@ internal sealed class ControlAuthentication
         var sid = user.User?.Value ?? throw new IOException("control_windows_user_unavailable");
         _localSubject = "local:" + sid;
         _instanceId = instanceId; _effectiveRemoteListener = effectiveRemoteListener; _effectiveMcpPort = effectiveMcpPort;
-        _settings = settings; _bearer = bearer; _throttle = new(clock);
+        _settings = settings; _bearer = bearer; _throttle = new(clock); _clock = clock;
     }
 
     internal async Task InvokeAsync(HttpContext context, RequestDelegate next)
@@ -53,6 +56,7 @@ internal sealed class ControlAuthentication
         {
             if (!_effectiveRemoteListener || !current!.AllowRemoteAccess) { await Deny(context, 403); return; }
             if (!_throttle.IsAllowed(peer)) { await Deny(context, 429); return; }
+            Exception? dependencyFailure = null;
             var header = context.Request.Headers.Authorization;
             if (header.Count == 1 && header[0] is { Length: <= 280 } text &&
                 AuthenticationHeaderValue.TryParse(text, out var parsed) &&
@@ -61,10 +65,17 @@ internal sealed class ControlAuthentication
                 try { credential = _bearer.Verify(token); }
                 catch (Exception error) when (error is IOException or UnauthorizedAccessException or
                     System.Security.Cryptography.CryptographicException or System.ComponentModel.Win32Exception or InvalidOperationException)
-                { credential = null; }
+                { dependencyFailure = error; }
             }
             if (credential is null)
-            { _throttle.RecordFailure(peer); await Deny(context, 401); return; }
+            {
+                _throttle.RecordFailure(peer);
+                if (dependencyFailure is not null && TakeDependencyDiagnostic())
+                    await ControlErrors.Reported(401, "access_denied", "bearer-verification", dependencyFailure,
+                        instanceId: _instanceId).ExecuteAsync(context);
+                else await Deny(context, 401);
+                return;
+            }
         }
         var origin = isMcp ? ControlOrigin.Mcp : local ? ControlOrigin.Local : ControlOrigin.Remote;
         Func<ControlPermissionSnapshot> permissions = origin == ControlOrigin.Local ? static () => LocalPermissions : () =>
@@ -90,6 +101,13 @@ internal sealed class ControlAuthentication
 
     private static Task Deny(HttpContext context, int status) =>
         ControlErrors.Result(status, status == 429 ? "authentication_throttled" : "access_denied").ExecuteAsync(context);
+
+    private bool TakeDependencyDiagnostic()
+    {
+        var now = _clock.GetUtcNow().ToUnixTimeSeconds();
+        var next = Interlocked.Read(ref _nextDependencyDiagnostic);
+        return now >= next && Interlocked.CompareExchange(ref _nextDependencyDiagnostic, now + 60, next) == next;
+    }
 
     private static bool Authority(HttpContext context)
     {
@@ -143,5 +161,36 @@ internal sealed class AuthenticatedControlRequest
         if (!ControlCapabilityPolicy.IsAllowed(original.Origin, ControlCapability.ExtensionsRead, original._current()))
             throw new UnauthorizedAccessException("control_capability_denied");
         Require(ControlCapability.ExtensionsRead);
+    }
+}
+
+internal sealed class ControlAuthenticationThrottle(TimeProvider clock)
+{
+    private readonly object _gate = new();
+    private readonly Dictionary<IPAddress, (long Since, int Failures)> _failures = [];
+    private static readonly TimeSpan Window = TimeSpan.FromMinutes(1);
+
+    internal bool IsAllowed(IPAddress peer)
+    {
+        lock (_gate)
+        {
+            Prune();
+            return _failures.TryGetValue(peer, out var value) ? value.Failures < 20 : _failures.Count < 256;
+        }
+    }
+    internal void RecordFailure(IPAddress peer)
+    {
+        lock (_gate)
+        {
+            Prune();
+            if (_failures.TryGetValue(peer, out var old))
+                _failures[peer] = (old.Since, Math.Min(20, old.Failures + 1));
+            else if (_failures.Count < 256) _failures.Add(peer, (clock.GetTimestamp(), 1));
+        }
+    }
+    private void Prune()
+    {
+        foreach (var peer in _failures.Where(pair => clock.GetElapsedTime(pair.Value.Since) >= Window)
+                     .Select(pair => pair.Key).ToArray()) _failures.Remove(peer);
     }
 }

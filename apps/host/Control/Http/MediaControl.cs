@@ -34,7 +34,7 @@ internal sealed class MediaControl(ControlAuthentication authority, MediaUseCase
             context.Response.Headers["X-Image-Width"] = image.Width.ToString(System.Globalization.CultureInfo.InvariantCulture);
             context.Response.Headers["X-Image-Height"] = image.Height.ToString(System.Globalization.CultureInfo.InvariantCulture);
             await context.Response.Body.WriteAsync(image.Png, context.RequestAborted);
-        });
+        }).WithMetadata(ControlRequestLimits.ResponseStream);
         app.MapPost("/control/v1/media/previews/{previewId}/close", async (HttpContext context, string previewId) =>
         {
             var request = authority.Require(context, ControlCapability.MediaGrant); Query(context);

@@ -39,7 +39,7 @@ internal sealed class McpAutomationTools(AutomationUseCases automation, Emulator
         request.Require(ControlCapability.AutomationRead);
         if (emulators is null || contracts is null || !parameters.TryGetProperty("arguments", out var arguments))
             throw new McpProtocolException(-32602, "tool_arguments_invalid");
-        var command = contracts.Read<ControlEmulatorDiscover>(JsonSerializer.SerializeToUtf8Bytes(arguments), "control-emulator-discover.schema.json");
+        var command = contracts.ReadParsed<ControlEmulatorDiscover>(arguments, "control-emulator-discover.schema.json");
         var result = await emulators.DiscoverAsync(Guid.Parse(command.ScriptId), command.ExpectedCatalogRevision,
             command.RootIds.Select(Guid.Parse).ToArray(), () => request.Require(ControlCapability.AutomationRead), CancellationToken.None);
         return new { content = new[] { new { type = "text", text = JsonSerializer.Serialize(result, NotificationUseCases.Json) } }, structuredContent = result, isError = false };

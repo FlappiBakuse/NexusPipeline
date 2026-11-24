@@ -13,7 +13,7 @@ internal sealed class ControlEventFeed(Guid instanceId, Func<ControlEventRevisio
     private readonly Guid _stream = Guid.NewGuid();
     private long _sequence;
     private ControlEventRevision? _revision;
-    private object? _snapshot;
+    private EncodedControlJson? _snapshot;
 
     internal object Snapshot()
     {
@@ -40,7 +40,7 @@ internal sealed class ControlEventFeed(Guid instanceId, Func<ControlEventRevisio
         }
     }
 
-    private object Capture()
+    private EncodedControlJson Capture()
     {
         var revision = readRevision();
         if (_revision == revision && _snapshot is not null) return _snapshot;
@@ -49,12 +49,14 @@ internal sealed class ControlEventFeed(Guid instanceId, Func<ControlEventRevisio
             var value = readSnapshot();
             var current = readRevision();
             if (current != revision) { revision = current; continue; }
-            if (JsonSerializer.SerializeToUtf8Bytes(value).Length > 4096) throw new IOException("control_event_snapshot_limit");
+            var snapshot = new EncodedControlJson(JsonSerializer.SerializeToUtf8Bytes(value));
+            if (snapshot.SizeBytes > 4096) throw new IOException("control_event_snapshot_limit");
             if (_sequence >= 9007199254740991) throw new IOException("control_event_sequence_exhausted");
-            _sequence++; _revision = revision; _snapshot = value;
-            _retained.Enqueue(Message(_sequence, "state", value));
+            var message = Message(_sequence + 1, "state", snapshot);
+            _sequence = message.Sequence; _revision = revision; _snapshot = snapshot;
+            _retained.Enqueue(message);
             while (_retained.Count > 256) _retained.Dequeue();
-            return value;
+            return snapshot;
         }
         throw new IOException("control_event_snapshot_changed");
     }

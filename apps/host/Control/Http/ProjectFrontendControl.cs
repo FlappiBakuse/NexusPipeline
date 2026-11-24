@@ -1,8 +1,9 @@
+using System.Buffers;
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using NexusPipeline.Core.Control;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Host.Control.Configuration;
@@ -68,15 +69,20 @@ internal sealed class ProjectFrontendControl(Guid instanceId, ControlAuthenticat
                 var selected = isScript
                     ? ScriptOwner(projects.ReadScriptContext(caller, ownerId, extensionId, current))
                     : BindingOwner(projects.ReadContext(caller, ownerId, extensionId, current, action is not ("select" or "result"), draft));
+                var input = body.Root.GetProperty("input");
                 if (action == "context")
                 {
-                    ControlRequestBody.RequireMembers(body.Root.GetProperty("input")); current(); return selected.Context;
+                    ControlRequestBody.RequireMembers(input); current(); return selected.Context;
                 }
-                var command = Command(action, selected, body.Root);
                 var subject = "project-ui:" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
                     caller.SubjectId + "\n" + client.ClientId.ToString("D") + "\n" + surface.GetProperty("surfaceId").GetString() + "\n" + ownerId.ToString("D") +
                     (draft is null ? "" : $"\n{draft.Owner.UserId:D}\n{draft.Owner.ScriptId:D}\n{draft.Owner.ScriptRevision}\n{candidate:D}"))));
-                return await projects.ExecuteAsync(caller, action, command, cancellation, current, subject, client.Lifetime, draft, drafts);
+                using var commandBytes = new ControlJsonBuffer(JsonMarshal.GetRawUtf8Value(input).Length + 4096,
+                    static () => new JsonException("invalid_json_size"));
+                WriteCommand(commandBytes, action, selected, input, body.Root);
+                using var command = JsonDocument.Parse(commandBytes.Written);
+                return await projects.ExecuteAsync(caller, ProjectUseCases.Command.Borrow(action, command.RootElement),
+                    cancellation, current, subject, client.Lifetime, draft, drafts);
             }, Caller, deadline.Token, client.Lifetime);
             return Results.Json(result, NotificationUseCases.Json);
         });
@@ -86,9 +92,8 @@ internal sealed class ProjectFrontendControl(Guid instanceId, ControlAuthenticat
     private static Owner ScriptOwner(ScriptProjectContext value) => new(value.ScriptId, value.ScriptRevision, value.ExtensionId, value.ProviderId, true, value);
     private static Owner BindingOwner(ProjectEditorContext value) => new(value.BindingId, value.BindingRevision, value.ExtensionId, value.ProviderId, false, value);
 
-    private static JsonElement Command(string action, Owner selected, JsonElement body)
+    private static void WriteCommand(IBufferWriter<byte> output, string action, Owner selected, JsonElement input, JsonElement body)
     {
-        var input = body.GetProperty("input");
         var revisionName = selected.IsScript ? "expectedScriptRevision" : "expectedBindingRevision";
         var names = action switch
         {
@@ -102,24 +107,33 @@ internal sealed class ProjectFrontendControl(Guid instanceId, ControlAuthenticat
         if (names.Where(name => name is not ("protectedInputs" or "providerId" or "finish") && (action != "preview" || name != "selection"))
             .Any(name => !input.TryGetProperty(name, out _)))
             throw new ControlRequestException(400, "project_input_invalid");
-        var value = JsonNode.Parse(input.GetRawText())!.AsObject();
-        if (action is "select" or "result")
+        var requiresProvider = action is "select" or "result";
+        var hasProvider = input.TryGetProperty("providerId", out var provider);
+        if (requiresProvider && hasProvider && (provider.ValueKind != JsonValueKind.String || provider.GetString() != selected.ProviderId))
+            throw new ControlRequestException(409, "project_provider_changed");
+        var bindsProject = action is "select" or "result" or "discover" or "preview";
+        if (bindsProject && (!input.GetProperty(revisionName).TryGetInt64(out var revision) || revision < 1 ||
+            action != "result" && revision != selected.Revision))
+            throw new ControlRequestException(409, selected.IsScript ? "project_script_changed" : "project_binding_changed");
+
+        using var writer = new Utf8JsonWriter(output);
+        writer.WriteStartObject();
+        foreach (var member in input.EnumerateObject())
         {
-            if (input.TryGetProperty("providerId", out var provider) &&
-                (provider.ValueKind != JsonValueKind.String || provider.GetString() != selected.ProviderId))
-                throw new ControlRequestException(409, "project_provider_changed");
-            value["providerId"] = selected.ProviderId;
+            writer.WritePropertyName(member.Name);
+            writer.WriteRawValue(JsonMarshal.GetRawUtf8Value(member.Value), skipInputValidation: true);
         }
-        value["format"] = "nexus.control.project-command"; value["version"] = 1; value["action"] = action;
-        if (action is "select" or "result" or "discover" or "preview")
+        if (requiresProvider && !hasProvider) writer.WriteString("providerId", selected.ProviderId);
+        writer.WriteString("format", "nexus.control.project-command");
+        writer.WriteNumber("version", 1);
+        writer.WriteString("action", action);
+        if (bindsProject)
         {
-            if (!input.GetProperty(revisionName).TryGetInt64(out var revision) || revision < 1 ||
-                action != "result" && revision != selected.Revision)
-                throw new ControlRequestException(409, selected.IsScript ? "project_script_changed" : "project_binding_changed");
-            value[selected.IsScript ? "scriptId" : "bindingId"] = selected.Id.ToString("D"); value["extensionId"] = selected.ExtensionId;
+            writer.WriteString(selected.IsScript ? "scriptId" : "bindingId", selected.Id);
+            writer.WriteString("extensionId", selected.ExtensionId);
         }
-        if (action == "select") value["operationId"] = body.GetProperty("operationId").GetString();
-        return JsonSerializer.SerializeToElement(value);
+        if (action == "select") writer.WriteString("operationId", body.GetProperty("operationId").GetString());
+        writer.WriteEndObject();
     }
 }
 

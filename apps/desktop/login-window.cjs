@@ -2,6 +2,7 @@
 const { BrowserWindow, session, Menu } = require('electron');
 const { text } = require('./native-text.cjs');
 const { isReady, collectValues, watchResponses, origin } = require('./login-values.cjs');
+const { describeFailure, recordDiagnostic } = require('./diagnostics.cjs');
 const denyPermission = (_contents, _permission, answer) => answer(false);
 const denyCapability = () => false;
 const denyDownload = event => event.preventDefault();
@@ -12,6 +13,7 @@ function createLoginWindow(offer, parent, onCleaned, validateCandidate) {
   const windows = new Set(); const observers = new Set(); const pending = new Set();
   const passive = Object.create(null);
   let root; let timer; let navigating = false; let sampling = false; let rejected = false; let closing = false; let cleanup; let settled = false; let bootstrapping = true;
+  let lastCleanupFailure;
   privateSession.setPermissionRequestHandler(denyPermission);
   privateSession.setPermissionCheckHandler(denyCapability);
   privateSession.setDevicePermissionHandler(denyCapability);
@@ -19,7 +21,7 @@ function createLoginWindow(offer, parent, onCleaned, validateCandidate) {
   const preferences = { session: privateSession, contextIsolation: true, sandbox: true, nodeIntegration: false,
     nodeIntegrationInSubFrames: false, webSecurity: true, webviewTag: false, devTools: false, spellcheck: false,
     disableDialogs: true, navigateOnDragDrop: false };
-  const diagnostic = (stage, details = {}) => console.error(JSON.stringify({ kind: 'browser-login-stage', stage, ...details }));
+  const diagnostic = (stage, details) => recordDiagnostic('browser-login-stage', stage, details);
   function allowed(url) { return policy.origins.includes(origin(url)); }
   privateSession.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, answer) => {
     const bootstrap = details.url === 'about:blank' && bootstrapping && !closing;
@@ -51,38 +53,58 @@ function createLoginWindow(offer, parent, onCleaned, validateCandidate) {
     const observer = watchResponses(contents, policy, passive, pending, () => closing, () => { if (!closing) void finish('failed'); });
     observers.add(observer); return observer.ready;
   }
-  async function clearSession() {
-    for (const observer of observers) { try { observer.dispose(); } catch { } }
-    observers.clear();
-    await Promise.all([...windows].map(window => new Promise((resolve, reject) => {
+  async function clearSession(failures) {
+    async function attempt(stage, action) {
+      try { await action(); } catch (error) {
+        if (failures.length < 8) failures.push({ stage, ...describeFailure(error) });
+      }
+    }
+    for (const observer of observers) await attempt('observer', () => { observer.dispose(); observers.delete(observer); });
+    await Promise.all([...windows].map(window => attempt('window', () => new Promise((resolve, reject) => {
       if (window.isDestroyed()) { windows.delete(window); resolve(); return; }
-      const timeout = setTimeout(() => reject(new Error('browser_login_window_not_closed')), 5000);
-      window.once('closed', () => { clearTimeout(timeout); resolve(); }); window.destroy();
-    })));
-    if (windows.size !== 0) throw new Error('browser_login_window_not_closed');
+      const closed = () => { clearTimeout(timeout); resolve(); };
+      const timeout = setTimeout(() => {
+        window.removeListener('closed', closed); reject(new Error('browser_login_window_not_closed'));
+      }, 5000);
+      window.once('closed', closed);
+      try { window.destroy(); } catch (error) { clearTimeout(timeout); window.removeListener('closed', closed); reject(error); }
+    }))));
+    if (windows.size !== 0) return;
+    observers.clear();
     await Promise.allSettled([...pending]);
-    await privateSession.closeAllConnections();
-    await privateSession.clearStorageData();
-    await privateSession.clearCache();
-    await privateSession.clearAuthCache();
-    await privateSession.clearHostResolverCache();
-    if ((await privateSession.cookies.get({})).length !== 0) throw new Error('browser_login_storage_not_cleared');
-    privateSession.webRequest.onBeforeRequest(null);
-    privateSession.removeListener('will-download', denyDownload);
+    await attempt('connections', () => privateSession.closeAllConnections());
+    await attempt('storage', () => privateSession.clearStorageData());
+    await attempt('cache', () => privateSession.clearCache());
+    await attempt('authentication-cache', () => privateSession.clearAuthCache());
+    await attempt('resolver-cache', () => privateSession.clearHostResolverCache());
+    await attempt('cookies', async () => {
+      if ((await privateSession.cookies.get({})).length !== 0) throw new Error('browser_login_storage_not_cleared');
+    });
+    if (failures.length === 0) {
+      privateSession.webRequest.onBeforeRequest(null);
+      privateSession.removeListener('will-download', denyDownload);
+    }
     for (const key of Object.keys(passive)) delete passive[key];
   }
   async function finish(status, values = Object.create(null)) {
     if (settled) return;
     if (cleanup) return cleanup;
-    diagnostic(status === 'canceled' ? 'canceled' : 'cleanup', { status });
+    if (!closing) diagnostic(status === 'canceled' ? 'canceled' : 'cleanup', { status });
     closing = true; clearTimeout(timer);
     cleanup = (async () => {
+      const failures = [];
       try {
-        await clearSession();
-        await onCleaned(status, values); settled = true;
-      } catch {
-        diagnostic('cleanup-failed'); cleanup = undefined;
-      } finally { for (const key of Object.keys(values)) delete values[key]; }
+        await clearSession(failures);
+        if (failures.length === 0) { await onCleaned(status, values); settled = true; }
+      } catch (error) { failures.push({ stage: 'finalize', ...describeFailure(error) }); }
+      finally {
+        if (!settled) {
+          const failure = JSON.stringify(failures);
+          if (failure !== lastCleanupFailure) diagnostic('cleanup-failed', { primary: failures[0], cleanup: failures.slice(1) });
+          lastCleanupFailure = failure; cleanup = undefined;
+        }
+        for (const key of Object.keys(values)) delete values[key];
+      }
     })();
     return cleanup;
   }
@@ -101,8 +123,8 @@ function createLoginWindow(offer, parent, onCleaned, validateCandidate) {
         rejected = true;
         root?.setTitle(text('login') + ' · ' + text('loginRejected'));
       } else if (explicit) root?.setTitle(text('login') + ' · ' + text('loginIncomplete'));
-    } catch {
-      if (!closing) { rejected = true; diagnostic('validation-unavailable'); root?.setTitle(text('login') + ' · ' + text('loginRetry')); }
+    } catch (error) {
+      if (!closing) { rejected = true; diagnostic('validation-unavailable', describeFailure(error)); root?.setTitle(text('login') + ' · ' + text('loginRetry')); }
     } finally {
       sampling = false;
       if (values) for (const key of Object.keys(values)) delete values[key];
@@ -142,7 +164,7 @@ function createLoginWindow(offer, parent, onCleaned, validateCandidate) {
     await ready; diagnostic('cdp-attached');
     if (!closing) await navigate();
   })();
-  void started.catch(() => finish('failed'));
+  void started.catch(error => { diagnostic('startup-failed', describeFailure(error)); return finish('failed'); });
   return Object.freeze({ cancel: () => finish('canceled'), retry: () => closing ? finish('failed') : Promise.resolve(), started });
 }
 module.exports = { createLoginWindow };

@@ -1,15 +1,31 @@
-using System.ComponentModel;
-using System.Diagnostics;
-using System.Runtime.InteropServices;
-using System.Runtime.Versioning;
-using System.Text.Json;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Core.Settings;
 using NexusPipeline.Platform.Security;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Sqlite;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
+using System.Text.Json;
 
 namespace NexusPipeline.Host.Desktop;
+
+internal enum StartupStage
+{
+    OpeningInstance,
+    CheckingDatabase,
+    RecoveringOperations,
+    LoadingSettings,
+    RestoringExecution,
+    PreparingServices,
+    InstallingExtensions,
+    StartingExtensions,
+    StartingServer,
+    StartingDesktop,
+    StartupUpdates,
+    Ready
+}
 
 [SupportedOSPlatform("windows")]
 internal sealed class StartupProgress : IDisposable

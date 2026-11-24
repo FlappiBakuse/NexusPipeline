@@ -62,7 +62,7 @@ internal sealed class HostAutomaticUpdates : IAsyncDisposable
             await CheckAsync(startup: true, deadline.Token);
             _nextCheck = _clock.GetUtcNow() + AutomaticUpdatePolicy.CheckInterval;
             if (Status.PendingOperationId is not { } pending) return false;
-            return (await _maintenance.StartAsync(pending, Subject, _stop.Token)).State == HostUpdateState.Starting;
+            return (await StartMaintenanceAsync(pending, Subject)).State == HostUpdateState.Starting;
         }
         catch (OperationCanceledException) when (!_stop.IsCancellationRequested) { Fail("automatic_startup_update_deadline"); return false; }
         catch (Exception error) when (Expected(error)) { Fail("automatic_startup_update_blocked"); return false; }
@@ -121,10 +121,21 @@ internal sealed class HostAutomaticUpdates : IAsyncDisposable
         {
             if (item.Subject == Subject && _settings.Read().Effective.Updates is not { CheckEnabled: true, AutoApplyEnabled: true }) continue;
             if (!AutomaticUpdatePolicy.ShouldApplyPending(item.Timing, _startupPending.Contains(item.OperationId), startup)) continue;
-            var result = await _maintenance.StartAsync(item.OperationId, item.Subject, _stop.Token);
+            var result = await StartMaintenanceAsync(item.OperationId, item.Subject);
             if (result.State == HostUpdateState.Starting) return true;
         }
         return false;
+    }
+
+    private async Task<HostUpdateOperation> StartMaintenanceAsync(Guid operationId, string subject)
+    {
+        try { return await _maintenance.StartAsync(operationId, subject, _stop.Token); }
+        catch (Exception error) when (error is not OperationCanceledException || CleanupFailures.Read(error).Count != 0)
+        {
+            if (HostHandoffDiagnostic.Read(error) is { } diagnostic)
+                MaintenanceDiagnostic.Record(_instance, operationId, "controller", diagnostic.Stage, error);
+            throw;
+        }
     }
 
     private async Task CheckAsync(bool startup = false, CancellationToken cancellation = default)
@@ -182,7 +193,8 @@ internal sealed class HostAutomaticUpdates : IAsyncDisposable
     private Guid OperationId(string kind, string value) => new(SHA256.HashData(Encoding.UTF8.GetBytes($"nexus.automatic-update/1:{_instance.InstanceId:D}:{kind}:{value}"))[..16]);
     private void Fail(string code) => Volatile.Write(ref _status, Status with { FailureCode = code });
     private static bool Expected(Exception error) => error is IOException or UnauthorizedAccessException or InvalidOperationException or CryptographicException or System.Text.Json.JsonException or
-        ArgumentException or HttpRequestException or System.ComponentModel.Win32Exception or NexusPipeline.Core.Extensions.ExtensionApplyException;
+        ArgumentException or HttpRequestException or System.ComponentModel.Win32Exception or Microsoft.Data.Sqlite.SqliteException or
+        NexusPipeline.Core.Extensions.ExtensionApplyException;
 
     public async ValueTask DisposeAsync()
     {

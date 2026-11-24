@@ -102,9 +102,9 @@ internal sealed class NotificationControlCommand : IDisposable
         var chars = ArrayPool<char>.Shared.Rent(65537);
         try
         {
-            using var encoded = new SecretJsonBuffer();
+            using var encoded = new ControlJsonBuffer(6 * 65536 + 8192, Invalid);
             using (var writer = new Utf8JsonWriter(encoded)) { value.WriteTo(writer); writer.Flush(); }
-            var reader = new Utf8JsonReader(encoded.Written);
+            var reader = new Utf8JsonReader(encoded.Written.Span);
             if (!reader.Read() || reader.TokenType != JsonTokenType.String) throw Invalid();
             var count = reader.CopyString(chars);
             if (count is < 1 or > 65536) throw Invalid();
@@ -114,30 +114,6 @@ internal sealed class NotificationControlCommand : IDisposable
         {
             CryptographicOperations.ZeroMemory(System.Runtime.InteropServices.MemoryMarshal.AsBytes(chars.AsSpan()));
             ArrayPool<char>.Shared.Return(chars);
-        }
-    }
-
-    private sealed class SecretJsonBuffer : IBufferWriter<byte>, IDisposable
-    {
-        private const int Capacity = 6 * 65536 + 8192;
-        private readonly byte[] _bytes = ArrayPool<byte>.Shared.Rent(Capacity);
-        private int _written;
-        internal ReadOnlySpan<byte> Written => _bytes.AsSpan(0, _written);
-        public Memory<byte> GetMemory(int sizeHint = 0)
-        {
-            if (sizeHint < 0 || Math.Max(1, sizeHint) > Capacity - _written) throw Invalid();
-            return _bytes.AsMemory(_written, Capacity - _written);
-        }
-        public Span<byte> GetSpan(int sizeHint = 0) => GetMemory(sizeHint).Span;
-        public void Advance(int count)
-        {
-            if (count < 0 || count > Capacity - _written) throw Invalid();
-            _written += count;
-        }
-        public void Dispose()
-        {
-            CryptographicOperations.ZeroMemory(_bytes);
-            ArrayPool<byte>.Shared.Return(_bytes);
         }
     }
 

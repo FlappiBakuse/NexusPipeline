@@ -66,7 +66,7 @@ internal static class ApplicationHost
         using (StartupProfile.Begin("providers.restore"))
             providers.RestoreSavedReferences(instance, runtime.Database, contracts, instanceLease, resources);
         var secretService = new SecretFieldService(instance, runtime.Database, instanceLease, resources, runtime.Recovery, contracts);
-        var secrets = new SecretsControl(secretService);
+        var secrets = new SecretsControl(secretService, instance.InstanceId);
         var settingsService = HostStartupSettings.Create(instance, runtime.Database, instanceLease, resources, runtime.Recovery);
         var updateNetwork = new ExtensionStoreNetwork(instance, runtime.Database, instanceLease, resources,
             () => settingsService.Read().Effective.Proxy, secretService);
@@ -162,7 +162,7 @@ internal static class ApplicationHost
         await using var app = builder.Build();
         await using var maintenance = new HostMaintenanceController(instance, runtime.Database, instanceLease, contracts,
             payloadRoots,
-            lifecycle, resources, app.Lifetime, nativeBinding, maintenanceOrigin, ownedDesktop, services.Scheduling, windowIntent, app.Logger);
+            lifecycle, resources, app.Lifetime, nativeBinding, maintenanceOrigin, ownedDesktop, services.Scheduling, windowIntent);
         await using var automaticUpdates = new HostAutomaticUpdates(instance, runtime.Database, settingsService,
             updates, maintenance, packages, extensions, app.Lifetime.ApplicationStopping);
         var initialSource = Path.Combine(payloadRoots.HostPayloadRoot, "package-info", "initial-extensions");
@@ -183,7 +183,8 @@ internal static class ApplicationHost
             mcpPort, controlSettings.Read, bearerVerifier, TimeProvider.System);
         await using var controlTokens = new ControlTokenService(instance, runtime.Database, instanceLease, resources,
             secretService, nativeBinding, app.Lifetime.ApplicationStopping);
-        app.Use(ControlExceptionBoundary.InvokeAsync);
+        app.Use((HttpContext context, RequestDelegate next) => ControlExceptionBoundary.InvokeAsync(context, next, instance.InstanceId));
+        app.UseRouting();
         app.Use(new ControlRequestLimits().InvokeAsync);
         app.Use(controlAuthority.InvokeAsync);
         if (showBeforeInitialExtensions) app.Use(initialStartup.InvokeAsync);
@@ -228,7 +229,7 @@ internal static class ApplicationHost
             };
         if (desktop is not null) availableCapabilities.Add(NexusPipeline.Core.Control.ControlCapability.Desktop);
         new ControlQueries(controlAuthority, operations, instance.InstanceId, () => desktop?.VerificationKeyBase64, availableCapabilities).Map(app);
-        new LocalTokenControl(controlAuthority, controlTokens).Map(app);
+        new LocalTokenControl(controlAuthority, controlTokens, instance.InstanceId).Map(app);
         new HostSecretsControl(controlAuthority, secretService, instance.InstanceId).Map(app);
         var notificationUseCases = new NexusPipeline.Host.Control.Notifications.NotificationUseCases(instance.InstanceId,
             new NexusPipeline.Platform.Storage.Notifications.NotificationCatalogService(instance, runtime.Database,
@@ -255,7 +256,7 @@ internal static class ApplicationHost
         new MediaControl(controlAuthority, mediaControl, contracts).Map(app);
         var doctor = new NexusPipeline.Platform.Storage.Sqlite.RuntimeDoctor(instance, runtime.Database, runtime.Recovery);
         var runtimeUseCases = new NexusPipeline.Host.Control.Runtime.RuntimeUseCases(doctor, services.Consumer, services.Notifications,
-            automaticUpdates, services.Scheduling, new(payloadRoots.HostPayloadRoot, port, mcpPort, definitions.Read, extensions));
+            automaticUpdates, services.Scheduling, services.Retention, new(payloadRoots.HostPayloadRoot, port, mcpPort, definitions.Read, extensions));
         var recordUseCases = new NexusPipeline.Host.Control.Records.RecordUseCases(
             new NexusPipeline.Platform.Storage.Sqlite.RunRecordStore(runtime.Database),
             new NexusPipeline.Platform.Storage.Sqlite.AttemptHistoryReader(runtime.Database),
@@ -292,7 +293,7 @@ internal static class ApplicationHost
         new EmulatorControl(controlAuthority, emulators, contracts).Map(app);
         new ConfigurationValueControl(controlAuthority, configurationValues, contracts).Map(app);
         new ConfigurationReadControl(controlAuthority, new ConfigurationOverviewReader(instance, runtime.Database, instanceLease, contracts, providers)).Map(app);
-        var adapterControl = new AdapterControl(controlAuthority, new NexusPipeline.Host.Control.Configuration.AdapterUseCases(taskAdapters, contracts), contracts);
+        var adapterControl = new AdapterControl(controlAuthority, new NexusPipeline.Host.Control.Configuration.AdapterUseCases(taskAdapters), contracts);
         adapterControl.Map(app);
         adapterControl.MapDraftDiscovery(app, taskAdapters, configurationEdits.Drafts);
         var scriptProjects = new ScriptProjectService(instance, runtime.Database, instanceLease, resources, contracts, payloadRoots, extensions.Activator);
@@ -300,7 +301,7 @@ internal static class ApplicationHost
             new ScriptSourceService(instance, runtime.Database, instanceLease, resources, contracts, payloadRoots, extensions.Activator), contracts);
         new ScriptSourceControl(controlAuthority, scriptSources).Map(app);
         var projectUseCases = new NexusPipeline.Host.Control.Configuration.ProjectUseCases(projectCompilation, projectPreviews, contracts, scriptProjects);
-        new ProjectControl(controlAuthority, projectUseCases, contracts).Map(app);
+        new ProjectControl(controlAuthority, projectUseCases).Map(app);
         new ProjectFrontendControl(instance.InstanceId, controlAuthority, extensionFrontend, projectUseCases, contracts, configurationEdits.Drafts).Map(app);
         new RecordControl(controlAuthority, recordUseCases, contracts).Map(app);
         new RecordSummaryControl(controlAuthority, new NexusPipeline.Platform.Storage.Sqlite.RecordSummaryReader(runtime.Database),

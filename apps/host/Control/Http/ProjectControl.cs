@@ -2,12 +2,11 @@ using System.Runtime.Versioning;
 using NexusPipeline.Core.Control;
 using NexusPipeline.Host.Control.Configuration;
 using NexusPipeline.Host.Control.Notifications;
-using NexusPipeline.Platform.Serialization;
 
 namespace NexusPipeline.Host.Control.Http;
 
 [SupportedOSPlatform("windows")]
-internal sealed class ProjectControl(ControlAuthentication authority, ProjectUseCases projects, ContractReader contracts)
+internal sealed class ProjectControl(ControlAuthentication authority, ProjectUseCases projects)
 {
     internal void Map(WebApplication app)
     {
@@ -18,9 +17,8 @@ internal sealed class ProjectControl(ControlAuthentication authority, ProjectUse
             var request = authority.Require(context, action == "select" ? ControlCapability.ConfigurationEdit : ControlCapability.ConfigurationRead);
             new ControlQueryValues(context.Request.Query).Validate();
             using var body = await ControlRequestBody.ReadAsync(context);
-            body.RequireSchema(contracts, "control-project-command.schema.json");
-            if (body.Root.GetProperty("action").GetString() != action) throw new ControlRequestException(400, "project_action_mismatch");
-            var result = await projects.ExecuteAsync(request, action, body.Root, context.RequestAborted);
+            var command = projects.Validate(action, body.Root);
+            var result = await projects.ExecuteAsync(request, command, context.RequestAborted);
             return Results.Json(result, NotificationUseCases.Json);
         });
     }

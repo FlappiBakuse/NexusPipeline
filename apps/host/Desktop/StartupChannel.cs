@@ -1,21 +1,25 @@
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using System.Text;
 using System.Text.Json;
 using Microsoft.Win32.SafeHandles;
 using NexusPipeline.Platform.Serialization;
+using NexusPipeline.Platform.Storage;
 
 namespace NexusPipeline.Host.Desktop;
 
 [SupportedOSPlatform("windows")]
 internal sealed class StartupChannel : IDisposable
 {
+    private const int MaximumFrameBytes = 16384;
     private readonly NamedPipeServerStream _pipe;
+    private readonly byte[] _receive = new byte[MaximumFrameBytes + 1];
     private readonly CancellationTokenSource _stop = new();
     private readonly SemaphoreSlim _writes = new(1);
     private readonly TaskCompletionSource _connected = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _dismissed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _receiveStart;
+    private int _receiveEnd;
     private Task? _loop;
     private bool _ready;
     private bool _failed;
@@ -35,7 +39,7 @@ internal sealed class StartupChannel : IDisposable
     {
         await _connected.Task.WaitAsync(_stop.Token);
         var bytes = JsonSerializer.SerializeToUtf8Bytes(value);
-        if (bytes.Length > 16384) throw new IOException("desktop_startup_frame_limit");
+        if (bytes.Length > MaximumFrameBytes) throw new IOException("desktop_startup_frame_limit");
         await _writes.WaitAsync(_stop.Token);
         try { await _pipe.WriteAsync(bytes, _stop.Token); await _pipe.WriteAsync(new byte[] { 10 }, _stop.Token); await _pipe.FlushAsync(_stop.Token); }
         finally { _writes.Release(); }
@@ -114,15 +118,33 @@ internal sealed class StartupChannel : IDisposable
 
     private async Task<byte[]> ReadAsync()
     {
-        using var frame = new MemoryStream();
-        var next = new byte[1];
-        while (frame.Length <= 16384)
+        var scan = _receiveStart;
+        while (true)
         {
-            if (await _pipe.ReadAsync(next, _stop.Token) == 0) throw new EndOfStreamException();
-            if (next[0] == 10) return frame.ToArray();
-            frame.WriteByte(next[0]);
+            var delimiter = Array.IndexOf(_receive, (byte)'\n', scan, _receiveEnd - scan);
+            if (delimiter >= 0)
+            {
+                var frame = _receive.AsSpan(_receiveStart, delimiter - _receiveStart).ToArray();
+                _receiveStart = delimiter + 1;
+                return frame;
+            }
+
+            var length = _receiveEnd - _receiveStart;
+            if (length > MaximumFrameBytes) throw new IOException("desktop_startup_frame_limit");
+            if (_receiveEnd == _receive.Length)
+            {
+                Array.Copy(_receive, _receiveStart, _receive, 0, length);
+                _receiveStart = 0;
+                _receiveEnd = length;
+            }
+
+            scan = _receiveEnd;
+            int read;
+            using (StartupProfile.Measure("desktop.pipe.read"))
+                read = await _pipe.ReadAsync(_receive.AsMemory(_receiveEnd), _stop.Token);
+            if (read == 0) throw new EndOfStreamException();
+            _receiveEnd += read;
         }
-        throw new IOException("desktop_startup_frame_limit");
     }
 
     public void Dispose()

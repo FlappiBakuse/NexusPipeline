@@ -7,11 +7,39 @@ const { createStartupView } = require('./startup-view.cjs');
 const { strictJson } = require('./strict-json.cjs');
 const { installNativeBridge } = require('./native-bridge.cjs');
 const { installFilePermissions } = require('./file-permissions.cjs');
-const { loadHostPage } = require('./host-page.cjs');
 const { createTrayLifecycle } = require('./tray-lifecycle.cjs');
 const { setLocale, text } = require('./native-text.cjs');
 const { chooseWindowPlacement, MIN_WIDTH, MIN_HEIGHT, CAPTION_HEIGHT } = require('./window-placement.cjs');
 const { createWindowState } = require('./window-state.cjs');
+const { recordFailure } = require('./diagnostics.cjs');
+
+const retryableHostErrors = new Set(['ERR_CONNECTION_REFUSED', 'ERR_CONNECTION_RESET', 'ERR_CONNECTION_CLOSED', 'ERR_EMPTY_RESPONSE']);
+
+async function loadHostPage(window, page) {
+  const deadline = performance.now() + 30000;
+  while (!window.isDestroyed()) {
+    const remaining = deadline - performance.now();
+    if (remaining <= 0) throw new Error('desktop_host_startup_unavailable');
+    let timer;
+    try {
+      await Promise.race([
+        window.loadURL(page),
+        new Promise((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error('desktop_host_startup_unavailable')), remaining);
+        })
+      ]);
+      return;
+    } catch (error) {
+      if (!retryableHostErrors.has(error?.code) || window.isDestroyed()) throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+    await new Promise(resolve => setTimeout(resolve, Math.min(100, Math.max(0, deadline - performance.now()))));
+  }
+  throw new Error('desktop_window_ended');
+}
+
+process.on('uncaughtException', error => { recordFailure('desktop-main', 'uncaught', error); app.exit(1); });
 
 const argument = process.argv.find(value => value.startsWith('--nexus-bootstrap='));
 if (!argument || argument.length > 8192) throw new Error('desktop_bootstrap_required');
@@ -35,7 +63,6 @@ let window;
 let tray;
 let bridge;
 let quitting = false;
-process.on('uncaughtException', () => app.exit(1));
 app.on('window-all-closed', () => { if (quitting) app.quit(); });
 // Bound transient renderer allocation without limiting the retained application heap.
 app.commandLine.appendSwitch('js-flags', '--max-semi-space-size=1');
@@ -173,4 +200,4 @@ app.whenReady().then(async () => {
   } catch (error) {
     if (!startup.failed) throw error;
   }
-}).catch(error => { console.error('desktop_startup_failed', String(error?.message).slice(0, 160)); app.exit(1); });
+}).catch(error => { recordFailure('desktop-main', 'startup', error); app.exit(1); });

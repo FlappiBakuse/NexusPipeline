@@ -31,7 +31,7 @@ internal sealed class AutomationExchangeControl(ControlAuthentication authority,
                 query.LongInteger("revision", -1), query.Text("templateScriptId") is { } template ? ControlQueryValues.Id(template) : null);
             using var bundle = StrictJson.Parse(export.ExportBundle());
             return Results.Json(new { bundle = bundle.RootElement.Clone(), export.Attachments }, NotificationUseCases.Json);
-        });
+        }).WithMetadata(ControlRequestLimits.ResponseStream);
         app.MapGet("/control/v1/automation/export/{assetId}/original", async (HttpContext context, string assetId) =>
         {
             var request = authority.Require(context, ControlCapability.AutomationExchange);
@@ -44,7 +44,7 @@ internal sealed class AutomationExchangeControl(ControlAuthentication authority,
             request.Require(ControlCapability.AutomationExchange);
             context.Response.ContentType = "application/octet-stream"; context.Response.ContentLength = asset.SizeBytes;
             await export.CopyAttachmentToAsync(id, context.Response.Body, context.RequestAborted);
-        });
+        }).WithMetadata(ControlRequestLimits.ResponseStream);
     }
     private static ControlQueryValues Query(HttpContext context, params string[] names)
     { var query = new ControlQueryValues(context.Request.Query, names); query.Validate(1024); return query; }

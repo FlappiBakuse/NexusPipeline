@@ -6,7 +6,7 @@ using NexusPipeline.Core.Control;
 namespace NexusPipeline.Host.Control.Http;
 
 [SupportedOSPlatform("windows")]
-internal sealed class FrontendClients(TimeProvider clock) : IDisposable
+internal sealed class FrontendClients(TimeProvider clock, Guid? instanceId = null) : IDisposable
 {
     private readonly object _gate = new();
     private readonly Dictionary<string, Grant> _grants = new(StringComparer.Ordinal);
@@ -49,7 +49,7 @@ internal sealed class FrontendClients(TimeProvider clock) : IDisposable
             { _grants[key].Retired = true; expired.Add(_grants[key]); _grants.Remove(key); }
             if (_grants.Count >= 128) throw new ControlRequestException(429, "frontend_clients_full");
             var token = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
-            var grant = new Grant(Guid.NewGuid(), caller, origin, now.AddHours(24), clock);
+            var grant = new Grant(Guid.NewGuid(), caller, origin, now.AddHours(24), clock, instanceId);
             _grants.Add(Digest(token), grant);
             result = new(grant.ClientId, token, grant.ExpiresAt);
         }
@@ -134,6 +134,7 @@ internal sealed class FrontendClients(TimeProvider clock) : IDisposable
     private sealed class Grant
     {
         private readonly CancellationTokenSource _owner;
+        private readonly Guid? _instanceId;
         private int _ended;
         internal Guid ClientId { get; }
         internal AuthenticatedControlRequest Caller { get; }
@@ -143,16 +144,17 @@ internal sealed class FrontendClients(TimeProvider clock) : IDisposable
         internal DateTimeOffset ExpiresAt { get; }
         internal bool Retired { get; set; }
         internal CancellationToken Lifetime { get; }
-        internal Grant(Guid clientId, AuthenticatedControlRequest caller, string origin, DateTimeOffset expiresAt, TimeProvider clock)
+        internal Grant(Guid clientId, AuthenticatedControlRequest caller, string origin, DateTimeOffset expiresAt, TimeProvider clock, Guid? instanceId)
         {
             ClientId = clientId; Caller = caller; Origin = origin; ExpiresAt = expiresAt;
+            _instanceId = instanceId;
             _owner = new(TimeSpan.FromHours(24), clock); Lifetime = _owner.Token;
         }
         internal void End()
         {
             if (Interlocked.Exchange(ref _ended, 1) != 0) return;
             try { _owner.Cancel(); }
-            catch (AggregateException) { }
+            catch (AggregateException error) { ControlErrors.RecordLifetime("frontend-client-cancel", ClientId, error, _instanceId); }
             finally { _owner.Dispose(); }
         }
     }

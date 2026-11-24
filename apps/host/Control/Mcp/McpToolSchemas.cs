@@ -1,8 +1,12 @@
+using NexusPipeline.Platform.Serialization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using NexusPipeline.Platform.Serialization;
 
 namespace NexusPipeline.Host.Control.Mcp;
+
+internal sealed record McpToolAnnotations(bool ReadOnlyHint, bool DestructiveHint, bool IdempotentHint, bool OpenWorldHint);
+internal sealed record McpToolDescription(string Name, string Title, string Description, JsonElement InputSchema,
+    McpToolAnnotations Annotations);
 
 internal static class McpToolSchemas
 {

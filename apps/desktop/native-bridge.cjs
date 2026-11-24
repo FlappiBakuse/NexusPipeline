@@ -1,9 +1,9 @@
 'use strict';
+const { describeFailure, recordFailure } = require('./diagnostics.cjs');
 const { app, ipcMain, dialog, shell } = require('electron');
 const crypto = require('node:crypto');
 const path = require('node:path/win32');
-const { readProof, readSession, readClosePermit, readCloseRejection, readMode, responseText } = require('./proof-reader.cjs');
-const { installFrontendBridge } = require('./native-frontend.cjs');
+const { readProof, readSession, readClosePermit, readCloseRejection, readFrontend, readMode, responseText } = require('./proof-reader.cjs');
 const { installLoginBridge } = require('./native-login.cjs');
 
 function installNativeBridge(window, config, page, authorizedQuit, setLocale = () => {}, exitChanged = () => {}) {
@@ -14,6 +14,7 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
   let closing;
   let closeAuthorization;
   let busy = false;
+  let lastMaintenanceFailure;
   let timer;
   let ended = false;
   let connecting;
@@ -149,27 +150,38 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
   }
   async function pollMaintenance() {
     if (ended) return;
-    let acquired = false;
+    let acquired = false; let stage = 'connect'; let correlationId;
     try {
       if (!busy) {
         if (!session) await connectWhenReady();
         const current = generation;
         const request = requestIdentity(crypto.randomUUID());
+        correlationId = request.correlationId; stage = 'poll';
         const query = new URLSearchParams({ sessionId: request.sessionId, correlationId: request.correlationId });
         const response = await fetch(new URL('control/v1/desktop/maintenance?' + query, host), {
           signal: AbortSignal.any([stopping.signal, AbortSignal.timeout(30000)]) });
         if (response.status === 204) await response.body?.cancel();
         else {
+          stage = 'verify';
           const text = await responseText(response);
           const permit = readClosePermit(text, config.verificationKey, request);
           while (busy && !ended && Date.parse(permit.expiresAt) > Date.now())
             await new Promise(resolve => setTimeout(resolve, 50));
           if (ended || current !== generation) throw new Error('desktop_document_changed');
           busy = true; acquired = true;
+          stage = 'consume';
           await consumePermit(text, request);
         }
+        lastMaintenanceFailure = undefined;
       }
-    } catch { }
+    } catch (error) {
+      if (!ended && error?.message !== 'desktop_document_changed') {
+        const { type, reason } = describeFailure(error);
+        const failure = `${stage}/${type}/${reason}`;
+        if (failure !== lastMaintenanceFailure) recordFailure('desktop-maintenance', stage, error, correlationId);
+        lastMaintenanceFailure = failure;
+      }
+    }
     finally { if (acquired) busy = false; if (!ended) timer = setTimeout(pollMaintenance, 2000); }
   }
   frontend = installFrontendBridge(config, validateSender, connectWhenReady, () => generation);
@@ -266,4 +278,54 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
     if (!ended) timer = setTimeout(pollMaintenance, 2000);
   } });
 }
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+function installFrontendBridge(config, validateSender, connect, generation) {
+  const clients = new Map();
+  const address = new URL(config.address);
+  const identity = session => ({ format: 'nexus.desktop.frontend', version: 1, instanceId: session.instanceId,
+    nativeClientId: session.clientId, sessionId: session.sessionId, correlationId: crypto.randomUUID() });
+  async function post(path, request, clientId, token) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['X-Nexus-Frontend-Client'] = token;
+    const response = await fetch(new URL(path, address), { method: 'POST', headers, body: JSON.stringify(request),
+      redirect: 'error', signal: AbortSignal.timeout(5000) });
+    return readFrontend(await responseText(response), config.verificationKey, request, clientId);
+  }
+  async function retire(clientId, session) {
+    const request = { ...identity(session), frontendClientId: clientId };
+    await post('control/v1/desktop/frontend/retire', request, clientId);
+  }
+  ipcMain.handle('desktop.frontend.bind', async (event, input) => {
+    validateSender(event);
+    if (!input || Object.keys(input).length !== 3 || Object.keys(input).some(key => !['clientId', 'token', 'sessionId'].includes(key)) ||
+        !uuid.test(input.clientId) || typeof input.token !== 'string' || !/^[a-f0-9]{64}$/.test(input.token))
+      throw new Error('desktop_frontend_request_invalid');
+    const current = generation(); const session = await connect(); validateSender(event);
+    if (input.sessionId !== session.sessionId || current !== generation()) throw new Error('desktop_document_changed');
+    if (clients.size >= 128 && !clients.has(input.clientId)) throw new Error('desktop_frontend_limit');
+    const request = { ...identity(session), frontendClientId: input.clientId };
+    try {
+      await post('control/v1/desktop/frontend/bind', request, input.clientId, input.token);
+      if (current !== generation()) throw new Error('desktop_document_changed');
+      validateSender(event); clients.set(input.clientId, session); return { clientId: input.clientId };
+    } catch (error) {
+      await retire(input.clientId, session).catch(() => {}); throw error;
+    }
+  });
+  ipcMain.handle('desktop.frontend.retire', async (event, input) => {
+    validateSender(event);
+    if (!input || Object.keys(input).length !== 1 || !uuid.test(input.clientId)) throw new Error('desktop_frontend_request_invalid');
+    const session = clients.get(input.clientId); if (!session) return;
+    clients.delete(input.clientId); await retire(input.clientId, session); validateSender(event);
+  });
+  function invalidate() {
+    for (const [id, session] of clients) void retire(id, session).catch(() => {});
+    clients.clear();
+  }
+  return Object.freeze({ invalidate, dispose: () => {
+    invalidate(); ipcMain.removeHandler('desktop.frontend.bind'); ipcMain.removeHandler('desktop.frontend.retire');
+  } });
+}
+
 module.exports = { installNativeBridge };

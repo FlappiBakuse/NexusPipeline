@@ -8,12 +8,14 @@ using NexusPipeline.Host.Lifecycle;
 using NexusPipeline.Host.Control.Notifications;
 using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Notifications;
+using NexusPipeline.Platform.Storage.Records;
 
 namespace NexusPipeline.Host.Control.Runtime;
 
 [SupportedOSPlatform("windows")]
 internal sealed class RuntimeUseCases(IRuntimeDoctor doctor, ExecutionRuntimeConsumer execution, NotificationRuntime notifications,
-    HostAutomaticUpdates automaticUpdates, NexusPipeline.Platform.Storage.Scheduling.PersistentScheduleService scheduling, RuntimeChecks checks)
+    HostAutomaticUpdates automaticUpdates, NexusPipeline.Platform.Storage.Scheduling.PersistentScheduleService scheduling,
+    RecordHistoryRetention retention, RuntimeChecks checks)
 {
     internal RuntimeDoctorReport Doctor(AuthenticatedControlRequest request, CancellationToken cancellation = default)
     {
@@ -42,7 +44,7 @@ internal sealed class RuntimeUseCases(IRuntimeDoctor doctor, ExecutionRuntimeCon
             Write("runtime-state.json", new { report.Admission, report.RecoveryRevision, report.IsolatedResourceCount,
                 report.HeldResourceCount, report.PendingOperationCount, report.AttemptReceiptCount, report.CompletedRunCount,
                 report.Details.OpenConfigurationCount, report.Details.PendingExtensionCount, report.Details.PendingUpdateCount,
-                report.Details.DefinedQueueCount, report.Details.WaitingOccurrenceCount });
+                report.Details.DefinedQueueCount, report.Details.WaitingOccurrenceCount, retention = retention.Status });
             Write("safe-log.json", report.Details.SafeLogTail);
 
             void Write(string name, object value)
@@ -72,6 +74,7 @@ internal sealed class RuntimeUseCases(IRuntimeDoctor doctor, ExecutionRuntimeCon
             execution = new { execution.FailureCode, execution.PendingReconciliationCount },
             notifications = new { notifications.FailureCode },
             scheduling = new { scheduling.IsRunning, scheduling.FailureCode, scheduling.Diagnostics },
+            retention = retention.Status,
             updates = automaticUpdates.Status
         };
     }

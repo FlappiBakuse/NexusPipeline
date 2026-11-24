@@ -11,6 +11,7 @@ using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Scheduling;
 using NexusPipeline.Platform.Storage.Sqlite;
 using NexusPipeline.Platform.Storage.Notifications;
+using NexusPipeline.Platform.Storage.Records;
 using NexusPipeline.Platform.Storage.Secrets;
 using NexusPipeline.Platform.Storage.Configuration;
 
@@ -25,7 +26,6 @@ internal sealed class ExecutionRuntimeServices : IAsyncDisposable
     private Task _retentionTask = Task.CompletedTask;
     private Task _configurationCleanupTask = Task.CompletedTask;
     private readonly ConfigurationWorkspaceCleanup _configurationCleanup;
-    private readonly NexusPipeline.Platform.Storage.Records.RecordHistoryRetention _retention;
     private int _stopped;
     internal HistoryProjection History { get; }
     internal ExecutionAdmissionService Admission { get; }
@@ -36,6 +36,7 @@ internal sealed class ExecutionRuntimeServices : IAsyncDisposable
     internal CompletionActionService Completion { get; }
     internal LocalCompletionAuthorization Authorization { get; }
     internal NotificationRuntime Notifications { get; }
+    internal RecordHistoryRetention Retention { get; }
     internal HostCompletionExit Exit { get; } = new();
 
     internal ExecutionRuntimeServices(RuntimeInstance instance, StateDatabase database, ContractReader contracts, InstanceLease lease,
@@ -46,7 +47,7 @@ internal sealed class ExecutionRuntimeServices : IAsyncDisposable
         using var paths = DirectoryAttributeScope.Hold(instance);
         using var blobs = BlobReadScope.Hold(instance);
         var inbox = new ExecutionAdmissionInbox();
-        _retention = new(database, new(instance, database, contracts, lease, resources, recovery, payloadRoots));
+        Retention = new(database, new(instance, database, contracts, lease, resources, recovery, payloadRoots));
         _configurationCleanup = new(instance, database, contracts, lease, resources);
         Admission = new(instance, database, contracts, lease, resources, recovery, inbox, new(5, 5, 30),
             judgementRuntime: new(PhysicalPathPolicy.RuntimeProcessPath(),
@@ -98,7 +99,7 @@ internal sealed class ExecutionRuntimeServices : IAsyncDisposable
         _retentionTask = Task.Run(async () =>
         {
             await History.RunAsync(_retryStopping.Token).ConfigureAwait(false);
-            if (History.IsComplete) await _retention.RunAsync(_retryStopping.Token).ConfigureAwait(false);
+            if (History.IsComplete) await Retention.RunAsync(_retryStopping.Token).ConfigureAwait(false);
         });
     }
 

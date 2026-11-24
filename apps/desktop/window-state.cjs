@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { strictJson } = require('./strict-json.cjs');
 const { validSaved, CAPTION_HEIGHT } = require('./window-placement.cjs');
+const { recordFailure } = require('./diagnostics.cjs');
 
 function createWindowState(profilePath, screen) {
   const file = path.join(profilePath, 'window-state.json');
@@ -14,7 +15,9 @@ function createWindowState(profilePath, screen) {
     const value = strictJson(fs.readFileSync(file, 'utf8'));
     if (!validSaved(value)) throw new Error('desktop_window_state_invalid');
     saved = value;
-  } catch (error) { if (error.code !== 'ENOENT') writable = false; }
+  } catch (error) {
+    if (error.code !== 'ENOENT') { writable = false; recordFailure('desktop-window-state', 'read', error); }
+  }
   function flush() {
     clearTimeout(timer); timer = undefined;
     if (!writable || disposed || !window || window.isDestroyed() || !window.isVisible() || window.isMinimized()) return;
@@ -30,7 +33,7 @@ function createWindowState(profilePath, screen) {
     try {
       fs.writeFileSync(temporary, JSON.stringify(value) + '\n', { encoding: 'utf8', mode: 0o600, flag: 'wx' });
       fs.renameSync(temporary, file); saved = value;
-    } catch { writable = false; }
+    } catch (error) { writable = false; recordFailure('desktop-window-state', 'write', error); }
   }
   function schedule() { clearTimeout(timer); timer = setTimeout(flush, 200); }
   function rememberInsets() {
