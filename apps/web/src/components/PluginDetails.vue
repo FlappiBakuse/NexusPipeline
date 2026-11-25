@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from 'vue';
 import { locale, t } from '../app/locale';
-import type { CatalogEntry, ExtensionState } from '../control/extensions';
+import type { CatalogEntry, ExtensionState, LocalExtensionCandidate } from '../control/extensions';
 import type { ExtensionMetadata } from '../control/extension-metadata';
-type PluginDetailsInput = { name: string; summary: string; kind: string; version: string; metadata?: ExtensionMetadata; candidate?: CatalogEntry; installed?: ExtensionState };
+type PluginDetailsInput = { name: string; summary: string; kind: string; version: string; metadata?: ExtensionMetadata; candidate?: CatalogEntry; installed?: ExtensionState; local?: LocalExtensionCandidate };
 import { releaseDocument, type ExtensionDetails } from '../control/extensions';
 import { metadataText } from '../control/extension-metadata';
 const MarkdownDocument = defineAsyncComponent(() => import('./MarkdownDocument.vue'));
@@ -15,12 +15,23 @@ const props = defineProps<{
   status: string;
   tone: string;
   kindLabel: string;
+  unofficial: boolean;
+  actionError: string;
 }>();
 const readme = computed(() => releaseDocument(props.details, 'README', locale.value));
 const changelog = computed(() => releaseDocument(props.details, 'CHANGELOG', locale.value));
 const metadata = computed(() => props.row.metadata);
 const text = computed(() => metadata.value && metadataText(metadata.value, locale.value));
-const facts = computed(() => [
+const facts = computed(() => props.row.local ? [
+  ['来源', t(props.unofficial ? '本地投放 · 非官方' : '本地投放')],
+  ['版本', props.row.version ? 'v' + props.row.version : ''],
+  ...(props.row.kind ? [['插件类型', props.kindLabel]] : []),
+  ['最低宿主版本', props.row.local.minHostVersion ? 'v' + props.row.local.minHostVersion : ''],
+  ['文件位置', props.row.local.relativePath],
+  ...(props.row.kind === 'data-specialized' ? [
+    ['适用项目', props.row.local.gameName || ''], ['申报能力', props.row.local.capabilities.join(' · ') || t('未申报')]
+  ] : [])
+] : [
   [
     '版本',
     props.details?.packageVersion
@@ -42,7 +53,8 @@ const facts = computed(() => [
         : ''
   ],
   ['作者', metadata.value?.author || ''],
-  ['标签', metadata.value?.tags.join(' · ') || '']
+  ['标签', metadata.value?.tags.join(' · ') || ''],
+  ...(props.unofficial ? [['来源', t('本地投放 · 非官方')]] : [])
 ]);
 </script>
 <template>
@@ -54,33 +66,38 @@ const facts = computed(() => [
   >
     <header>
       <div class="badges">
-        <nexus-badge :tone="row.kind === 'data-specialized' ? 'info' : 'neutral'" :label="kindLabel" />
+        <nexus-badge v-if="kindLabel" :tone="row.kind === 'data-specialized' ? 'info' : 'neutral'" :label="kindLabel" />
         <nexus-badge :tone="tone" :label="status" />
+        <nexus-badge v-if="unofficial" tone="warning" :label="t('非官方')" />
       </div>
       <div class="detail-actions"><slot name="actions" /></div>
-      <h3>{{ row.name }}</h3>
+      <h3 tabindex="-1">{{ row.name }}</h3>
     </header>
     <p v-if="row.summary" class="plugin-summary">{{ row.summary }}</p>
     <dl class="plugin-facts">
       <div v-for="fact in facts" :key="fact[0]">
         <dt>{{ t(fact[0]) }}</dt>
-        <dd>{{ fact[1] || t('未提供') }}</dd>
+        <dd><code v-if="fact[0] === '文件位置'">{{ fact[1] }}</code><template v-else>{{ fact[1] || t('未提供') }}</template></dd>
       </div>
     </dl>
-    <nexus-spinner v-if="loading && !details" :label="t('正在验证发行文档…')" />
-    <nexus-toast v-if="error" tone="danger" :message.prop="t(error)" />
-    <section class="plugin-document">
-      <h4>README</h4>
-      <MarkdownDocument v-if="readme" :text="readme" />
-      <p v-else-if="!loading" class="empty-document">{{ t('没有随包发行文档') }}</p>
-    </section>
-    <section class="plugin-document plugin-changelog">
-      <h4>{{ t('更新记录') }}</h4>
-      <MarkdownDocument v-if="changelog" :text="changelog" />
-      <slot v-else name="history">
-        <p class="empty-document">{{ t('暂无更新记录') }}</p>
-      </slot>
-    </section>
+    <p v-if="actionError" class="detail-error" role="alert">{{ t(actionError) }}</p>
+    <p v-else-if="row.local?.reason" class="detail-reason">{{ t(row.local.reason) }}</p>
+    <template v-if="!row.local">
+      <nexus-spinner v-if="loading && !details" :label="t('正在验证发行文档…')" />
+      <nexus-toast v-if="error" tone="danger" :message.prop="t(error)" />
+      <section class="plugin-document">
+        <h4>README</h4>
+        <MarkdownDocument v-if="readme" :text="readme" />
+        <p v-else-if="!loading" class="empty-document">{{ t('没有随包发行文档') }}</p>
+      </section>
+      <section class="plugin-document plugin-changelog">
+        <h4>{{ t('更新记录') }}</h4>
+        <MarkdownDocument v-if="changelog" :text="changelog" />
+        <slot v-else name="history">
+          <p class="empty-document">{{ t('暂无更新记录') }}</p>
+        </slot>
+      </section>
+    </template>
   </nexus-scroll-area>
 </template>
 <style scoped>
@@ -166,6 +183,12 @@ dd {
 }
 .detail-error {
   color: var(--bad);
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.detail-reason {
+  color: var(--muted);
+  overflow-wrap: anywhere;
   font-size: 12px;
 }
 @media (max-width: 719px) {

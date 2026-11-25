@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Microsoft.Win32.SafeHandles;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Platform.Storage.Journals;
 
@@ -12,8 +13,8 @@ internal sealed class ExtensionTreeEffects(FileTreeScanner scanner, FileTreeArch
     internal ImmutableArray<PhysicalTreeObject> MaterializeCandidate(FrozenPayloadApply plan,
         ExtensionPhysicalRecord previous, CancellationToken cancellation) =>
         _trees.MaterializeCandidate(plan, Scene(previous), cancellation);
-    internal void PreserveOriginal(FrozenPayloadApply plan, ExtensionPhysicalRecord previous) =>
-        _trees.PreserveOriginal(plan, Scene(previous));
+    internal void PreserveOriginal(FrozenPayloadApply plan, ExtensionPhysicalRecord previous, SafeFileHandle? owned = null) =>
+        _trees.PreserveOriginal(plan, Scene(previous), owned);
     internal void InstallCandidate(FrozenPayloadApply plan, ExtensionPhysicalRecord previous) =>
         _trees.InstallCandidate(plan, Scene(previous));
     internal void RequireRemoved(FrozenPayloadApply plan, ExtensionPhysicalRecord previous) =>

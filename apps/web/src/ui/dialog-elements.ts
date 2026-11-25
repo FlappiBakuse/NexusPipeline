@@ -16,6 +16,7 @@ dialog[data-tone=warning] button[data-action=confirm]{background:var(--warning);
 
 export class ConfirmDialog extends NexusElement {
   static readonly observedAttributes = elementAttributes('nexus-confirm-dialog');
+  confirmLabel = '';
   private readonly dialog: HTMLDialogElement;
   private readonly modal: ModalSurface;
   constructor() {
@@ -55,7 +56,7 @@ export class ConfirmDialog extends NexusElement {
   protected render(): void {
     const chinese = this.ownerDocument.documentElement.lang.toLowerCase().startsWith('zh');
     this.dialog.querySelector('[data-action="cancel"]')!.textContent = chinese ? '取消' : 'Cancel';
-    this.dialog.querySelector('[data-action="confirm"]')!.textContent = chinese ? '确认' : 'Confirm';
+    this.dialog.querySelector('[data-action="confirm"]')!.textContent = this.confirmLabel || (chinese ? '确认' : 'Confirm');
     this.dialog.querySelector('.close')!.setAttribute('aria-label', chinese ? '关闭' : 'Close');
     this.dialog.querySelector('h2')!.textContent = String(this.values.title);
     this.dialog.querySelector('nexus-scroll-area')!.setAttribute('label', String(this.values.title));

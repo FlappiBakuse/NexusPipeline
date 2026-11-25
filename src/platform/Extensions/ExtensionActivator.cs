@@ -10,7 +10,7 @@ using System.Text.Json;
 
 namespace NexusPipeline.Platform.Extensions;
 
-public sealed class ExtensionActivator
+public sealed partial class ExtensionActivator
 {
     internal ProjectCompilerRegistry Compilers { get; } = new();
     internal EmulatorProviderRegistry Emulators { get; } = new();

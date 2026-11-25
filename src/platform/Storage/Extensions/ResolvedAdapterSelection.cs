@@ -1,6 +1,8 @@
 using System.Collections.Immutable;
+using System.Reflection.PortableExecutable;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
+using System.Text.Json;
 using NexusPipeline.Core.Automation;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Extensions;
@@ -42,27 +44,73 @@ internal sealed class ResolvedAdapterSelection : IDisposable
 
     internal string CheckGamePath()
     {
+        var (resource, selector, expected, actual, _) = GamePathConfiguration();
+        if (selector is null) return "notApplicable";
+        if (resource is null || expected is null || actual.ValueKind != JsonValueKind.String ||
+            string.IsNullOrWhiteSpace(actual.GetString())) return "unverified";
+        return SameGamePath(actual.GetString()!, expected) ? "matches" : "mismatch";
+    }
+
+    internal ConfigPatch? ProposeGamePathRepair()
+    {
+        if (!Selection.ConfigurationIntents.IsDefaultOrEmpty) return null;
+        var (resource, selector, expected, actual, exists) = GamePathConfiguration();
+        if (resource is null || selector is null || expected is null || resource.Revision is not { } revision ||
+            actual.ValueKind is not (JsonValueKind.Null or JsonValueKind.String) ||
+            actual.ValueKind == JsonValueKind.String && SameGamePath(actual.GetString()!, expected)) return null;
+        return new ConfigPatch
+        {
+            Format = "nexus.config.patch", Version = 1, OperationId = Selection.OperationId.ToString("D"),
+            ResourceId = resource.ResourceId, SourceSha256 = resource.Sha256, ExpectedRevision = revision,
+            Edits = [new ConfigPatchEditsItem
+            {
+                Selector = ConfigurationSelectorProtocol.Write(new(selector.Select(field =>
+                    (ConfigurationSelectorStep)new ConfigurationProperty(field)).ToImmutableArray()), false),
+                Expected = actual, ExpectedExists = exists, Value = JsonSerializer.SerializeToElement(expected)
+            }]
+        };
+    }
+
+    private (TaskDefinitionsResource? Resource, IReadOnlyList<string>? Selector, string? BoundPath, JsonElement Actual, bool Exists)
+        GamePathConfiguration()
+    {
         RequireCurrent();
         var installed = new ExtensionInstalledEvidence(_instance, _database, _contracts, _roots).ReadCurrent(Selection.ExtensionId)
             ?? throw Invalid();
         var policy = ExtensionDetailsReader.ReadListing(installed, _contracts).Specialized?.InstancePolicy;
-        if (policy?.GamePathResource is null) return "notApplicable";
+        if (policy?.GamePathResource is null || policy.GamePathSelector is not { } selector) return default;
         var resource = Resources.SingleOrDefault(item => item.ResourceId == policy.GamePathResource);
         var (_, script) = ReadDefinitions();
-        if (resource is null || script.Target?.Pc is not { } pc) return "unverified";
-        using var document = StrictJson.Parse(System.Text.Encoding.UTF8.GetBytes(resource.Content));
-        var value = document.RootElement;
-        foreach (var field in policy.GamePathSelector!)
-            if (value.ValueKind != System.Text.Json.JsonValueKind.Object || !value.TryGetProperty(field, out value)) return "unverified";
-        if (value.ValueKind != System.Text.Json.JsonValueKind.String || string.IsNullOrWhiteSpace(value.GetString())) return "unverified";
+        if (script.Target?.Pc is not { } pc || resource?.Value is not { } value)
+            return (resource, selector, null, default, false);
         var root = new AutomationDefinitionStore(_database).Read().Roots.Single(item => item.Id == pc.ReadyExecutable.RootId);
+        string expected;
         try
         {
-            var actual = PhysicalPathPolicy.NormalizeSyntax(value.GetString()!);
-            var expected = PhysicalPathPolicy.NormalizeSyntax(Path.Combine(root.Path, pc.ReadyExecutable.RelativePath));
-            return StringComparer.OrdinalIgnoreCase.Equals(actual, expected) ? "matches" : "mismatch";
+            expected = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(root.Path, pc.ReadyExecutable.RelativePath));
+            using var image = File.OpenRead(expected);
+            using var executable = new PEReader(image);
+            var flags = executable.PEHeaders.CoffHeader.Characteristics;
+            if (executable.PEHeaders.PEHeader is null || !flags.HasFlag(Characteristics.ExecutableImage) ||
+                flags.HasFlag(Characteristics.Dll)) return (resource, selector, null, default, false);
         }
-        catch (Exception error) when (error is IOException or ArgumentException) { return "unverified"; }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or BadImageFormatException)
+        { return (resource, selector, null, default, false); }
+        for (var index = 0; index < selector.Count; index++)
+        {
+            if (value.ValueKind != JsonValueKind.Object) return (resource, selector, null, default, false);
+            if (!value.TryGetProperty(selector[index], out value))
+                return index == selector.Count - 1
+                    ? (resource, selector, expected, JsonSerializer.SerializeToElement<object?>(null), false)
+                    : (resource, selector, null, default, false);
+        }
+        return (resource, selector, expected, value, true);
+    }
+
+    private static bool SameGamePath(string actual, string expected)
+    {
+        try { return StringComparer.OrdinalIgnoreCase.Equals(PhysicalPathPolicy.NormalizeSyntax(actual), expected); }
+        catch (Exception error) when (error is IOException or ArgumentException) { return false; }
     }
 
     internal ResolvedAdapterSelection(RuntimeInstance instance, StateDatabase database, InstanceLease lease,

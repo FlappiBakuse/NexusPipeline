@@ -38,7 +38,7 @@ public sealed class ApplyWorkflowTests
         var first = fixture.Coordinator.Start(id, "local", fixture.Request);
         var complete = await first.Completion.Task.WaitAsync(TimeSpan.FromSeconds(20));
         fixture.Package.Publish(2);
-        var restarted = new ExtensionApplyCoordinator(fixture.Workflow);
+        var restarted = new ExtensionApplyCoordinator(fixture.Workflow, new(1, 1));
         try
         {
             var replay = restarted.Start(id, "local", fixture.Request);

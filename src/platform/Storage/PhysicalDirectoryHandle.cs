@@ -11,7 +11,7 @@ namespace NexusPipeline.Platform.Storage
         internal static PhysicalDirectoryHandle Open(string path, PhysicalObjectIdentity? expected = null)
         {
             PhysicalPathPolicy.NormalizeWithoutLinks(path);
-            var actual = CreateFile(PhysicalPathPolicy.NativePath(path), 0x001000a0, 3, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero);
+            var actual = CreateFile(PhysicalPathPolicy.NativePath(path), 0x001000a0, InstalledDirectoryMoveHandle.ReadShare(path), IntPtr.Zero, 3, 0x02200000, IntPtr.Zero);
             try
             {
                 if (actual.IsInvalid) throw new IOException("physical_directory_unavailable", new Win32Exception(Marshal.GetLastWin32Error()));
@@ -136,7 +136,7 @@ namespace NexusPipeline.Platform.Storage
 
         internal static SafeFileHandle OpenEntry(string path, out PhysicalObjectIdentity identity)
         {
-            var handle = CreateFile(PhysicalPathPolicy.NativePath(path), 0xa0, 3, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero);
+            var handle = CreateFile(PhysicalPathPolicy.NativePath(path), 0xa0, InstalledDirectoryMoveHandle.ReadShare(path), IntPtr.Zero, 3, 0x02200000, IntPtr.Zero);
             try
             {
                 if (handle.IsInvalid)

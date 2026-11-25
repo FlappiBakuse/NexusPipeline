@@ -3772,6 +3772,9 @@ export default {
       "editor": {
         "$ref": "#/$defs/editor"
       },
+      "accountPreview": {
+        "$ref": "#/$defs/accountPreview"
+      },
       "operationId": {
         "$ref": "common.schema.json#/$defs/uuid"
       },
@@ -3825,6 +3828,26 @@ export default {
             "candidates",
             "diagnostics"
           ]
+        }
+      },
+      {
+        "if": {
+          "required": [
+            "accountPreview"
+          ]
+        },
+        "then": {
+          "required": [
+            "purpose"
+          ],
+          "properties": {
+            "direction": {
+              "const": "response"
+            },
+            "extensionId": {
+              "const": "okww"
+            }
+          }
         }
       }
     ],
@@ -3962,6 +3985,96 @@ export default {
               "json",
               "yaml"
             ]
+          }
+        }
+      },
+      "accountPreview": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "state",
+          "mode",
+          "accounts"
+        ],
+        "properties": {
+          "state": {
+            "enum": [
+              "ready",
+              "empty",
+              "invalid"
+            ]
+          },
+          "mode": {
+            "enum": [
+              "enabled",
+              "disabled",
+              "unknown"
+            ]
+          },
+          "accounts": {
+            "type": "array",
+            "maxItems": 128,
+            "items": {
+              "$ref": "#/$defs/accountSummary"
+            }
+          }
+        },
+        "if": {
+          "properties": {
+            "state": {
+              "const": "ready"
+            }
+          }
+        },
+        "then": {
+          "properties": {
+            "accounts": {
+              "minItems": 1
+            }
+          }
+        },
+        "else": {
+          "properties": {
+            "accounts": {
+              "maxItems": 0
+            }
+          }
+        }
+      },
+      "accountSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "enabled",
+          "task",
+          "overrideCount"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "task": {
+            "enum": [
+              "DailyTask",
+              "RahaiBlocksTask",
+              "FarmEchoTask",
+              "NightmareNestTask",
+              "TacetTask",
+              "ForgeryTask",
+              "SimulationTask",
+              "CultivationTask",
+              "MergeEchoTask",
+              "EnhanceEchoTask",
+              "ChangeEchoTask",
+              "GardenTask",
+              "loginOnly",
+              "unknown"
+            ]
+          },
+          "overrideCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 262144
           }
         }
       },

@@ -41,6 +41,8 @@ Host 组合这些共同用例；Web、CLI、MCP 的传输和访问权限见[控�
 
 Maa 实例创建先保存定义，再以明确的来源实例保存项目选择。选择操作 ID 在响应不确定时保留，确认或重放该操作不会重复创建定义；明确拒绝时保留草稿，并使用已提交的定义修订继续编辑。
 
+OkWW 的编辑来源查询可返回 `accountPreview`。该字段按原生保存顺序提供多账号配置摘要，只包含启用状态、任务类别和覆盖项数量。账号标识与配置值留在来源读取侧。预览记录没有候选 ID，也不携带可执行文件或绑定资源。
+
 绑定 `runDays` 使用 -1 表示不限、0 表示不参与、正数表示剩余天数；每日成功上限 `maximumSuccessfulRunsPerDay` 使用 -1 表示不限，0 非法。用户 `bindingOverrides` 分为 general、notification、advanced 三组，每组独立 `syncEnabled`；执行冻结有效值，关闭同步后原始绑定重新生效，覆盖不会改写原始绑定。
 `AutomationBindingPolicy` 是覆盖字段选择的唯一 owner；展示、选择与调度直接消费 Core 规则，冻结计划来源校验及完成通知通过 Platform 的 wire/domain 映射调用同一规则。`BindingPolicyCodec` 仅负责映射和编解码，冻结定义、源修订与通知路由仍由原流程 owner 校验。
 队列 `successDependencies` 的 `scriptId` / `requiredScriptIds` 表达更早脚本组的成功依赖。

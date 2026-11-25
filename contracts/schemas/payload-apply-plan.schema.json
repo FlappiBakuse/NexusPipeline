@@ -191,7 +191,7 @@
           "before": {
             "properties": {
               "shape": {
-                "const": "missing"
+                "enum": ["missing", "directory"]
               }
             }
           },

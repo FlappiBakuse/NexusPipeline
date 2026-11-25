@@ -94,8 +94,8 @@ internal sealed class ExtensionPayloadBinding(RuntimeInstance instance, StateDat
     {
         RequireRegistration(connection, transaction, bound);
         if (RequireRuntimeSql(connection, transaction, bound.Registered, bound.Source) != bound.Identity) throw Invalid();
-        if (bound.Source.Package is { } package)
-            ExtensionCatalogRows.RequireAcceptanceOperation(connection, transaction, package.Catalog, catalogOperation);
+        if (bound.Source.Package?.Catalog is { } catalog)
+            ExtensionCatalogRows.RequireAcceptanceOperation(connection, transaction, catalog, catalogOperation);
         PayloadEffectCursor.RequireFrozenEffectsInside(connection, transaction, bound.Registered.JournalId, effects);
     }
 
@@ -148,7 +148,7 @@ internal sealed class ExtensionPayloadBinding(RuntimeInstance instance, StateDat
                     original.JournalId != previous.JournalId || original.Package != previous.Package ||
                     original.IsInstalled != previous.IsInstalled ||
                     original.TargetPath != plan.TargetPath || original.ParentIdentity != plan.ParentIdentity ||
-                    source.RemovalReason is null && (original.Payload.Snapshot.Shape != plan.Before.Snapshot.Shape ||
+                    !source.ImportTarget && source.RemovalReason is null && (original.Payload.Snapshot.Shape != plan.Before.Snapshot.Shape ||
                     !original.Payload.Snapshot.Entries.SequenceEqual(plan.Before.Snapshot.Entries) ||
                     !original.Payload.Contents.SequenceEqual(plan.Before.Contents) ||
                     !original.Payload.OriginalObjects.SequenceEqual(plan.Before.OriginalObjects))) throw Invalid();
@@ -238,8 +238,8 @@ internal sealed class ExtensionPayloadBinding(RuntimeInstance instance, StateDat
         RegisteredJournal registered, ExtensionPayloadSource source, out string? catalogOperation)
     {
         var identity = RequireRuntimeSql(connection, transaction, registered, source);
-        catalogOperation = source.Package is { } package
-            ? ExtensionCatalogRows.RequireAcceptedInside(connection, transaction, package.Catalog) : null;
+        catalogOperation = source.Package?.Catalog is { } catalog
+            ? ExtensionCatalogRows.RequireAcceptedInside(connection, transaction, catalog) : null;
         return identity;
     }
 

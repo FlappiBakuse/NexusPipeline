@@ -42,6 +42,8 @@ internal static class PhysicalObjectMove
             throw new IOException("physical_move_result_unconfirmed");
     }
 
+    internal static SafeFileHandle OpenForMove(string path) => Open(path, 0x00110080);
+
     private static SafeFileHandle Open(string path, uint access)
     {
         var result = CreateFile(PhysicalPathPolicy.NativePath(path), access, 3, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero);

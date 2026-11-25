@@ -15,11 +15,10 @@ internal sealed class ExtensionApplyFlight(OperationIdentity identity)
 }
 
 [SupportedOSPlatform("windows")]
-internal sealed class ExtensionApplyCoordinator(ExtensionApplyWorkflow workflow)
+internal sealed class ExtensionApplyCoordinator(ExtensionApplyWorkflow workflow, SemaphoreSlim execution)
 {
     private readonly object _gate = new();
     private readonly Dictionary<Guid, ExtensionApplyFlight> _flights = [];
-    private readonly SemaphoreSlim _execution = new(1, 1);
     private readonly CancellationTokenSource _stop = new();
     private bool _stopping;
 
@@ -54,7 +53,7 @@ internal sealed class ExtensionApplyCoordinator(ExtensionApplyWorkflow workflow)
         var entered = false;
         try
         {
-            await _execution.WaitAsync(_stop.Token).ConfigureAwait(false); entered = true;
+            await execution.WaitAsync(_stop.Token).ConfigureAwait(false); entered = true;
             var result = await workflow.RunAsync(flight.Identity.OperationId, subject, request,
                 acceptance => flight.Acceptance.TrySetResult(acceptance), _stop.Token).ConfigureAwait(false);
             flight.Completion.TrySetResult(result);
@@ -65,7 +64,7 @@ internal sealed class ExtensionApplyCoordinator(ExtensionApplyWorkflow workflow)
         }
         finally
         {
-            if (entered) _execution.Release();
+            if (entered) execution.Release();
             lock (_gate) _flights.Remove(flight.Identity.OperationId);
         }
     }

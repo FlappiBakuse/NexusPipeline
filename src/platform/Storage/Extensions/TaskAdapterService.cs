@@ -99,7 +99,7 @@ internal sealed class TaskAdapterService : ITaskAdapterPort
     {
         RequireSubject(serverSubject);
         using var source = new ResolvedAdapterSelection(_instance, _database, _lease, _resources, _contracts, _roots, selection, requireCaller: requireCaller);
-        var response = await PrepareAsync(source, "configuration", cancellationToken).ConfigureAwait(false);
+        var response = await PrepareConfigurationAsync(source, cancellationToken).ConfigureAwait(false);
         var reader = new ConfigurationPatchReader(_contracts);
         var patches = (response.ConfigPatches ?? []).Select(patch => reader.Read(JsonSerializer.SerializeToUtf8Bytes(patch))).ToImmutableArray();
         var diagnostics = Diagnostics(response);
@@ -108,6 +108,15 @@ internal sealed class TaskAdapterService : ITaskAdapterPort
 
     private ValueTask<TaskAdapter> PrepareAsync(ResolvedAdapterSelection source, string phase, CancellationToken cancellationToken)
         => new AdapterPreparation(_database, _activator, _secrets, _compilation, new(_instance, _contracts)).ExecuteAsync(source, phase, cancellationToken);
+
+    private async ValueTask<TaskAdapter> PrepareConfigurationAsync(ResolvedAdapterSelection source, CancellationToken cancellationToken)
+    {
+        var response = await PrepareAsync(source, "configuration", cancellationToken).ConfigureAwait(false);
+        var patch = source.ProposeGamePathRepair();
+        var patches = response.ConfigPatches ?? [];
+        return patch is null || patches.Any(item => item.ResourceId == patch.ResourceId)
+            ? response : response with { ConfigPatches = [.. patches, patch] };
+    }
 
     private static ImmutableArray<AdapterDiagnostic> Diagnostics(TaskAdapter response) => (response.Diagnostics ?? [])
         .Select(item => new AdapterDiagnostic(item.Code, item.ResourceId, item.Severity switch
@@ -151,7 +160,7 @@ internal sealed class TaskAdapterService : ITaskAdapterPort
         AcceptedExecutionAdmission accepted, StepEvidenceBinding binding, BlobReference rawOutput, Action requireActualStep)
         => _observer.ObserveOwnedAsync(accepted, binding, rawOutput, requireActualStep);
 
-    internal async ValueTask<bool> IsLaunchUniqueAsync(AcceptedExecutionAdmission accepted, ExecutionPlanStep step,
+    internal async ValueTask<bool> IsLaunchAvailableAsync(AcceptedExecutionAdmission accepted, ExecutionPlanStep step,
         CancellationToken cancellation)
     {
         accepted.Prepared.RequireLive();
@@ -163,15 +172,23 @@ internal sealed class TaskAdapterService : ITaskAdapterPort
             if (step.ExclusiveProgramInUserSession == true)
                 NexusPipeline.Platform.Processes.ExclusiveProgramAdmission.RequireStopped(step.ExecutablePath, inUserSession: true);
             if (source is null) return true;
+            var script = BindingSourceCodec.Resolve(bundle, step);
             var discovery = new ScriptSourceService(_instance, _database, _lease, _resources, _contracts, _roots, _activator);
             return await discovery.UseAsync(Guid.NewGuid(), step.ExtensionId!, step.Adapter!.InstalledRevision,
                 step.WorkingDirectory, accepted.Prepared.RequireLive, cancellation,
-                (result, _) => !result.Candidates!.Any(candidate => candidate.RunIdentity is not null &&
-                    candidate.CandidateId != source.CandidateId &&
+                (result, _) => result.Candidates!.Any(candidate =>
+                    (candidate.CandidateId == source.CandidateId || candidate.RunIdentity == source.CandidateId) &&
                     candidate.Executable.Equals(source.Executable.Relative, StringComparison.OrdinalIgnoreCase) &&
-                    candidate.Arguments.SequenceEqual(step.Arguments)), edit: true, owner: accepted.Root).ConfigureAwait(false);
+                    candidate.Arguments.SequenceEqual(source.Arguments) &&
+                    candidate.LogPaths.SequenceEqual(source.LogPaths.Select(path => path.Relative), StringComparer.OrdinalIgnoreCase) &&
+                    candidate.Resources.Count == script.AdapterResources.Count &&
+                    script.AdapterResources.All(declaration => candidate.Resources.Any(resource =>
+                        resource.ResourceId == declaration.ResourceId && resource.Syntax == declaration.Syntax &&
+                        resource.Path.Equals(source.ConfigurationPaths[checked((int)declaration.DeclarationIndex)].Relative,
+                            StringComparison.OrdinalIgnoreCase)))), owner: accepted.Root).ConfigureAwait(false);
         }
-        catch (IOException) { return false; }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or
+            DecoderFallbackException or Jint.Runtime.JavaScriptException) { return false; }
     }
 
     public async ValueTask<AdapterRepairPreview> PreviewRepairAsync(string serverSubject, AdapterSelection selection,
@@ -209,7 +226,7 @@ internal sealed class TaskAdapterService : ITaskAdapterPort
         int index, string expected, CancellationToken cancellationToken)
     {
         RequireRepairEnabled();
-        var response = await PrepareAsync(source, "configuration", cancellationToken).ConfigureAwait(false);
+        var response = await PrepareConfigurationAsync(source, cancellationToken).ConfigureAwait(false);
         var patches = (response.ConfigPatches ?? []).Select(patch => new ConfigurationPatchReader(_contracts)
             .Read(JsonSerializer.SerializeToUtf8Bytes(patch))).ToImmutableArray();
         var diagnostics = Diagnostics(response);

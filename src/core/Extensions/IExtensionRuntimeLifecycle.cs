@@ -3,6 +3,7 @@ namespace NexusPipeline.Core.Extensions;
 public sealed record ExtensionRuntimeState(string ExtensionId, long InstalledRevision, bool IsInstalled,
     bool DesiredEnabled, Guid? ActivationId, string? UnavailableReason)
 {
+    public bool IsUnofficial { get; init; }
     public string? PackageVersion { get; init; }
     public string? Kind { get; init; }
     public string? ArtifactName { get; init; }

@@ -1,3 +1,4 @@
+using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Extensions;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Platform.Extensions;
@@ -11,8 +12,11 @@ using System.Text.Json.Serialization;
 
 namespace NexusPipeline.Platform.Storage.Extensions;
 
-internal sealed record CatalogPackageSource(ExtensionCatalogSaved Catalog, ExtensionCatalogEntry Entry,
-    BlobReference Archive);
+internal sealed record CatalogPackageSource(ExtensionCatalogSaved? Catalog, ExtensionCatalogEntry Entry, BlobReference Archive)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LocalApproval { get; init; }
+}
 internal sealed record ExtensionPayloadSource(string Format, int Version, Guid InstanceId, Guid OperationId, Guid JournalId,
     string ExtensionId, PayloadAction Action, long ExpectedInstalledRevision, BlobReference? OriginalFootprint,
     CatalogPackageSource? Package, long SettingsRevision, bool DesiredEnabled, ImmutableArray<ResourceClaim> Claims,
@@ -20,6 +24,12 @@ internal sealed record ExtensionPayloadSource(string Format, int Version, Guid I
 {
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
     public string? RemovalReason { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool ImportTarget { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LocalUpdateConfirmation { get; init; }
 }
 
 internal sealed class PayloadSourceCodec(RuntimeInstance instance, ContractReader contracts)
@@ -67,6 +77,11 @@ internal sealed class PayloadSourceCodec(RuntimeInstance instance, ContractReade
             if (source.Action != PayloadAction.Remove || plan.Before.Snapshot.Shape != NexusPipeline.Core.Configuration.FileObjectKind.Missing)
                 throw Invalid();
         }
+        if (source.ImportTarget && (plan.Action != PayloadAction.Install ||
+            plan.Before.Snapshot.Shape != FileObjectKind.Directory ||
+            !plan.Before.Snapshot.Entries.SequenceEqual(plan.Candidate.Snapshot.Entries)) ||
+            plan.Action == PayloadAction.Install && !source.ImportTarget && plan.Before.Snapshot.Shape != FileObjectKind.Missing)
+            throw Invalid();
         var targetEntry = PhysicalResourceAdmission.EntryKey(plan.ParentIdentity, Path.GetFileName(plan.TargetPath));
         var workspaceEntry = PhysicalResourceAdmission.EntryKey(plan.ParentIdentity, Path.GetFileName(ExtensionWorkspacePath.For(plan)));
         if (!source.Claims.Any(claim => claim.ResourceKey == targetEntry && claim.Mode == ResourceClaimMode.Mutation) ||
@@ -89,16 +104,17 @@ internal sealed class PayloadSourceCodec(RuntimeInstance instance, ContractReade
         if (source.Package is not { } package) return;
         if (database.InstanceId != instance.InstanceId ||
             !StringComparer.OrdinalIgnoreCase.Equals(database.RuntimeRoot, instance.RuntimeRoot)) throw Invalid();
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions))
-        using (var transaction = DatabaseConnections.BeginRead(connection))
+        if (package.Catalog is { } saved)
         {
-            ExtensionCatalogRows.RequireAcceptedInside(connection, transaction, package.Catalog);
+            using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true,
+                domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions);
+            using var transaction = DatabaseConnections.BeginRead(connection);
+            ExtensionCatalogRows.RequireAcceptedInside(connection, transaction, saved);
             transaction.Commit();
+            var catalog = verifier.Verify(Read(saved.Pointer), Read(saved.Catalog), Read(saved.Signature), saved.Identity.Channel);
+            if (catalog.Identity != saved.Identity || catalog.KeyId != saved.KeyId ||
+                catalog.Entries.SingleOrDefault(entry => entry.ExtensionId == source.ExtensionId) != package.Entry) throw Invalid();
         }
-        var catalog = verifier.Verify(Read(package.Catalog.Pointer), Read(package.Catalog.Catalog),
-            Read(package.Catalog.Signature), package.Catalog.Identity.Channel);
-        if (catalog.Identity != package.Catalog.Identity || catalog.KeyId != package.Catalog.KeyId ||
-            catalog.Entries.SingleOrDefault(entry => entry.ExtensionId == source.ExtensionId) != package.Entry) throw Invalid();
         using var zipInput = _blobs.OpenVerified(package.Archive);
         using var zip = ExtensionPackageArchive.Open(zipInput, cancellation);
         var originalManifest = zip.ReadManifest(cancellation);
@@ -116,7 +132,7 @@ internal sealed class PayloadSourceCodec(RuntimeInstance instance, ContractReade
 
     internal BlobReference? ReadOriginalArchive(ExtensionPayloadSource source, FrozenPayloadApply plan, PayloadApplyRoots roots)
     {
-        if (source.RemovalReason == "files-changed" || plan.Before.Snapshot.Shape == NexusPipeline.Core.Configuration.FileObjectKind.Missing) return null;
+        if (source.ImportTarget || source.RemovalReason == "files-changed" || plan.Before.Snapshot.Shape == NexusPipeline.Core.Configuration.FileObjectKind.Missing) return null;
         var original = new InstalledFootprintCodec(instance, roots, contracts)
             .ReadMetadata(source.OriginalFootprint ?? throw Invalid());
         if (!original.IsInstalled || original.ExtensionId != source.ExtensionId ||
@@ -137,7 +153,7 @@ internal sealed class PayloadSourceCodec(RuntimeInstance instance, ContractReade
         if (source.OriginalFootprint is { } original) references.Add(original);
         if (source.Package is { } package)
         {
-            references.AddRange(ImmutableArray.Create(package.Catalog.Pointer, package.Catalog.Catalog, package.Catalog.Signature));
+            if (package.Catalog is { } catalog) references.AddRange(ImmutableArray.Create(catalog.Pointer, catalog.Catalog, catalog.Signature));
             if (includeArchive) references.Add(package.Archive);
         }
         return references.Distinct().ToImmutableArray();
@@ -155,6 +171,8 @@ internal sealed class PayloadSourceCodec(RuntimeInstance instance, ContractReade
             source.ExtensionId.Any(c => c is not (>= 'a' and <= 'z' or >= '0' and <= '9' or '-'))) throw Invalid();
         if (source.RemovalReason is not null && (source.Action != PayloadAction.Remove ||
             source.RemovalReason is not ("external-removal" or "files-changed"))) throw Invalid();
+        if (source.LocalUpdateConfirmation is not null && (source.Action != PayloadAction.Upgrade ||
+            source.Package?.Catalog is null || !Digest(source.LocalUpdateConfirmation))) throw Invalid();
         if (source.Action is PayloadAction.Remove or PayloadAction.Upgrade && source.ExpectedInstalledRevision == 0 ||
             (source.ExpectedInstalledRevision == 0) != (source.OriginalFootprint is null) ||
             (source.Action == PayloadAction.Remove) != (source.Package is null)) throw Invalid();
@@ -179,20 +197,27 @@ internal sealed class PayloadSourceCodec(RuntimeInstance instance, ContractReade
             source.ExpectedInstalledRevision != 0 || !source.DesiredEnabled)) throw Invalid();
         if (source.Package is { } package)
         {
-            RequireClaim("extensions:catalog", ResourceClaimMode.Reference);
-            if (package.Entry is null || package.Catalog is null || package.Catalog.Identity is null || package.Archive is null ||
+            if (package.Entry is null || package.Archive is null ||
                 package.Entry.ExtensionId != source.ExtensionId || package.Entry.Kind is not ("managed-code" or "data-specialized") ||
                 package.Entry.SdkVersion != "0.1.0" || package.Entry.ArtifactName is not { Length: >= 1 and <= 120 } ||
                 package.Entry.PackageVersion is not { Length: >= 1 and <= 80 } ||
                 package.Entry.MinHostVersion is not { Length: >= 1 and <= 80 } ||
-                package.Entry.ArtifactUrl is not { Length: >= 1 and <= 2048 } ||
-                package.Catalog.KeyId is not { Length: >= 2 and <= 80 } || !Digest(package.Entry.ArtifactSha256) ||
+                !Digest(package.Entry.ArtifactSha256) ||
                 !Digest(package.Entry.ManifestSha256) || package.Archive.RelativePath !=
                 $"blobs/content/{package.Entry.ArtifactSha256}.bin" || package.Archive.SizeBytes != package.Entry.ArtifactBytes ||
                 package.Archive.Sha256 != package.Entry.ArtifactSha256 || package.Archive.SizeBytes is < 1 or > 268435456) throw Invalid();
-            CatalogSequencePolicy.Require(package.Catalog.Identity, 1, null);
-            RequirePlan(package.Catalog.Pointer); RequirePlan(package.Catalog.Catalog); RequirePlan(package.Catalog.Signature);
-            if (package.Catalog.Catalog.Sha256 != package.Catalog.Identity.Sha256) throw Invalid();
+            if (package.Catalog is { } catalog)
+            {
+                RequireClaim("extensions:catalog", ResourceClaimMode.Reference);
+                if (package.LocalApproval is not null || catalog.Identity is null ||
+                    catalog.KeyId is not { Length: >= 2 and <= 80 } ||
+                    package.Entry.ArtifactUrl is not { Length: >= 1 and <= 2048 }) throw Invalid();
+                CatalogSequencePolicy.Require(catalog.Identity, 1, null);
+                RequirePlan(catalog.Pointer); RequirePlan(catalog.Catalog); RequirePlan(catalog.Signature);
+                if (catalog.Catalog.Sha256 != catalog.Identity.Sha256) throw Invalid();
+            }
+            else if (source.Action == PayloadAction.Remove || !LocalExtensionEvidence.ValidId(source.ExtensionId) ||
+                package.LocalApproval is null || !Digest(package.LocalApproval) || package.Entry.ArtifactUrl != "") throw Invalid();
         }
         if (source.OriginalFootprint is { } footprint) RequirePlan(footprint);
         void RequireClaim(string key, ResourceClaimMode mode)

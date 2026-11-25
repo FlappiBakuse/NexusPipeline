@@ -13,8 +13,10 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class OfflineRemovalTests
 {
-    [Fact]
-    public async Task WaitsForMissingPluginResources()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WaitsForMissingPluginResources(bool restore)
     {
         await using var fixture = new InstallationCrashFixture("committed");
         await fixture.StartAsync(); Assert.True((await fixture.StopAsync()).CompleteJobStopped);
@@ -25,15 +27,29 @@ public sealed class OfflineRemovalTests
         var resources = new ResourceLeaseManager(new HostLifecycle(index, TimeProvider.System));
         await using var runtime = new ExtensionRuntimeLifecycle(fixture.Instance, database, lease, new(),
             fixture.Roots, resources, index, new());
+        var target = Path.Combine(fixture.Roots.ExtensionPayloadRoot, "fixture-plugin");
+        var moved = Path.Combine(fixture.Package.Root, "temporarily-removed");
         using (resources.TryAcquire(Guid.NewGuid(), [new("extension:fixture-plugin", ResourceClaimMode.Reference)]).Lease!)
         {
-            Directory.Delete(Path.Combine(fixture.Roots.ExtensionPayloadRoot, "fixture-plugin"), recursive: true);
+            Directory.Move(target, moved);
             await runtime.ReconcileFilesAsync(default);
             var waiting = Assert.Single(runtime.ReadStates());
             Assert.True(waiting.IsInstalled); Assert.Equal("extension_files_removed", waiting.UnavailableReason);
+            Assert.Single(runtime.ReadExternalRemovals().Waiting);
+            if (restore) Directory.Move(moved, target);
         }
         await runtime.ReconcileFilesAsync(default);
+        if (restore)
+        {
+            Assert.True(Assert.Single(runtime.ReadStates()).IsInstalled);
+            Assert.Empty(runtime.ReadExternalRemovals().Waiting);
+            Assert.Empty(runtime.ReadExternalRemovals().Removed);
+            Assert.ThrowsAny<IOException>(() => Directory.Move(target, moved));
+            return;
+        }
         Assert.False(Assert.Single(runtime.ReadStates()).IsInstalled);
+        Assert.Empty(runtime.ReadExternalRemovals().Waiting);
+        Assert.Single(runtime.ReadExternalRemovals().Removed);
         await runtime.ReconcileFilesAsync(default);
         Assert.Equal(2, Assert.Single(runtime.ReadStates()).InstalledRevision);
     }

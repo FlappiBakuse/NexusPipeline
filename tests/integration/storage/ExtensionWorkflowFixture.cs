@@ -42,7 +42,7 @@ internal sealed class ExtensionWorkflowFixture : IAsyncDisposable
         Transport = new(owner.Contracts, trust, () => new HttpClient(Handler, disposeHandler: false));
         Workflow = new(owner.Instance, owner.Database, owner.Lease, owner.Contracts, Roots, owner.Resources,
             owner.Index, owner.Store, Activator, Transport);
-        Coordinator = new(Workflow);
+        Coordinator = new(Workflow, new(1, 1));
         var catalog = owner.Store.ReadCached(ExtensionStoreChannel.Stable)!;
         Request = new(PayloadAction.Install, "fixture-plugin", 0, new HostSettingsStore(owner.Database).Read().Revision,
             catalog.Identity, catalog.Entries.Single());

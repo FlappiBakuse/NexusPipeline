@@ -16,7 +16,7 @@ namespace NexusPipeline.Platform.Storage.Extensions;
 
 [SupportedOSPlatform("windows")]
 internal sealed class ExtensionPhysicalJournal(RuntimeInstance instance, StateDatabase database,
-    ContractReader contracts, PayloadApplyRoots roots, IPayloadPersistenceObserver? observer = null)
+    ContractReader contracts, PayloadApplyRoots roots, IPayloadPersistenceObserver? observer = null, InstalledExtensionFileProtection? protection = null)
 {
     private readonly JournalStore _store = new(instance, contracts);
     private readonly RecoveryJournalRegistry _registry = new(database);
@@ -58,7 +58,9 @@ internal sealed class ExtensionPhysicalJournal(RuntimeInstance instance, StateDa
                     case "original-preservation-started":
                         break;
                     case "original-preserved":
-                        _trees.PreserveOriginal(plan, previous!); break;
+                        using (var owned = protection?.TakeForMove(source.ExtensionId))
+                            _trees.PreserveOriginal(plan, previous!, owned?.Handle);
+                        break;
                     case "candidate-installed":
                         _trees.InstallCandidate(plan, previous!); break;
                     case "target-removed":

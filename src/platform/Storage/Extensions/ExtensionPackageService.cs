@@ -27,9 +27,12 @@ public sealed class ExtensionPackageService : IExtensionPackages, IAsyncDisposab
     private readonly StoreHttpTransport? _transport;
     private readonly ExtensionApplyCoordinator _applies;
     private readonly LocalExtensionInstaller _local;
+    private readonly LocalExtensionIntake _intake;
+    private readonly ExtensionRuntimeLifecycle _runtime;
     private readonly ExtensionWorkSweep _workCleanup;
     private readonly ExtensionArchiveCleanup _archiveCleanup;
     private readonly SemaphoreSlim _refresh = new(1, 1);
+    private readonly SemaphoreSlim _applyAndCleanup = new(1, 1);
     private readonly CancellationTokenSource _stopping = new();
     private Task _cleanupLoop = Task.CompletedTask;
     public bool HasReleaseTrust => _catalog is not null;
@@ -54,13 +57,24 @@ public sealed class ExtensionPackageService : IExtensionPackages, IAsyncDisposab
             _transport = new(contracts, runtime.ReleaseTrust!.Policy, createClient ?? throw new IOException("extension_transport_required"));
         }
         else if (createClient is not null) throw new IOException("extension_release_trust_unprovisioned");
-        _applies = new(new(instance, database, lease, contracts, roots, resources, recovery,
-            _catalog, runtime.Activator, _transport));
+        var workflow = new ExtensionApplyWorkflow(instance, database, lease, contracts, roots, resources, recovery,
+            _catalog, runtime.Activator, _transport);
+        _applies = new(workflow, _applyAndCleanup);
         _local = new(instance, database, lease, contracts, roots, resources, recovery, runtime);
+        _runtime = runtime;
+        _intake = new(instance, database, contracts, roots, runtime, workflow, RefreshAsync,
+            (directory, channel) => InstallLocalAsync(directory, channel, onlyUninstalled: true), _applyAndCleanup, _stopping.Token);
         _workCleanup = new(database, roots, recovery, runtime.Activator,
             new(instance, database, lease, contracts, roots, resources, recovery, runtime.Activator));
         _archiveCleanup = new(instance, database, lease, contracts, roots, resources, recovery);
     }
+
+    public LocalExtensionSnapshot ReadLocalIntake() => _intake.Read();
+
+    public Task<LocalExtensionSnapshot> ScanLocalIntakeAsync() => _intake.ScanAsync();
+
+    public Task<LocalExtensionApply> EnableLocalAsync(string candidateId, Guid operationId, string subject) =>
+        _intake.EnableAsync(candidateId, operationId, subject);
 
     internal void StartCleanup() => _cleanupLoop = RunCleanupAsync(_stopping.Token);
 
@@ -72,20 +86,25 @@ public sealed class ExtensionPackageService : IExtensionPackages, IAsyncDisposab
         {
             while (await timer.WaitForNextTickAsync(cancellation).ConfigureAwait(false))
             {
-                await _workCleanup.SweepAsync(1, cancellation).ConfigureAwait(false);
-                _archiveCleanup.Sweep(cancellation, executor);
+                await _intake.RunMaintenanceWhenIdleAsync(async () =>
+                {
+                    if (_runtime.ReadExternalRemovals().Waiting.Length > 0)
+                        await _runtime.ReconcileFilesAsync(cancellation).ConfigureAwait(false);
+                    await _workCleanup.SweepAsync(1, cancellation).ConfigureAwait(false);
+                    _archiveCleanup.Sweep(cancellation, executor);
+                }, cancellation).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
     }
 
-    internal async Task InstallLocalAsync(string directory, ExtensionStoreChannel channel)
+    internal async Task InstallLocalAsync(string directory, ExtensionStoreChannel channel, bool onlyUninstalled = false)
     {
         RequireAvailable();
         await _refresh.WaitAsync(_stopping.Token).ConfigureAwait(false);
         try
         {
-            await _local.InstallAllAsync(directory, channel, _stopping.Token).ConfigureAwait(false);
+            await _local.InstallAllAsync(directory, channel, _stopping.Token, onlyUninstalled).ConfigureAwait(false);
         }
         finally { _refresh.Release(); }
     }
@@ -146,7 +165,7 @@ public sealed class ExtensionPackageService : IExtensionPackages, IAsyncDisposab
         var package = original.Metadata.Package;
         return AutomaticUpdatePolicy.ShouldUpgradeExtension(candidate.PackageVersion, package.PackageVersion,
             candidate.ArtifactSha256 == package.ArchiveSha256 && candidate.ManifestSha256 == package.ManifestSha256,
-            channel == ExtensionStoreChannel.Develop, original.Operation.Source.Package?.Catalog.Identity.Channel == ExtensionStoreChannel.Develop);
+            channel == ExtensionStoreChannel.Develop, original.Operation.Source.Package?.Catalog?.Identity.Channel == ExtensionStoreChannel.Develop);
     }
 
     public async Task<ExtensionCatalogView> RefreshAsync(string subject, ExtensionStoreChannel channel,
@@ -194,7 +213,7 @@ public sealed class ExtensionPackageService : IExtensionPackages, IAsyncDisposab
     {
         if (timeout <= TimeSpan.Zero || timeout > TimeSpan.FromSeconds(120)) throw new ArgumentOutOfRangeException(nameof(timeout));
         _stopping.Cancel();
-        await Task.WhenAll(_applies.StopAsync(timeout), _cleanupLoop).WaitAsync(timeout).ConfigureAwait(false);
+        await Task.WhenAll(_applies.StopAsync(timeout), _cleanupLoop, _intake.WaitStoppedAsync()).WaitAsync(timeout).ConfigureAwait(false);
         if (!await _refresh.WaitAsync(timeout).ConfigureAwait(false)) throw new TimeoutException("extension_refresh_stop_pending");
         _refresh.Release();
     }

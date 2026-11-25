@@ -26,6 +26,10 @@ public sealed record ScriptSource
     [JsonPropertyName("editor")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ScriptSourceEditor? Editor { get; init; }
+    /// <summary>Schema field <c>accountPreview</c>; constraints are owned by script-source.schema.json.</summary>
+    [JsonPropertyName("accountPreview")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ScriptSourceAccountPreview? AccountPreview { get; init; }
     /// <summary>Schema field <c>operationId</c>; constraints are owned by script-source.schema.json.</summary>
     [JsonPropertyName("operationId")]
     public required string OperationId { get; init; }
@@ -40,6 +44,36 @@ public sealed record ScriptSource
     [JsonPropertyName("diagnostics")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? Diagnostics { get; init; }
+}
+
+/// <summary>Wire shape from script-source.schema.json; validate the schema before use.</summary>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record ScriptSourceAccountPreview
+{
+    /// <summary>Schema field <c>state</c>; constraints are owned by script-source.schema.json.</summary>
+    [JsonPropertyName("state")]
+    public required string State { get; init; }
+    /// <summary>Schema field <c>mode</c>; constraints are owned by script-source.schema.json.</summary>
+    [JsonPropertyName("mode")]
+    public required string Mode { get; init; }
+    /// <summary>Schema field <c>accounts</c>; constraints are owned by script-source.schema.json.</summary>
+    [JsonPropertyName("accounts")]
+    public required IReadOnlyList<ScriptSourceAccountSummary> Accounts { get; init; }
+}
+
+/// <summary>Wire shape from script-source.schema.json; validate the schema before use.</summary>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record ScriptSourceAccountSummary
+{
+    /// <summary>Schema field <c>enabled</c>; constraints are owned by script-source.schema.json.</summary>
+    [JsonPropertyName("enabled")]
+    public required bool Enabled { get; init; }
+    /// <summary>Schema field <c>task</c>; constraints are owned by script-source.schema.json.</summary>
+    [JsonPropertyName("task")]
+    public required string Task { get; init; }
+    /// <summary>Schema field <c>overrideCount</c>; constraints are owned by script-source.schema.json.</summary>
+    [JsonPropertyName("overrideCount")]
+    public required long OverrideCount { get; init; }
 }
 
 /// <summary>Wire shape from script-source.schema.json; validate the schema before use.</summary>

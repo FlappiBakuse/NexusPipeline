@@ -64,7 +64,7 @@ public sealed class InstalledActivationTests
         var catalog = fixture.Package.Catalog;
         var reader = new ExtensionInstalledEvidence(catalog.Instance, catalog.Database, catalog.Contracts, fixture.Roots);
         using var evidence = reader.ProtectCurrent("fixture-plugin", catalog.Lease)!;
-        var accepted = evidence.ReadCurrent().Source.Package!.Catalog;
+        var accepted = Assert.IsType<ExtensionCatalogSaved>(evidence.ReadCurrent().Source.Package!.Catalog);
         var operation = catalog.Database.Write((connection, transaction) =>
             ExtensionCatalogRows.RequireAcceptedInside(connection, transaction, accepted));
         void WriteDigest(string digest) => catalog.Database.Write((connection, transaction) =>
@@ -139,7 +139,7 @@ public sealed class InstalledActivationTests
             }
             VerifyCurrent();
             await RechecksWriterState(context.Database, bound.Registered.JournalId, origin);
-            var catalog = bound.Source.Package!.Catalog;
+            var catalog = Assert.IsType<ExtensionCatalogSaved>(bound.Source.Package!.Catalog);
             void SetReady(int ready)
             {
                 using var connection = DatabaseConnections.Open(context.Database.DatabasePath, domains: DatabaseDomain.Runtime | DatabaseDomain.Configuration | DatabaseDomain.Records | DatabaseDomain.Extensions | DatabaseDomain.System | DatabaseDomain.Content);

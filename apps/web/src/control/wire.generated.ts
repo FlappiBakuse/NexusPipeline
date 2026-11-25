@@ -604,10 +604,23 @@ export interface ScriptSource {
   readonly direction: "request" | "response";
   readonly purpose?: "edit";
   readonly editor?: ScriptSourceEditor;
+  readonly accountPreview?: ScriptSourceAccountPreview;
   readonly operationId: string;
   readonly extensionId: string;
   readonly candidates?: ReadonlyArray<ScriptSourceCandidate>;
   readonly diagnostics?: ReadonlyArray<string>;
+}
+
+export interface ScriptSourceAccountPreview {
+  readonly state: "ready" | "empty" | "invalid";
+  readonly mode: "enabled" | "disabled" | "unknown";
+  readonly accounts: ReadonlyArray<ScriptSourceAccountSummary>;
+}
+
+export interface ScriptSourceAccountSummary {
+  readonly enabled: boolean;
+  readonly task: "DailyTask" | "RahaiBlocksTask" | "FarmEchoTask" | "NightmareNestTask" | "TacetTask" | "ForgeryTask" | "SimulationTask" | "CultivationTask" | "MergeEchoTask" | "EnhanceEchoTask" | "ChangeEchoTask" | "GardenTask" | "loginOnly" | "unknown";
+  readonly overrideCount: number;
 }
 
 export interface ScriptSourceCandidate {

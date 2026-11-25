@@ -2,6 +2,7 @@ import { createApp, h, nextTick } from 'vue';
 import type { UiElement } from '@nexuspipeline/extension-sdk';
 import HistoryPage from '../../apps/web/src/pages/HistoryPage.vue';
 import PluginsPage from '../../apps/web/src/pages/PluginsPage.vue';
+import { createLocalPlugins, localPluginsKey } from '../../apps/web/src/pages/local-plugins';
 import FormSelect from '../../apps/web/src/components/FormSelect';
 import PageActions from '../../apps/web/src/components/PageActions.vue';
 import AppNavigation from '../../apps/web/src/app/AppNavigation.vue';
@@ -95,6 +96,7 @@ async function inspectWorkspace(component: typeof HistoryPage | typeof PluginsPa
     </main></nexus-scroll-area></div>`;
   document.body.append(holder);
   const app = createApp({ render: () => h(component, { store, visible: true }) });
+  app.provide(localPluginsKey, createLocalPlugins(store));
   app.component('FormSelect', FormSelect).component('PageActions', PageActions);
   app.mount(holder.querySelector('.app-page')!);
   const outer = holder.querySelector<Area>('.workspace-scroll')!;

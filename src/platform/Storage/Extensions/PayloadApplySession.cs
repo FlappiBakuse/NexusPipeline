@@ -23,13 +23,23 @@ internal sealed class PayloadApplySession(RuntimeInstance instance, StateDatabas
         if (prepared.ReadCommitted() is { } committed) return Result(committed);
         var root = prepared.RequireReservationRoot();
         using var inventory = await activator.ReserveForApplyAsync(root, prepared.ExtensionId, acceptedCancellation).ConfigureAwait(false);
-        _ = new ExtensionPhysicalJournal(instance, database, contracts, roots, observer)
-            .Apply(prepared, inventory, acceptedCancellation);
+        var protection = activator.InstalledFiles;
+        var protectedCandidate = false;
         ExtensionApplyActivation? activation = null;
         PreparedExtensionActivation? source = null;
         Exception? operationFailure = null;
         try
         {
+            var physical = new ExtensionPhysicalJournal(instance, database, contracts, roots, observer, protection)
+                .Apply(prepared, inventory, acceptedCancellation);
+            if (protection is not null)
+                protectedCandidate = prepared.WithPhysical(inventory, acceptedCancellation, (plan, command, _, _, _, _, _, _) =>
+                {
+                    if (plan.Action == PayloadAction.Remove) return false;
+                    protection.Protect(command.ExtensionId, plan.TargetPath, plan.ParentIdentity,
+                        plan.Candidate with { OriginalObjects = physical.CandidateObjects });
+                    return true;
+                });
             var required = prepared.WithPhysical(inventory, acceptedCancellation,
                 (_, _, _, _, policy, _, _, _) => policy.MustActivateCandidate);
             if (required)
@@ -51,6 +61,7 @@ internal sealed class PayloadApplySession(RuntimeInstance instance, StateDatabas
         catch (Exception failure)
         {
             operationFailure = failure;
+            if (protectedCandidate) protection?.Release(prepared.ExtensionId);
             if (activation is null && source is not null)
             {
                 try
@@ -67,6 +78,12 @@ internal sealed class PayloadApplySession(RuntimeInstance instance, StateDatabas
                 catch (Exception restorationFailure)
                 { throw new AggregateException("extension_activation_restoration_pending", failure, restorationFailure); }
             }
+            try
+            {
+                if (protection is not null && new ExtensionInstalledEvidence(instance, database, contracts, roots)
+                    .ReadCurrent(prepared.ExtensionId) is { } current) protection.ProtectExisting(current);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception) { }
             throw;
         }
         finally

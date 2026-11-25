@@ -25,6 +25,8 @@ import StartupPreparation from './StartupPreparation.vue';
 import { interfacePreparation } from './interface-preparation';
 import { clearExtensionIcons } from '../control/extension-icons';
 import { useDesktopExit } from './desktop-exit-state';
+import { createLocalPlugins, localPluginsKey } from '../pages/local-plugins';
+import { ModalSurface } from '../ui/modal-surface';
 registerMessages({
   '部分界面准备失败，可重新准备。': 'Some interface preparation failed. Retry preparation.',
   '与宿主的连接已中断，请重新连接。': 'Connection to the Host was lost. Reconnect to continue.',
@@ -34,6 +36,18 @@ registerMessages({
 const client = new ControlClient();
 const { exitMessage, exitFailed } = useDesktopExit(client);
 const store = createStore(client);
+const localPlugins = createLocalPlugins(store);
+provide(localPluginsKey, localPlugins);
+const modalOpen = ref(false);
+const stopTrackingModal = ModalSurface.watchLayer(dialog => { modalOpen.value = !!dialog; });
+const localNotice = computed(() => modalOpen.value ? undefined : localPlugins.toast.value);
+const localNoticeMessage = computed(() => {
+  const notice = localNotice.value;
+  if (!notice) return '';
+  if (notice.kind === 'discovered') return t('检测到非官方插件，请进入插件中心手动启用');
+  const titles = { removed: '检测到部分插件已移除', waiting: '检测到部分插件等待移除', installed: '已安装本地官方插件' };
+  return t(titles[notice.kind]) + '\n' + notice.names.join(' · ');
+});
 const { theme, themeBusy, themeNotice, themeIcon, toggleTheme } = useAppAppearance(store);
 const registry = markRaw(
   new FrontendRegistry({
@@ -77,7 +91,10 @@ watch(
     visited.value = new Set();
   }
 );
-const preparation = interfacePreparation(store, frontend, registry);
+const preparation = interfacePreparation(store, frontend, registry, async () => {
+  await localPlugins.refresh();
+  await nextTick();
+});
 const { preparing, surfacesReady, failed: preparationFailed, coreFailed, stage: preparationStage, count: preparationCount } = preparation;
 const installingExtensions = computed(() => !!store.state.capabilities && surfacesReady.value &&
   !coreFailed.value && store.state.events?.initialExtensions === 'installing');
@@ -118,7 +135,10 @@ async function authenticate(): Promise<void> {
   authenticating.value = true;
   frontend.disconnect();
   clearExtensionIcons();
-  if (credential.value) client.authenticate(credential.value);
+  if (credential.value) {
+    localPlugins.dispose();
+    client.authenticate(credential.value);
+  }
   credential.value = '';
   try {
     await prepareInterface();
@@ -157,6 +177,8 @@ onMounted(async () => {
 });
 onBeforeUnmount(() => {
   preparation.cancel();
+  stopTrackingModal();
+  localPlugins.dispose();
   clearExtensionIcons();
   client.clearPrepared();
   void frontend.dispose().catch(store.report);
@@ -211,6 +233,8 @@ onBeforeUnmount(() => {
         </header>
         <nexus-toast v-if="installingExtensions" :key="store.state.capabilities?.instanceId" class="startup-installation-toast" :persistent.prop="true"
           :message.prop="t('initial_extensions_pending')" />
+        <nexus-toast v-if="localNotice" :key="localNotice.key" :tone="localNotice.kind === 'installed' ? 'success' : 'warning'"
+          :message.prop="localNoticeMessage" @nexus-close="localPlugins.closeToast" />
         <nexus-toast v-if="operationMessage" class="operation-toast" tone="danger" :message.prop="t(operationMessage)">
         </nexus-toast>
         <nexus-toast v-if="store.state.feedError && store.state.error !== 'connection_lost'" class="connection-toast" tone="warning" :message.prop="t('事件连接中断，正在重连')" />

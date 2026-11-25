@@ -46,13 +46,13 @@ internal sealed class InstalledActivationOrigin : IDisposable
     }
 
     internal static InstalledActivationOrigin Prepare(RuntimeInstance instance, StateDatabase database,
-        InstanceLease lease, ContractReader contracts, PayloadApplyRoots roots, ExtensionCatalogStore catalog,
+        InstanceLease lease, ContractReader contracts, PayloadApplyRoots roots, ExtensionCatalogStore? catalog,
         ResourceLeaseManager resources, RecoveryIndex recovery, ResourceOperationLease root, ExtensionActivator.ApplyReservation inventory,
         string extensionId, ProcessIdentityLease? executor = null)
     {
         lease.VerifyHeld(instance);
         using var reads = DatabaseReadScope.Hold(database.DatabasePath);
-        if (catalog.Instance != instance || !resources.UsesRecoveryIndex(recovery)) throw Invalid();
+        if (catalog is not null && catalog.Instance != instance || !resources.UsesRecoveryIndex(recovery)) throw Invalid();
         var reader = new ExtensionInstalledEvidence(instance, database, contracts, roots);
         InstallationReadLease? evidence = reader.ProtectCurrent(extensionId, lease);
         try
@@ -73,7 +73,11 @@ internal sealed class InstalledActivationOrigin : IDisposable
             {
                 result._processIdentity = executor ?? lease.ExecutorIdentity;
                 var package = installed.Operation.Source.Package ?? throw Invalid();
-                result._catalogEvidence = catalog.ProtectInstalledHistory(root, package.Catalog, package.Entry);
+                if (package.Catalog is { } saved)
+                    result._catalogEvidence = (catalog ?? throw new IOException("extension_release_trust_unprovisioned"))
+                        .ProtectInstalledHistory(root, saved, package.Entry);
+                else
+                    using (new ImmutableBlobStore(instance, contracts).OpenVerified(package.Archive)) { }
                 result._sql = new(database, "activation.sql.validate",
                     DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System);
                 _ = result.RequireCurrent(); return result;
@@ -121,7 +125,7 @@ internal sealed class InstalledActivationOrigin : IDisposable
             if (bound.Commit is null || bound.Footprint is null ||
                 ExtensionPayloadBinding.DerivedInstallation(bound.Plan, bound.Commit, bound.Footprint) != _installed ||
                 bound.Registered.Phase != JournalPhase.Committed || bound.Source.Package is null) throw Invalid();
-            _catalogEvidence!.RequireCurrent();
+            _catalogEvidence?.RequireCurrent();
             var stopped = _sql!.Read((connection, transaction) => new JournalWriterStore(_database)
                 .ObserveWithExecutor(connection, transaction, _installed.JournalId, _processIdentity));
             if (!stopped.IsComplete || stopped.State != WriterState.Stopped)

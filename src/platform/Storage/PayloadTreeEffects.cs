@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Microsoft.Win32.SafeHandles;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Platform.Storage.Journals;
 
@@ -34,11 +35,10 @@ internal sealed class PayloadTreeEffects(FileTreeScanner scanner, FileTreeArchiv
         return PhysicalTreeIdentity.Capture(candidate, actual).ToImmutableArray();
     }
 
-    internal void PreserveOriginal(FrozenPayloadApply plan, PayloadTreeScene previous)
+    internal void PreserveOriginal(FrozenPayloadApply plan, PayloadTreeScene previous, SafeFileHandle? owned = null)
     {
         if (plan.Before.Snapshot.Shape != FileObjectKind.Directory ||
-            (plan.Action == PayloadAction.Upgrade ? previous.Stage != "original-preservation-started" :
-                plan.Action != PayloadAction.Remove || previous.Stage != "workspace-created")) throw Invalid();
+            previous.Stage != (plan.Action == PayloadAction.Remove ? "workspace-created" : "original-preservation-started")) throw Invalid();
         var work = PayloadWorkspacePath.For(plan);
         using var held = StableDirectoryLease.Acquire(work);
         RequireWorkspace(plan, previous, plan.Action == PayloadAction.Remove ? ["before"] : ["candidate", "before"]);
@@ -48,7 +48,7 @@ internal sealed class PayloadTreeEffects(FileTreeScanner scanner, FileTreeArchiv
         if (Matches(before, plan.Before.Snapshot, plan.Before.OriginalObjects) && IsMissing(plan.TargetPath)) return;
         RequireTree(plan.TargetPath, plan.Before.Snapshot, plan.Before.OriginalObjects); RequireMissing(before);
         PhysicalObjectMove.MoveVerified(new(plan.TargetPath, plan.ParentIdentity, plan.Before.OriginalIdentity!,
-            before, previous.WorkspaceIdentity!, FileObjectKind.Directory));
+            before, previous.WorkspaceIdentity!, FileObjectKind.Directory), owned);
         RequireTree(before, plan.Before.Snapshot, plan.Before.OriginalObjects); RequireMissing(plan.TargetPath);
     }
 

@@ -137,6 +137,8 @@ public sealed class PayloadPlanCodec(RuntimeInstance instance, ContractReader co
         VerifiedSource verified;
         if (plan.Kind == JournalKind.UpdateApply)
         {
+            if (plan.Action == PayloadAction.Install && plan.Before.Snapshot.Shape != FileObjectKind.Missing)
+                throw new IOException("payload_install_target_already_exists");
             ApplicationTree.Validate(plan.Before.Snapshot, complete: false);
             ApplicationTree.Validate(plan.Candidate.Snapshot, complete: true);
             if (ApplicationTree.Roots.Select(name => Path.Combine(target, name)).Any(path =>

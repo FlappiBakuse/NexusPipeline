@@ -49,7 +49,7 @@ internal sealed class PayloadSourceFixture : IDisposable
                 using (var connection = DatabaseConnections.Open(Package.Catalog.Database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System))
                 using (var transaction = connection.BeginTransaction(deferred: true))
                 {
-                    catalog = ExtensionCatalogRows.ReadHead(connection, transaction, binding.Catalog.Channel)
+                    catalog = ExtensionCatalogRows.ReadHead(connection, transaction, binding.Catalog!.Channel)
                         ?? throw new IOException("fixture_catalog_missing");
                     transaction.Commit();
                 }

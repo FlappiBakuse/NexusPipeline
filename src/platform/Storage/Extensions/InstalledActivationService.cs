@@ -15,7 +15,7 @@ internal sealed record InstalledActivationResult(string ExtensionId, long Instal
 [SupportedOSPlatform("windows")]
 internal sealed class InstalledActivationService(RuntimeInstance instance, StateDatabase database,
     InstanceLease lease, ContractReader contracts, PayloadApplyRoots roots, ResourceLeaseManager resources,
-    RecoveryIndex recovery, ExtensionCatalogStore catalog, ExtensionActivator activator)
+    RecoveryIndex recovery, ExtensionCatalogStore? catalog, ExtensionActivator activator)
 {
     internal async ValueTask<InstalledActivationResult> ActivateAsync(string extensionId,
         CancellationToken acceptedHostCancellation, NexusPipeline.Platform.Processes.ProcessIdentityLease? executor = null)

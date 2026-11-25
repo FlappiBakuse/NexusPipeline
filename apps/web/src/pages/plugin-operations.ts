@@ -8,6 +8,7 @@ import {
   extensionState,
   type ExtensionDirectory,
   type ExtensionState,
+  type LocalExtensionCandidate,
   type ExtensionCatalog,
   type CatalogEntry
 } from '../control/extensions';
@@ -19,17 +20,19 @@ import type {
 } from '../control/wire.generated';
 
 interface PluginCommand {
-  kind: 'apply' | 'setting' | 'reconcile';
+  kind: 'apply' | 'local' | 'setting' | 'reconcile';
   extensionId: string;
   apply: ControlExtensionApply | null;
   setting: ControlHostSettings | null;
   reconcile: ControlExtensionReconcile | null;
   journalId: string;
+  local?: { candidateId: string; operationId: string };
 }
 interface PluginSession {
   pending: PluginCommand | null;
   busy: boolean;
   error: string;
+  errorExtensionId: string;
   notice: string;
   retryable: boolean;
 }
@@ -44,7 +47,7 @@ export class PluginOperations {
     if (!store.drafts.has(this.key))
       store.drafts.set(
         this.key,
-        reactive({ pending: null, busy: false, error: '', notice: '', retryable: false })
+        reactive({ pending: null, busy: false, error: '', errorExtensionId: '', notice: '', retryable: false })
       );
     this.state = store.drafts.get(this.key) as unknown as PluginSession;
   }
@@ -58,6 +61,7 @@ export class PluginOperations {
   private finish(notice: string): void {
     this.state.pending = null;
     this.state.error = '';
+    this.state.errorExtensionId = '';
     this.state.notice = notice;
     this.state.retryable = false;
     this.mark();
@@ -103,6 +107,7 @@ export class PluginOperations {
     };
     this.state.busy = true;
     this.state.error = '';
+    this.state.errorExtensionId = '';
     this.state.notice = '';
     this.mark();
     try {
@@ -128,18 +133,53 @@ export class PluginOperations {
       this.mark();
     }
   }
+  async enableLocal(item: LocalExtensionCandidate): Promise<void> {
+    if (!this.current() || this.state.busy || this.state.pending ||
+      (item.state !== 'pendingApproval' && item.state !== 'pendingUpdate') ||
+      !this.store.can('extensions.write') || !this.store.can('settings.write')) return;
+    const authority = this.store.client.authoritySignal;
+    const body = { candidateId: item.candidateId, operationId: createIdentity() };
+    this.state.pending = { kind: 'local', extensionId: item.extensionId, local: body, apply: null,
+      setting: null, reconcile: null, journalId: '' };
+    this.state.busy = true;
+    this.state.error = '';
+    this.state.errorExtensionId = item.extensionId;
+    this.state.notice = '';
+    this.mark();
+    try {
+      const status = await this.store.client.write('/control/v1/extensions/local/enable', body, value => {
+        const result = objectValue(value);
+        if (result.operationId !== body.operationId || (result.status !== 'installed' && result.status !== 'pending'))
+          throw new TypeError('extension_acceptance_unbound');
+        return result.status;
+      }, body.operationId, authority);
+      if (status === 'installed') {
+        this.finish('插件操作已完成。');
+        if (this.current() && !authority.aborted) await this.store.refresh(authority);
+      }
+    } catch (reason) {
+      if (!(reason instanceof ControlFailure && reason.uncertain)) this.state.pending = null;
+      this.state.errorExtensionId = item.extensionId;
+      this.failed(reason);
+    } finally {
+      this.state.busy = false;
+      this.mark();
+    }
+  }
   private async inspectApply(pending: PluginCommand): Promise<void> {
-    const body = pending.apply!;
+    const body = pending.apply;
+    const operationId = pending.local?.operationId ?? body!.operationId;
+    const authority = this.store.client.authoritySignal;
     const result = await this.store.client.read(
-      '/control/v1/extensions/operations/' + body.operationId,
-      objectValue
+      '/control/v1/extensions/operations/' + operationId,
+      objectValue, authority
     );
     const operation = objectValue(result.operation);
     if (
-      operation.operationId !== body.operationId ||
+      operation.operationId !== operationId ||
       operation.kind !== 'extension.apply' ||
-      result.extensionId !== body.command.extensionId ||
-      result.action !== body.command.action ||
+      result.extensionId !== pending.extensionId ||
+      (body ? result.action !== body.command.action : result.action !== 'install' && result.action !== 'upgrade') ||
       (pending.journalId && operation.initialJournalId !== pending.journalId)
     )
       throw new TypeError('extension_operation_unbound');
@@ -154,12 +194,13 @@ export class PluginOperations {
       throw new TypeError('extension_completion_invalid');
     if (result.outcome === 'installed' || result.outcome === 'removed') {
       if (
-        integerValue(result.resultInstalledRevision) !== body.command.expectedInstalledRevision + 1 ||
+        (body && integerValue(result.resultInstalledRevision) !== body.command.expectedInstalledRevision + 1) ||
+        (!body && result.outcome !== 'installed') ||
         result.resultIsInstalled !== (result.outcome === 'installed')
       )
         throw new TypeError('extension_revision_unbound');
     }
-    if (this.state.pending !== pending) return;
+    if (authority.aborted || this.state.pending !== pending) return;
     this.finish(
       result.outcome === 'originalRestored'
         ? '插件操作未完成，原版本已恢复。'
@@ -210,6 +251,7 @@ export class PluginOperations {
     const authority = this.store.client.authoritySignal;
     this.state.busy = true;
     this.state.error = '';
+    this.state.errorExtensionId = '';
     this.state.notice = '';
     this.mark();
     try {
@@ -278,7 +320,7 @@ export class PluginOperations {
     const authority = this.store.client.authoritySignal;
     this.state.busy = true;
     try {
-      if (pending.kind === 'apply') await this.inspectApply(pending);
+      if (pending.kind === 'apply' || pending.kind === 'local') await this.inspectApply(pending);
       else {
         if (pending.kind === 'setting') {
           const operation = await this.store.client.read(

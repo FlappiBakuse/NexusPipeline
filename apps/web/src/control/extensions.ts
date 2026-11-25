@@ -12,6 +12,7 @@ export interface ExtensionState {
   packageVersion?: string;
   kind?: ExtensionManifest['kind'];
   artifactName?: string;
+  isUnofficial?: boolean;
   capabilities: string[];
   metadata?: ExtensionMetadata;
 }
@@ -69,10 +70,59 @@ export function extensionState(value: unknown): ExtensionState {
     ...(row.packageVersion == null ? {} : { packageVersion: stringValue(row.packageVersion) }),
     ...(row.kind == null ? {} : { kind: kind(row.kind) }),
     ...(row.artifactName == null ? {} : { artifactName: stringValue(row.artifactName) }),
+    ...(row.isUnofficial == null ? {} : { isUnofficial: booleanValue(row.isUnofficial) }),
     capabilities: arrayValue(row.capabilities, stringValue), metadata: extensionMetadata(row.metadata)
   };
 }
 export type ExtensionDirectory = { hasReleaseTrust: boolean; items: ExtensionState[] };
+
+export interface LocalExtensionCandidate {
+  candidateId: string;
+  discoveryId: string;
+  extensionId: string;
+  name: string;
+  summary: string;
+  gameName?: string;
+  kind: ExtensionManifest['kind'];
+  packageVersion: string;
+  minHostVersion: string;
+  relativePath: string;
+  capabilities: string[];
+  state: 'pendingApproval' | 'pendingUpdate' | 'awaitingVerification' | 'unavailable';
+  reason: string | null;
+}
+
+export interface LocalExtensionSnapshot {
+  items: LocalExtensionCandidate[];
+  scanning: boolean;
+  notice: { batchId: string; removed: string[]; waiting: string[]; installed: string[] } | null;
+}
+
+export function localExtensionSnapshot(value: unknown): LocalExtensionSnapshot {
+  const row = objectValue(value);
+  const items = arrayValue(row.items, (value): LocalExtensionCandidate => {
+    const item = objectValue(value);
+    const candidateId = stringValue(item.candidateId), discoveryId = stringValue(item.discoveryId);
+    const state = item.state;
+    if (!/^[a-f0-9]{64}$/i.test(candidateId) || !/^[a-f0-9]{64}$/i.test(discoveryId) ||
+      (state !== 'pendingApproval' && state !== 'pendingUpdate' && state !== 'awaitingVerification' && state !== 'unavailable'))
+      throw new TypeError('extension_local_candidate_invalid');
+    return {
+      candidateId, discoveryId, state, extensionId: stringValue(item.extensionId), name: stringValue(item.name),
+      summary: stringValue(item.summary), kind: kind(item.kind), packageVersion: stringValue(item.packageVersion),
+      ...(item.gameName == null ? {} : { gameName: stringValue(item.gameName) }),
+      minHostVersion: stringValue(item.minHostVersion), relativePath: stringValue(item.relativePath),
+      capabilities: arrayValue(item.capabilities, stringValue), reason: item.reason == null ? null : stringValue(item.reason)
+    };
+  });
+  if (items.length > 256 || new Set(items.map(item => item.candidateId)).size !== items.length)
+    throw new TypeError('extension_local_snapshot_invalid');
+  const notice = row.notice == null ? null : objectValue(row.notice);
+  return { items, scanning: booleanValue(row.scanning), notice: notice && {
+    batchId: stringValue(notice.batchId), removed: arrayValue(notice.removed, stringValue),
+    waiting: arrayValue(notice.waiting, stringValue), installed: arrayValue(notice.installed, stringValue)
+  } };
+}
 
 export function extensionList(value: unknown): ExtensionDirectory {
   const row = objectValue(value);

@@ -11,14 +11,19 @@ using NexusPipeline.Platform.Storage.Extensions;
 
 namespace NexusPipeline.Platform.Extensions;
 
-internal sealed record ExtensionPackageBinding(Guid InstanceId, Guid OperationId, ExtensionCatalogIdentity Catalog, string CatalogKeyId,
-    ExtensionCatalogEntry Entry, string ArchivePath, PhysicalObjectIdentity ArchiveIdentity, PhysicalObjectIdentity ParentIdentity);
+internal sealed record ExtensionPackageBinding(Guid InstanceId, Guid OperationId, ExtensionCatalogIdentity? Catalog, string? CatalogKeyId,
+    ExtensionCatalogEntry Entry, string ArchivePath, PhysicalObjectIdentity ArchiveIdentity, PhysicalObjectIdentity ParentIdentity)
+{
+    internal string? LocalApproval { get; init; }
+}
 
 [SupportedOSPlatform("windows")]
 internal sealed class VerifiedExtensionPackage : IDisposable
 {
     private readonly object _gate = new();
-    private readonly ExtensionCatalogStore _catalogs;
+    private readonly ExtensionCatalogStore? _catalogs;
+    private readonly RuntimeInstance _instance;
+    private readonly ResourceLeaseManager? _resources;
     private readonly FileStream _input;
     private readonly ExtensionPackageArchive _archive;
     private readonly List<IDisposable> _held;
@@ -29,9 +34,23 @@ internal sealed class VerifiedExtensionPackage : IDisposable
     internal byte[] ManifestBytes() => _manifest.ToArray();
     internal ImmutableArray<ExtensionPackageFile> Files => _archive.Files;
 
-    private VerifiedExtensionPackage(ExtensionCatalogStore catalogs, ExtensionPackageBinding binding,
-        FileStream input, ExtensionPackageArchive archive, byte[] manifest, List<IDisposable> held)
-    { _catalogs = catalogs; Binding = binding; _input = input; _archive = archive; _manifest = manifest.ToArray(); _held = held; }
+    private VerifiedExtensionPackage(RuntimeInstance instance, ExtensionCatalogStore? catalogs, ResourceLeaseManager? resources,
+        ExtensionPackageBinding binding, FileStream input, ExtensionPackageArchive archive, byte[] manifest, List<IDisposable> held)
+    {
+        _instance = instance; _catalogs = catalogs; _resources = resources; Binding = binding;
+        _input = input; _archive = archive; _manifest = manifest.ToArray(); _held = held;
+    }
+
+    internal static VerifiedExtensionPackage PrepareLocal(RuntimeInstance instance, ResourceLeaseManager resources,
+        ResourceOperationLease root, ExtensionCatalogEntry entry, string approval, string archive, ContractReader contracts,
+        CancellationToken cancellation)
+    {
+        if (!LocalExtensionEvidence.ValidId(entry.ExtensionId) || !LocalExtensionEvidence.IsDigest(approval) ||
+            entry.ArtifactUrl.Length != 0) throw Invalid();
+        using var borrow = root.Borrow(resources, root.OperationId, [new("blobs:content", ResourceClaimMode.Reference)]);
+        return borrow.Use(() => Open(instance, null, resources, null, null, entry, approval, root.OperationId,
+            archive, contracts, cancellation));
+    }
 
     internal static VerifiedExtensionPackage Prepare(ExtensionCatalogStore catalogs, ExtensionStoreChannel channel,
         Guid operationId, ResourceOperationLease root, string extensionId, string requestedArchive,
@@ -48,6 +67,14 @@ internal sealed class VerifiedExtensionPackage : IDisposable
         cancellation.ThrowIfCancellationRequested();
         var catalog = catalogs.ReadCached(channel) ?? throw Invalid();
         var entry = catalog.Entries.SingleOrDefault(item => item.ExtensionId == extensionId) ?? throw Invalid();
+        return Open(catalogs.Instance, catalogs, null, catalog.Identity, catalog.KeyId, entry, null,
+            operationId, requestedArchive, contracts, cancellation);
+    }
+
+    private static VerifiedExtensionPackage Open(RuntimeInstance instance, ExtensionCatalogStore? catalogs,
+        ResourceLeaseManager? resources, ExtensionCatalogIdentity? catalog, string? keyId, ExtensionCatalogEntry entry,
+        string? approval, Guid operationId, string requestedArchive, ContractReader contracts, CancellationToken cancellation)
+    {
         var path = PhysicalPathPolicy.NormalizeWithoutLinks(requestedArchive);
         var held = new List<IDisposable>(); ExtensionPackageArchive? archive = null;
         try
@@ -57,14 +84,15 @@ internal sealed class VerifiedExtensionPackage : IDisposable
             if (input.Length != entry.ArtifactBytes ||
                 Convert.ToHexStringLower(SHA256.HashData(input)) != entry.ArtifactSha256) throw Invalid();
             input.Position = 0;
-            var binding = new ExtensionPackageBinding(catalogs.Instance.InstanceId, operationId, catalog.Identity, catalog.KeyId, entry,
-                path, PhysicalObjectIdentity.Read(input.SafeFileHandle), PhysicalObjectIdentity.Read(Path.GetDirectoryName(path)!));
+            var binding = new ExtensionPackageBinding(instance.InstanceId, operationId, catalog, keyId, entry,
+                path, PhysicalObjectIdentity.Read(input.SafeFileHandle), PhysicalObjectIdentity.Read(Path.GetDirectoryName(path)!))
+                { LocalApproval = approval };
             archive = ExtensionPackageArchive.Open(input, cancellation);
             var manifestBytes = archive.ReadManifest(cancellation);
             var manifest = new ExtensionManifestAdmission(contracts).ReadCurrent(manifestBytes, entry.ExtensionId);
             RequireManifest(entry, manifest, manifestBytes, archive.Files);
             RequireContents(manifest, archive, cancellation);
-            var result = new VerifiedExtensionPackage(catalogs, binding, input, archive, manifestBytes, held);
+            var result = new VerifiedExtensionPackage(instance, catalogs, resources, binding, input, archive, manifestBytes, held);
             result.RequireCurrent(cancellation);
             return result;
         }
@@ -90,7 +118,7 @@ internal sealed class VerifiedExtensionPackage : IDisposable
         internal static Candidate Capture(VerifiedExtensionPackage package, ResourceOperationLease root,
             ImmutableBlobStore blobs, CancellationToken cancellation)
         {
-            using var borrow = package._catalogs.BorrowPackage(root, package.Binding.OperationId);
+            using var borrow = package.Borrow(root);
             return borrow.Use(() =>
             {
                 lock (package._gate)
@@ -106,7 +134,7 @@ internal sealed class VerifiedExtensionPackage : IDisposable
         internal T Use<T>(ResourceOperationLease root, ImmutableBlobStore blobs, CancellationToken cancellation,
             Func<ExtensionPackageBinding, ArchivedFileTree, T> use)
         {
-            using var borrow = _package._catalogs.BorrowPackage(root, Binding.OperationId);
+            using var borrow = _package.Borrow(root);
             return borrow.Use(() =>
             {
                 lock (_package._gate)
@@ -119,20 +147,27 @@ internal sealed class VerifiedExtensionPackage : IDisposable
         }
     }
 
+    private ResourceOperationBorrow Borrow(ResourceOperationLease root) => _catalogs is { } catalog
+        ? catalog.BorrowPackage(root, Binding.OperationId)
+        : root.Borrow(_resources!, Binding.OperationId, [new("blobs:content", ResourceClaimMode.Reference)]);
+
     private void RequireInstance(ImmutableBlobStore blobs)
     {
         if (blobs.Instance.InstanceId != Binding.InstanceId ||
-            !StringComparer.OrdinalIgnoreCase.Equals(blobs.Instance.RuntimeRoot, _catalogs.Instance.RuntimeRoot)) throw Invalid();
+            !StringComparer.OrdinalIgnoreCase.Equals(blobs.Instance.RuntimeRoot, _instance.RuntimeRoot)) throw Invalid();
     }
 
     private void RequireCurrent(CancellationToken cancellation)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         cancellation.ThrowIfCancellationRequested();
-        var catalog = _catalogs.ReadCached(Binding.Catalog.Channel) ?? throw Invalid();
-        if (catalog.Identity != Binding.Catalog || catalog.KeyId != Binding.CatalogKeyId ||
-            catalog.Entries.SingleOrDefault(item => item.ExtensionId == Binding.Entry.ExtensionId) != Binding.Entry ||
-            PhysicalObjectIdentity.Read(_input.SafeFileHandle) != Binding.ArchiveIdentity ||
+        if (_catalogs is { } catalogs)
+        {
+            var catalog = catalogs.ReadCached(Binding.Catalog!.Channel) ?? throw Invalid();
+            if (catalog.Identity != Binding.Catalog || catalog.KeyId != Binding.CatalogKeyId ||
+                catalog.Entries.SingleOrDefault(item => item.ExtensionId == Binding.Entry.ExtensionId) != Binding.Entry) throw Invalid();
+        }
+        if (PhysicalObjectIdentity.Read(_input.SafeFileHandle) != Binding.ArchiveIdentity ||
             PhysicalObjectIdentity.Read(Binding.ArchivePath) != Binding.ArchiveIdentity ||
             PhysicalObjectIdentity.Read(Path.GetDirectoryName(Binding.ArchivePath)!) != Binding.ParentIdentity ||
             _input.Length != Binding.Entry.ArtifactBytes) throw Invalid();

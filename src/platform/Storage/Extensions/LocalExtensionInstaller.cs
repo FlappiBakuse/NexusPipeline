@@ -15,7 +15,7 @@ internal sealed class LocalExtensionInstaller(RuntimeInstance instance, StateDat
     ContractReader contracts, PayloadApplyRoots roots, ResourceLeaseManager resources, RecoveryIndex recovery,
     ExtensionRuntimeLifecycle runtime)
 {
-    internal async Task InstallAllAsync(string directory, ExtensionStoreChannel channel, CancellationToken cancellation)
+    internal async Task InstallAllAsync(string directory, ExtensionStoreChannel channel, CancellationToken cancellation, bool onlyUninstalled = false)
     {
         directory = PhysicalPathPolicy.NormalizeWithoutLinks(directory);
         if (!Directory.Exists(directory)) throw new IOException("extension_bundle_missing");
@@ -26,9 +26,9 @@ internal sealed class LocalExtensionInstaller(RuntimeInstance instance, StateDat
         var evidence = new ExtensionInstalledEvidence(instance, database, contracts, roots);
         var selected = ids.Select(id => (Entry: catalog.Entries.SingleOrDefault(item => item.ExtensionId == id)
                 ?? throw new IOException("extension_bundle_entry_missing"), Installed: evidence.ReadCurrent(id)?.Metadata))
-            .Where(item => item.Installed is null || !item.Installed.IsInstalled ||
-                item.Installed.Package.ArchiveSha256 != item.Entry.ArtifactSha256 ||
-                item.Installed.Package.ManifestSha256 != item.Entry.ManifestSha256).ToArray();
+            .Where(item => item.Installed?.IsInstalled != true || !onlyUninstalled &&
+                (item.Installed.Package.ArchiveSha256 != item.Entry.ArtifactSha256 ||
+                    item.Installed.Package.ManifestSha256 != item.Entry.ManifestSha256)).ToArray();
         if (selected.Length == 0 && runtime.Catalog!.ReadCached(catalog.Identity.Channel) is { } current &&
             current.Identity == catalog.Identity && current.PointerBytes().AsSpan().SequenceEqual(catalog.PointerBytes()) &&
             current.CatalogBytes().AsSpan().SequenceEqual(catalog.CatalogBytes()) &&

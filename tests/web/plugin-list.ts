@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { pluginIndex, matchesPlugin, comparePlugins } from '../../apps/web/src/pages/plugin-catalog';
 import { extensionMetadata, metadataText, taskTitle } from '../../apps/web/src/control/extension-metadata';
+import { createLocalPlugins } from '../../apps/web/src/pages/local-plugins';
+import { ControlFailure } from '../../apps/web/src/control/client';
+import type { AppStore } from '../../apps/web/src/app/store';
 export async function run(): Promise<string[]> {
   const row = { extensionId: 'sample', name: '截图工具', kind: 'managed-code', summary: '' };
   const fallback = pluginIndex(row);
@@ -44,5 +47,49 @@ export async function run(): Promise<string[]> {
   assert.deepEqual(names.map(item => item.name), Array.from({ length: 128 }, (_, index) => '脚本 ' + (index + 1)));
   assert.equal(collators, 0, `sorting 128 localized names constructs ${collators} collators`);
   cases.push('name ordering reuses one pinyin collator while preserving numeric order for 128 localized names');
+  const candidate = { candidateId: 'a'.repeat(64), discoveryId: 'a'.repeat(64), extensionId: 'local-fixture-plugin', name: 'Local plugin',
+    summary: 'Local test package', kind: 'managed-code', packageVersion: '1.0.0', minHostVersion: '1.0.0',
+    relativePath: 'fixture.zip', capabilities: [], state: 'pendingApproval', reason: null };
+  const snapshot = { items: [candidate], scanning: false,
+    notice: { batchId: 'startup', removed: ['Removed plugin'], waiting: [], installed: [] } };
+  let response = snapshot, remote = false, scans = 0;
+  const authoritySignal = new AbortController().signal;
+  const store = {
+    state: { capabilities: { instanceId: 'fixture' } }, can: () => true,
+    client: { authoritySignal, read: async (_path: string, parse: (value: unknown) => unknown) => {
+      if (remote) throw new ControlFailure(403, 'control_capability_denied');
+      return parse(response);
+    }, write: async (_path: string, _body: unknown, parse: (value: unknown) => unknown) => {
+      scans++;
+      return parse(response);
+    } }
+  } as unknown as AppStore;
+  const local = createLocalPlugins(store);
+  await local.refresh();
+  assert.equal(local.available.value, true);
+  assert.equal(local.items.value[0]?.candidateId, candidate.candidateId);
+  assert.equal(local.toast.value?.kind, 'removed');
+  local.closeToast();
+  assert.equal(local.toast.value?.kind, 'discovered');
+  local.closeToast();
+  await local.refresh();
+  await local.scan();
+  assert.equal(scans, 1);
+  assert.equal(local.toast.value, undefined);
+  response = { ...snapshot, items: [{ ...candidate, candidateId: 'b'.repeat(64) }] };
+  await local.scan();
+  assert.equal(local.toast.value, undefined);
+  response = { ...snapshot, items: [{ ...candidate, candidateId: 'c'.repeat(64), discoveryId: 'c'.repeat(64) }] };
+  await local.scan();
+  assert.equal(local.toast.value?.kind, 'discovered');
+  remote = true;
+  await local.refresh();
+  await local.scan();
+  assert.equal(local.available.value, false);
+  assert.equal(local.items.value.length, 0);
+  assert.equal(local.toast.value, undefined);
+  assert.equal(scans, 3);
+  local.dispose();
+  cases.push('local discovery orders startup removal before approval notices, deduplicates digests and honors remote denial');
   return cases;
 }

@@ -1,8 +1,8 @@
-import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref, watch, type Ref } from 'vue';
 import type { AppStore } from '../app/store';
 import { locale } from '../app/locale';
 import { metadataText, type ExtensionMetadata } from '../control/extension-metadata';
-import { extensionCatalog, extensionDetails, extensionList, releaseSummary, upgradeAvailable, type CatalogEntry, type ExtensionCatalog, type ExtensionDetails, type ExtensionDirectory, type ExtensionState } from '../control/extensions';
+import { extensionCatalog, extensionDetails, extensionList, releaseSummary, upgradeAvailable, type CatalogEntry, type ExtensionCatalog, type ExtensionDetails, type ExtensionDirectory, type ExtensionState, type LocalExtensionCandidate } from '../control/extensions';
 import { pinyin } from 'pinyin-pro';
 
 export interface PluginRow {
@@ -14,13 +14,16 @@ export interface PluginRow {
   installed?: ExtensionState;
   installation?: ExtensionState;
   candidate?: CatalogEntry;
+  local?: LocalExtensionCandidate;
   details?: ExtensionDetails;
   update: boolean;
   metadata?: ExtensionMetadata;
   artifactName?: string;
 }
 
-export function usePluginBrowser(store: AppStore, visible: () => boolean) {
+export const pluginRowId = (row: PluginRow): string => row.local ? 'local/' + row.local.candidateId : row.extensionId;
+
+export function usePluginBrowser(store: AppStore, visible: () => boolean, local: Ref<LocalExtensionCandidate[]>) {
   const installed = ref<ExtensionState[]>([]),
     catalog = ref<ExtensionCatalog | null>(null);
   const localDetails = reactive(new Map<string, ExtensionDetails>());
@@ -49,7 +52,7 @@ export function usePluginBrowser(store: AppStore, visible: () => boolean) {
       view.value === 'installed'
         ? installed.value.filter((item) => item.isInstalled).map((item) => item.extensionId)
         : catalog.value?.entries.map((item) => item.extensionId) || [];
-    return ids.map((extensionId) => {
+    const known = ids.map((extensionId) => {
       const installation = installed.value.find((item) => item.extensionId === extensionId);
       const state = installation?.isInstalled ? installation : undefined;
       const candidate = catalog.value?.entries.find((item) => item.extensionId === extensionId);
@@ -73,22 +76,29 @@ export function usePluginBrowser(store: AppStore, visible: () => boolean) {
         update: !!state && upgradeAvailable(localDetails.get(extensionId), candidate, channel.value)
       };
     });
+    if (view.value === 'store') return known;
+    return [...local.value.map((item) => ({
+      extensionId: item.extensionId, name: item.name, summary: item.summary, kind: item.packageVersion ? item.kind : '',
+      version: item.packageVersion, artifactName: item.relativePath, local: item, update: false
+    })), ...known];
   });
   const searchIndexes = computed(() => {
     const next = new Map<string, { stamp: string; value: PluginIndex }>();
     for (const row of rows.value) {
       const stamp = JSON.stringify([row.metadata || [row.name, row.summary], row.artifactName, row.extensionId]);
-      const prior = indexes.get(row.extensionId);
-      next.set(row.extensionId, prior?.stamp === stamp ? prior : { stamp, value: pluginIndex(row) });
+      const id = pluginRowId(row);
+      const prior = indexes.get(id);
+      next.set(id, prior?.stamp === stamp ? prior : { stamp, value: pluginIndex(row) });
     }
     indexes = next; return next;
   });
   const filtered = computed(() => {
     return rows.value
-      .filter(row => (kind.value === 'all' || row.kind === kind.value) && matchesPlugin(searchIndexes.value.get(row.extensionId)!.value, search.value))
-      .sort((left, right) => comparePlugins(left, right, order.value, descending.value));
+      .filter(row => (kind.value === 'all' || row.kind === kind.value) && matchesPlugin(searchIndexes.value.get(pluginRowId(row))!.value, search.value))
+      .sort((left, right) => Number(right.local?.state === 'pendingApproval') - Number(left.local?.state === 'pendingApproval') ||
+        comparePlugins(left, right, order.value, descending.value));
   });
-  const selected = computed(() => rows.value.find((item) => item.extensionId === selectedId.value));
+  const selected = computed(() => rows.value.find(item => pluginRowId(item) === selectedId.value));
   const details = computed(() =>
     view.value === 'store' ? catalogDetails.get(selectedId.value) : localDetails.get(selectedId.value)
   );
@@ -109,6 +119,10 @@ export function usePluginBrowser(store: AppStore, visible: () => boolean) {
     selectedId.value = extensionId;
     detailOwner?.abort();
     detailError.value = '';
+    if (selected.value?.local) {
+      detailLoading.value = false;
+      return;
+    }
     if (!visible() || !current()) return;
     const controller = new AbortController();
     detailOwner = controller;
@@ -177,8 +191,7 @@ export function usePluginBrowser(store: AppStore, visible: () => boolean) {
       if (catalog.value?.identity.sha256 !== next?.identity.sha256) catalogDetails.clear();
       catalog.value = next;
       loaded = true;
-      if (!rows.value.some((item) => item.extensionId === selectedId.value))
-        selectedId.value = filtered.value[0]?.extensionId || '';
+      if (!selected.value) selectedId.value = filtered.value[0] ? pluginRowId(filtered.value[0]) : '';
       if (selectedId.value) await select(selectedId.value);
     } catch (reason) {
       if (!controller.signal.aborted && current()) {
@@ -203,7 +216,7 @@ export function usePluginBrowser(store: AppStore, visible: () => boolean) {
     observeInstalled(list);
     if (!list.hasReleaseTrust) { catalog.value = null; catalogDetails.clear(); }
     if (acquiredTrust && !busy.value) { await load(false, list); return; }
-    if (!rows.value.some(item => item.extensionId === selectedId.value)) selectedId.value = filtered.value[0]?.extensionId || '';
+    if (!selected.value) selectedId.value = filtered.value[0] ? pluginRowId(filtered.value[0]) : '';
     if (selectedId.value) await select(selectedId.value);
   }
   watch(view, (next, previous) => {
@@ -212,9 +225,18 @@ export function usePluginBrowser(store: AppStore, visible: () => boolean) {
     search.value = saved.search; kind.value = saved.kind; order.value = saved.order; descending.value = saved.descending;
   });
   watch([view, kind, order, descending, search], () => {
-    if (!filtered.value.some((item) => item.extensionId === selectedId.value))
-      selectedId.value = filtered.value[0]?.extensionId || '';
+    if (!filtered.value.some(item => pluginRowId(item) === selectedId.value))
+      selectedId.value = filtered.value[0] ? pluginRowId(filtered.value[0]) : '';
     if (selectedId.value) void select(selectedId.value);
+  });
+  watch(local, (next, previous) => {
+    if (view.value !== 'installed' || !visible()) return;
+    if (selected.value) return;
+    const prior = previous.find(item => 'local/' + item.candidateId === selectedId.value);
+    const replacement = prior && next.find(item => item.extensionId === prior.extensionId && item.relativePath === prior.relativePath);
+    if (replacement) void select('local/' + replacement.candidateId);
+    else if (prior) selectedId.value = prior.extensionId;
+    else if (filtered.value[0]) void select(pluginRowId(filtered.value[0]));
   });
   watch(channel, () => {
     catalog.value = null;

@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, inject, nextTick, onMounted, ref, watch } from 'vue';
 import type { AppStore } from '../app/store';
 import { confirmAction } from '../app/confirmation';
 import { locale, t } from '../app/locale';
-import { usePluginBrowser, compatiblePlugin, type PluginRow } from './plugin-catalog';
+import { usePluginBrowser, compatiblePlugin, pluginRowId, type PluginRow } from './plugin-catalog';
+import { localPluginsKey } from './local-plugins';
 import { PluginOperations } from './plugin-operations';
 import { usePluginHistory } from './plugin-history';
 import PluginDetails from '../components/PluginDetails.vue';
@@ -11,7 +12,8 @@ import PluginFilters from '../components/PluginFilters.vue';
 import './plugin-messages';
 
 const props = defineProps<{ store: AppStore; visible: boolean }>();
-const browser = usePluginBrowser(props.store, () => props.visible),
+const local = inject(localPluginsKey)!;
+const browser = usePluginBrowser(props.store, () => props.visible, local.items),
   owner = new PluginOperations(props.store);
 const {
   view,
@@ -30,8 +32,13 @@ const {
   catalog
 } = browser;
 const session = owner.state;
+const confirming = ref(false);
 const locked = computed(() => busy.value || session.busy || !!session.pending);
 const canManage = computed(() => props.store.can('extensions.write'));
+const canScan = computed(() => local.available.value && canManage.value);
+const canEnable = computed(() => canScan.value && props.store.can('settings.write'));
+const listColumn = ref<HTMLElement | null>(null);
+const detailColumn = ref<HTMLElement | null>(null);
 const descriptionTarget = ref<HTMLElement | null>(null);
 const mobileDetail = ref(false);
 const { history, historyNext, historyBusy, loadHistory } = usePluginHistory(
@@ -42,11 +49,19 @@ const { history, historyNext, historyBusy, loadHistory } = usePluginHistory(
 onMounted(() => {
   descriptionTarget.value = document.getElementById('page-description-override');
 });
-const kindLabel = (row: PluginRow): string => t(row.kind === 'data-specialized' ? '专项插件' : '通用插件');
+const kindLabel = (row: PluginRow): string => row.kind ? t(row.kind === 'data-specialized' ? '专项插件' : '通用插件') : '';
 const compatible = (row: PluginRow) =>
   compatiblePlugin(row, props.store.state.capabilities?.hostVersion || '0.0.0');
+const unofficial = (row: PluginRow) => !!row.installed?.isUnofficial || row.local?.state === 'pendingApproval';
 function status(row: PluginRow): string {
   if (session.pending?.extensionId === row.extensionId) return t('待应用');
+  if (row.local) {
+    if (row.local.state === 'pendingApproval') return t('待启用');
+    if (row.local.state === 'pendingUpdate') return t('待确认更新');
+    if (row.local.state === 'awaitingVerification') return t('等待官方校验');
+    if (row.local.reason === 'extension_host_version_unsupported') return t('需要更新宿主');
+    return t(row.local.reason === 'extension_local_source_unverified' ? '来源待核验' : '不可用');
+  }
   if (view.value === 'installed') {
     if (row.installed?.unavailableReason === 'extension_files_changed') return t('插件文件损坏');
     if (row.installed?.unavailableReason === 'extension_directory_unavailable') return t('插件目录不可用');
@@ -86,8 +101,51 @@ async function enable(row: PluginRow): Promise<void> {
   if (directory) await browser.adoptDirectory(directory);
   else if (props.visible) await browser.load();
 }
+async function enableLocal(row: PluginRow): Promise<void> {
+  const item = row.local;
+  if (!item || (item.state !== 'pendingApproval' && item.state !== 'pendingUpdate') ||
+    locked.value || confirming.value || !canEnable.value) return;
+  const update = item.state === 'pendingUpdate';
+  const authority = props.store.client.authoritySignal;
+  const risk = t(item.kind === 'managed-code'
+    ? '发布者未经官方验证。插件代码会在宿主进程中运行，并使用宿主进程的操作系统权限。请确认信任此文件后继续。'
+    : '发布者未经官方验证。请核对专项插件申报的能力和适用范围，并确认信任此文件后继续。');
+  const context = item.kind === 'data-specialized'
+    ? '\n\n' + t('适用项目') + ' · ' + (item.gameName || t('未提供')) + '\n' +
+      t('申报能力') + ' · ' + (item.capabilities.join(' · ') || t('未申报'))
+    : '';
+  confirming.value = true;
+  try {
+    const message = update ? t('将使用此本地发行包更新插件，并保留当前启用设置。') : risk + context;
+    if (!(await confirmAction(`${row.name} · v${row.version}\n\n${message}\n\n${item.relativePath}`,
+      authority, { title: t(update ? '更新本地官方插件？' : '启用非官方插件？'),
+        confirmLabel: t(update ? '更新插件' : '确认启用') })) ||
+      !props.visible || authority.aborted || !canEnable.value) return;
+    const candidate = local.items.value.find(value => value.candidateId === item.candidateId);
+    if (!candidate || candidate.state !== item.state) {
+      session.errorExtensionId = item.extensionId;
+      session.error = 'extension_local_candidate_changed';
+    } else await owner.enableLocal(candidate);
+  } finally {
+    confirming.value = false;
+  }
+  if (session.error === 'extension_local_candidate_changed' || (!session.pending && !session.error)) {
+    await local.scan();
+    if (!local.error.value) return;
+  }
+  await local.refresh();
+  if (props.visible && !session.pending) await browser.load();
+}
 async function inspect(retry = false): Promise<void> {
+  const localOperation = session.pending?.kind === 'local';
   const directory = await (retry ? owner.retry() : owner.inspect());
+  if (localOperation) {
+    if (!session.pending) {
+      await local.scan();
+      if (!local.error.value) return;
+    }
+    await local.refresh();
+  }
   if (directory) await browser.adoptDirectory(directory);
   else if (props.visible && !session.pending) await browser.load();
 }
@@ -99,13 +157,28 @@ async function updateAll(): Promise<void> {
     if (session.pending || session.error || !props.visible) break;
   }
 }
-const selectedHistory = computed(() => history.value.filter((item) => item.extensionId === selectedId.value));
+const selectedHistory = computed(() => history.value.filter((item) => item.extensionId === selected.value?.extensionId));
+watch(() => props.visible, async (visible) => {
+  if (!visible) return;
+  if (!local.available.value) await local.refresh();
+  if (props.visible && canScan.value) await local.scan();
+}, { immediate: true });
+watch(local.revision, () => { if (props.visible) void browser.load(); }, { flush: 'post' });
 watch(view, () => {
   mobileDetail.value = false;
 });
-function select(id: string): void {
+async function select(id: string): Promise<void> {
   mobileDetail.value = true;
   void browser.select(id);
+  if (matchMedia('(max-width: 719px)').matches) {
+    await nextTick();
+    detailColumn.value?.querySelector<HTMLElement>('h3')?.focus();
+  }
+}
+async function backToList(): Promise<void> {
+  mobileDetail.value = false;
+  await nextTick();
+  listColumn.value?.querySelector<HTMLElement>('[aria-pressed="true"]')?.focus();
 }
 </script>
 <template>
@@ -126,20 +199,23 @@ function select(id: string): void {
     >
       {{ t('插件仓库') }}
     </button>
-      <button v-if="session.pending" :disabled="session.busy || !store.can('operations.read')" @click="inspect()">{{ t('读取操作结果') }}</button>
+    <nexus-button v-if="view === 'installed' && canScan" :label="t('扫描本地目录')" :busy.prop="local.busy.value"
+      :disabled.prop="locked || local.busy.value" @click="local.scan" />
+    <button v-if="session.pending" type="button" :disabled="session.busy || !store.can('operations.read')" @click="inspect()">{{ t('读取操作结果') }}</button>
     <button v-if="session.pending && session.retryable" :disabled="session.busy || !canManage" @click="inspect(true)">{{ t('重试应用') }}</button>
   </PageActions>
   <Teleport :to="descriptionTarget || 'body'" :disabled="!descriptionTarget">
     <span v-if="visible && view === 'store'">{{ t('浏览官方插件并管理安装版本。') }}</span>
   </Teleport>
   <template v-if="visible">
-    <nexus-toast v-if="session.error" :tone="session.pending ? 'warning' : 'danger'" :message.prop="t(session.error)" />
+    <nexus-toast v-if="session.error && !session.errorExtensionId" :tone="session.pending ? 'warning' : 'danger'" :message.prop="t(session.error)" />
     <nexus-toast v-else-if="session.notice" :message.prop="t(session.notice)" @nexus-close="session.notice = ''" />
     <nexus-toast v-else-if="session.pending && !session.busy" tone="warning" :message.prop="t('原操作尚待确认，请先读取结果。')" />
     <nexus-toast v-else-if="!session.pending && error" tone="danger" :message.prop="t(error)" />
+    <nexus-toast v-if="local.error.value" tone="danger" :message.prop="t(local.error.value)" @nexus-close="local.error.value = ''" />
   </template>
   <div class="plugin-workspace" :class="{ store: view === 'store', detail: mobileDetail }">
-    <div class="plugin-list-column">
+    <div ref="listColumn" class="plugin-list-column">
       <div class="plugin-search">
         <nexus-text-input
           :value.prop="search"
@@ -161,7 +237,7 @@ function select(id: string): void {
         class="plugin-list"
         :label="t(view === 'installed' ? '本地插件' : '插件仓库')"
         :aria-label="t(view === 'installed' ? '本地插件' : '插件仓库')"
-        :aria-busy="busy"
+        :aria-busy="busy || (view === 'installed' && local.busy.value)"
       >
         <div class="plugin-list-items">
           <nexus-loading-state
@@ -176,31 +252,34 @@ function select(id: string): void {
           />
           <button
             v-for="row in filtered"
-            :key="row.extensionId"
+            :key="pluginRowId(row)"
+            type="button"
             class="plugin-row"
-            :class="{ selected: selectedId === row.extensionId }"
-            :aria-pressed="selectedId === row.extensionId"
-            @click="select(row.extensionId)"
+            :class="{ selected: selectedId === pluginRowId(row) }"
+            :aria-pressed="selectedId === pluginRowId(row)"
+            @click="select(pluginRowId(row))"
           >
             <strong>{{ row.name }}</strong>
             <span class="row-summary">{{ row.summary || row.extensionId }}</span>
             <span class="badges">
               <nexus-badge
+                v-if="row.kind"
                 :tone="row.kind === 'data-specialized' ? 'info' : 'neutral'"
                 :label="kindLabel(row)"
               />
               <nexus-badge :tone="tone(row)" :label="status(row)" />
               <nexus-badge v-if="row.version" tone="neutral" :label="'v' + row.version" />
+              <nexus-badge v-if="unofficial(row)" tone="warning" :label="t('非官方')" />
             </span>
           </button>
         </div>
       </nexus-scroll-area>
     </div>
-    <div class="plugin-detail-column">
-      <button class="plugin-back" @click="mobileDetail = false">{{ t('返回插件列表') }}</button>
+    <div ref="detailColumn" class="plugin-detail-column">
+      <button class="plugin-back" type="button" @click="backToList">{{ t('返回插件列表') }}</button>
       <PluginDetails
         v-if="selected"
-        :key="view + '/' + selected.extensionId"
+        :key="view + '/' + pluginRowId(selected)"
         :row="selected"
         :details="details"
         :loading="detailLoading"
@@ -208,22 +287,31 @@ function select(id: string): void {
         :status="status(selected)"
         :tone="tone(selected)"
         :kind-label="kindLabel(selected)"
+        :unofficial="unofficial(selected)"
+        :action-error="session.errorExtensionId === selected.extensionId ? session.error : ''"
       >
         <template #actions>
-          <button
-            v-if="view === 'installed' && selected.installed?.unavailableReason === 'extension_files_changed'"
-            :disabled="locked || !canManage"
-            @click="apply(selected, 'remove')"
-          >
-            {{ t('卸载插件') }}
-          </button>
-          <button
-            v-if="view === 'installed'"
-            :disabled="locked || !canManage || !store.can('settings.write')"
-            @click="enable(selected)"
-          >
-            {{ t(selected.installed?.desiredEnabled ? '禁用插件' : '启用插件') }}
-          </button>
+          <template v-if="selected.local">
+            <button v-if="(selected.local.state === 'pendingApproval' || selected.local.state === 'pendingUpdate') && canEnable"
+              class="primary" type="button" :disabled="locked || local.busy.value" @click="enableLocal(selected)">
+              {{ t(selected.local.state === 'pendingUpdate' ? '更新插件' : '启用插件') }}
+            </button>
+          </template>
+          <template v-else-if="view === 'installed'">
+            <button
+              v-if="selected.installed?.isUnofficial || selected.installed?.unavailableReason === 'extension_files_changed'"
+              :disabled="locked || !canManage"
+              @click="apply(selected, 'remove')"
+            >
+              {{ t('卸载插件') }}
+            </button>
+            <button
+              :disabled="locked || !canManage || !store.can('settings.write')"
+              @click="enable(selected)"
+            >
+              {{ t(selected.installed?.desiredEnabled ? '禁用插件' : '启用插件') }}
+            </button>
+          </template>
           <template v-else>
             <button
               v-if="selected.installed"
@@ -358,6 +446,7 @@ function select(id: string): void {
 .badges {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
   align-items: center;
   margin-top: 2px;
 }

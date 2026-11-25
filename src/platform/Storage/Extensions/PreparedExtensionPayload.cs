@@ -59,7 +59,8 @@ internal sealed class PreparedExtensionPayload : IDisposable
         InstanceLease lease, ResourceLeaseManager resources, IRecoveryIndex recovery, ResourceOperationLease root,
         PayloadAction action, string extensionId, long expectedInstalledRevision, long expectedSettingsRevision,
         VerifiedExtensionPackage.Candidate? candidate, PayloadApplyRoots roots, ContractReader contracts,
-        string subject, CancellationToken cancellation, bool externalRemoval = false)
+        string subject, CancellationToken cancellation, bool externalRemoval = false,
+        ArchivedFileTree? importTarget = null, string? localUpdateConfirmation = null)
     {
         lease.VerifyHeld(instance);
         if (database.InstanceId != instance.InstanceId ||
@@ -72,7 +73,9 @@ internal sealed class PreparedExtensionPayload : IDisposable
             throw Invalid();
         if (subject is not { Length: >= 1 and <= 256 } || subject.Any(char.IsControl)) throw Invalid();
         _ = new ExtensionApplyRequest(action, extensionId, expectedInstalledRevision, expectedSettingsRevision,
-            candidate?.Binding.Catalog, candidate?.Binding.Entry).Identity(root.OperationId, subject);
+            candidate?.Binding.Catalog, candidate?.Binding.Entry)
+            { LocalApproval = candidate?.Binding.LocalApproval, LocalUpdateConfirmation = localUpdateConfirmation,
+                ImportTarget = importTarget is not null }.Identity(root.OperationId, subject);
         var original = new ExtensionInstalledEvidence(instance, database, contracts, roots).ReadCurrent(extensionId);
         if ((original?.Metadata.Revision ?? 0) != expectedInstalledRevision ||
             (action == PayloadAction.Install ? original?.Metadata.IsInstalled == true : original?.Metadata.IsInstalled != true))
@@ -89,7 +92,7 @@ internal sealed class PreparedExtensionPayload : IDisposable
             new("blobs:content", ResourceClaimMode.Reference),
             new("settings:host", settings.InitializeEnabledPreference ? ResourceClaimMode.Mutation : ResourceClaimMode.Reference)
         };
-        if (candidate is not null) fixedClaims.Add(new("extensions:catalog", ResourceClaimMode.Reference));
+        if (candidate?.Binding.Catalog is not null) fixedClaims.Add(new("extensions:catalog", ResourceClaimMode.Reference));
         var claims = PhysicalResourceAdmission.Merge(fixedClaims.Concat(PhysicalResourceAdmission.Read(target))
             .Concat(PhysicalResourceAdmission.Read(workspace)));
         var borrow = root.Borrow(resources, root.OperationId, claims);
@@ -104,7 +107,9 @@ internal sealed class PreparedExtensionPayload : IDisposable
                 if (original is not null && (original.Footprint.TargetPath != target ||
                     original.Footprint.ParentIdentity != parentIdentity)) throw Invalid();
                 var observation = RemovalObservation.Read(action, externalRemoval, target, original?.Footprint, new(instance, contracts), cancellation);
-                var before = observation.Before;
+                var before = importTarget ?? observation.Before;
+                if (importTarget is not null && (action != PayloadAction.Install || original?.Metadata.IsInstalled == true))
+                    throw Invalid();
                 using var held = TreeReadLease.Acquire(target, parentIdentity, before);
                 RequireBefore();
                 var blobs = new ImmutableBlobStore(instance, contracts);
@@ -126,17 +131,17 @@ internal sealed class PreparedExtensionPayload : IDisposable
                     }, extensionId, expectedInstalledRevision, packageIdentity), original is null ? null :
                         new(original.Metadata.Revision, original.Metadata.IsInstalled, original.Metadata.Package),
                         settings.DesiredEnabled, NexusPipeline.Core.Extensions.ExtensionObservedActivity.None,
-                        ExtensionUpgradeSource.AllowsSameVersion(binding?.Catalog.Channel, original?.Operation.Source.Package?.Catalog.Identity.Channel));
+                        ExtensionUpgradeSource.AllowsSameVersion(binding?.Catalog?.Channel, original?.Operation.Source.Package?.Catalog?.Identity.Channel));
                     ExtensionCatalogSaved? catalog = null;
                     using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true, domains: DatabaseDomain.Runtime | DatabaseDomain.Extensions | DatabaseDomain.System))
                     using (var transaction = DatabaseConnections.BeginRead(connection))
                     {
                         ExtensionInstalledRows.RequireExpectedInside(connection, transaction, extensionId,
                             expectedInstalledRevision, original?.Metadata.Footprint);
-                        if (binding is not null)
+                        if (binding?.Catalog is { } catalogIdentity)
                         {
-                            catalog = ExtensionCatalogRows.ReadHead(connection, transaction, binding.Catalog.Channel) ?? throw Invalid();
-                            if (catalog.Identity != binding.Catalog || catalog.KeyId != binding.CatalogKeyId) throw Invalid();
+                            catalog = ExtensionCatalogRows.ReadHead(connection, transaction, catalogIdentity.Channel) ?? throw Invalid();
+                            if (catalog.Identity != catalogIdentity || catalog.KeyId != binding.CatalogKeyId) throw Invalid();
                         }
                         HostSettingsStore.RequireExtensionIntentInside(connection, transaction, extensionId, settings);
                         transaction.Commit();
@@ -150,12 +155,13 @@ internal sealed class PreparedExtensionPayload : IDisposable
                             archive = blobs.PersistContent(binding.ArchivePath,
                                 new(Path.GetFileName(binding.ArchivePath), FileObjectKind.File,
                                     binding.Entry.ArtifactBytes, binding.Entry.ArtifactSha256), cancellation);
-                        package = new(catalog!, binding.Entry, archive);
+                        package = new(catalog, binding.Entry, archive) { LocalApproval = binding.LocalApproval };
                     }
                     var source = new ExtensionPayloadSource(PayloadSourceCodec.Format, 1, instance.InstanceId,
                         root.OperationId, Guid.NewGuid(), extensionId, action, expectedInstalledRevision, original?.Metadata.Footprint,
                         package, settings.SettingsRevision, settings.DesiredEnabled, claims, settings.InitializeEnabledPreference)
-                        { RemovalReason = observation.Reason };
+                        { RemovalReason = observation.Reason, ImportTarget = importTarget is not null,
+                            LocalUpdateConfirmation = localUpdateConfirmation };
                     var sourceReference = new PayloadSourceCodec(instance, contracts).Persist(source);
                     var plan = new FrozenPayloadApply(instance.InstanceId, root.OperationId, source.JournalId,
                         JournalKind.ExtensionApply, action, extensionId, target, parentIdentity, before, tree,
@@ -258,7 +264,7 @@ internal sealed class PreparedExtensionPayload : IDisposable
                         }, _source.ExtensionId, _source.ExpectedInstalledRevision, package),
                         original is null ? null : new(original.Metadata.Revision, original.Metadata.IsInstalled, original.Metadata.Package),
                         _source.DesiredEnabled, activity,
-                        ExtensionUpgradeSource.AllowsSameVersion(binding?.Catalog.Channel, original?.Operation.Source.Package?.Catalog.Identity.Channel));
+                        ExtensionUpgradeSource.AllowsSameVersion(binding?.Catalog?.Channel, original?.Operation.Source.Package?.Catalog?.Identity.Channel));
                     if (policy.MustDeactivateExistingScope
                             ? closure != NexusPipeline.Core.Extensions.ExtensionScopeClosure.Stopped
                             : closure != NexusPipeline.Core.Extensions.ExtensionScopeClosure.NotRequired)
@@ -315,8 +321,8 @@ internal sealed class PreparedExtensionPayload : IDisposable
     {
         ExtensionInstalledRows.RequireExpectedInside(connection, transaction, source.ExtensionId,
             source.ExpectedInstalledRevision, source.OriginalFootprint);
-        if (source.Package is { } package &&
-            ExtensionCatalogRows.ReadHead(connection, transaction, package.Catalog.Identity.Channel) != package.Catalog) throw Invalid();
+        if (source.Package?.Catalog is { } catalog &&
+            ExtensionCatalogRows.ReadHead(connection, transaction, catalog.Identity.Channel) != catalog) throw Invalid();
         var saved = RecoveryJournalRegistry.ReadValidatedSnapshotInside(connection, transaction);
         RequireRecovery(new(saved.IsReady, saved.Revision, null, saved.Isolations), source.Claims, source.JournalId);
         HostSettingsStore.RequireExtensionIntentInside(connection, transaction, source.ExtensionId,

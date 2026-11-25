@@ -68,7 +68,23 @@ internal sealed class ExtensionCatalogStore
         _lease.VerifyHeld(_instance);
         var operationId = Guid.NewGuid();
         using var root = _resources.TryAcquire(operationId, ReadClaims).Lease ?? throw Invalid();
-        using var borrow = root.Borrow(_resources, operationId, ReadClaims);
+        return ReadCached(channel, root);
+    }
+
+    internal async Task<VerifiedExtensionCatalog?> ReadCachedAsync(ExtensionStoreChannel channel, CancellationToken cancellation)
+    {
+        _lease.VerifyHeld(_instance);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        deadline.CancelAfter(TimeSpan.FromSeconds(8));
+        var operation = Guid.NewGuid();
+        using var root = (await _resources.AcquireAsync(operation, ReadClaims, deadline.Token, _lease.PublishExecution).ConfigureAwait(false)).Lease
+            ?? throw Invalid();
+        return ReadCached(channel, root);
+    }
+
+    private VerifiedExtensionCatalog? ReadCached(ExtensionStoreChannel channel, ResourceOperationLease root)
+    {
+        using var borrow = root.Borrow(_resources, root.OperationId, ReadClaims);
         return borrow.Use(() =>
         {
             ExtensionCatalogSaved? saved;

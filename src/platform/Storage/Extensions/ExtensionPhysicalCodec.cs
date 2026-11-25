@@ -179,7 +179,7 @@ internal sealed class ExtensionPhysicalCodec(RuntimeInstance instance, ContractR
         if (plan.Action != PayloadAction.Remove) result.Add("candidate-materialized");
         if (plan.Before.Snapshot.Shape != FileObjectKind.Missing)
         {
-            if (plan.Action == PayloadAction.Upgrade) result.Add("original-preservation-started");
+            if (plan.Action != PayloadAction.Remove) result.Add("original-preservation-started");
             result.Add("original-preserved");
         }
         result.Add(plan.Action == PayloadAction.Remove ? "target-removed" : "candidate-installed");

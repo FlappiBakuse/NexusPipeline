@@ -20,12 +20,15 @@ public sealed class ExtensionRuntimeLifecycle : IExtensionRuntimeLifecycle, IAsy
     private readonly PayloadApplyRoots _roots;
     private readonly ResourceLeaseManager _resources;
     private readonly RecoveryIndex _recovery;
-    private readonly InstalledActivationService? _activation;
+    private readonly InstalledActivationService _activation;
     private readonly ExtensionFileReconciliation _files;
+    private readonly InstalledExtensionFileProtection _fileProtection = new();
     private readonly Dictionary<string, string> _failures = new(StringComparer.Ordinal);
     private Task? _start;
     private bool _stopping;
     private InstalledPortDependencies? _ports;
+    internal InstanceLease InstanceLease => _lease;
+    internal (string[] Removed, string[] Waiting) ReadExternalRemovals() => _files.ReadNotices();
     internal ExtensionActivator Activator { get; }
     internal ExtensionCatalogStore? Catalog { get; }
     internal ExtensionReleaseTrust? ReleaseTrust { get; }
@@ -40,14 +43,14 @@ public sealed class ExtensionRuntimeLifecycle : IExtensionRuntimeLifecycle, IAsy
             !resources.UsesRecoveryIndex(recovery)) throw new IOException("extension_runtime_instance_unbound");
         _instance = instance; _database = database; _lease = lease; _contracts = contracts;
         _roots = roots; _resources = resources; _recovery = recovery;
-        Activator = new(contracts, lease, resources, providers);
+        Activator = new(contracts, lease, resources, providers) { InstalledFiles = _fileProtection };
         _files = new(instance, database, lease, contracts, roots, resources, recovery, Activator);
         ReleaseTrust = releaseTrust;
         if (releaseTrust is not null)
         {
             Catalog = new(instance, database, lease, resources, contracts, new(contracts, releaseTrust.Policy));
-            _activation = new(instance, database, lease, contracts, roots, resources, recovery, Catalog, Activator);
         }
+        _activation = new(instance, database, lease, contracts, roots, resources, recovery, Catalog, Activator);
     }
 
     public void ConfigurePorts(InstalledPortDependencies dependencies)
@@ -89,7 +92,7 @@ public sealed class ExtensionRuntimeLifecycle : IExtensionRuntimeLifecycle, IAsy
             var desired = settings.Values.Extensions.SingleOrDefault(item => item.ExtensionId == id)?.Enabled == true;
             string? failure;
             lock (_gate) _failures.TryGetValue(id, out failure);
-            if (desired && saved.Metadata.IsInstalled && !HasReleaseTrust) failure = "extension_release_trust_unprovisioned";
+            if (desired && saved.Metadata.IsInstalled && !HasReleaseTrust && saved.Operation.Source.Package?.Catalog is not null) failure = "extension_release_trust_unprovisioned";
             var physicalFailure = ExtensionFileReconciliation.Observe(saved);
             NexusPipeline.Extensibility.Protocol.ExtensionManifest? manifest = null;
             if (saved.Metadata.IsInstalled)
@@ -110,7 +113,7 @@ public sealed class ExtensionRuntimeLifecycle : IExtensionRuntimeLifecycle, IAsy
             result.Add(new(id, saved.Metadata.Revision, saved.Metadata.IsInstalled, desired,
                 active.TryGetValue(id, out var scope) ? scope.ActivationId : null, failure)
                 { PackageVersion = manifest?.PackageVersion, Kind = manifest?.Kind, ArtifactName = manifest?.ArtifactName,
-                    Capabilities = manifest?.Capabilities ?? [], Metadata = ExtensionListingMetadata.Read(_database, saved,
+                    Capabilities = manifest?.Capabilities ?? [], IsUnofficial = saved.Operation.Source.Package?.LocalApproval is not null, Metadata = ExtensionListingMetadata.Read(_database, saved,
                         ExtensionMetadataReader.Read(manifest?.Metadata)) });
         }
         return result.AsReadOnly();
@@ -134,8 +137,9 @@ public sealed class ExtensionRuntimeLifecycle : IExtensionRuntimeLifecycle, IAsy
         var intent = new HostSettingsStore(_database).ReadExtensionIntent(selection.ExtensionId, false);
         if (installed.Metadata.Revision != selection.ExpectedInstalledRevision || intent.SettingsRevision != selection.ExpectedSettingsRevision)
             throw new IOException("extension_runtime_revision_conflict");
-        if (intent.DesiredEnabled && (!installed.Metadata.IsInstalled || _activation is null))
-            throw new IOException(_activation is null ? "extension_release_trust_unprovisioned" : "extension_not_installed");
+        if (intent.DesiredEnabled && !installed.Metadata.IsInstalled) throw new IOException("extension_not_installed");
+        if (intent.DesiredEnabled && !HasReleaseTrust && installed.Operation.Source.Package?.Catalog is not null)
+            throw new IOException("extension_release_trust_unprovisioned");
         IReadOnlyList<ResourceClaim> claims = installed.Metadata.IsInstalled ? InstalledActivationOrigin.Claims(_instance, installed) :
             [new("extension:" + selection.ExtensionId, ResourceClaimMode.Mutation), new("settings:host", ResourceClaimMode.Reference),
                 new("blobs:content", ResourceClaimMode.Reference)];
@@ -148,7 +152,7 @@ public sealed class ExtensionRuntimeLifecycle : IExtensionRuntimeLifecycle, IAsy
         using var inventory = await Activator.ReserveForApplyAsync(root, selection.ExtensionId, acceptedHostCancellation).ConfigureAwait(false);
         if (intent.DesiredEnabled)
         {
-            try { _ = await _activation!.ActivateReservedAsync(root, inventory, selection.ExtensionId, acceptedHostCancellation).ConfigureAwait(false); }
+            try { _ = await _activation.ActivateReservedAsync(root, inventory, selection.ExtensionId, acceptedHostCancellation).ConfigureAwait(false); }
             catch
             {
                 lock (_gate) _failures[selection.ExtensionId] = "extension_preference_activation_failed";
@@ -187,7 +191,14 @@ public sealed class ExtensionRuntimeLifecycle : IExtensionRuntimeLifecycle, IAsy
         cancellationToken.ThrowIfCancellationRequested();
         ExtensionProjectionPublication.PublishIfDirty(_instance, _database, _lease, _contracts, _roots, _resources, _recovery);
         await ReconcileFilesAsync(cancellationToken).ConfigureAwait(false);
-        if (_activation is null) return;
+        var evidence = new ExtensionInstalledEvidence(_instance, _database, _contracts, _roots);
+        foreach (var id in ExtensionInstalledRows.ReadIds(_database, installedOnly: true))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try { if (evidence.ReadCurrent(id) is { } installed) _fileProtection.ProtectExisting(installed); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+            { lock (_gate) _failures[id] = "extension_file_protection_failed"; }
+        }
         var selected = ReadEnabledInstallations();
         var executor = _lease.ExecutorIdentity;
         await Parallel.ForEachAsync(selected, new ParallelOptions
@@ -226,6 +237,7 @@ public sealed class ExtensionRuntimeLifecycle : IExtensionRuntimeLifecycle, IAsy
         lock (_gate) { _stopping = true; start = _start ?? Task.CompletedTask; }
         var close = Activator.StopAllAsync(timeout);
         await Task.WhenAll(start, close).WaitAsync(timeout).ConfigureAwait(false);
+        _fileProtection.Dispose();
     }
 
     public ValueTask DisposeAsync() => new(StopAsync(TimeSpan.FromSeconds(10)));

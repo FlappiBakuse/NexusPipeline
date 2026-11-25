@@ -243,6 +243,7 @@ internal static class ApplicationHost
         new AutomationExchangeControl(controlAuthority, exchange, contracts).Map(app);
         new ExtensionControl(controlAuthority, new NexusPipeline.Host.Control.Extensions.ExtensionUseCases(packages, extensions,
             extensionOperations, app.Lifetime.ApplicationStopping, () => initialStartup.Pending), contracts).Map(app);
+        new LocalExtensionControl(controlAuthority, packages, () => initialStartup.Pending).Map(app);
         new ExtensionDetailsControl(controlAuthority, new ExtensionDetailsReader(instance, runtime.Database, instanceLease, contracts, payloadRoots)).Map(app);
         var extensionFrontend = new ExtensionFrontendControl(controlAuthority, extensions.Activator); extensionFrontend.Map(app);
         if (desktop is not null) new NativeFrontendControl(controlAuthority, extensionFrontend.Clients, desktop, nativeClients).Map(app);
@@ -345,6 +346,9 @@ internal static class ApplicationHost
             {
                 services.Start(app.Lifetime); automaticUpdates.Start(); packages.StartCleanup();
                 initialStartup.Complete();
+                _ = packages.ScanLocalIntakeAsync().ContinueWith(fault =>
+                    app.Logger.LogWarning(fault.Exception, "Local extension scan failed"),
+                    CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
                 if (startup is not null) await startup.CompleteAsync();
             }
             var webAddress = app.Urls.Single(value => new Uri(value).Port != mcpPort);

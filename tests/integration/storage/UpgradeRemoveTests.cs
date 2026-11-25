@@ -33,7 +33,7 @@ public sealed class UpgradeRemoveTests
         var bound = fixture.Bound();
         Assert.Equal(2, result.InstalledRevision); Assert.True(result.IsInstalled); Assert.False(result.IsEnabled);
         Assert.Equal("0.5.0", bound.Footprint!.Package.PackageVersion);
-        Assert.Equal(candidateChannel, bound.Source.Package!.Catalog.Identity.Channel);
+        Assert.Equal(candidateChannel, Assert.IsType<ExtensionCatalogSaved>(bound.Source.Package!.Catalog).Identity.Channel);
         Assert.Equal(JournalPhase.Committed, bound.Registered.Phase);
         Assert.Equal(desired, File.ReadAllBytes(target));
         Assert.Equal(before, File.ReadAllBytes(Path.Combine(fixture.Backup(bound), changedEntry)));

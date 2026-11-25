@@ -6,7 +6,8 @@ import { abortable } from '../control/abortable';
 import { preparePages } from './page-preparation';
 import { desktop } from './desktop';
 
-export function interfacePreparation(store: AppStore, frontend: FrontendLoader, registry: FrontendRegistry) {
+export function interfacePreparation(store: AppStore, frontend: FrontendLoader, registry: FrontendRegistry,
+  beforePluginRead?: () => Promise<void>) {
   const preparing = ref(true), surfacesReady = ref(false), failed = ref(false), coreFailed = ref(false);
   const stage = ref('准备界面'), count = ref({ done: 0, total: 0 });
   let current: AbortController | undefined, work: Promise<void> | undefined;
@@ -43,6 +44,8 @@ export function interfacePreparation(store: AppStore, frontend: FrontendLoader, 
     const foreground = async () => {
       const page = store.state.page;
       stage.value = '加载插件界面'; progress(0, 0);
+      if (beforePluginRead) await beforePluginRead();
+      owner.signal.throwIfAborted();
       await Promise.all([
         abortable(frontend.synchronize(), owner.signal)
           .then(() => { performance.mark('nexus.plugins.prepared'); })

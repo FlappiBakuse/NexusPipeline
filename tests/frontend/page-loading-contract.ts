@@ -1,6 +1,7 @@
 import { createApp, h, nextTick } from 'vue';
 import QueueFields from '../../apps/web/src/pages/QueueFields.vue';
 import PluginsPage from '../../apps/web/src/pages/PluginsPage.vue';
+import { createLocalPlugins, localPluginsKey } from '../../apps/web/src/pages/local-plugins';
 import { createStore } from '../../apps/web/src/app/store';
 import { ControlClient } from '../../apps/web/src/control/client';
 import type { AutomationBundle, ControlHostSettingsValues } from '../../apps/web/src/control/wire.generated';
@@ -16,6 +17,7 @@ export async function pageLoadingContract(fixture: HTMLElement, check: (value: u
   store.state.capabilities = { instanceId: 'page-fixture', hostVersion: '0.18.0', capabilities: [] };
   const mount = document.createElement('section'); fixture.append(mount);
   const plugins = createApp({ render: () => h(PluginsPage, { store, visible: true }) });
+  plugins.provide(localPluginsKey, createLocalPlugins(store));
   plugins.mount(mount);
   try {
     await nextTick();
@@ -133,6 +135,7 @@ async function pluginEnable(fixture: HTMLElement, check: (value: unknown, name: 
   store.state.settings = runtime();
   const holder = document.createElement('section'); fixture.append(holder);
   const app = createApp({ render: () => h(PluginsPage, { store, visible: true }) });
+  app.provide(localPluginsKey, createLocalPlugins(store));
   app.mount(holder);
   const button = (label: string) => [...holder.querySelectorAll('button')].find(item => item.textContent?.trim() === t(label) && !item.disabled);
   const wait = async (condition: () => unknown) => {

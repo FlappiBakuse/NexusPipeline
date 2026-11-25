@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 import type { AutomationStore } from '../app/store-ports';
-import type { AutomationBundle, ScriptSourceCandidate } from '../control/wire.generated';
+import type { AutomationBundle, ScriptSource, ScriptSourceCandidate } from '../control/wire.generated';
 import { extensionList, extensionDetails, type ExtensionDetails } from '../control/extensions';
 import { createIdentity } from '../control/identity';
 import { scriptPaths } from './script-paths';
 import { readSource, selectSource, scriptSourceKey } from './script-source';
 import { locale, t, registerMessages } from '../app/locale';
+import OkwwAccountPreview from './OkwwAccountPreview.vue';
 registerMessages({
   '请在 Host 本机创建专项脚本实例。': 'Create specialized script instances on the Host machine.',
   '选择脚本配置': 'Select script configuration',
@@ -20,6 +21,7 @@ const props = defineProps<{ store: AutomationStore; modelValue: Script }>();
 const emit = defineEmits<{ 'update:modelValue': [value: Script] }>();
 const paths = computed(() => scriptPaths(props.store, props.modelValue));
 const candidates = ref<readonly ScriptSourceCandidate[]>([]), busy = ref(false), note = ref('');
+const accountPreview = shallowRef<ScriptSource['accountPreview']>();
 const diagnosticDetails = shallowRef<ExtensionDetails>();
 const message = computed(() => {
   const details = diagnosticDetails.value;
@@ -34,12 +36,14 @@ const discoveryScope = () => JSON.stringify([identity(), props.store.state.event
 watch([identity, discoveryScope], ([key], [previous]) => {
   owner?.abort(); owner = undefined;
   candidates.value = []; busy.value = false; note.value = ''; diagnosticDetails.value = undefined;
+  accountPreview.value = undefined;
   if (previous && previous !== key) {
     paths.value.executable = ''; paths.value.configuration = ''; paths.value.logs = ''; paths.value.arguments = '';
     props.store.drafts.delete(scriptSourceKey(props.modelValue.id));
     emit('update:modelValue', { ...props.modelValue, adapterResources: [] });
   }
-  if (paths.value.root.trim() && !paths.value.executable && props.modelValue.extensionId && props.store.can('configuration.read')) void discover();
+  const extensionId = props.modelValue.extensionId;
+  if (paths.value.root.trim() && extensionId && props.store.can('configuration.read')) void discover();
 }, { immediate: true });
 onBeforeUnmount(() => owner?.abort());
 async function discover(): Promise<void> {
@@ -59,13 +63,15 @@ async function discover(): Promise<void> {
       expectedInstalledRevision: extension.installedRevision, rootPath: root, purpose: 'edit'
     }, value => readSource(value, operationId, extensionId, root, extension.installedRevision), operation.signal);
     if (!current()) return;
-    const details = result.diagnostics?.length ? await props.store.client.read(
+    accountPreview.value = result.accountPreview;
+    const details = !paths.value.executable && result.diagnostics?.length ? await props.store.client.read(
       '/control/v1/extensions/' + encodeURIComponent(extensionId) + '/details',
       value => extensionDetails(value, extensionId), operation.signal) : undefined;
     if (!current()) return;
     diagnosticDetails.value = details;
     candidates.value = result.candidates!;
-    note.value = !candidates.value.length && !result.editor ? result.diagnostics?.[0] || '此目录没有可用的脚本配置。' : '';
+    note.value = !paths.value.executable && !candidates.value.length && !result.editor
+      ? result.diagnostics?.[0] || '此目录没有可用的脚本配置。' : '';
     if (!paths.value.executable && props.store.can('automation.declare')) {
       if (candidates.value.length) emit('update:modelValue', selectSource(props.store, props.modelValue, candidates.value[0]!));
       else if (result.editor) {
@@ -74,7 +80,7 @@ async function discover(): Promise<void> {
       }
     }
   } catch (error) {
-    if (current()) {
+    if (current() && !paths.value.executable) {
       note.value = error instanceof Error && error.message === 'script_source_root_missing'
         ? '脚本根目录不存在，请选择有效目录后重试。'
         : error instanceof Error ? error.message : '读取失败，请核对脚本目录后重试。';
@@ -84,4 +90,5 @@ async function discover(): Promise<void> {
 </script>
 <template>
   <nexus-toast v-if="note && !candidates.length && !busy" tone="warning" :message.prop="message" />
+  <OkwwAccountPreview v-if="accountPreview" :preview="accountPreview" />
 </template>

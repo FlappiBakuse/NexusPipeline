@@ -26,8 +26,8 @@ internal static class PayloadEffectCursor
             source.ExpectedInstalledRevision, source.OriginalFootprint);
         HostSettingsStore.RequireExtensionIntentInside(connection, transaction, source.ExtensionId,
             new(source.SettingsRevision, source.DesiredEnabled, source.InitializeEnabledPreference));
-        if (source.Package is { } package &&
-            ExtensionCatalogRows.ReadHead(connection, transaction, package.Catalog.Identity.Channel) != package.Catalog)
+        if (source.Package?.Catalog is { } catalog &&
+            ExtensionCatalogRows.ReadHead(connection, transaction, catalog.Identity.Channel) != catalog)
             throw Invalid();
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT resource_key,mode FROM main.journal_resource_claims WHERE journal_id=$id ORDER BY resource_key LIMIT 4097;";

@@ -38,6 +38,7 @@ public sealed class BoundedTaskScript
             .MaxStatements(1_000_000)
             .LimitRecursion(128)
             .TimeoutInterval(TimeSpan.FromSeconds(2))
+            .CatchClrExceptions(error => discover && error is DecoderFallbackException)
             .CancellationToken(cancellationToken));
         engine.SetValue("__nexusInputJson", Utf8.GetString(request.Span));
         if (readCompiled is not null)

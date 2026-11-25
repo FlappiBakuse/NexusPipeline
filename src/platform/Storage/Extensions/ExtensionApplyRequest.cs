@@ -12,9 +12,19 @@ internal sealed record ExtensionApplyRequest(PayloadAction Action, string Extens
     long ExpectedInstalledRevision, long ExpectedSettingsRevision,
     ExtensionCatalogIdentity? Catalog, ExtensionCatalogEntry? Candidate)
 {
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? LocalApproval { get; init; }
+
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? LocalUpdateConfirmation { get; init; }
+
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool ImportTarget { get; init; }
+
     internal static ExtensionApplyRequest FromSource(ExtensionPayloadSource source) => new(
         source.Action, source.ExtensionId, source.ExpectedInstalledRevision, source.SettingsRevision,
-        source.Package?.Catalog.Identity, source.Package?.Entry);
+        source.Package?.Catalog?.Identity, source.Package?.Entry)
+        { LocalApproval = source.Package?.LocalApproval, LocalUpdateConfirmation = source.LocalUpdateConfirmation, ImportTarget = source.ImportTarget };
 
     internal OperationIdentity Identity(Guid operationId, string subject)
     {
@@ -24,8 +34,14 @@ internal sealed record ExtensionApplyRequest(PayloadAction Action, string Extens
             ExtensionId.Any(c => c is not (>= 'a' and <= 'z' or >= '0' and <= '9' or '-')) ||
             ExpectedInstalledRevision is < 0 or > 9007199254740991 ||
             ExpectedSettingsRevision is < 0 or > 9007199254740991 ||
-            (Action == PayloadAction.Remove) != (Candidate is null && Catalog is null) ||
-            Action != PayloadAction.Remove && (Candidate is null || Catalog is null || Candidate.ExtensionId != ExtensionId) ||
+            (Action == PayloadAction.Remove) != (Candidate is null) ||
+            (Catalog is not null && (Candidate is null || LocalApproval is not null)) ||
+            LocalApproval is not null && (Candidate is null || !LocalExtensionEvidence.ValidId(ExtensionId) ||
+                !LocalExtensionEvidence.IsDigest(LocalApproval)) ||
+            LocalUpdateConfirmation is not null && (Action != PayloadAction.Upgrade || Catalog is null ||
+                !LocalExtensionEvidence.IsDigest(LocalUpdateConfirmation)) ||
+            Action != PayloadAction.Remove && (Candidate!.ExtensionId != ExtensionId || (Catalog is null && LocalApproval is null)) ||
+            ImportTarget && Action != PayloadAction.Install ||
             Action is PayloadAction.Upgrade or PayloadAction.Remove && ExpectedInstalledRevision == 0)
             throw new IOException("extension_apply_request_invalid");
         if (Catalog is not null) CatalogSequencePolicy.Require(Catalog, 1, null);

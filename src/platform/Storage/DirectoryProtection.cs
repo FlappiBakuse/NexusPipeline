@@ -88,7 +88,7 @@ internal sealed class DirectoryAttributeProtection : IDisposable
     private void Retain(string path)
     {
         // Attribute-only access does not participate in delete sharing; directory traverse access pins the name.
-        var handle = CreateFile(PhysicalPathPolicy.NativePath(path), 0xa0, 3, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero);
+        var handle = CreateFile(PhysicalPathPolicy.NativePath(path), 0xa0, InstalledDirectoryMoveHandle.ReadShare(path), IntPtr.Zero, 3, 0x02200000, IntPtr.Zero);
         if (handle.IsInvalid)
         {
             var error = Marshal.GetLastWin32Error(); handle.Dispose();

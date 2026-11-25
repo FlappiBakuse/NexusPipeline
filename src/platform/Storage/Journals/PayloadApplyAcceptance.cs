@@ -93,6 +93,9 @@ internal static class PayloadFileIntents
         FileEffect Effect(string step, FileEffectAction action) => new(plan.JournalId, step, action, FileEffectState.Pending, planDigest, null);
         return plan.Action switch
         {
+            PayloadAction.Install when plan.Kind == JournalKind.ExtensionApply &&
+                plan.Before.Snapshot.Shape == FileObjectKind.Directory =>
+                [Effect("preserve-original", FileEffectAction.PreserveOriginal), Effect("install-candidate", FileEffectAction.InstallCandidate)],
             PayloadAction.Install => [Effect("install-candidate", FileEffectAction.InstallCandidate)],
             PayloadAction.Upgrade => [Effect("preserve-original", FileEffectAction.PreserveOriginal), Effect("install-candidate", FileEffectAction.InstallCandidate)],
             PayloadAction.Remove when plan.Kind == JournalKind.ExtensionApply && plan.Before.Snapshot.Shape != FileObjectKind.Missing =>

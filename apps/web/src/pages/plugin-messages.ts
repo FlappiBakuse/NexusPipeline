@@ -78,5 +78,32 @@ registerMessages({
   '插件操作尚未完成，请稍后读取结果。': 'The operation has not completed. Check its result later.',
   需要更新宿主: 'Host update required',
   读取更多记录: 'Load more history',
-  '正在读取更新记录…': 'Loading update history…'
+  '正在读取更新记录…': 'Loading update history…',
+  扫描本地目录: 'Scan local directory',
+  '扫描本地插件失败。': 'Local plugin scan failed.',
+  非官方: 'Unofficial',
+  待启用: 'Awaiting approval',
+  待确认更新: 'Awaiting update confirmation',
+  '更新本地官方插件？': 'Update the official plugin from local files?',
+  '将使用此本地发行包更新插件，并保留当前启用设置。':
+    'This local release will update the plugin and keep its current enabled setting.',
+  等待官方校验: 'Awaiting official verification',
+  来源待核验: 'Source unverified',
+  不可用: 'Unavailable',
+  来源: 'Source',
+  本地投放: 'Local files',
+  '本地投放 · 非官方': 'Local files · Unofficial',
+  文件位置: 'File location',
+  申报能力: 'Declared capabilities',
+  未申报: 'None declared',
+  '检测到非官方插件，请进入插件中心手动启用': 'Unofficial plugins detected. Open Plugins to enable them manually.',
+  检测到部分插件已移除: 'Plugins removed while the Host was offline',
+  检测到部分插件等待移除: 'Plugins waiting for removal',
+  已安装本地官方插件: 'Installed official plugins from local files',
+  '启用非官方插件？': 'Enable unofficial plugin?',
+  确认启用: 'Enable plugin',
+  '发布者未经官方验证。插件代码会在宿主进程中运行，并使用宿主进程的操作系统权限。请确认信任此文件后继续。':
+    'The publisher has not been officially verified. Plugin code runs in the Host process with its operating system permissions. Continue only if you trust this file.',
+  '发布者未经官方验证。请核对专项插件申报的能力和适用范围，并确认信任此文件后继续。':
+    'The publisher has not been officially verified. Review the specialized plugin’s declared capabilities and scope before trusting this file.',
 });

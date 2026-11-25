@@ -5,7 +5,7 @@ import { PluginOperations } from '../../apps/web/src/pages/plugin-operations';
 import { savedSettings } from '../../apps/web/src/control/settings';
 import type { AppStore } from '../../apps/web/src/app/store';
 import type { ControlHostSettingsValues } from '../../apps/web/src/control/wire.generated';
-import { upgradeAvailable, type CatalogEntry, type ExtensionCatalog, type ExtensionDetails } from '../../apps/web/src/control/extensions';
+import { upgradeAvailable, type CatalogEntry, type ExtensionCatalog, type ExtensionDetails, type LocalExtensionCandidate } from '../../apps/web/src/control/extensions';
 
 export const cases: string[] = [];
 function check(value: unknown, name: string): void { assert(value, name); cases.push(name); }
@@ -30,6 +30,10 @@ function fixture() {
   const client = new ControlClient('http://127.0.0.1', async (url, request) => {
     const path = new URL(String(url)).pathname, body = request?.body ? JSON.parse(String(request.body)) : undefined;
     if (request?.method === 'POST') requests.push({ path, body });
+    if (path.endsWith('/extensions/local/enable')) {
+      writeId = body.operationId;
+      return json({ operationId: writeId, status: 'pending' });
+    }
     if (path.endsWith('/extensions/apply')) {
       writeId = body.operationId;
       if (held) await new Promise<void>(resolve => { hold = resolve; });
@@ -113,6 +117,19 @@ export async function run(): Promise<string[]> {
   const delayed = switched.apply(candidate, 'upgrade', fourth.installed, catalog);
   fourth.store.state.capabilities!.instanceId = 'instance-b'; fourth.release(); await delayed;
   check(!new PluginOperations(fourth.store).state.pending, 'A late old-instance operation cannot publish pending state into another instance');
+  const fifth = fixture(), local = new PluginOperations(fifth.store);
+  const localCandidate: LocalExtensionCandidate = { candidateId: 'e'.repeat(64), discoveryId: 'e'.repeat(64), extensionId: 'sample', name: 'Local plugin',
+    summary: '', kind: 'managed-code', packageVersion: '1.0.0', minHostVersion: '1.0.0',
+    relativePath: 'runtime\\extensions\\sample.zip', capabilities: [], state: 'pendingApproval', reason: null };
+  await local.enableLocal(localCandidate);
+  assert.match(fifth.requests[0]!.body.operationId, /^[0-9a-f-]{36}$/);
+  check(fifth.requests[0]!.body.candidateId === localCandidate.candidateId && local.state.pending?.kind === 'local',
+    'Local approval sends the selected package digest and keeps its operation identity while it applies');
+  fifth.mode({ wrongProof: true }); await local.inspect();
+  check(local.state.pending?.kind === 'local', 'Local approval rejects a different operation receipt');
+  fifth.mode({ wrongProof: false }); await local.inspect();
+  check(!local.state.pending && fifth.requests.length === 1 && fifth.store.dirty.size === 0,
+    'Local approval checks the original committed result without repeating its write');
   const client = new ControlClient('http://127.0.0.1', async () => json({ operationId: body.operationId, saved: { revision: 2, values: {} } }));
   await assert.rejects(client.write('/control/v1/settings', body, value => savedSettings(value, body), body.operationId),
     (error: unknown) => error instanceof ControlFailure && error.uncertain && error.operationId === body.operationId);

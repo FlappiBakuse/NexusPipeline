@@ -45,6 +45,7 @@ MCP 工具列表与实际调用均复核当前启用和写权限，两个开关�
 | 宿主与服务设置 | settings、service-settings、interface preferences 普通读取和写入可由已认证远程调用 | 不开放 |
 | 专用秘密与控制令牌 | secret-status/read/change、control-token-*，仅本机；明文使用专用接口 | 不开放 |
 | 扩展与商店 | extensions/details、extension-catalog/refresh/operation/apply/reconcile；普通管理可由已认证远程调用 | 不开放 |
+| 本地插件投放 | GET /control/v1/extensions/local、POST /control/v1/extensions/local/scan、POST /control/v1/extensions/local/enable；仅本机 | 不开放 |
 | 事件、实时预览 | events-snapshot/events；media-open/frame/close 绑定实际运行与授权主体，允许已认证远程预览 | 不开放实时预览 |
 | 桌面与系统完成动作 | 固定本机授权入口；pending/cancel 提供本机倒计时与撤销；CLI 可撤销完成动作，不能伪造桌面确认 | 不开放 |
 | 宿主维护更新 | maintenance-feed/refresh/prepare/operation/start/cancel；查询绑定原主体，写入仅本机 | 不开放 |

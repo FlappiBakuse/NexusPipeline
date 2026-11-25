@@ -45,9 +45,18 @@ public sealed class RuntimeLifecycleTests
             Assert.Equal(trustState == "unprovisioned" ? "extension_release_trust_unprovisioned" :
                 "extension_startup_activation_failed", state.UnavailableReason);
         }
+        var target = Path.Combine(fixture.Roots.ExtensionPayloadRoot, "fixture-plugin");
+        var lockError = Assert.Throws<IOException>(() => PhysicalObjectMove.OpenForMove(target).Dispose());
+        Assert.Equal(32, Assert.IsType<System.ComponentModel.Win32Exception>(lockError.InnerException).NativeErrorCode);
+        using (var directory = PhysicalDirectoryHandle.Open(target))
+        {
+            var fileError = Assert.Throws<IOException>(() => directory.OpenOwnedFile("manifest.json").Dispose());
+            Assert.Equal(32, Assert.IsType<System.ComponentModel.Win32Exception>(fileError.InnerException).NativeErrorCode);
+        }
         var conflict = Assert.Throws<IOException>(() => new ExtensionActivator(new(), lease, resources));
         Assert.Equal("extension_scope_inventory_already_bound", conflict.Message);
         await runtime.StopAsync(TimeSpan.FromSeconds(5)); Assert.Null(Assert.Single(runtime.ReadStates()).ActivationId);
+        using (PhysicalObjectMove.OpenForMove(target)) { }
         await Assert.ThrowsAsync<IOException>(() => runtime.StartAsync(default));
         var after = fixture.History(); Assert.Equal(before.Length, after.Length);
         for (var i = 0; i < before.Length; i++) Assert.Equal(before[i], after[i]);

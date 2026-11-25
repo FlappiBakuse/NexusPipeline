@@ -27,6 +27,7 @@
     "NexusPipeline.StorageTests.InstalledContextTests",
     "NexusPipeline.StorageTests.InstalledLibraryTests",
     "NexusPipeline.StorageTests.InstalledMetadataTests",
+    "NexusPipeline.StorageTests.LocalExtensionIntakeTests",
     "NexusPipeline.StorageTests.MaaInstalledTests",
     "NexusPipeline.StorageTests.ManagedInstallationTests",
     "NexusPipeline.StorageTests.ManagedInstalledTests",

@@ -37,7 +37,7 @@ export const pageMeta: Record<string, { description: string }> = {
   scripts: { description: '管理脚本入口、用户配置和运行策略。' },
   users: { description: '统一管理用户头像、脚本绑定、运行优先级和通知设置。' },
   history: { description: '按日期与账号查阅运行结果、完整日志和截图。' },
-  plugins: { description: '查看已安装插件并管理运行状态。' },
+  plugins: { description: '查看本地插件并管理启用状态。' },
   notifications: {
     description: '管理可复用的通知任务，并在用户、队列和扩展任务中选择发送目标。'
   },
@@ -65,7 +65,7 @@ registerMessages({
     'Manage user avatars, script bindings, run priority, and notification settings.',
   '按日期与账号查阅运行结果、完整日志和截图。':
     'Browse results, full logs and screenshots by date and account.',
-  '查看已安装插件并管理运行状态。': 'View installed plugins and manage runtime status.',
+  '查看本地插件并管理启用状态。': 'View local plugins and manage which plugins are enabled.',
   '管理可复用的通知任务，并在用户、队列和扩展任务中选择发送目标。':
     'Manage reusable notification tasks for users, queues and extension tasks.',
   '集中管理服务行为、通知渠道、远程访问、代理与更新设置。':
