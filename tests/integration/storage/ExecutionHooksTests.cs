@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
+using NexusPipeline.Core.Records;
 using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Configuration;
@@ -16,6 +17,32 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class ExecutionHooksTests
 {
+    [Fact(DisplayName = "A Fresh Live Subscription Reads Finished Pre Hook Output During Main Execution")]
+    public async Task ReopensFinishedPreHook()
+    {
+        using var fixture = new ExecutionHooksFixture(configuration: false, waitMain: true);
+        var state = fixture.State;
+        var key = new RunLogKey(Guid.Parse(state.Attempt.RunId), Guid.Parse(state.Attempt.AttemptId),
+            Assert.Single(state.Total.Steps).StepId, RunLogRole.PreHook);
+        var logs = new LiveLogReader(fixture.Source.Instance, fixture.Source.Lease);
+        var running = fixture.Consumer.RunNextAsync();
+        try
+        {
+            await fixture.Ready("main");
+            using var subscription = logs.Subscribe(key);
+            var tail = subscription.InitialTail;
+            Assert.True(tail.IsComplete);
+            Assert.Contains("failed", System.Text.Encoding.UTF8.GetString(tail.Frames.SelectMany(frame => frame.Bytes).ToArray()));
+            Assert.False(await subscription.Events.WaitToReadAsync());
+        }
+        finally
+        {
+            File.WriteAllText(fixture.Marker + ".main.release", "");
+            await running;
+        }
+        Assert.Throws<IOException>(() => logs.ReadTail(key));
+    }
+
     [Theory(DisplayName = "Real Pre Main And Post Jobs Keep Hook Bytes Out Of Main Business And Restore Only After Post")]
     [InlineData(false)]
     [InlineData(true)]

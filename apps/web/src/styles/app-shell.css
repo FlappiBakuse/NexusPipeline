@@ -52,6 +52,14 @@ html[data-desktop='true'] .ambient-layer {
   flex-direction: column;
   min-height: 0;
 }
+@media (max-width: 899px), (max-height: 650px) {
+  .workspace-scroll[data-page='dispatch'] .workspace {
+    height: auto;
+  }
+  .dispatch-workspace .dispatch-panes {
+    flex: none;
+  }
+}
 .workspace {
   min-width: 0;
   max-width: 1520px;

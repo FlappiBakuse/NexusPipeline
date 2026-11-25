@@ -287,17 +287,17 @@ async function invocationContract(fixture: HTMLElement, check: (value: unknown, 
       !mount.innerText.includes('Historical Script'), 'the invocation section retains its accessible name without repeating the script title');
     cards()[0]!.querySelector<HTMLElement>('.history-log-toggle')!.click();
     cards()[1]!.querySelector<HTMLElement>('.history-log-toggle')!.click();
-    await wait(() => cards()[0]!.querySelector('.history-log-preview pre')?.textContent === 'main:1' &&
+    await wait(() => cards()[0]!.querySelector('.history-log-preview pre')?.textContent === 'preHook:1\nmain:1' &&
       cards()[1]!.querySelector('.history-log-preview pre')?.textContent === 'preHook:2');
     logs.value = [...logs.value, { key: { stepId: 'wanted', role: 'main', invocationOrdinal: 2 } }];
     await nextTick();
-    const first = cards()[0]!.querySelectorAll('.history-log-disclosure nav button');
-    const second = [...cards()[1]!.querySelectorAll<HTMLButtonElement>('.history-log-disclosure nav button')];
-    check(first.length === 2 && second.length === 2 &&
-      cards()[0]!.querySelector('.history-log-preview pre')?.textContent === 'main:1' &&
-      cards()[1]!.querySelector('.history-log-preview pre')?.textContent === 'preHook:2',
-      'additional invocation-specific entries preserve both selected logs and filter each invocation');
-    second.find(button => button.textContent?.includes('main'))!.click();
+    await wait(() => cards()[0]!.querySelector('.history-log-preview pre')?.textContent === 'preHook:1\nmain:1' &&
+      cards()[1]!.querySelector('.history-log-preview pre')?.textContent === 'preHook:2\nmain:2');
+    const first = cards()[0]!.querySelectorAll('.script-log-roles button');
+    const second = [...cards()[1]!.querySelectorAll<HTMLButtonElement>('.script-log-roles button')];
+    check(first.length === 3 && second.map(button => button.dataset.role).join(',') === 'all,preHook,main',
+      'each invocation shows its available roles in the shared log toolbar');
+    second.find(button => button.dataset.role === 'main')!.click();
     await wait(() => cards()[1]!.querySelector('.history-log-preview pre')?.textContent === 'main:2');
     check(requests.some(path => path.includes('/main/original?') && path.includes('invocationOrdinal=2')),
       'aggregated log entries remain usable for each invocation and specific entries use their own ordinal');

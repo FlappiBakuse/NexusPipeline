@@ -14,8 +14,10 @@ public sealed class LiveLogReader : ILiveLogReader
 
 internal sealed class LiveLogHub(InstanceLease lease)
 {
+    private const int MaximumWriters = 128;
     private readonly object _gate = new();
     private readonly Dictionary<RunLogKey, LiveLogWriter> _writers = [];
+    private readonly OrderedDictionary<RunLogKey, LiveLogFeed> _finished = [];
     private int _subscribers;
     private bool _closed;
 
@@ -29,37 +31,59 @@ internal sealed class LiveLogHub(InstanceLease lease)
         var key = new RunLogKey(binding.RunId, binding.AttemptId, binding.StepId, logRole);
         lock (_gate)
         {
-            if (_closed || _writers.Count >= 128 || _writers.ContainsKey(key)) throw new IOException("run_log_live_writer_conflict");
-            var writer = new LiveLogWriter(new(key), () => Remove(key));
+            if (_closed || _writers.Count >= MaximumWriters || _writers.ContainsKey(key))
+                throw new IOException("run_log_live_writer_conflict");
+            _finished.Remove(key);
+            var writer = new LiveLogWriter(new(key), () => Finish(key));
             _writers.Add(key, writer); return writer;
         }
     }
 
     internal LiveLogTail ReadTail(RunLogKey key, int maximumBytes)
-    { lease.VerifyHeld(lease.Instance); return Find(key).Feed.ReadTail(maximumBytes); }
+    { lease.VerifyHeld(lease.Instance); return Find(key).ReadTail(maximumBytes); }
 
     internal LiveLogSubscription Subscribe(RunLogKey key)
     {
         lease.VerifyHeld(lease.Instance);
-        var writer = Find(key);
+        var feed = Find(key);
         if (Interlocked.Increment(ref _subscribers) > 64)
         { Interlocked.Decrement(ref _subscribers); throw new IOException("run_log_subscription_limit"); }
-        try { return writer.Feed.Subscribe(() => Interlocked.Decrement(ref _subscribers)); }
+        try { return feed.Subscribe(() => Interlocked.Decrement(ref _subscribers)); }
         catch { Interlocked.Decrement(ref _subscribers); throw; }
     }
 
-    private LiveLogWriter Find(RunLogKey key)
+    private LiveLogFeed Find(RunLogKey key)
     {
         ArgumentNullException.ThrowIfNull(key);
-        lock (_gate) return !_closed && _writers.TryGetValue(key, out var writer) ? writer : throw new IOException("run_log_not_active");
+        lock (_gate)
+        {
+            if (_writers.TryGetValue(key, out var writer)) return writer.Feed;
+            if (_finished.TryGetValue(key, out var feed)) return feed;
+            throw new IOException("run_log_not_active");
+        }
     }
 
-    private void Remove(RunLogKey key) { lock (_gate) _writers.Remove(key); }
+    private void Finish(RunLogKey key)
+    {
+        lock (_gate)
+        {
+            if (!_writers.Remove(key, out var writer)) return;
+            if (_finished.Count == MaximumWriters * 2) _finished.RemoveAt(0);
+            _finished.Add(key, writer.Feed);
+        }
+    }
+
+    internal void Release(Guid runId, Guid attemptId)
+    {
+        lock (_gate)
+            foreach (var key in _finished.Keys.Where(key => key.RunId == runId && key.AttemptId == attemptId).ToArray())
+                _finished.Remove(key);
+    }
 
     internal void Close()
     {
         LiveLogWriter[] active;
-        lock (_gate) { _closed = true; active = _writers.Values.ToArray(); _writers.Clear(); }
+        lock (_gate) { _closed = true; active = _writers.Values.ToArray(); _writers.Clear(); _finished.Clear(); }
         foreach (var writer in active) writer.Dispose();
     }
 }

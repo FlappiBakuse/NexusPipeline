@@ -25,6 +25,12 @@ export async function executionLayoutContract(fixture: HTMLElement, check: (valu
     check(kinds?.map(item => item.label).join(',') === '脚本实例,调度队列', 'the run center only offers script and queue targets');
     const widths = () => [...mount.querySelectorAll('.dispatch-targets,.dispatch-running')].map(card => card.getBoundingClientRect().width);
     const idle = widths();
+    const workspace = mount.querySelector<HTMLElement>('.dispatch-workspace')!;
+    const emptyHeight = mount.querySelector('.dispatch-running')!.getBoundingClientRect().height;
+    workspace.style.minHeight = '640px';
+    check(emptyHeight > 0 && Math.abs(mount.querySelector('.dispatch-running')!.getBoundingClientRect().height - emptyHeight) < 1,
+      'the idle card keeps its natural height when the desktop workspace grows');
+    workspace.style.minHeight = '';
     const id = () => crypto.randomUUID();
     items = [{ operationId: id(), runId: id(), attemptId: id(), ordinal: 1, phase: 'running', canCancel: false,
       cancellationRequested: false, display: { targetKind: 'queue', targetId: id(), targetName: 'Queue', mode: 'manual', maximumAttempts: 3 },
@@ -45,25 +51,34 @@ export async function executionLayoutContract(fixture: HTMLElement, check: (valu
       });
     };
     check(inside(), 'running cards remain inside the desktop page');
+    const activity = mount.querySelector('.dispatch-running')!.getBoundingClientRect();
+    check(Math.abs(activity.width - mount.getBoundingClientRect().width) < 1 &&
+      !mount.querySelector('[role="tablist"], .dispatch-split'),
+      'the single active run fills the workspace without a tab row');
+    check(mount.querySelector('.run-steps li[aria-current="step"]')?.textContent?.includes('运行中'),
+      'the queue strip identifies the active frozen step');
     for (const ordinal of [2, 3]) {
+      const previousLog = mount.querySelector('.script-log-panel');
       items[0]!.steps[0]!.invocationOrdinal = ordinal;
       store.state.events = { executionRevision: ordinal };
       await settle();
       check(mount.querySelector('.current-step')?.textContent?.includes(`${ordinal}/3`),
         `the live subtitle includes invocation ${ordinal} within attempt one`);
+      check(previousLog && mount.querySelector('.script-log-panel') !== previousLog,
+        'a new invocation reopens all log subscriptions for the same step');
     }
-    mount.style.width = '500px'; await settle();
-    check(inside(), 'the running layout also fits a narrower desktop content column');
-    const scroll = mount.querySelector('nexus-scroll-area') as HTMLElement;
+    mount.style.width = '360px'; await settle();
+    check(inside(), 'the running layout fits a phone-width content column');
+    const scroll = mount.querySelector('.live-task-steps') as HTMLElement;
     const viewport = scroll?.shadowRoot?.querySelector('.viewport');
     check(viewport && viewport.scrollWidth > viewport.clientWidth, 'task overflow belongs to its horizontal scroll area');
     items[0]!.phase = 'reconciliationRequired';
     store.state.events = { executionRevision: 4 };
     await settle();
-    check(mount.querySelector('.running-heading')?.textContent?.includes('(0)') &&
-      mount.querySelectorAll('.dispatch-review .running-item').length === 1,
-      'a quarantined run stays visible outside the running count');
-    check(!mount.querySelector('.dispatch-review .running-item button.danger'), 'a quarantined run does not offer cancellation');
+    check(!mount.querySelector('.dispatch-tab') &&
+      mount.querySelectorAll('.dispatch-running .running-item').length === 1 && !!mount.querySelector('.dispatch-review'),
+      'a quarantined run remains selectable and gets a pinned review notice');
+    check(!mount.querySelector('.dispatch-running .running-item button.danger'), 'a quarantined run does not offer cancellation');
   } finally { app.unmount(); mount.remove(); store.dispose(); }
 }
 
@@ -86,7 +101,9 @@ async function executionSubmissionContract(fixture: HTMLElement, check: (value: 
       createdAt: new Date().toISOString(), roots: [], scripts: [], users: [], bindings: [], schedules: [], attachments: [],
       queues: [{ id: queueId, name: 'Queue', scriptIds: [], order: 0, completionAction: 'none',
         notifyEnabled: false, notificationTaskIds: [] }] } };
-  const mount = document.createElement('section'); fixture.append(mount);
+  const mount = document.createElement('section');
+  mount.style.cssText = 'display:grid;gap:16px;width:800px;max-width:100%';
+  fixture.append(mount);
   const app = createApp({ render: () => h(DispatchPage, { store, visible: true }) });
   app.component('FormSelect', FormSelect).mount(mount);
   const settle = async () => { await nextTick(); await new Promise(resolve => setTimeout(resolve, 40)); await nextTick(); };
@@ -132,9 +149,45 @@ async function executionSubmissionContract(fixture: HTMLElement, check: (value: 
     const second = run(2);
     items = [first, second]; store.state.events = { executionRevision: 2 };
     await settle();
-    check(active() === 2 && !mount.querySelector('.dispatch-running')?.textContent?.includes('正在提交运行请求'),
+    const tabs = [...mount.querySelectorAll<HTMLButtonElement>('.dispatch-tab')];
+    check(active() === 1 && tabs.length === 2 && !mount.querySelector('.dispatch-workspace')?.textContent?.includes('正在提交运行请求'),
       'the matching active result arriving first replaces the submission feedback');
     accept(2, second); await settle();
-    check(active() === 2 && !card(), 'the later response leaves both active runs visible');
+    check(active() === 1 && !card(), 'the later response keeps one focused detail');
+    const shown = () => [...mount.querySelectorAll('.running-item')].map(item => item.getAttribute('data-run-id')).join(',');
+    const split = () => mount.querySelector<HTMLButtonElement>('.dispatch-split');
+    tabs[0]!.focus();
+    tabs[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    await settle();
+    check(document.activeElement === tabs[1] && shown() === first.runId, 'arrows move tab focus without loading another run');
+    tabs[1]!.click();
+    await settle();
+    check(shown() === second.runId && tabs[1]!.getAttribute('aria-selected') === 'true',
+      'activating a tab mounts its matching detail and releases the previous pane');
+    split()!.click();
+    await settle();
+    const panes = [...mount.querySelectorAll('.dispatch-running')].map(item => item.getBoundingClientRect());
+    check(shown() === [second.runId, first.runId].join(',') && panes[0]!.right < panes[1]!.left,
+      'split view opens exactly two different runs side by side');
+    check(getComputedStyle(tabs[0]!).borderTopStyle === 'dashed' &&
+      getComputedStyle(tabs[1]!).borderTopLeftRadius === '10px' &&
+      getComputedStyle(tabs[1]!).borderBottomLeftRadius === '4px' &&
+      tabs[0]!.querySelector('.tab-secondary-badge')?.textContent?.trim() === '右屏',
+      'the prototype tab shape and right-pane marker distinguish both visible runs');
+    tabs[0]!.click();
+    await settle();
+    check(shown() === [first.runId, second.runId].join(','), 'selecting the right tab moves the previous main run into comparison');
+    mount.style.width = '360px';
+    await settle();
+    const tablist = mount.querySelector('.dispatch-tabs')!;
+    check(shown() === first.runId && !split() && tablist.scrollWidth > tablist.clientWidth,
+      'a phone-width view has one pane and a horizontally scrollable tab row');
+    tabs[1]!.click();
+    await settle();
+    check(shown() === second.runId && tablist.scrollLeft > 0, 'selecting an overflowing tab reveals it without moving the page');
+    items = [first]; store.state.events = { executionRevision: 3 };
+    await settle();
+    check(shown() === first.runId && !mount.querySelector('[role="tablist"]'),
+      'finishing the focused run returns to a tab-free single detail');
   } finally { app.unmount(); mount.remove(); store.dispose(); }
 }

@@ -1,5 +1,6 @@
 import { locale, t } from '../app/locale';
-import { currentStep, type ActiveRun } from '../control/execution';
+import { currentStep, finishedSteps, type ActiveRun } from '../control/execution';
+import type { AutomationBundle } from '../control/wire.generated';
 
 const phases: Record<string, string> = {
   preparing: '准备中',
@@ -10,6 +11,8 @@ const phases: Record<string, string> = {
   cancelled: '已取消',
   completed: '已完成',
   skipped: '已跳过',
+  notExecuted: '未执行',
+  committed: '已完成',
   restoring: '恢复配置中',
   collecting: '收集中',
   collected: '已收集',
@@ -20,6 +23,27 @@ const phases: Record<string, string> = {
 
 export function runPhase(value: string): string {
   return t(phases[value] || value);
+}
+
+export function runTitle(run: ActiveRun): string {
+  return run.display?.targetName || run.runId;
+}
+
+export function runScriptName(run: ActiveRun, scripts?: AutomationBundle['scripts']): string {
+  const scriptId = currentStep(run)?.scriptId;
+  return scripts?.find(item => item.id === scriptId)?.name || scriptId || '—';
+}
+
+export function runPhaseTone(phase: string): 'danger' | 'warning' | 'info' {
+  if (phase === 'reconciliationRequired') return 'danger';
+  return phase === 'restoring' || phase === 'stopping' ? 'warning' : 'info';
+}
+
+export function runProgress(run: ActiveRun): number {
+  if (run.display?.targetKind === 'queue')
+    return Math.round(100 * finishedSteps(run) / Math.max(1, run.steps.length));
+  const { ordinal, maximum } = invocationAttempt(run);
+  return Math.min(100, Math.round(100 * ordinal / maximum));
 }
 
 export function invocationAttempt(run: ActiveRun): { ordinal: number; maximum: number } {

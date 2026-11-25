@@ -187,7 +187,15 @@ export class LiveLogs {
             let value: LogWindow = { text: '', sequence: 0, omitted: data.prefixOmitted === true, connected: true };
             for (const item of arrayValue(data.frames, objectValue))
               value = this.append(value, item, logDecoder, tail);
-            owner.value = { ...value, sequence: integerValue(data.lastSequence) };
+            const complete = data.isComplete === true;
+            if (complete) tail.append(logDecoder.decode());
+            owner.value = { ...value, text: tail.text, omitted: value.omitted || tail.omitted,
+              sequence: integerValue(data.lastSequence), connected: !complete };
+            if (complete) {
+              owner.completed = true;
+              this.publish(owner);
+              return;
+            }
             started = true;
           } else if (started && event.kind === 'frame') {
             const sequence = integerValue(data.sequence);

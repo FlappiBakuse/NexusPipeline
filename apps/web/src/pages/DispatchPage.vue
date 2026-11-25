@@ -5,7 +5,7 @@ import { objectValue, arrayValue, ControlFailure } from '../control/client';
 import { recordRow } from '../control/records';
 import { t, registerMessages } from '../app/locale';
 import ExtensionOutlet from '../extensions/ExtensionOutlet.vue';
-import RunningExecution from './RunningExecution.vue';
+import DispatchActivity from './DispatchActivity.vue';
 import { executionPreview, executionRun, type ExecutionPreview, type ActiveRun } from '../control/execution';
 import { ExecutionCommands } from './execution-commands';
 import ExecutionPlan from './ExecutionPlan.vue';
@@ -22,8 +22,7 @@ const commands = new ExecutionCommands(props.store);
 const pending = computed(() => commands.state.pending);
 const confirmation = ref<ActiveRun>();
 const active = ref<ActiveRun[]>([]);
-const running = computed(() => active.value.filter(run => run.phase !== 'reconciliationRequired'));
-const review = computed(() => active.value.filter(run => run.phase === 'reconciliationRequired'));
+const pendingStop = computed(() => pending.value?.kind === 'cancel' ? pending.value.target : undefined);
 const startStatus = computed(() => {
   const command = pending.value;
   if (command?.kind === 'start' && commands.state.sending &&
@@ -146,8 +145,13 @@ async function runSelected(): Promise<void> {
   }
 }
 async function cancel(): Promise<void> {
-  const target = confirmation.value;
-  if (!target || pending.value) return;
+  const selected = confirmation.value;
+  if (!selected || pending.value) return;
+  const target = active.value.find(run => run.runId === selected.runId && run.attemptId === selected.attemptId);
+  if (!target?.canCancel || target.cancellationRequested) {
+    confirmation.value = undefined;
+    return;
+  }
   targetHint.value = '';
   if (await commands.cancel(target)) {
     confirmation.value = undefined;
@@ -282,34 +286,8 @@ onBeforeUnmount(() => {
     />
   </nexus-modal>
   <ExtensionOutlet :store="store" target="execution.cards" :visible="visible" />
-  <section class="dispatch-running">
-    <div class="running-heading">
-      <strong>{{ t('运行中') }} ({{ running.length }})</strong>
-      <small v-if="active.length" role="status">{{ startStatus }}</small>
-    </div>
-    <RunningExecution
-      v-for="run in running"
-      :key="run.runId"
-      :store="store"
-      :run="run"
-      :visible="visible"
-      :cancelling="!!pending"
-      @cancel="confirmation = $event"
-    />
-    <div v-if="!active.length" role="status">
-      <nexus-empty-state
-        class="running-empty"
-        :title="startStatus || t('当前没有正在运行的任务')"
-        :description="startStatus ? '' : t('选择脚本或队列后，可以在这里查看实时状态。')"
-      />
-    </div>
-    <section v-if="review.length" class="dispatch-review">
-      <h3>{{ t('需要核对的运行') }} ({{ review.length }})</h3>
-      <p>{{ t('请在系统诊断中查看运行收尾或配置恢复状态。') }}</p>
-      <RunningExecution v-for="run in review" :key="run.runId" :store="store" :run="run"
-        :visible="visible" :cancelling="false" />
-    </section>
-  </section>
+  <DispatchActivity :store="store" :runs="active" :visible="visible" :start-status="startStatus"
+    :cancel-blocked="!!pending" :pending-stop="pendingStop" @cancel="confirmation = $event" />
   <nexus-confirm-dialog
     v-if="confirmation"
     :open.prop="visible"
@@ -324,8 +302,7 @@ onBeforeUnmount(() => {
   />
 </template>
 <style scoped>
-.dispatch-targets,
-.dispatch-running {
+.dispatch-targets {
   min-width: 0;
   padding: 20px;
   border: 1px solid var(--border);
@@ -335,27 +312,6 @@ onBeforeUnmount(() => {
 .target-controls > label {
   color: var(--muted);
   font-size: 12px;
-}
-.running-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-.running-heading small {
-  color: var(--muted);
-  font-size: 12px;
-}
-.running-heading strong {
-  font-size: 15px;
-  line-height: 1.35;
-}
-.dispatch-review {
-  padding: 12px 0;
-}
-.dispatch-review p {
-  margin: 6px 0;
-  color: var(--muted);
 }
 .target-controls {
   align-items: end;

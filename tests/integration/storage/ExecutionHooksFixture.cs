@@ -20,7 +20,8 @@ internal sealed class ExecutionHooksFixture : IDisposable
     internal string Marker { get; }
     internal AttemptWriterState State => AttemptWriterState.Read(Source.Instance, Source.Database, new(), Accepted.JournalId);
 
-    internal ExecutionHooksFixture(bool configuration, int preExit = 0, int postExit = 0, bool waitPre = false, bool accept = true)
+    internal ExecutionHooksFixture(bool configuration, int preExit = 0, int postExit = 0, bool waitPre = false, bool accept = true,
+        bool waitMain = false)
     {
         try
         {
@@ -31,7 +32,7 @@ internal sealed class ExecutionHooksFixture : IDisposable
             var script = catalog.Scripts.Single(script => script.Id == Source.ScriptId) with
             {
                 RootId = root.Id, Executable = new(root.Id, Path.GetFileName(native)),
-                Arguments = Arguments("main", 0, false), ConfigurationPaths = configuration
+                Arguments = Arguments("main", 0, waitMain), ConfigurationPaths = configuration
                     ? catalog.Scripts.Single(script => script.Id == Source.ScriptId).ConfigurationPaths : [],
                 LogPaths = [], Limits = new(1, 30, 120),
                 Judgement = new(AutomationJudgementLanguage.Keywords, ["done"], ["failed"], null)

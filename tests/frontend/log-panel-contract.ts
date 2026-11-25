@@ -77,12 +77,19 @@ export async function logPanelContract(fixture: HTMLElement, check: (value: unkn
     const expectedLines = strings.join('').split('\n').slice(-500).join('\n');
     await wait(() => renderedText() === expectedLines);
     check(renderedText() === expectedLines, 'the combined roles retain the final five hundred lines in canonical role order');
-    const longPre = '😀' + 'a'.repeat(256 * 1024 - 34);
+    const longPre = '😀' + 'a'.repeat(256 * 1024 - 36);
     const main = 'm'.repeat(16), post = 'p'.repeat(17);
     send('preHook', longPre, 2); send('main', main, 2); send('postHook', post, 2);
-    const expectedUnits = longPre.slice(2) + main + post;
+    const expectedUnits = [longPre.slice(2), main, post].join('\n');
     await wait(() => renderedText().length > 250000 && renderedText().endsWith(post));
     check(renderedText() === expectedUnits && pre.querySelector('.omitted'), 'the combined roles keep a separate character limit without splitting a code point');
+    const filters = [...mount.querySelectorAll<HTMLButtonElement>('.script-log-roles button')];
+    check(filters.map(button => button.textContent?.trim()).join(',') === '全部,前置,主任务,后置',
+      'live log roles are offered in invocation order');
+    filters[1]!.click();
+    await wait(() => renderedText() === longPre);
+    check(filters[1]!.getAttribute('aria-pressed') === 'true' && grouped.every(owner => !owner.released),
+      'switching the displayed log role reuses the focused run streams');
     mount.style.top = '-2000px';
     await wait(() => grouped.every(owner => owner.released));
     check(subscriptions.length === 7, 'offscreen log panels leave no active stream');

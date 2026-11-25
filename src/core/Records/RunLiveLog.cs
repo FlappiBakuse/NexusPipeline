@@ -48,6 +48,7 @@ public sealed class LiveLogFeed(RunLogKey key)
     private int _tailBytes;
     private long _sequence, _observedEnd;
     private bool _complete, _closed, _omitted;
+    private string? _failure;
 
     public LiveLogTail ReadTail(int maximumBytes = 65536)
     {
@@ -59,10 +60,11 @@ public sealed class LiveLogFeed(RunLogKey key)
     {
         lock (_gate)
         {
-            if (_closed) throw new IOException("run_log_not_active");
             if (_subscriptions.Count == 8) throw new IOException("run_log_subscription_limit");
             var subscription = new LiveLogSubscription(Tail(65536), Remove, released);
-            _subscriptions.Add(subscription); return subscription;
+            if (_closed) subscription.End(_failure);
+            else _subscriptions.Add(subscription);
+            return subscription;
         }
     }
 
@@ -97,7 +99,7 @@ public sealed class LiveLogFeed(RunLogKey key)
         lock (_gate)
         {
             if (_closed) return;
-            _closed = true; _complete = durableComplete;
+            _closed = true; _complete = durableComplete; _failure = failureCode;
             foreach (var subscription in _subscriptions) subscription.End(failureCode);
             _subscriptions.Clear();
         }

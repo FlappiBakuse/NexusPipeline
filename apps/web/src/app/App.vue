@@ -193,7 +193,8 @@ onBeforeUnmount(() => {
     <div v-if="store.state.busy" class="navigation-progress" role="progressbar" :aria-label="t('准备页面')">
       <span />
     </div>
-    <nexus-scroll-area class="workspace-scroll" :data-card-scroll="store.state.page === 'history' || store.state.page === 'plugins'" :label="t('主内容')">
+    <nexus-scroll-area class="workspace-scroll" :data-page="store.state.page"
+      :data-card-scroll="['history', 'plugins', 'dispatch'].includes(store.state.page)" :label="t('主内容')">
       <main class="workspace">
         <header v-show="!!title" class="workspace-header">
           <div class="page-heading">

@@ -101,6 +101,7 @@ internal sealed class AttemptRuntimeSession : IExecutionAttemptSession, IDisposa
         Verify();
         _progress?.Step(stepId, "preparing");
         if (!_prepared || _steps.ContainsKey(stepId) || !_index.Current.IsReady) throw new IOException("execution_runtime_step_unavailable");
+        _lease.LiveLogs.Release(Guid.Parse(_total.RunId), Guid.Parse(_attempt.AttemptId));
         var input = _total.Steps.Single(step => step.StepId == stepId);
         _bindingStarts.TryAdd(stepId, TimeSpan.FromMilliseconds(_accepted.Prepared.TimeBudget.Read().ConsumedMilliseconds));
         if (_currentConfigurations.TryGetValue(stepId, out var prepared))
@@ -367,6 +368,7 @@ internal sealed class AttemptRuntimeSession : IExecutionAttemptSession, IDisposa
         if (_disposed) return;
         if (!IsTerminal) throw new IOException("execution_runtime_reconciliation_required");
         foreach (var step in _steps.Values) step.Dispose();
+        _lease.LiveLogs.Release(Guid.Parse(_total.RunId), Guid.Parse(_attempt.AttemptId));
         foreach (var configuration in _retryConfigurations) configuration.Dispose();
         _readSession?.Dispose(); _accepted.Dispose(); _disposed = true;
     }

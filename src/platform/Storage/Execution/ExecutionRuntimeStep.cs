@@ -197,7 +197,7 @@ internal sealed class ExecutionRuntimeStep : IDisposable
         }
         if (Stop() is { } beforeMain) return beforeMain;
         if (_input is { EngineKind: "process", Adapter: not null } &&
-            !await _adapters!.IsLaunchUniqueAsync(_accepted, _input, hostStopping).ConfigureAwait(false)) return ExecutionStopReason.TargetUnavailable;
+            !await _adapters!.IsLaunchAvailableAsync(_accepted, _input, hostStopping).ConfigureAwait(false)) return ExecutionStopReason.TargetUnavailable;
         if (_input.Target is not null)
         {
             await using var waiting = ExecutionTargetPreview.Open(_liveMediaOwner, _instance, _accepted, _lease, _scope!,

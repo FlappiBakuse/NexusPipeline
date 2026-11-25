@@ -62,6 +62,9 @@ public sealed class LiveLogTests
         feed.Complete(true); feed.Complete(false, "ignored");
         Assert.True(feed.ReadTail().IsComplete); Assert.Equal(9, released);
         foreach (var item in subscriptions) item.Dispose(); replacement.Dispose(); Assert.Equal(9, released);
-        Assert.Throws<IOException>(() => feed.Subscribe());
+        using var finished = feed.Subscribe(() => released++);
+        Assert.True(finished.InitialTail.IsComplete);
+        Assert.True(finished.Events.Completion.IsCompletedSuccessfully);
+        finished.Dispose(); Assert.Equal(10, released);
     }
 }

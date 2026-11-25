@@ -3,6 +3,8 @@ import { computed, ref, watch, onBeforeUnmount, nextTick } from 'vue';
 import type { LiveLogs, LogIdentity, LogWindow } from '../control/live-logs';
 import { LiveLogTail } from '../control/live-log-tail';
 import { t, registerMessages } from '../app/locale';
+import ScriptLogPanel from './ScriptLogPanel.vue';
+import { needsLogSeparator, scriptLogRoles, type ScriptLogSelection } from './script-log-roles';
 
 const props = defineProps<{
   subscribe: LiveLogs['subscribe']; identity?: Omit<LogIdentity, 'role'>; roles: readonly string[]; visible: boolean;
@@ -11,7 +13,8 @@ const value = ref<LogWindow>({ text: '', sequence: 0, omitted: false, connected:
 const height = ref(Math.max(180, Math.min(360, Math.round(innerHeight * 0.3))));
 const maximum = ref(Math.max(180, Math.min(720, Math.floor(innerHeight * 0.75))));
 const root = ref<HTMLElement>();
-const windowElement = ref<HTMLElement>();
+const panel = ref<InstanceType<typeof ScriptLogPanel>>();
+const roleSelection = ref<ScriptLogSelection>('all');
 const inView = ref(false);
 let follow = true;
 let release: (() => void) | undefined;
@@ -20,14 +23,20 @@ let drag: { pointer: number; y: number; height: number } | undefined;
 let selected = '';
 let generation = 0;
 let renderTimer: ReturnType<typeof setTimeout> | undefined;
-const roles = computed(() => ['preHook', 'main', 'postHook'].filter(role => props.roles.includes(role)));
+const roles = computed(() => scriptLogRoles.filter(role => props.roles.includes(role)));
+const selectedRole = computed(() => roleSelection.value !== 'all' && roles.value.includes(roleSelection.value)
+  ? roleSelection.value : 'all');
 const windows = new Map<string, LogWindow>();
 function renderWindow(epoch: number): void {
   renderTimer = undefined;
   if (epoch !== generation || !props.visible || !inView.value) return;
-  const ordered = roles.value.map((key) => windows.get(key));
+  const ordered = (selectedRole.value === 'all' ? roles.value : [selectedRole.value]).map(key => windows.get(key));
   const tail = new LiveLogTail();
-  for (const item of ordered) if (item) tail.append(item.text);
+  for (const item of ordered) {
+    if (!item?.text) continue;
+    if (needsLogSeparator(tail.text, item.text)) tail.append('\n');
+    tail.append(item.text);
+  }
   value.value = {
     text: tail.text,
     sequence: Math.max(0, ...ordered.map((item) => item?.sequence || 0)),
@@ -37,12 +46,11 @@ function renderWindow(epoch: number): void {
   };
   if (follow) void nextTick(() => {
     if (epoch !== generation || !props.visible || !inView.value) return;
-    const element = windowElement.value;
+    const element = panel.value?.viewport;
     if (element) element.scrollTop = element.scrollHeight;
   });
 }
 registerMessages({
-  运行日志: 'Run log',
   暂无日志输出: 'No log output',
   调整日志高度: 'Adjust log height',
   较早日志已折叠: 'Earlier log output is folded',
@@ -68,10 +76,13 @@ watch(
     if (identity !== selected) {
       selected = identity;
       windows.clear();
+      roleSelection.value = 'all';
       value.value = { text: '', sequence: 0, omitted: false, connected: false };
       follow = true;
     }
     if (!props.visible || !inView.value || !props.identity) return;
+    if (selectedRole.value === 'all') roleSelection.value = 'all';
+    renderTimer = setTimeout(() => renderWindow(epoch), 200);
     const subscriptions = roles.value.map((role) =>
       props.subscribe({ ...props.identity!, role }, (next) => {
         if (epoch !== generation) return;
@@ -88,8 +99,15 @@ watch(
   { immediate: true }
 );
 
+function selectRole(role: ScriptLogSelection): void {
+  if (role === selectedRole.value) return;
+  roleSelection.value = role;
+  follow = true;
+  clearTimeout(renderTimer);
+  renderWindow(generation);
+}
 function scroll(): void {
-  const element = windowElement.value;
+  const element = panel.value?.viewport;
   if (element) follow = element.scrollHeight - element.clientHeight - element.scrollTop <= 24;
 }
 function resize(next: number): void {
@@ -130,10 +148,11 @@ onBeforeUnmount(() => {
 
 <template>
   <div ref="root" class="run-log-resizable" :style="{ height: height + 'px' }">
-    <nexus-scroll-area ref="windowElement" class="run-log" :label="t('运行日志')" @scroll="scroll">
+    <ScriptLogPanel ref="panel" :title="t('实时日志')" :roles="roles" :selected="selectedRole" live
+      @select="selectRole" @scroll="scroll">
       <div v-if="value.error" role="status">{{ t('日志读取失败') }} · {{ value.error }}</div>
       <pre><span v-if="value.omitted" class="omitted">{{ t('较早日志已折叠') }}</span>{{ value.text || '(' + t('暂无日志输出') + ')' }}</pre>
-    </nexus-scroll-area>
+    </ScriptLogPanel>
     <div
       class="log-resize"
       role="separator"
@@ -157,26 +176,6 @@ onBeforeUnmount(() => {
   min-width: 0;
   min-height: 180px;
   margin-top: 12px;
-}
-.run-log {
-  width: 100%;
-  height: 100%;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--log-bg);
-  color: var(--log-text);
-}
-pre {
-  margin: 0;
-  min-height: 100%;
-  padding: 13px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font:
-    12px/1.6 'Cascadia Mono',
-    Consolas,
-    'Courier New',
-    monospace;
 }
 .omitted {
   display: block;

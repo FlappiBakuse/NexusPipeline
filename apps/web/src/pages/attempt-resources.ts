@@ -7,8 +7,6 @@ import { historyImage, type AttemptFacts, type HistoryImage } from '../control/r
 export type HistoryLog = Record<string, unknown> & {
   key: { stepId: string; role: string; invocationOrdinal?: number };
 };
-export const historyLogId = (log: HistoryLog): string =>
-  JSON.stringify([log.key.stepId, log.key.role, log.key.invocationOrdinal ?? null]);
 type Kind = 'logs' | 'images' | 'report';
 type Status = { loaded: boolean; busy: boolean; requested: boolean; indexing: boolean; error: string };
 type Catalog<T> = Status & { items: T[]; next: number | null };
