@@ -47,7 +47,7 @@ export async function preparePages(store: AppStore, signal: AbortSignal,
   jobs.push(...paths.map(path => ({ key: path, run: async () => { await read(path); } })));
   if (include('plugins', 'scripts', 'users') && store.can('extensions.read')) jobs.push({ key: 'extension-icons', run: async () => {
     const list = await retryRead(() => store.prepareEditorDirectory('extensions', extensionList, signal), signal);
-    await prepareExtensionIcons(store.client, list.items.filter(item => item.isInstalled).map(item => item.extensionId), signal);
+    await prepareExtensionIcons(store.client, list.items.filter(item => item.isInstalled), signal);
   } });
   if (include('plugins') && store.can('extensions.read')) jobs.push({ key: 'extension-catalog', run: async () => {
     const list = await retryRead(() => store.prepareEditorDirectory('extensions', extensionList, signal), signal);

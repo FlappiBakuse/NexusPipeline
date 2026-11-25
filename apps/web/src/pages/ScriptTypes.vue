@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { extensionIcon as scriptIcon } from '../control/extension-icons';
+import { extensionIcon as scriptIcon, prepareExtensionIcons } from '../control/extension-icons';
 import { computed, onBeforeUnmount, watch, ref } from 'vue';
 import type { AutomationStore } from '../app/store-ports';
 import { extensionList, type ExtensionState } from '../control/extensions';
@@ -11,16 +11,28 @@ export type ScriptChoice = { extensionId: string; label: string; artifact: strin
 const props = defineProps<{ store: AutomationStore; visible: boolean; active: boolean }>();
 const emit = defineEmits<{ choose: [value?: ScriptChoice]; close: [] }>();
 const installed = defineModel<readonly ExtensionState[] | undefined>('installed', { required: true });
-const choices = computed<ScriptChoice[]>(() => (installed.value ?? []).filter(item => item.isInstalled && item.desiredEnabled &&
-  item.activationId && !item.unavailableReason && item.capabilities.includes('task.adapt') && (item.kind === 'data-specialized' ||
-    item.kind === 'managed-code' && item.capabilities.includes('source.compile') && item.capabilities.includes('execution.drive')))
+function isDriver(item: ExtensionState): boolean {
+  return item.kind === 'managed-code' && item.capabilities.includes('source.compile') && item.capabilities.includes('execution.drive');
+}
+const installedTypes = computed(() => installed.value?.filter(item => item.isInstalled &&
+  (item.kind === 'data-specialized' || isDriver(item))));
+function selectableType(item: ExtensionState): boolean {
+  return item.isInstalled && item.desiredEnabled && !!item.activationId && !item.unavailableReason &&
+    item.capabilities.includes('task.adapt') && (item.kind === 'data-specialized' || isDriver(item));
+}
+const choices = computed<ScriptChoice[]>(() => (installedTypes.value ?? []).filter(selectableType)
   .map(item => ({ extensionId: item.extensionId, label: item.metadata ? metadataText(item.metadata, locale.value).displayName : item.artifactName || item.extensionId,
-    driver: item.kind === 'managed-code', artifact: item.artifactName || item.extensionId })).sort((a, b) => Number(!!b.driver) - Number(!!a.driver) || a.artifact.localeCompare(b.artifact, 'en')));
+    driver: isDriver(item), artifact: item.artifactName || item.extensionId })).sort((a, b) => Number(!!b.driver) - Number(!!a.driver) || a.artifact.localeCompare(b.artifact, 'en')));
+const hasDriverChoice = computed(() => choices.value.some(choice => choice.driver));
 const loading = ref(false);
 const error = ref('');
 let owner: AbortController | undefined;
 const instance = () => props.store.state.capabilities?.instanceId;
 const readAllowed = () => props.store.can('extensions.read');
+const genericOnly = computed(() => !readAllowed() || installedTypes.value?.length === 0);
+watch([() => props.visible, genericOnly], ([visible, direct]) => {
+  if (visible && direct) emit('choose');
+});
 async function refresh(): Promise<void> {
   if (!props.active || !readAllowed()) return;
   owner?.abort();
@@ -31,9 +43,12 @@ async function refresh(): Promise<void> {
   error.value = '';
   try {
     const catalog = await props.store.readEditorDirectory('extensions', extensionList, current.signal);
-    if (!current.signal.aborted && instance() === instanceId) {
-      installed.value = catalog.items;
-    }
+    current.signal.throwIfAborted();
+    if (instance() !== instanceId) return;
+    installed.value = catalog.items;
+    if (catalog.items.some(selectableType))
+      await prepareExtensionIcons(props.store.client, catalog.items.filter(item => item.isInstalled), current.signal)
+        .catch(reason => { if (!current.signal.aborted) console.warn('Script type icons could not all be prepared', reason); });
   } catch {
     if (!current.signal.aborted) error.value = '脚本类型加载失败，请重新打开。';
   } finally {
@@ -52,10 +67,10 @@ onBeforeUnmount(() => owner?.abort());
 </script>
 
 <template>
-  <nexus-modal :open.prop="visible" :title="t('新建脚本实例')" @nexus-close="emit('close')">
+  <nexus-modal :open.prop="visible && !genericOnly && !loading && (!!installed || !!error)" :title="t('新建脚本实例')" @nexus-close="emit('close')">
     <div class="script-types" :aria-busy="loading">
-      <template v-if="installed || !store.can('extensions.read')">
-      <button type="button" class="type-choice" @click="emit('choose')">
+      <template v-if="installed && !genericOnly">
+      <button type="button" class="type-choice" :class="{ 'type-choice-wide': !hasDriverChoice }" @click="emit('choose')">
         <span class="type-icon"><img :src="scriptIcon()" alt="" /></span>
         <span>
           <strong>{{ t('通用脚本') }}</strong>
@@ -78,7 +93,6 @@ onBeforeUnmount(() => owner?.abort());
         </button>
       </template>
       </template>
-      <nexus-spinner v-if="!installed && loading" :label="t('加载中…')" />
       <nexus-toast v-if="visible && error" tone="danger" :message.prop="t(error)" />
     </div>
     <div slot="footer">
@@ -93,7 +107,8 @@ onBeforeUnmount(() => owner?.abort());
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
-.script-types > p { grid-column: 1 / -1; }
+.script-types > p,
+.type-choice-wide { grid-column: 1 / -1; }
 .type-divider { grid-column: 1 / -1; width: 100%; margin: 0; border: 0; border-top: 1px solid var(--border); }
 .type-choice {
   display: flex;

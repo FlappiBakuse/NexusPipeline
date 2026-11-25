@@ -3,22 +3,56 @@ import { boundedBytes, type ControlClient } from './client';
 import generic from '../assets/script-icons/generic.ico';
 import { abortable } from './abortable';
 import { retryRead } from './read-retry';
+import type { ExtensionState } from './extensions';
 
 const icons = shallowReactive(new Map<string, string>());
-let generation = 0;
+type IconRevision = Pick<ExtensionState, 'extensionId' | 'installedRevision'>;
+type IconPreparation = {
+  client: ControlClient;
+  key: string;
+  owner: AbortController;
+  work: Promise<void>;
+  readers: number;
+  complete: boolean;
+};
+let preparation: IconPreparation | undefined;
 export function extensionIcon(id?: string): string { return id ? icons.get(id) ?? generic : generic; }
 export function clearExtensionIcons(): void {
-  generation++;
+  preparation?.owner.abort();
+  preparation = undefined;
   for (const url of icons.values()) URL.revokeObjectURL(url);
   icons.clear();
 }
-export async function prepareExtensionIcons(client: ControlClient, ids: readonly string[], signal: AbortSignal): Promise<void> {
-  const own = ++generation;
+export async function prepareExtensionIcons(client: ControlClient, revisions: readonly IconRevision[], signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted();
+  const key = JSON.stringify(revisions.map(item => [item.extensionId, item.installedRevision]).sort());
+  let current = preparation;
+  if (!current || current.client !== client || current.key !== key) {
+    current?.owner.abort();
+    const owner = new AbortController();
+    const work = loadIcons(client, revisions.map(item => item.extensionId), owner.signal);
+    const started = { client, key, owner, work, readers: 0, complete: false };
+    preparation = current = started;
+    void work.then(() => { started.complete = true; }, () => {
+      if (preparation === started) preparation = undefined;
+    });
+  }
+  current.readers++;
+  try { await abortable(current.work, signal); }
+  finally {
+    if (--current.readers === 0 && !current.complete && preparation === current) {
+      preparation = undefined;
+      current.owner.abort();
+    }
+  }
+}
+
+async function loadIcons(client: ControlClient, ids: readonly string[], signal: AbortSignal): Promise<void> {
   for (const [id, url] of icons) if (!ids.includes(id)) { URL.revokeObjectURL(url); icons.delete(id); }
   let next = 0;
   const errors: unknown[] = [];
   await Promise.all(Array.from({ length: Math.min(4, ids.length) }, async () => {
-    while (next < ids.length && !signal.aborted && own === generation) {
+    while (next < ids.length && !signal.aborted) {
       const id = ids[next++]!;
       let url: string | undefined;
       try {
@@ -41,12 +75,11 @@ export async function prepareExtensionIcons(client: ControlClient, ids: readonly
           url = URL.createObjectURL(blob);
         }
         signal.throwIfAborted();
-        if (own !== generation) return;
         const previous = icons.get(id);
         if (previous) URL.revokeObjectURL(previous);
         icons.delete(id);
         if (url) { icons.set(id, url); url = undefined; }
-      } catch (error) { if (!signal.aborted && own === generation) errors.push(error); }
+      } catch (error) { if (!signal.aborted) errors.push(error); }
       finally { if (url) URL.revokeObjectURL(url); }
     }
   }));

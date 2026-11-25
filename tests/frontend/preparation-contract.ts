@@ -101,12 +101,18 @@ async function iconPreparation(check: (value: unknown, name: string) => void): P
     return new Response(png, { headers: { 'Content-Type': 'image/png' } });
   });
   try {
-    const work = prepareExtensionIcons(client, ['broken-icon', 'slow-icon', 'third-icon', 'fourth-icon', 'last-icon'], new AbortController().signal)
+    const revisions = ['broken-icon', 'slow-icon', 'third-icon', 'fourth-icon', 'last-icon']
+      .map(extensionId => ({ extensionId, installedRevision: 1 }));
+    const work = prepareExtensionIcons(client, revisions, new AbortController().signal)
       .then(() => { throw new Error('Expected icon fault'); }, () => { finished = true; });
+    const secondary = new AbortController();
+    const joined = prepareExtensionIcons(client, revisions, secondary.signal).catch(() => {});
+    secondary.abort();
+    await joined;
     await new Promise(resolve => setTimeout(resolve, 0));
     check(!finished, 'one icon failure does not complete readiness while another icon is pending');
     release(); await work;
-    check(requests.includes('last-icon') && extensionIcon('slow-icon').startsWith('blob:'),
+    check(requests.length === revisions.length && requests.includes('last-icon') && extensionIcon('slow-icon').startsWith('blob:'),
       'icon preparation retains successful icons and attempts remaining declarations after a failure');
   } finally { release(); clearExtensionIcons(); }
 }

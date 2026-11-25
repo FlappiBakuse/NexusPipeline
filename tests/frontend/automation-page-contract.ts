@@ -56,20 +56,19 @@ async function accountSave(parent: HTMLElement, check: Check) {
     actions.querySelector('button')!.click();
     await settle();
     const modal = holder.querySelector('nexus-modal')!;
-    const notes = modal.querySelector('nexus-text-area');
-    check(notes?.getClientRects().length && modal.querySelector('.add-binding')?.getClientRects().length,
-      'a new account exposes notes and binding controls before its first save');
+    const nameOnly = () => modal.querySelectorAll('.editor-fields nexus-text-input').length === 1 &&
+      modal.querySelector('nexus-text-input')?.getAttribute('aria-label') === '用户名' &&
+      !modal.querySelector('nexus-text-area, .bindings-section');
+    check(nameOnly(), 'creating a user exposes exactly the username field');
     modal.querySelector('nexus-text-input')!.dispatchEvent(new CustomEvent('nexus-change', { detail: { value: 'New account' } }));
-    await settle();
-    notes?.dispatchEvent(new CustomEvent('nexus-change', { detail: { value: 'Initial account note' } }));
     await settle();
     modal.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
     await Promise.race([refreshed.promise, new Promise((_, reject) => setTimeout(() => reject(Error('Account save did not refresh')), 1500))]);
     await settle();
     check(dialogTitle(modal) === '添加用户' && modal.shadowRoot?.querySelector('dialog')?.dataset.size === 'normal' &&
-      modal.querySelector('.bindings-section')?.getClientRects().length,
-      'the creation modal keeps its title and binding controls when the new user reaches the catalog');
-    check(command?.users[0]?.value.notes === 'Initial account note', 'saving a new account includes its notes');
+      nameOnly(), 'the creation modal stays username-only when the new user reaches the catalog');
+    check(command?.users[0]?.value.name === 'New account' && command.users[0].value.notes === undefined &&
+      command.bindings.length === 0, 'adding a user writes the username without notes or bindings');
     finish.resolve();
     await settle();
     await new Promise(resolve => setTimeout(resolve, 230));
@@ -165,7 +164,8 @@ async function queueAvatar(parent: HTMLElement, check: Check) {
   publish([firstId, secondId]);
   const { holder, dispose } = mountPage(parent, store, 'queues');
   try {
-    await prepareExtensionIcons(client, ['baah', 'bettergi'], new AbortController().signal); await settle();
+    await prepareExtensionIcons(client, ['baah', 'bettergi'].map(extensionId => ({ extensionId, installedRevision: 1 })),
+      new AbortController().signal); await settle();
     const avatar = () => holder.querySelector<HTMLImageElement>('.automation-row .script-avatar img');
     check(avatar()?.getAttribute('src') === extensionIcon('baah'), 'a queue shows the icon of its first script instance');
     publish([secondId, firstId]); await settle();
@@ -278,17 +278,18 @@ async function activeBindingRemoval(parent: HTMLElement, check: Check) {
   });
   store.state.capabilities!.capabilities.push('automation.write');
   const script = { id: 'script', name: 'Native fixture', kind: 'specialized', extensionId: 'fixture' } as Script;
+  const user = { id: crypto.randomUUID(), name: 'Existing account', order: 0 };
   store.state.automation = {
     ...store.state.automation!,
-    revisions: [{ kind: 'script', id: script.id, revision: 1 }],
-    bundle: { ...emptyBundle, scripts: [script] }
+    revisions: [{ kind: 'script', id: script.id, revision: 1 }, { kind: 'user', id: user.id, revision: 1 }],
+    bundle: { ...emptyBundle, scripts: [script], users: [user] }
   };
-  const { holder, actions, dispose } = mountPage(parent, store, 'users');
+  const { holder, dispose } = mountPage(parent, store, 'users');
   const press = (root: Element, text: string) => {
     [...root.querySelectorAll('button')].find(button => button.textContent?.trim() === text)!.click();
   };
   try {
-    actions.querySelector('button')!.click();
+    holder.querySelector('.entity-card-actions nexus-icon-button')!.shadowRoot!.querySelector('button')!.click();
     await settle();
     const account = holder.querySelector('nexus-modal')!;
     account.querySelector<HTMLButtonElement>('.add-binding')!.click();
@@ -408,12 +409,82 @@ async function emulatorDiscovery(parent: HTMLElement, check: Check): Promise<voi
   } finally { app.unmount(); store.dispose(); holder.remove(); }
 }
 
+async function scriptCreation(parent: HTMLElement, check: Check): Promise<void> {
+  const png = await new Promise<Blob>(resolve => document.createElement('canvas').toBlob(blob => resolve(blob!)));
+  for (const kind of ['none', 'data-specialized', 'managed-code'] as const) {
+    const plugin = (extensionId: string, pluginKind: string, capabilities: string[]) => ({
+      extensionId, isInstalled: true, installedRevision: 1, desiredEnabled: true, activationId: 'fixture-active',
+      unavailableReason: null, kind: pluginKind, artifactName: extensionId, capabilities
+    });
+    const other = plugin('live-screenshot', 'managed-code', []);
+    const types = kind === 'none' ? [other] : [other, kind === 'managed-code'
+      ? plugin('maa-framework', kind, ['task.adapt', 'source.compile', 'execution.drive'])
+      : plugin('fixture-adapter', kind, ['task.adapt'])];
+    const pendingTypes = Promise.withResolvers<void>();
+    const pendingIcons = Promise.withResolvers<void>();
+    const store = createStore(new ControlClient(location.origin, async input => {
+      if (new URL(String(input)).pathname.endsWith('/icon')) {
+        if (kind === 'data-specialized') await pendingIcons.promise;
+        return new Response(png, { headers: { 'Content-Type': 'image/png' } });
+      }
+      if (kind === 'none') await pendingTypes.promise;
+      return Response.json({ hasReleaseTrust: false, items: types });
+    }));
+    store.state.capabilities = { instanceId: 'script-creation-' + kind, hostVersion: '0.18.0',
+      capabilities: ['automation.write', 'automation.declare', 'extensions.read'] };
+    store.state.automation = { catalogRevision: 1, roots: [], revisions: [], bundle: emptyBundle };
+    const { holder, actions, dispose } = mountPage(parent, store, 'scripts');
+    try {
+      await settle();
+      actions.querySelector('button')!.click();
+      await settle();
+      const grid = holder.querySelector<HTMLElement>('.script-types')!;
+      const chooser = grid.closest('nexus-modal');
+      const editor = () => holder.querySelector('#automation-editor-scripts');
+      if (kind === 'none') {
+        check(!chooser?.shadowRoot?.querySelector('dialog')?.open && !editor(),
+          'the type chooser stays closed while the installed plugin list is pending');
+        pendingTypes.resolve();
+        await settle();
+        check(!!editor() && !chooser?.shadowRoot?.querySelector('dialog')?.open,
+          'unrelated installed plugins leave the generic editor as the direct create entry');
+        continue;
+      }
+      if (kind === 'data-specialized') {
+        check(!chooser?.shadowRoot?.querySelector('dialog')?.open, 'the picker waits for its installed plugin icons');
+        pendingIcons.resolve();
+      }
+      await new Promise<void>((resolve, reject) => {
+        const limit = Date.now() + 3000;
+        const timer = setInterval(() => {
+          if (!chooser?.shadowRoot?.querySelector('dialog')?.open && Date.now() < limit) return;
+          clearInterval(timer);
+          if (chooser?.shadowRoot?.querySelector('dialog')?.open) resolve();
+          else reject(new Error('The script type picker did not open'));
+        }, 20);
+      });
+      const cards = grid.querySelectorAll<HTMLButtonElement>('.type-choice');
+      check(cards[1]?.querySelector('img')?.src.startsWith('blob:'), 'the picker first shows the plugin icon: ' + kind);
+      const width = grid.getBoundingClientRect().width;
+      const genericWidth = cards[0]?.getBoundingClientRect().width ?? 0;
+      check(cards.length === 2 && chooser?.shadowRoot?.querySelector('dialog')?.open && !editor(),
+        'installed script-capable plugins keep the type chooser: ' + kind);
+      check(width > 0 && (kind === 'managed-code' ? genericWidth < width * 0.6 : Math.abs(genericWidth - width) < 1),
+        'generic script card width follows the visible driver choice: ' + kind);
+      cards[0]?.click();
+      await settle();
+      check(!!editor(), 'choosing the generic card opens the same editor: ' + kind);
+    } finally { pendingTypes.resolve(); pendingIcons.resolve(); dispose(); clearExtensionIcons(); }
+  }
+}
+
 export async function automationPageContract(parent: HTMLElement, check: Check): Promise<void> {
   await queueAvatar(parent, check);
   const failures: string[] = [];
   const record: Check = (value, name) => { if (value) check(value, name); else failures.push(name); };
   await accountSave(parent, record);
   await scriptBadges(parent, record);
+  await scriptCreation(parent, record);
   await accountFailure(parent, record);
   await accountDelete(parent, record);
   await bindingEditorFailure(parent, record);

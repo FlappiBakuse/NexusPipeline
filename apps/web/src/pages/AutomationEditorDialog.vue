@@ -10,6 +10,7 @@ import { initialValue, schemaAt } from '../control/schema';
 import BindingPolicyFields from './BindingPolicyFields.vue';
 import QueueFields from './QueueFields.vue';
 import AccountFields from './AccountFields.vue';
+import AccountNameField from './AccountNameField.vue';
 import ScriptFields from './ScriptFields.vue';
 import ScriptActions from './ScriptActions.vue';
 import ExtensionOutlet from '../extensions/ExtensionOutlet.vue';
@@ -107,6 +108,11 @@ const specializedTitle = computed(() => props.scriptType && activeKind.value ===
             :store="store"
             @update:model-value="draft = $event as AutomationDraft"
             @discard-new-item="presentation.discardNewItem($event)"
+          />
+          <AccountNameField
+            v-else-if="activeKind === 'users' && !existing"
+            :model-value="String(draft.name ?? '')"
+            @update:model-value="draft = { ...draft, name: $event }"
           />
           <AccountFields
             v-else-if="bundle && activeKind === 'users' && !userGlobal"

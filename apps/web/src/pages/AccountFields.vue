@@ -4,6 +4,7 @@ import { createIdentity } from '../control/identity';
 import { computed, nextTick, ref } from 'vue';
 import type { AutomationStore } from '../app/store-ports';
 import type { AutomationBundle } from '../control/wire.generated';
+import AccountNameField from './AccountNameField.vue';
 import BindingPolicyFields from './BindingPolicyFields.vue';
 import BindingTaskPlan from './BindingTaskPlan.vue';
 import { t } from '../app/locale';
@@ -104,18 +105,8 @@ function discardConfiguration(binding: Binding): void {
 
 <template>
   <div ref="root" class="account-fields">
-    <label>
-      {{ t('用户名') }}
-      <em>*</em>
-      <nexus-text-input
-        data-draft-field="AccountFields/modelValue.name"
-        :aria-label="t('用户名')"
-        aria-required="true"
-        :value.prop="modelValue.name"
-        :max-length.prop.camel="120"
-        @nexus-change="emit('update:modelValue', { ...modelValue, name: $event.detail.value })"
-      />
-    </label>
+    <AccountNameField :model-value="modelValue.name"
+      @update:model-value="emit('update:modelValue', { ...modelValue, name: $event })" />
     <label>
       {{ t('备注') }}
       <nexus-text-area
@@ -280,13 +271,8 @@ label {
   font-size: 12px;
   font-weight: 600;
 }
-label > nexus-text-input,
 label > nexus-text-area {
   flex-basis: 100%;
-}
-em {
-  color: var(--bad);
-  font-style: normal;
 }
 .bindings-section {
   border-top: 1px solid var(--border);
