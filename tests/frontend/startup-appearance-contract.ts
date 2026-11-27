@@ -15,6 +15,11 @@ export async function startupAppearanceContract(fixture: HTMLElement, check: (va
     check(icon.naturalWidth > 0 && icon.getBoundingClientRect().width > 0 &&
       mount.querySelector('h1')?.textContent === 'NexusPipeline',
       'Web preparation displays a decoded brand image and the product name');
+    const surface = mount.querySelector('.startup-surface')!;
+    mount.style.colorScheme = 'light';
+    check(getComputedStyle(surface).backgroundColor === 'rgb(252, 252, 253)', 'Web preparation inherits the light interface scheme');
+    mount.style.colorScheme = 'dark';
+    check(getComputedStyle(surface).backgroundColor === 'rgb(19, 31, 51)', 'Web preparation inherits the dark interface scheme');
     const progress = () => mount.querySelector('progress')!;
     check(!progress().hasAttribute('value'), 'unknown preparation count uses indeterminate progress');
     total.value = 5; count.value = 2; await nextTick();

@@ -25,7 +25,7 @@ public sealed record HostSettings(bool AutoStart, DesktopPreferences Desktop, Se
     public AutomaticRetryPreferences AutomaticRetry { get; init; } = new(false, 30);
 
     public static HostSettings Default { get; } = new(false, new(DesktopMode.Desktop, true, false),
-        new(58731, false, false, false, 58732), false, 7, HostLogLevel.Info, HostLocale.ZhCn,
+        new(0, false, false, false, 58732), false, 7, HostLogLevel.Info, HostLocale.ZhCn,
         new(ProxyMode.None, null, ""), new(true, false, false, UpdateChannel.Prerelease, null, PluginSourceChannel.Stable), []);
 }
 

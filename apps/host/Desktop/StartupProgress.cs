@@ -55,7 +55,7 @@ internal sealed class StartupProgress : IDisposable
             {
                 using var profile = StartupProfile.Begin("desktop.launch");
                 var desktop = new OwnedDesktop(instance, payloadRoot, _signer, Intent, presentation.Desktop.MinimizeToTray, _channel,
-                    presentation.Locale == HostLocale.ZhCn ? "zh-CN" : "en-US");
+                    presentation.Locale == HostLocale.ZhCn ? "zh-CN" : "en-US", presentation.Theme);
                 try { desktop.Start(); return desktop; }
                 catch { desktop.Dispose(); throw; }
             });

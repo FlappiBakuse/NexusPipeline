@@ -16,7 +16,7 @@ public sealed class HostSettingsTests
         state.PublishSaved(saved);
         var observed = state.Read();
         Assert.Equal(60000, observed.Saved.Values.Service.WebPort);
-        Assert.Equal(58731, observed.Effective.Service.WebPort);
+        Assert.Equal(0, observed.Effective.Service.WebPort);
         Assert.Equal(DesktopMode.Desktop, observed.Effective.Desktop.Mode);
         Assert.Equal(PluginSourceChannel.Stable, observed.Effective.Updates.PluginSource);
         Assert.Equal(HostLogLevel.Fatal, observed.Effective.LogLevel);
@@ -27,7 +27,7 @@ public sealed class HostSettingsTests
         state.PublishDesktopMode(DesktopMode.Browser);
         Assert.Equal(DesktopMode.Browser, state.Read().Effective.Desktop.Mode);
         Assert.DoesNotContain(SettingsRestartReason.DesktopMode, state.Read().RestartReasons);
-        Assert.Equal(58731, state.Read().Effective.Service.WebPort);
+        Assert.Equal(0, state.Read().Effective.Service.WebPort);
         Assert.Throws<HostSettingsException>(() => state.PublishDesktopMode((DesktopMode)99));
         Assert.Equal(DesktopMode.Browser, state.Read().Effective.Desktop.Mode);
     }
@@ -37,7 +37,7 @@ public sealed class HostSettingsTests
     {
         var value = HostSettings.Default;
         HostSettingsPolicy.Validate(value);
-        Assert.Equal(58731, value.Service.WebPort);
+        Assert.Equal(0, value.Service.WebPort);
         Assert.Equal(58732, value.Service.McpPort);
         Assert.Equal(7, value.HistoryRetentionDays);
         Assert.True(value.Desktop.MinimizeToTray);
@@ -54,7 +54,8 @@ public sealed class HostSettingsTests
     [Fact(DisplayName = "An Automatic Web Port Is Saved Without Changing The Current Listener Until Restart")]
     public void AcceptsAutomaticPort()
     {
-        var before = HostSettings.Default;
+        var defaults = HostSettings.Default;
+        var before = defaults with { Service = defaults.Service with { WebPort = 58731 } };
         var values = before with { Service = before.Service with { WebPort = 0, McpEnabled = true } };
         var saved = HostSettingsPolicy.Next(new(0, before), 0, values);
         Assert.Equal(0, saved.Values.Service.WebPort);
@@ -78,7 +79,7 @@ public sealed class HostSettingsTests
         {
             "web-port" => value with { Service = value.Service with { WebPort = 80 } },
             "mcp-port" => value with { Service = value.Service with { McpPort = 70000 } },
-            "port-collision" => value with { Service = value.Service with { McpEnabled = true, McpPort = value.Service.WebPort } },
+            "port-collision" => value with { Service = value.Service with { McpEnabled = true, WebPort = value.Service.McpPort } },
             "retention" => value with { HistoryRetentionDays = 181 },
             "proxy-required" => value with { Proxy = value.Proxy with { Mode = ProxyMode.Http } },
             "embedded-credential" => value with { Proxy = value.Proxy with { Url = "http://fixture:fixture@proxy.invalid" } },

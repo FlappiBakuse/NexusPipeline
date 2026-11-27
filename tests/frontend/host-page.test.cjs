@@ -7,7 +7,7 @@ const vm = require('node:vm');
 const desktop = path.join(__dirname, '../../apps/desktop');
 
 function hostPageLoader(timers = { performance, setTimeout, clearTimeout }) {
-  const config = { startupPipe: 'fixture', nonce: 'fixture', locale: 'en-US', instanceId: 'fixture',
+  const config = { startupPipe: 'fixture', nonce: 'fixture', locale: 'en-US', theme: 'dark', instanceId: 'fixture',
     verificationKey: 'fixture', profilePath: desktop, visible: false, route: '/', minimizeToTray: false, mode: 'desktop' };
   const app = { setPath() {}, setAppUserModelId() {}, on() {}, commandLine: { appendSwitch() {} },
     whenReady: () => new Promise(() => {}) };

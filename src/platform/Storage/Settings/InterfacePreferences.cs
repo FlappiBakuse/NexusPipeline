@@ -42,6 +42,11 @@ public sealed class InterfacePreferences
 
     public InterfaceSnapshot Read() => _owner.PublishExecution(() => Observe(Load()));
 
+    internal static string DefaultTheme => Default.Theme;
+
+    internal static string ReadTheme(InstanceLease owner) => owner.PublishExecution(() =>
+        Load(Path.Combine(owner.Instance.RuntimeRoot, "state", FileName), owner.Instance.InstanceId).Values.Theme);
+
     public InterfaceSnapshot Save(Guid operationId, string subject, long expectedRevision, InterfaceValues values)
     {
         if (operationId == Guid.Empty || string.IsNullOrWhiteSpace(subject) || subject.Length > 256 || expectedRevision < 0)
@@ -140,16 +145,18 @@ public sealed class InterfacePreferences
         return snapshot;
     }
 
-    private Saved Load()
+    private Saved Load() => Load(_path, _owner.Instance.InstanceId);
+
+    private static Saved Load(string path, Guid instanceId)
     {
-        PhysicalPathPolicy.NormalizeWithoutLinks(_path);
-        if (!File.Exists(_path)) return new("nexus.interface.preferences", 1, _owner.Instance.InstanceId, 0, Default, Guid.Empty, "", "");
-        using var input = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        path = PhysicalPathPolicy.NormalizeWithoutLinks(path);
+        if (!File.Exists(path)) return new("nexus.interface.preferences", 1, instanceId, 0, Default, Guid.Empty, "", "");
+        using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
         if (input.Length is < 1 or > 16384) throw new IOException("interface_preferences_invalid");
         var bytes = new byte[(int)input.Length]; input.ReadExactly(bytes);
         using var parsed = StrictJson.Parse(bytes);
         var saved = parsed.RootElement.Deserialize<Saved>(Json) ?? throw new IOException("interface_preferences_invalid");
-        if (saved.Format != "nexus.interface.preferences" || saved.Version != 1 || saved.InstanceId != _owner.Instance.InstanceId ||
+        if (saved.Format != "nexus.interface.preferences" || saved.Version != 1 || saved.InstanceId != instanceId ||
             saved.Revision < 1 || saved.OperationId == Guid.Empty || string.IsNullOrWhiteSpace(saved.Subject) ||
             saved.Subject.Length > 256 || saved.RequestSha256.Length != 64 ||
             saved.RequestSha256.Any(c => c is not (>= '0' and <= '9' or >= 'a' and <= 'f')))

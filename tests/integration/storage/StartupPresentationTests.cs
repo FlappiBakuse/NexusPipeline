@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Settings;
 using NexusPipeline.Platform.Storage;
+using NexusPipeline.Platform.Storage.Settings;
 using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
 
@@ -17,6 +18,7 @@ public sealed class StartupPresentationTests
         var before = Files(instance);
         var value = StartupPresentation.Read(instance, lease);
         Assert.Equal(HostSettings.Default.Desktop, value.Desktop);
+        Assert.Equal("dark", value.Theme);
         Assert.Equal(before, Files(instance));
     }
 
@@ -76,6 +78,23 @@ public sealed class StartupPresentationTests
         Assert.Equal(settings.Desktop, value.Desktop);
         Assert.Equal(settings.Locale, value.Locale);
         Assert.Equal(before, Files(instance));
+    }
+
+    [Theory(DisplayName = "Startup Presentation Reads The Saved Interface Theme Without Writing State")]
+    [InlineData("light")]
+    [InlineData("dark")]
+    [InlineData("system")]
+    public void ReadsSavedTheme(string theme)
+    {
+        using var fixture = new ExecutionAdmissionFixture();
+        var source = fixture.Source;
+        var preferences = new InterfacePreferences(source.Lease, fixture.Resources);
+        var saved = preferences.Read();
+        preferences.Save(Guid.NewGuid(), "theme-fixture", saved.Revision, saved.Values with { Theme = theme });
+        var before = Files(source.Instance);
+
+        Assert.Equal(theme, StartupPresentation.Read(source.Instance, source.Lease).Theme);
+        Assert.Equal(before, Files(source.Instance));
     }
 
     [Fact(DisplayName = "Unknown Startup Database Identity Is Preserved And Refused Before Presentation")]

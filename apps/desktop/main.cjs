@@ -3,7 +3,7 @@ const electron = require('electron');
 const { app, BrowserWindow, Menu, dialog, screen, ipcMain } = electron;
 const path = require('node:path');
 const { connectStartup } = require('./startup-channel.cjs');
-const { createStartupView } = require('./startup-view.cjs');
+const { createStartupView, startupBackground } = require('./startup-view.cjs');
 const { strictJson } = require('./strict-json.cjs');
 const { installNativeBridge } = require('./native-bridge.cjs');
 const { installFilePermissions } = require('./file-permissions.cjs');
@@ -44,10 +44,10 @@ process.on('uncaughtException', error => { recordFailure('desktop-main', 'uncaug
 const argument = process.argv.find(value => value.startsWith('--nexus-bootstrap='));
 if (!argument || argument.length > 8192) throw new Error('desktop_bootstrap_required');
 const config = strictJson(Buffer.from(argument.slice('--nexus-bootstrap='.length), 'base64').toString('utf8'));
-const fields = ['startupPipe', 'nonce', 'locale', 'instanceId', 'verificationKey', 'profilePath', 'visible', 'route', 'minimizeToTray', 'mode'];
+const fields = ['startupPipe', 'nonce', 'locale', 'theme', 'instanceId', 'verificationKey', 'profilePath', 'visible', 'route', 'minimizeToTray', 'mode'];
 if (Object.keys(config).length !== fields.length || fields.some(name => !Object.hasOwn(config, name)) ||
     !path.isAbsolute(config.profilePath) || typeof config.visible !== 'boolean' || typeof config.minimizeToTray !== 'boolean' ||
-    !['desktop', 'browser'].includes(config.mode) || typeof config.route !== 'string' ||
+    !['dark', 'light', 'system'].includes(config.theme) || !['desktop', 'browser'].includes(config.mode) || typeof config.route !== 'string' ||
     !/^\/(?!\/)[^\\?#%:\x00-\x1f]{0,255}$/.test(config.route)) throw new Error('desktop_bootstrap_invalid');
 if (!['zh-CN', 'en-US'].includes(config.locale)) throw new Error('desktop_locale_invalid');
 setLocale(config.locale);
@@ -75,7 +75,7 @@ app.whenReady().then(async () => {
   async function createWindow() {
     if (window && !window.isDestroyed()) return window;
     const created = new BrowserWindow({ width: 1280, height: 760, minWidth: 1280, minHeight: 760,
-      useContentSize: true, frame: false, icon: path.join(__dirname, 'nexuspipeline.ico'), title: 'NexusPipeline', show: false, backgroundColor: '#131f33',
+      useContentSize: true, frame: false, icon: path.join(__dirname, 'nexuspipeline.ico'), title: 'NexusPipeline', show: false, backgroundColor: startupBackground(config.theme),
       webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true,
         nodeIntegration: false, webSecurity: true, spellcheck: false, backgroundThrottling: true } });
     window = created;

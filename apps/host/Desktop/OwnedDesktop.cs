@@ -70,7 +70,7 @@ internal sealed class OwnedDesktop : IDisposable
     internal NativeClientBinding Binding { get; }
 
     internal OwnedDesktop(RuntimeInstance instance, string payloadRoot, DesktopResponseSigner signer,
-        UpdateWindowIntent intent, bool minimizeToTray, StartupChannel channel, string locale)
+        UpdateWindowIntent intent, bool minimizeToTray, StartupChannel channel, string locale, string theme)
     {
         _observer = _job.ObserveProcessStarts(_ => { });
         DesktopLaunch? launch = null;
@@ -85,7 +85,7 @@ internal sealed class OwnedDesktop : IDisposable
                 Directory.CreateDirectory(PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(profile, name)));
             var bootstrap = Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(new
             {
-                startupPipe = channel.Name, nonce = channel.Nonce, locale,
+                startupPipe = channel.Name, nonce = channel.Nonce, locale, theme,
                 instanceId = instance.InstanceId, verificationKey = signer.VerificationKeyBase64,
                 profilePath = profile, visible = intent.Visible, route = intent.Route, minimizeToTray,
                 mode = intent.Mode == UpdateWindowMode.Desktop ? "desktop" : "browser"

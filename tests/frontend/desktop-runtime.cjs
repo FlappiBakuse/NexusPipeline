@@ -6,7 +6,7 @@ const http = require('node:http');
 const net = require('node:net');
 const crypto = require('node:crypto');
 const electron = require('electron');
-const { app, BrowserWindow, shell, dialog } = electron;
+const { app, BrowserWindow, shell, dialog, nativeTheme } = electron;
 const args = process.argv.slice(2);
 if (args.length !== 4 || args[0] !== '--output' || !path.isAbsolute(args[1]) || args[2] !== '--mode' ||
     !['desktop', 'browser', 'failed'].includes(args[3])) throw new Error('explicit_output_and_mode_required');
@@ -15,9 +15,12 @@ fs.mkdirSync(output, { recursive: true });
 process.prependListener('uncaughtException', error => fs.writeFileSync(path.join(output, 'uncaught.log'), String(error.stack)));
 const runId = new Date().toISOString().replaceAll(/[-:.]/g, '');
 const mode = args[3];
+const theme = mode === 'desktop' ? 'light' : mode === 'failed' ? 'system' : 'dark';
+const lightBackground = 'rgb(252, 252, 253)';
+const darkBackground = 'rgb(19, 31, 51)';
 const started = performance.now();
 const source = path.resolve(__dirname, '../../apps/desktop');
-const files = fs.readdirSync(source).filter(name => name.endsWith('.cjs')).sort().map(name => ({
+const files = fs.readdirSync(source).filter(name => /\.(?:cjs|js|html|css)$/.test(name)).sort().map(name => ({
   path: name, sha256: crypto.createHash('sha256').update(fs.readFileSync(path.join(source, name))).digest('hex')
 }));
 const identity = { instanceId: crypto.randomUUID(), clientId: crypto.randomUUID(), sessionId: crypto.randomUUID() };
@@ -147,7 +150,8 @@ async function run() {
   const address = 'http://127.0.0.1:' + server.address().port + '/';
   const profile = path.join(output, 'profile');
   for (const name of ['', 'session', 'dumps']) fs.mkdirSync(path.join(profile, name), { recursive: true });
-  process.argv.push('--nexus-bootstrap=' + Buffer.from(JSON.stringify({ startupPipe: pipeName, nonce, locale,
+  nativeTheme.themeSource = mode === 'failed' ? 'light' : 'dark';
+  process.argv.push('--nexus-bootstrap=' + Buffer.from(JSON.stringify({ startupPipe: pipeName, nonce, locale, theme,
     instanceId: identity.instanceId, verificationKey, profilePath: profile, visible: mode !== 'browser',
     route: '/', minimizeToTray: true, mode: mode === 'failed' ? 'desktop' : mode })).toString('base64'));
   require(path.join(source, 'main.cjs'));
@@ -157,6 +161,11 @@ async function run() {
     await waitFor(() => BrowserWindow.getAllWindows().length === 1 && BrowserWindow.getAllWindows()[0].isVisible());
     progressWindow = BrowserWindow.getAllWindows()[0];
     assert.equal(progressWindow.contentView.children.length, 1);
+    const view = progressWindow.contentView.children[0].webContents;
+    assert.equal(new URL(view.getURL()).searchParams.get('theme'), theme);
+    assert.equal(await view.executeJavaScript('getComputedStyle(document.documentElement).backgroundColor'), lightBackground);
+    assert.equal(await view.executeJavaScript('getComputedStyle(document.querySelector("main")).backgroundColor'), lightBackground);
+    cases.push(theme === 'light' ? 'saved-light-theme-overrides-system-dark-before-presentation' : 'system-light-theme-before-presentation');
     progressWindow.close(); assert.equal(progressWindow.isVisible(), false);
     cases.push('early-progress-window-close-hides-without-cancelling');
   } else {
@@ -169,6 +178,11 @@ async function run() {
     peer.write(JSON.stringify({ kind: 'failed', reason: 'fixture_admission_rejected', errorCode: 7 }) + '\n');
     const view = progressWindow.contentView.children[0].webContents;
     await waitFor(() => view.executeJavaScript('document.querySelector("#actions").hidden === false'));
+    assert.equal(await view.executeJavaScript('getComputedStyle(document.querySelector("main")).backgroundColor'), lightBackground);
+    nativeTheme.themeSource = 'dark';
+    await waitFor(async () =>
+      await view.executeJavaScript('getComputedStyle(document.querySelector("main")).backgroundColor') === darkBackground);
+    cases.push('failure-diagnostics-follow-system-theme-changes');
     assert.equal(await view.executeJavaScript('document.querySelector("#diagnostic").textContent'), 'fixture_admission_rejected\n7');
     peer.write(JSON.stringify({ kind: 'stage', stage: 1, total: 12, elapsedMilliseconds: 10 }) + '\n');
     await leftClick();

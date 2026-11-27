@@ -1,3 +1,9 @@
+:where(.startup-document, .startup-surface) {
+  --startup-background: light-dark(#fcfcfd, #131f33);
+  --startup-text: light-dark(#202b38, #e9effb);
+  --startup-muted: light-dark(#536173, #94a8c4);
+  --startup-accent: light-dark(#1e6f9e, #3989ff);
+}
 .startup-surface {
   box-sizing: border-box;
   display: flex;
@@ -5,13 +11,12 @@
   justify-content: center;
   align-items: center;
   padding: 32px;
-  color-scheme: dark;
   font: 14px "Segoe UI", sans-serif;
-  color: #e9effb;
-  background: #131f33;
+  color: var(--startup-text);
+  background: var(--startup-background);
 }
 .startup-surface .startup-icon { display: block; width: 64px; height: 64px; flex: none; }
 .startup-surface h1 { font: 700 24px "Segoe UI", sans-serif; margin: 18px 0; }
 .startup-surface .startup-stage { margin: 6px 0 20px; line-height: normal; }
-.startup-surface progress { width: min(420px, 80vw); height: 8px; accent-color: #3989ff; }
-.startup-surface .startup-elapsed { color: #94a8c4; margin: 14px 0; line-height: normal; }
+.startup-surface progress { width: min(420px, 80vw); height: 8px; accent-color: var(--startup-accent); }
+.startup-surface .startup-elapsed { color: var(--startup-muted); margin: 14px 0; line-height: normal; }

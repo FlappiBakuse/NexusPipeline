@@ -1,12 +1,20 @@
 'use strict';
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { WebContentsView, ipcMain, clipboard } = require('electron');
+const { WebContentsView, ipcMain, clipboard, nativeTheme } = require('electron');
+
+function startupBackground(theme) {
+  const dark = theme === 'dark' || (theme === 'system' && nativeTheme.shouldUseDarkColors);
+  return dark ? '#131f33' : '#fcfcfd';
+}
 
 function createStartupView(window, channel, config) {
   const view = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'startup-preload.cjs'),
     contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, spellcheck: false } });
-  const page = pathToFileURL(path.join(__dirname, 'startup.html')).href;
+  view.setBackgroundColor(startupBackground(config.theme));
+  const url = pathToFileURL(path.join(__dirname, 'startup.html'));
+  url.searchParams.set('theme', config.theme);
+  const page = url.href;
   window.contentView.addChildView(view);
   const resize = () => { const [width, height] = window.getContentSize(); view.setBounds({ x: 0, y: 0, width, height }); };
   resize(); window.on('resize', resize);
@@ -35,4 +43,4 @@ function createStartupView(window, channel, config) {
     if (!view.webContents.isDestroyed()) view.webContents.close();
   } };
 }
-module.exports = { createStartupView };
+module.exports = { createStartupView, startupBackground };
