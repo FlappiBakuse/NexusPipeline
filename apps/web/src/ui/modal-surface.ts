@@ -5,17 +5,18 @@ export const closeIcon =
 export const modalStyles = `
 :host{display:contents}
 dialog{top:var(--nx-desktop-offset,0px);width:min(680px,calc(100vw - 28px));height:fit-content;max-width:none;max-height:none;padding:0;overflow:visible;
-border:0;outline:0;color:var(--nx-color-text);background:transparent}
+border:0;outline:0;color:var(--nx-color-text);background:transparent;
+  box-shadow: none;}
 dialog[open]{display:block;animation:modal-fade var(--nx-motion-duration-fast,160ms) var(--nx-motion-ease,cubic-bezier(.2,.8,.2,1))}
 .panel{display:flex;flex-direction:column;max-height:min(calc((100dvh - var(--nx-desktop-offset,0px)) * .88),900px);overflow:hidden;min-width:0;
-border:1px solid var(--nx-color-border);border-radius:var(--nx-radius-lg,16px);background:var(--content-card,var(--nx-color-surface));
+border:1px solid var(--nx-color-border);border-radius:var(--nx-radius-lg);background:var(--content-card,var(--nx-color-surface));
 box-shadow:var(--shadow,0 16px 40px #0005);animation:modal-enter var(--nx-motion-duration-normal,200ms) var(--nx-motion-ease,cubic-bezier(.2,.8,.2,1))}
 .mask{position:fixed;inset:var(--nx-desktop-offset,0px) 0 0;z-index:-1;background:var(--mask,rgba(3,8,16,.68));animation:modal-fade var(--nx-motion-duration-fast,160ms) var(--nx-motion-ease,cubic-bezier(.2,.8,.2,1))}
 dialog[data-size=wide]{width:min(960px,calc(100vw - 28px))}
 dialog[data-surface=secondary]>.panel{background:var(--content-card-secondary,var(--content-card-soft))}
 dialog::backdrop{background:transparent}
 header{display:flex;flex:none;align-items:center;justify-content:space-between;gap:12px;padding:clamp(18px,3vw,30px);padding-bottom:16px}
-h2{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--nx-modal-title-size,19px);line-height:var(--nx-modal-title-line-height,1.35);letter-spacing:-.025em;margin:0}header>.close{width:40px;min-width:40px;height:40px;padding:0;border:1px solid var(--border-strong,var(--nx-color-border));border-radius:10px;background:transparent;font-size:22px;font-weight:400;color:var(--nx-color-muted)}
+h2{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--nx-modal-title-size,19px);line-height:var(--nx-modal-title-line-height,1.35);letter-spacing:-.025em;margin:0}header>.close{width:40px;min-width:40px;height:40px;padding:0;border:1px solid var(--nx-color-border);border-radius:var(--nx-radius-sm);background:transparent;font-size:22px;font-weight:400;color:var(--nx-color-muted);box-shadow: var(--nx-surface-shadow);}
 header>.close{display:grid;place-items:center}header>.close svg{width:20px;height:20px;pointer-events:none}
 .content{flex:1 1 auto;min-height:0;overflow:hidden;--nx-scroll-padding:0 clamp(18px,3vw,30px) 24px}
 footer{display:flex;flex:none;flex-wrap:wrap;justify-content:flex-end;gap:12px;padding:16px clamp(18px,3vw,30px) clamp(18px,3vw,30px);border-top:1px solid var(--nx-color-border)}

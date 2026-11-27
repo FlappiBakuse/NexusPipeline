@@ -6,8 +6,8 @@ const styles =
   `
 :host{display:flex;align-items:center;flex-wrap:wrap;gap:8px;width:100%;margin-top:16px;padding:12px 16px 16px;border-top:1px solid var(--nx-color-border)}
 :host([hidden]){display:none}.summary{margin-right:auto;color:var(--nx-color-muted);font-size:12px;font-variant-numeric:tabular-nums}
-.controls{display:inline-flex;align-items:center;flex-wrap:wrap;gap:8px}button{min-width:36px;min-height:40px;padding:0 11px;font-size:12px;border-radius:8px;background:transparent}
-button[aria-current=page]{background:var(--accent-soft);border-color:var(--border-strong,var(--nx-color-border));color:var(--nx-color-accent)}
+.controls{display:inline-flex;align-items:center;flex-wrap:wrap;gap:8px}button{min-width:36px;min-height:40px;padding:0 11px;font-size:12px;border-radius:var(--nx-radius-sm);background:transparent}
+button[aria-current=page]{background:var(--accent-soft);color:var(--nx-color-accent)}
 .gap{color:var(--nx-color-muted);padding:0 4px}
 `;
 

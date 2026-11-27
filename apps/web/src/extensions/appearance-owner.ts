@@ -6,10 +6,8 @@ const variables = [
   '--accent-strong',
   '--accent-soft',
   '--panel',
-  '--panel-soft',
   '--panel-hover',
   '--_nexus-secondary-panel',
-  '--_nexus-secondary-soft',
   '--_nexus-secondary-hover'
 ] as const;
 const allowed = new Set([
@@ -88,7 +86,7 @@ function render(): void {
   if (cardColor || opacity < 1) {
     const secondaryOpacity = current.secondaryTransparent ? opacity : 1;
     for (const [token, secondary] of [['--panel', '--_nexus-secondary-panel'],
-      ['--panel-soft', '--_nexus-secondary-soft'], ['--panel-hover', '--_nexus-secondary-hover']]) {
+      ['--panel-hover', '--_nexus-secondary-hover']]) {
       const color = surfaceColor(cardColor, `${token}-opaque`);
       style.setProperty(token, blend(color, opacity));
       style.setProperty(secondary, blend(color, secondaryOpacity));

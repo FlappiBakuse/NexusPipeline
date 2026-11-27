@@ -189,7 +189,7 @@ onBeforeUnmount(() => {
   right: 10px;
   height: 10px;
   border-top: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
-  border-radius: 2px;
+  border-radius: var(--nx-radius-pill);
   cursor: ns-resize;
   opacity: 0.35;
   touch-action: none;
@@ -201,7 +201,7 @@ onBeforeUnmount(() => {
   left: 35%;
   right: 35%;
   height: 2px;
-  border-radius: 2px;
+  border-radius: var(--nx-radius-pill);
   background: currentColor;
 }
 .log-resize:hover,

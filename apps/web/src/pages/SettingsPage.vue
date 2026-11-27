@@ -25,11 +25,11 @@ const categories: { id: InterfaceCategory; label: string; description: string }[
   { id: 'service', label: '服务行为', description: '服务启动、历史记录与日志选项' },
   { id: 'remote', label: '远程访问和 MCP', description: '远程管理入口与本机 Agent 服务' },
   { id: 'proxy', label: '网络代理', description: '宿主外部 HTTP/HTTPS 请求' },
-  { id: 'advanced', label: '高级设置', description: '控制需要手动确认的配置修复行为' },
   { id: 'updates', label: '更新设置', description: '更新渠道、检查与应用操作' },
   { id: 'diagnostics', label: '系统诊断', description: '检查运行环境、恢复现场与插件状态' }
 ];
-const host = reactive(useSettingsSession(props.store, () => validateForm(form.value)));
+const host = reactive(useSettingsSession(props.store, category =>
+  category === 'proxy' || validateForm(form.value?.querySelector<HTMLElement>('#settings-' + category) ?? undefined)));
 const categoryIds = reactive(categories.map(item => item.id));
 const view = reactive(useSettingsView(props.store, categoryIds));
 const categoryOwner = useSettingsCategories(form, categoryIds, view);
@@ -37,7 +37,6 @@ const extensionCategories = categoryOwner.extensions;
 watch(() => [view.state.values.pinnedSettings, view.state.values.collapsedSettings], categoryOwner.synchronize, { flush: 'post' });
 const secrets = reactive(useSettingsSecrets(props, notice));
 const accessToken = computed({ get: () => secrets.token, set: secrets.editToken });
-const proxyPassword = computed({ get: () => secrets.secret, set: secrets.editSecret });
 const panels = computed(() =>
   [...categories].sort(
     (left, right) => Number(view.pinned.includes(right.id)) - Number(view.pinned.includes(left.id))
@@ -46,6 +45,8 @@ const panels = computed(() =>
 const canEdit = computed(() => props.store.can('settings.write') && !host.locked);
 const tokenDisabled = computed(() => !secrets.tokenReady || secrets.tokenBusy ||
   !!secrets.tokenUnknownId || !props.store.can('secrets.write'));
+const passwordDisabled = computed(() => !secrets.secretReady || secrets.secretBusy ||
+  !!secrets.secretUnknownId || !props.store.can('secrets.status') || !props.store.can('secrets.write'));
 
 function preserveTokenFocus(event: PointerEvent): void {
   // An explicit pointer action takes precedence over submitting the field on blur.
@@ -61,9 +62,8 @@ async function clearToken(): Promise<void> {
   await secrets.clearToken();
 }
 async function setPassword(value: string): Promise<void> {
-  if (!value || !secrets.secretReady || secrets.secretUnknownId) return;
-  secrets.secret = value;
-  secrets.secretMode = 'set';
+  if (!value || passwordDisabled.value) return;
+  secrets.editSecret(value);
   await secrets.saveSecret();
 }
 async function restart(): Promise<void> {
@@ -133,7 +133,8 @@ async function restart(): Promise<void> {
           :disabled="!canEdit"
           :locale="view.state.values.locale"
           :locale-disabled="view.state.unknown"
-          @patch="host.patch"
+          @patch="host.patch(item.id, $event)"
+          @proxy-inactive="secrets.cancelSecret"
           @locale="view.setLocale"
         >
           <template #token>
@@ -192,22 +193,18 @@ async function restart(): Promise<void> {
               <nexus-toast v-if="visible && !secrets.tokenError && secrets.tokenOperationStatus" tone="info" :message.prop="t(secrets.tokenOperationStatus)" />
             </div>
           </template>
-          <template #proxy-password>
-            <label v-if="store.can('secrets.status')" v-help="t('留空保持已保存的代理密码；输入新值后提交替换。')">
+          <template #proxy-password="{ disabled }">
+            <label v-help="t('留空保持已保存的代理密码；输入新值后提交替换。')">
               <span class="field-help-caption"><span>{{ t('密码') }}</span></span>
               <input
                 type="password"
-                v-model="proxyPassword"
-                :placeholder="t('留空不修改')"
-                :disabled="
-                  !secrets.secretReady ||
-                  secrets.secretBusy ||
-                  !!secrets.secretUnknownId ||
-                  !store.can('secrets.write')
-                "
+                :value="disabled ? '' : secrets.secret"
+                :placeholder="t(disabled && store.can('secrets.status') && secrets.secretConfigured ? '已保存' : '留空不修改')"
+                :disabled="disabled || passwordDisabled"
                 autocomplete="new-password"
-                @focus="secrets.revealSecret"
-                @change="setPassword(($event.target as HTMLInputElement).value)"
+                @focus="!disabled && !passwordDisabled && secrets.revealSecret()"
+                @input="!disabled && !passwordDisabled && secrets.editSecret(($event.target as HTMLInputElement).value)"
+                @change="!disabled && setPassword(($event.target as HTMLInputElement).value)"
               />
               <nexus-toast v-if="visible && secrets.secretError" tone="danger" :message.prop="t(secrets.secretError)" />
               <button v-if="secrets.secretError && !secrets.secretReady" type="button" @click="secrets.loadSecret">{{ t('重试') }}</button>
@@ -254,8 +251,9 @@ async function restart(): Promise<void> {
 }
 .panel {
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--nx-radius-lg);
   overflow: hidden;
+  box-shadow: var(--nx-surface-shadow);
 }
 .panel-heading {
   display: flex;
@@ -268,6 +266,7 @@ async function restart(): Promise<void> {
   border: 0;
   border-radius: 0;
   background: transparent;
+  box-shadow: none;
 }
 .panel-heading > span {
   display: grid;
@@ -333,8 +332,9 @@ dt {
 .warning {
   padding: 12px 16px;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--content-card-soft);
+  border-radius: var(--nx-radius-md);
+  background: var(--content-embedded-fill, var(--content-card-soft));
+  box-shadow: var(--nx-surface-shadow);
 }
 .warning {
   border-left: 2px solid var(--warning);
@@ -374,4 +374,7 @@ dt {
 #settings-extension-panels :deep(.surface-outlet),
 #settings-extension-panels :deep(.surface-outlet-content),
 #settings-extension-panels :deep(.plugin-panel) { display: contents; }
+#settings-extension-panels :deep(.plugin-panel > *) {
+  --content-embedded-fill: initial;
+}
 </style>

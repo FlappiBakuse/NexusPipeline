@@ -1,6 +1,4 @@
 using System.Text.Json;
-using NexusPipeline.Core.Settings;
-using NexusPipeline.Platform.Storage.Sqlite;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Extensions;
 using NexusPipeline.Platform.Storage;
@@ -25,10 +23,6 @@ public sealed class BaahRepairTests
         var proposal = await fixture.Adapters.ProposeConfigurationAsync(subject, selection, default);
         Assert.Contains(proposal.Diagnostics, diagnostic => diagnostic.Severity == AdapterDiagnosticSeverity.Blocking);
         Assert.Single(proposal.Patches);
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => fixture.Adapters.PreviewRepairAsync(subject,
-            selection, 0, proposal.ProposalDigest, default).AsTask());
-        var settings = source.Settings.Read(); var change = new HostSettingsChange(settings.Revision, settings.Values with { AllowConfigRepair = true });
-        source.Settings.Commit(HostSettingsStore.Identity(Guid.NewGuid(), subject, change), change, DateTimeOffset.UtcNow);
         await Assert.ThrowsAsync<IOException>(() => fixture.Adapters.PreviewRepairAsync(subject, selection, 0, new string('a', 64), default).AsTask());
         var preview = await fixture.Adapters.PreviewRepairAsync(subject, selection, 0, proposal.ProposalDigest, default);
         Assert.True(preview.HasChanges);

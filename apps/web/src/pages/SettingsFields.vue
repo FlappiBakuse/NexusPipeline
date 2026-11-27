@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { fieldHelp as vHelp } from '../components/field-help';
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import type { ControlHostSettingsValues } from '../control/wire.generated';
 import type { InterfaceValues } from '../control/interface';
 import { t } from '../app/locale';
@@ -15,6 +15,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   patch: [value: Partial<ControlHostSettingsValues>];
   locale: [value: InterfaceValues['locale']];
+  'proxy-inactive': [];
 }>();
 type Values = ControlHostSettingsValues;
 function service(value: Partial<Values['service']>): void {
@@ -25,17 +26,34 @@ function desktop(value: Partial<Values['desktop']>): void {
 }
 const proxyInput = ref<Values['proxy']>();
 const proxyValue = computed(() => proxyInput.value || props.value.proxy);
-watch(() => props.value.proxy, () => { proxyInput.value = undefined; });
-function proxy(value: Partial<Values['proxy']>): void {
-  const next = { ...proxyValue.value, ...value };
-  proxyInput.value = next;
-  if (value.mode && value.mode !== 'http') next.url = props.value.proxy.url;
-  if (next.mode === 'http') {
-    try {
-      const address = new URL(next.url || '');
-      if (!['http:', 'https:'].includes(address.protocol) || !address.hostname) return;
-    } catch { return; }
+const proxyInactive = computed(() => proxyValue.value.mode !== 'http');
+const proxyDisabled = computed(() => props.disabled || proxyInactive.value);
+const proxyAddressInvalid = ref(false);
+watch(() => props.value.proxy, () => { proxyInput.value = undefined; proxyAddressInvalid.value = false; });
+watch(() => props.category === 'proxy' && proxyInactive.value, (inactive) => {
+  if (inactive) {
+    proxyAddressInvalid.value = false;
+    emit('proxy-inactive');
   }
+}, { flush: 'sync' });
+onBeforeUnmount(() => { if (props.category === 'proxy') emit('proxy-inactive'); });
+
+function validProxyAddress(value: string | null): boolean {
+  if (!value || value.length > 2048 || value !== value.trim() || /[\p{Cc}#]/u.test(value) || !/^https?:\/\//i.test(value)) return false;
+  const url = URL.parse(value);
+  return !!url?.hostname && !url.username && !url.password;
+}
+function proxy(value: Partial<Values['proxy']>): void {
+  if (props.disabled || (!value.mode && proxyDisabled.value)) return;
+  const next = value.mode && value.mode !== 'http'
+    ? { ...props.value.proxy, mode: value.mode }
+    : { ...proxyValue.value, ...value };
+  proxyInput.value = next;
+  if (next.mode === 'http' && !validProxyAddress(next.url)) {
+    if (value.url !== undefined) proxyAddressInvalid.value = true;
+    return;
+  }
+  proxyAddressInvalid.value = false;
   emit('patch', { proxy: next });
 }
 function updates(value: Partial<Values['updates']>): void {
@@ -166,7 +184,7 @@ function updates(value: Partial<Values['updates']>): void {
         />
       </label>
     </template>
-    <template v-else-if="category === 'proxy'">
+    <div v-else-if="category === 'proxy'" class="proxy-fields">
       <label v-help="t('下载、更新和宿主 HTTP 请求使用代理，回环地址直连；SMTP 不使用此 HTTP 代理。')">
         <span class="field-help-caption"><span>{{ t('代理模式') }}</span></span>
         <FormSelect
@@ -179,42 +197,35 @@ function updates(value: Partial<Values['updates']>): void {
           <option value="http">{{ t('HTTP 代理') }}</option>
         </FormSelect>
       </label>
-      <template v-if="proxyValue.mode === 'http'">
-        <label v-help="t('代理地址需包含 http:// 或 https://。')">
-          <span class="field-help-caption"><span>{{ t('代理地址') }}</span></span>
-          <input
-            :disabled="disabled"
-            :value="proxyValue.url || ''"
-            type="url"
-            required
-            pattern="https?://.+"
-            placeholder="http://127.0.0.1:7890"
-            @change="proxy({ url: ($event.target as HTMLInputElement).value || null })"
-          />
-        </label>
-        <div class="proxy-credentials">
-          <label>
-            {{ t('用户名') }}
-            <input
-              :disabled="disabled"
-              :value="proxyValue.userName"
-              autocomplete="off"
-              @change="proxy({ userName: ($event.target as HTMLInputElement).value })"
-            />
-          </label>
-          <slot name="proxy-password" />
-        </div>
-      </template>
-    </template>
-    <nexus-switch-list v-else-if="category === 'advanced'">
-      <nexus-switch-setting
-        :title="t('逐次配置修复')"
-        :description="t('允许在每次运行前检查并修复配置；关闭时保留原配置。')"
-        :value.prop="value.allowConfigRepair"
-        :disabled.prop="disabled"
-        @nexus-change="emit('patch', { allowConfigRepair: $event.detail.value })"
-      />
-    </nexus-switch-list>
+      <label v-help="t('代理地址需包含 http:// 或 https://。')">
+        <span class="field-help-caption"><span>{{ t('代理地址') }}</span></span>
+        <input
+          :disabled="proxyDisabled"
+          :value="proxyValue.url || ''"
+          type="url"
+          :required="!proxyDisabled"
+          :aria-invalid="proxyAddressInvalid ? 'true' : undefined"
+          :aria-describedby="proxyAddressInvalid ? 'settings-proxy-address-error' : undefined"
+          placeholder="http://127.0.0.1:7890"
+          @input="proxyAddressInvalid = false"
+          @change="proxy({ url: ($event.target as HTMLInputElement).value || null })"
+        />
+        <small v-if="proxyAddressInvalid" id="settings-proxy-address-error" class="proxy-address-error">
+          {{ t('请输入有效的 HTTP 或 HTTPS 代理地址。') }}
+        </small>
+      </label>
+      <label>
+        {{ t('用户名') }}
+        <input
+          :disabled="proxyDisabled"
+          :value="proxyValue.userName"
+          autocomplete="off"
+          maxlength="256"
+          @change="proxy({ userName: ($event.target as HTMLInputElement).value })"
+        />
+      </label>
+      <slot name="proxy-password" :disabled="proxyInactive" />
+    </div>
     <template v-else-if="category === 'updates'">
       <nexus-switch-list>
         <nexus-switch-setting
@@ -277,9 +288,18 @@ function updates(value: Partial<Values['updates']>): void {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
 }
-.proxy-credentials {
+.proxy-fields {
   display: grid;
   gap: 16px;
+  align-items: start;
+}
+.proxy-address-error {
+  color: var(--nx-color-danger);
+}
+@media (min-width: 701px) {
+  html[data-desktop='true'] .proxy-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 .three {
   grid-template-columns: repeat(3, minmax(0, 1fr));

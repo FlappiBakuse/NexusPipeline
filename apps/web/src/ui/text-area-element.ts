@@ -16,7 +16,7 @@ export class TextArea extends NexusElement {
         `:host{position:relative}textarea{min-height:96px;padding-bottom:12px;scrollbar-width:none}
       textarea::-webkit-scrollbar{display:none}
       textarea{padding:var(--nx-textarea-padding,8px 12px 12px)}
-      .resize{position:absolute;right:3px;bottom:3px;width:14px;height:14px;min-height:14px;padding:0;border:0;border-radius:0;background:transparent;cursor:ns-resize;touch-action:none;color:var(--muted)}
+      .resize{position:absolute;right:3px;bottom:3px;width:14px;height:14px;min-height:14px;padding:0;border:0;border-radius:0;background:transparent;cursor:ns-resize;touch-action:none;color:var(--muted);box-shadow: none;}
       .resize svg{width:10px;height:10px;pointer-events:none}`,
       '<textarea></textarea><button class="resize" type="button"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M10 2 2 10M10 6 6 10M10 10h-.1" fill="none" stroke="currentColor"/></svg></button>' +
         scrollRailMarkup

@@ -21,7 +21,7 @@ public sealed class InterfacePreferences
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
         { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow };
     private static readonly InterfaceValues Default = new("dark", ["status", "running", "history-duration"],
-        [], ["remote", "proxy", "advanced", "updates", "diagnostics"], "zh-CN");
+        [], ["remote", "proxy", "updates", "diagnostics"], "zh-CN");
     private readonly InstanceLease _owner;
     private readonly ResourceLeaseManager _resources;
     private readonly string _path;

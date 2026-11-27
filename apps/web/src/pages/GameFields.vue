@@ -143,7 +143,7 @@ function android(key: string, value: string): void {
         "
       />
     </div>
-    <div class="game-panel" data-surface="raised">
+    <div class="game-grid">
       <template v-if="target.kind === 'pc'">
         <label v-help="t('游戏路径用于启动与进程身份核验；清理仅作用于本次持有的目标。')">
           <span class="field-help-caption"><span>{{ t('游戏路径') }} </span><em v-if="target.launchByHost || target.forceCloseAtEnd">*</em></span>
@@ -245,18 +245,16 @@ h3 {
 }
 .switch-grid nexus-switch-setting {
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--nx-radius-md);
   padding: 12px 16px;
   background: var(--content-control);
+  box-shadow: var(--nx-surface-shadow);
 }
-.game-panel {
+.game-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px 16px;
-  padding: 12px;
-  margin-top: 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  margin-block-start: 12px;
 }
 label {
   display: flex;
@@ -277,7 +275,7 @@ em {
 }
 @media (max-width: 650px) {
   .switch-grid,
-  .game-panel {
+  .game-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 }

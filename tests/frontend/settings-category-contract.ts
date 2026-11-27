@@ -4,6 +4,11 @@ import { createStore } from '../../apps/web/src/app/store';
 import { ControlClient } from '../../apps/web/src/control/client';
 import type { InterfaceCategory } from '../../apps/web/src/control/interface';
 import { useSettingsView, useSettingsCategories } from '../../apps/web/src/pages/settings-view';
+import SettingsPage from '../../apps/web/src/pages/SettingsPage.vue';
+import { initialValue, schemaAt } from '../../apps/web/src/control/schema';
+import type { ControlHostSettingsValues } from '../../apps/web/src/control/wire.generated';
+import theme from '../../apps/web/src/styles/theme.css?inline';
+import uiTheme from '../../apps/web/src/ui/theme.css?inline';
 
 export async function settingsCategoryContract(fixture: HTMLElement, check: (value: unknown, name: string) => void): Promise<void> {
   const store = createStore(new ControlClient());
@@ -70,4 +75,41 @@ export async function settingsCategoryContract(fixture: HTMLElement, check: (val
     check(!card().expanded && expanded('remote') && card().querySelector('input')?.value === 'changed wallpaper draft',
       'switching back to a host category keeps the plugin draft and one expanded category');
   } finally { app.unmount(); mount.remove(); store.dispose(); }
+  await wallpaperCardFrame(fixture, check);
+}
+
+async function wallpaperCardFrame(fixture: HTMLElement, check: (value: unknown, name: string) => void) {
+  const store = createStore(new ControlClient());
+  store.state.capabilities = { instanceId: 'wallpaper-fixture', hostVersion: '0.18.0', capabilities: [] };
+  const values = initialValue(schemaAt('control-host-settings.schema.json#/properties/values')) as ControlHostSettingsValues;
+  store.state.settings = { saved: { revision: 1, values }, effective: values, restartReasons: [] };
+  store.state.interface = { revision: 1, operationId: '', values: { theme: 'dark', locale: 'zh-CN',
+    dashboardCards: [], pinnedSettings: [], collapsedSettings: [] } };
+  const styles = document.createElement('style');
+  styles.textContent = [theme, uiTheme, '.wallpaper-fixture .plugin-panel > * { --content-embedded-fill: transparent; }'].join('\n');
+  const mount = document.createElement('div');
+  mount.className = 'wallpaper-fixture';
+  fixture.append(styles, mount);
+  const app = createApp({ render: () => h(SettingsPage, { store, visible: false }, {
+    'settings-panels': () => h('div', { class: 'plugin-panel' }, [
+      h('div', { class: 'plugin-body' }, [h('nexus-collapsible-card', [h('nexus-switch-list')])])
+    ])
+  }) });
+  const previous = document.body.dataset.theme;
+  app.mount(mount);
+  try {
+    await nextTick();
+    const card = mount.querySelector('nexus-collapsible-card')!;
+    const builtIn = mount.querySelector('#settings-service')!;
+    for (const mode of ['dark', 'light']) {
+      document.body.dataset.theme = mode;
+      check(getComputedStyle(card).backgroundColor === getComputedStyle(builtIn).backgroundColor &&
+        getComputedStyle(card).backgroundColor !== 'rgba(0, 0, 0, 0)' &&
+        getComputedStyle(card.querySelector('nexus-switch-list')!).backgroundColor === 'rgba(0, 0, 0, 0)',
+        mode + ' settings cards paint the page surface once through display-contents plugin wrappers');
+    }
+  } finally {
+    app.unmount(); mount.remove(); styles.remove(); store.dispose();
+    if (previous === undefined) delete document.body.dataset.theme; else document.body.dataset.theme = previous;
+  }
 }

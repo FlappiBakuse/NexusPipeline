@@ -1,7 +1,6 @@
 .draft-surface [data-unsaved=true] {
   outline: 2px solid var(--nx-color-warning, var(--warning, #d8a339));
   outline-offset: 2px;
-  border-radius: var(--nx-radius-sm, 8px);
 }
 .draft-surface [data-unsaved=true][aria-invalid=true] {
   outline-color: var(--nx-color-danger, #c74646);

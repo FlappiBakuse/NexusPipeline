@@ -236,8 +236,9 @@ function key(event: KeyboardEvent, chart: 'duration' | 'runs', index: number): v
   min-height: 0;
   padding: 20px;
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--nx-radius-lg);
   background: var(--content-card);
+  box-shadow: var(--nx-surface-shadow);
 }
 header {
   display: flex;

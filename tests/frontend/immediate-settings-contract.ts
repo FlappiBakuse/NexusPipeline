@@ -68,29 +68,64 @@ async function failedAndUnknown(check: Check): Promise<void> {
 async function proxyCompletion(check: Check): Promise<void> {
   const holder = document.createElement('section'); document.body.append(holder);
   const value = ref({ proxy: { mode: 'none', url: null, userName: '' } } as ControlHostSettingsValues);
-  const visible = ref(true);
+  const visible = ref(true), locked = ref(false);
+  const desktop = document.documentElement.dataset.desktop;
   const patches: Partial<ControlHostSettingsValues>[] = [];
   const app = createApp({ render: () => visible.value ? h(SettingsFields, { category: 'proxy',
-    value: value.value, disabled: false, locale: 'zh-CN', localeDisabled: false,
-    onPatch: patch => { patches.push(patch); value.value = { ...value.value, ...patch }; } }) : null });
+    value: value.value, disabled: locked.value, locale: 'zh-CN', localeDisabled: false,
+    onPatch: patch => { patches.push(patch); value.value = { ...value.value, ...patch }; } }, {
+      'proxy-password': ({ disabled }: { disabled: boolean }) => h('input', { type: 'password', disabled })
+    }) : null });
   app.component('FormSelect', FormSelect); app.mount(holder);
   const mode = () => holder.querySelector('nexus-select')!;
   const choose = (index: string) => mode().dispatchEvent(new CustomEvent('nexus-change',
     { detail: { value: index }, bubbles: true, composed: true }));
   try {
-    choose('2'); await nextTick();
-    check(patches.length === 0 && !!holder.querySelector('input[type=url]'),
-      'choosing HTTP reveals its required address without submitting incomplete settings');
+    const grid = holder.querySelector('.proxy-fields')!;
+    const columns = () => getComputedStyle(grid).gridTemplateColumns.split(' ').length;
+    delete document.documentElement.dataset.desktop;
+    check(columns() === 1, 'proxy fields remain one column in a wide browser');
+    document.documentElement.dataset.desktop = 'true';
+    check(columns() === 2, 'proxy fields use two equal-width tracks in a wide desktop client');
     const address = holder.querySelector<HTMLInputElement>('input[type=url]')!;
+    const username = holder.querySelector<HTMLInputElement>('input[autocomplete=off]')!;
+    const password = holder.querySelector<HTMLInputElement>('input[type=password]')!;
+    const inputs = [address, username, password];
+    check(inputs.every(input => input?.disabled), 'direct mode keeps all proxy fields mounted and disabled');
+    choose('2'); await nextTick();
+    check(patches.length === 0 && inputs.every(input => !input.disabled) && address.required,
+      'choosing HTTP enables its fields without submitting incomplete settings');
+    locked.value = true; await nextTick();
+    check(address.disabled && username.disabled && !password.disabled, 'HTTP password keeps its separate secret permission and operation guard');
+    locked.value = false; await nextTick();
+    address.value = 'socks5://127.0.0.1:7890'; address.dispatchEvent(new Event('change', { bubbles: true }));
+    await nextTick();
+    check(patches.length === 0 && address.getAttribute('aria-invalid') === 'true' &&
+      holder.querySelector('#settings-proxy-address-error'), 'invalid proxy addresses get field feedback before any settings write');
     address.value = 'http://127.0.0.1:7890'; address.dispatchEvent(new Event('change', { bubbles: true }));
     await nextTick();
     check(patches.length === 1 && value.value.proxy.mode === 'http' && value.value.proxy.url === address.value,
       'a completed proxy address immediately saves the mode and address together');
+    username.value = 'saved-proxy-user'; username.dispatchEvent(new Event('change', { bubbles: true }));
+    await nextTick();
+    address.value = 'https://example.invalid/#fragment'; address.dispatchEvent(new Event('change', { bubbles: true }));
+    await nextTick();
+    choose('1'); await nextTick();
+    check(inputs.every(input => input.disabled) && !address.required && !address.hasAttribute('aria-invalid') &&
+      address.value === 'http://127.0.0.1:7890' && username.value === 'saved-proxy-user',
+      'system mode keeps the saved HTTP configuration while discarding invalid edits');
+    choose('2'); await nextTick();
+    check(value.value.proxy.mode === 'http' && inputs.every(input => !input.disabled) && username.value === 'saved-proxy-user',
+      'returning to HTTP uses the saved address and username');
     choose('0'); await nextTick();
     value.value = { ...value.value, proxy: { mode: 'none', url: null, userName: '' } }; await nextTick();
     choose('2'); await nextTick(); const completed = patches.length;
     visible.value = false; await nextTick(); visible.value = true; await nextTick();
-    check(patches.length === completed && !holder.querySelector('input[type=url]'),
+    check(patches.length === completed && holder.querySelector<HTMLInputElement>('input[type=url]')?.disabled,
       'leaving unfinished proxy input discards it without retaining a settings draft');
-  } finally { app.unmount(); holder.remove(); }
+  } finally {
+    if (desktop === undefined) delete document.documentElement.dataset.desktop;
+    else document.documentElement.dataset.desktop = desktop;
+    app.unmount(); holder.remove();
+  }
 }

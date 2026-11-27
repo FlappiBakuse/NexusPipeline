@@ -89,8 +89,9 @@ li {
   min-width: 0;
   padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--nx-radius-md);
   background: var(--content-card-soft);
+  box-shadow: var(--nx-surface-shadow);
 }
 li:not(:last-child)::after {
   content: '';

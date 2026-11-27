@@ -180,8 +180,9 @@ header button {
   flex: none;
   padding: 4px 8px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--nx-radius-md);
   background: var(--content-card-soft);
+  box-shadow: var(--nx-surface-shadow);
 }
 .run-steps li[aria-current='step'] {
   border-color: var(--accent);
@@ -192,7 +193,7 @@ header button {
 .run-progress {
   height: 7px;
   margin-top: 10px;
-  border-radius: 6px;
+  border-radius: var(--nx-radius-pill);
   overflow: hidden;
   background: var(--content-card-soft);
 }

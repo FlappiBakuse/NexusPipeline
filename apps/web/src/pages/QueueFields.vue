@@ -264,7 +264,8 @@ em {
 .notification-setting {
   padding: 12px 16px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--nx-radius-md);
+  box-shadow: var(--nx-surface-shadow);
 }
 .queue-section {
   border-top: 1px solid var(--border);
@@ -288,7 +289,7 @@ small {
 }
 .schedule-item {
   padding: 8px 0 14px;
-  border-radius: var(--radius-md);
+  border-radius: var(--nx-radius-md);
   transition: background-color var(--nx-motion-duration-fast, 160ms) ease;
 }
 @media (hover: hover) {
@@ -319,6 +320,7 @@ small {
   border: 0;
   background: transparent;
   padding: 8px 8px 8px 0;
+  box-shadow: none;
 }
 .schedule-heading span {
   color: var(--muted);

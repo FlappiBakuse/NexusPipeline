@@ -1,5 +1,7 @@
 import { createIdentity } from '../control/identity';
 import { controlStyles } from './control-styles.js';
+import dropdownMotion from './dropdown-motion.css?inline';
+import { orientDropdown } from './dropdown-origin.js';
 import { observeLocale } from './locale-observer.js';
 
 export const pad = (value: number): string => String(value).padStart(2, '0');
@@ -61,15 +63,15 @@ const dateStyles =
   controlStyles +
   `
 :host{display:inline-block;min-width:0}.date-control{position:relative;display:flex;width:100%}
-.date-control input{appearance:none;width:100%;height:40px;min-width:0;padding:0 40px 0 12px;background:var(--content-control,var(--nx-color-surface,#1a2940));border:1px solid var(--border-strong,var(--nx-color-border,#394152));border-radius:8px;font:inherit;font-weight:400;color:inherit}
-.date-control input[aria-invalid=true]{border-color:var(--nx-color-danger,#ff727b)}.trigger{position:absolute;right:1px;top:1px;bottom:1px;width:36px;min-height:0;padding:8px;border:0;background:transparent;color:var(--nx-color-accent)}
+.date-control input{appearance:none;width:100%;height:40px;min-width:0;padding:0 40px 0 12px;background:var(--content-embedded-fill,var(--content-control,var(--nx-color-surface,#1a2940)));border:1px solid var(--nx-color-border,#394152);border-radius:var(--nx-radius-sm);font:inherit;font-weight:400;color:inherit;box-shadow: var(--nx-surface-shadow);}
+.date-control input[aria-invalid=true]{border-color:var(--nx-color-danger,#ff727b)}.trigger{position:absolute;right:1px;top:1px;bottom:1px;width:36px;min-height:0;padding:8px;border:0;background:transparent;color:var(--nx-color-accent);box-shadow: none;}
 svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5}
-.popup{position:fixed;inset:auto;margin:0;padding:14px;width:290px;max-width:calc(100vw - 16px);border:1px solid var(--border-strong,var(--nx-color-border,#394152));border-radius:12px;background:var(--nx-color-surface,#131f33);color:var(--nx-color-text,#edf5ff);box-shadow:0 16px 40px #0005}
+.popup{position:fixed;inset:auto;margin:0;padding:14px;width:290px;max-width:calc(100vw - 16px);border:1px solid var(--nx-color-border,#394152);border-radius:var(--nx-radius-md);background:var(--nx-color-surface,#131f33);color:var(--nx-color-text,#edf5ff);box-shadow:var(--nx-surface-shadow)}
 .popup[hidden]{display:none}.popup::backdrop{background:transparent}.heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:4px}
-.heading button{min-height:28px;padding:0 8px;background:transparent;border:0}.heading strong{flex:1;text-align:center;font-size:13px}
+.heading button{min-height:28px;padding:0 8px;background:transparent;border:0;box-shadow: none;}.heading strong{flex:1;text-align:center;font-size:13px}
 .grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px}.weekday{text-align:center;color:var(--nx-color-muted,#92a8c4);font-size:11px;line-height:28px}
-.day{min-height:30px;padding:0;border:0;background:transparent;text-align:center;font-size:12px;border-radius:6px}.day.outside{color:var(--faint,var(--nx-color-muted,#92a8c4))}.day[aria-selected=true]{background:var(--accent-strong,var(--nx-color-accent,#62a0ff));color:white}.day.today{box-shadow:inset 0 0 0 1px var(--nx-color-accent,#62a0ff)}
-.footer{display:flex;justify-content:space-between;border-top:1px solid var(--nx-color-border,#394152);margin-top:10px;padding-top:10px;gap:8px}.footer button{min-height:28px;border:0;background:transparent;color:var(--nx-color-accent,#62a0ff);padding:0 8px;font-size:12px}
+.day{min-height:30px;padding:0;border:0;background:transparent;text-align:center;font-size:12px;border-radius:var(--nx-radius-compact);box-shadow: none;}.day.outside{color:var(--faint,var(--nx-color-muted,#92a8c4))}.day[aria-selected=true]{background:var(--accent-strong,var(--nx-color-accent,#62a0ff));color:white}.day.today{box-shadow:inset 0 0 0 1px var(--nx-color-accent,#62a0ff)}
+.footer{display:flex;justify-content:space-between;border-top:1px solid var(--nx-color-border,#394152);margin-top:10px;padding-top:10px;gap:8px}.footer button{min-height:28px;border:0;background:transparent;color:var(--nx-color-accent,#62a0ff);padding:0 8px;font-size:12px;box-shadow: none;}
 .error{display:block;color:var(--nx-color-danger,#ff727b);font-size:11px;margin-top:4px}.error:empty{display:none}
 `;
 
@@ -86,7 +88,7 @@ export class DateControl {
     private readonly root: ShadowRoot,
     private readonly changed: (value: string) => void
   ) {
-    root.innerHTML = `<style>${dateStyles}</style><div class="date-control"><input type="text" autocomplete="off"><button class="trigger" type="button"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M8 3v4m8-4v4M4 10h16"/></svg></button></div><span class="error" role="alert"></span><div class="popup" role="dialog" popover="manual" hidden></div>`;
+    root.innerHTML = `<style>${dateStyles}${dropdownMotion}</style><div class="date-control"><input type="text" autocomplete="off"><button class="trigger" type="button"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M8 3v4m8-4v4M4 10h16"/></svg></button></div><span class="error" role="alert"></span><div class="popup" data-dropdown-panel role="dialog" popover="manual" hidden></div>`;
     this.field = root.querySelector('input')!;
     this.trigger = root.querySelector('button')!;
     this.popup = root.querySelector('.popup')!;
@@ -239,6 +241,7 @@ export class DateControl {
           ? rect.bottom + 5
           : rect.top - this.popup.offsetHeight - 5
       ) + 'px';
+    orientDropdown(this.popup, this.trigger.getBoundingClientRect());
     const selected = this.popup.querySelector<HTMLButtonElement>('[aria-selected=true]:not(:disabled)');
     (selected || this.popup.querySelector<HTMLButtonElement>('button:not(:disabled)'))?.focus();
   }
@@ -349,13 +352,13 @@ type TimeOptions = { value: string; label: string; disabled: boolean };
 const timeStyles =
   controlStyles +
   `
-:host{display:block;width:100%}.trigger{display:flex;align-items:center;justify-content:space-between;width:100%;height:40px;padding:0 12px;border-radius:8px;background:var(--content-control);font-weight:400}
+:host{display:block;width:100%}.trigger{display:flex;align-items:center;justify-content:space-between;width:100%;height:40px;padding:0 12px;border-radius:var(--nx-radius-sm);background:var(--content-embedded-fill,var(--content-control));font-weight:400}
 .trigger[aria-expanded=true]{border-color:var(--nx-color-accent)}.arrow{width:7px;height:7px;margin-right:4px;border:solid var(--nx-color-muted);border-width:0 1.5px 1.5px 0;transform:rotate(45deg)}
 .trigger[aria-expanded=true] .arrow{transform:translateY(3px) rotate(225deg)}
-.popup{position:fixed;inset:auto;margin:0;padding:12px;border:1px solid var(--content-control-border,var(--nx-color-border));border-radius:var(--nx-radius-md);background:var(--content-card);color:inherit;box-shadow:0 12px 28px #0004}
+.popup{position:fixed;inset:auto;margin:0;padding:12px;border:1px solid var(--content-control-border,var(--nx-color-border));border-radius:var(--nx-radius-md);background:var(--content-card);color:inherit;box-shadow:var(--nx-surface-shadow)}
 .popup[hidden]{display:none}.columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.wheel{display:grid;grid-template-rows:40px 120px 40px;min-width:0}
 .values{display:grid;grid-template-rows:repeat(3,40px);overflow:hidden;border-block:1px solid var(--nx-color-border)}
-.wheel button{display:grid;place-items:center;min-width:0;width:100%;height:40px;min-height:40px;padding:0 4px;border:0;border-radius:0;background:transparent;color:var(--nx-color-muted);font-weight:400;font-variant-numeric:tabular-nums}
+.wheel button{display:grid;place-items:center;min-width:0;width:100%;height:40px;min-height:40px;padding:0 4px;border:0;border-radius:0;background:transparent;color:var(--nx-color-muted);font-weight:400;font-variant-numeric:tabular-nums;box-shadow: none;}
 .wheel button:hover{background:var(--content-control-hover);color:var(--nx-color-text)}.step{font-size:16px}.values [aria-selected=true]{background:var(--accent-soft);color:var(--nx-color-accent);font-weight:750;box-shadow:inset 0 1px currentColor,inset 0 -1px currentColor}
 `;
 
@@ -371,7 +374,7 @@ export class TimeControl {
     private readonly root: ShadowRoot,
     private readonly changed: (value: string) => void
   ) {
-    root.innerHTML = `<style>${timeStyles}</style><button class="trigger" type="button" aria-haspopup="dialog" aria-expanded="false"><span></span><i class="arrow" aria-hidden="true"></i></button><div class="popup" role="dialog" popover="manual" hidden><div class="columns"></div></div>`;
+    root.innerHTML = `<style>${timeStyles}${dropdownMotion}</style><button class="trigger" type="button" aria-haspopup="dialog" aria-expanded="false"><span></span><i class="arrow" aria-hidden="true"></i></button><div class="popup" data-dropdown-panel role="dialog" popover="manual" hidden><div class="columns"></div></div>`;
     this.field = root.querySelector('.trigger')!;
     this.panel = root.querySelector('.popup')!;
     this.panel.id = 'time-' + createIdentity();
@@ -467,6 +470,7 @@ export class TimeControl {
           ? rect.bottom + 6
           : rect.top - this.panel.offsetHeight - 6
       ) + 'px';
+    orientDropdown(this.panel, rect);
   }
 
   private close(): void {

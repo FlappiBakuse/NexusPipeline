@@ -314,7 +314,8 @@ fieldset {
   display: grid;
   gap: 8px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--nx-radius-md);
+  box-shadow: var(--nx-surface-shadow);
 }
 label {
   display: grid;
@@ -326,9 +327,10 @@ select {
   width: 100%;
   padding: 7px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--nx-radius-sm);
   color: inherit;
   background: var(--content-control);
+  box-shadow: var(--nx-surface-shadow);
 }
 .export {
   display: grid;
@@ -342,7 +344,8 @@ select {
 .preview {
   padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--nx-radius-md);
+  box-shadow: var(--nx-surface-shadow);
 }
 .error {
   color: var(--bad);

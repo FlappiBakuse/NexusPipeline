@@ -88,6 +88,14 @@ export async function checkFieldHelp(page, output) {
   for (const [theme, width] of [['dark', 1280], ['light', 390]]) {
     await page.evaluate(theme => { document.body.dataset.theme = theme; }, theme);
     await page.setViewportSize({ width, height: 900 });
+    assert(await page.locator('.game-fields').evaluate((section, columns) => {
+      const grid = section.querySelector('nexus-path-picker')?.closest('label')?.parentElement;
+      if (!grid) return false;
+      const style = getComputedStyle(grid);
+      return grid.querySelectorAll(':scope > label').length === 4 && section.querySelectorAll('nexus-switch-setting').length === 3 &&
+        style.borderTopWidth === '0px' && style.boxShadow === 'none' && style.backgroundColor === 'rgba(0, 0, 0, 0)' &&
+        style.gridTemplateColumns.split(' ').length === columns;
+    }, width > 650 ? 2 : 1), 'game linkage fields sit directly on the form in the ' + theme + ' viewport');
     const rect = await bubble.boundingBox();
     assert(rect && rect.x >= 0 && rect.x + rect.width <= width && rect.y >= 0 && rect.y + rect.height <= 900,
       'the pointed bubble fits the ' + theme + ' viewport');

@@ -31,7 +31,8 @@ function walk(directory) {
 walk(path.join(root, 'apps/web/src'));
 walk(path.join(root, 'sdk/frontend/src'));
 if (!files.length) throw new Error('Zero frontend architecture inputs');
-function resolve(specifier, source) {
+function resolve(reference, source) {
+  const specifier = reference.replace(/\.css\?inline$/, '.css');
   const resolved = ts.resolveModuleName(specifier, source, options, ts.sys).resolvedModule;
   if (resolved && !resolved.resolvedFileName.includes('node_modules')) return path.resolve(resolved.resolvedFileName);
   const candidates = [];

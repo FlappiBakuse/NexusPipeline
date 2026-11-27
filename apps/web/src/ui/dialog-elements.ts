@@ -1,5 +1,6 @@
 import { NexusElement, elementAttributes } from './element-base.js';
 import { FloatingElement } from './floating-element.js';
+import dropdownMotion from './dropdown-motion.css?inline';
 import { controlStyles } from './control-styles.js';
 import { ModalSurface, modalStyles, closeIcon } from './modal-surface.js';
 
@@ -71,14 +72,15 @@ export class DialogPopover extends FloatingElement {
   constructor() {
     super(
       'nexus-dialog-popover',
-      controlStyles +
+      controlStyles + dropdownMotion +
         `
       .panel{z-index:100;width:480px;min-width:220px;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);overflow:hidden;
-      padding:24px;border:1px solid var(--nx-color-border,#394152);border-radius:var(--nx-radius-md,10px);
-      background:var(--nx-color-surface,#1e2330);outline:0}
+      padding:24px;border:1px solid var(--nx-color-border,#394152);border-radius:var(--nx-radius-md);
+      background:var(--nx-color-surface,#1e2330);outline:0;
+  box-shadow: var(--nx-surface-shadow);}
       .panel[hidden]{display:none}.close{position:absolute;top:6px;right:6px;width:40px;min-width:40px;padding:0;background:transparent;color:var(--nx-color-muted)}.close svg{width:16px;height:16px}
     `,
-      '<nexus-scroll-area class="panel" role="dialog" tabindex="-1" hidden><button class="close" type="button" aria-label="Close">' +
+      '<nexus-scroll-area class="panel" data-dropdown-panel role="dialog" tabindex="-1" hidden><button class="close" type="button" aria-label="Close">' +
         closeIcon +
         '</button><slot></slot></nexus-scroll-area>',
       '.panel'

@@ -185,9 +185,10 @@ onBeforeUnmount(() => owner?.abort());
   justify-content: center;
   gap: 8px;
   background: transparent;
-  border: 1px dashed var(--border-strong);
-  border-radius: 8px;
+  border: 1px dashed var(--nx-color-border);
+  border-radius: var(--nx-radius-sm);
   cursor: pointer;
+  box-shadow: var(--nx-surface-shadow);
 }
 .history-log-toggle strong {
   font-size: 12px;

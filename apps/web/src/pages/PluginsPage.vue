@@ -13,7 +13,12 @@ import './plugin-messages';
 
 const props = defineProps<{ store: AppStore; visible: boolean }>();
 const local = inject(localPluginsKey)!;
-const browser = usePluginBrowser(props.store, () => props.visible, local.items),
+const scanPending = ref(true);
+const installing = computed(() => props.store.state.events?.initialExtensions === 'installing');
+const startupReady = computed(() => props.store.state.events !== null && !installing.value);
+const readsVisible = () => props.visible && startupReady.value && !scanPending.value;
+const localRevision = () => local.revision.value;
+const browser = usePluginBrowser(props.store, readsVisible, local.items, localRevision),
   owner = new PluginOperations(props.store);
 const {
   view,
@@ -33,9 +38,10 @@ const {
 } = browser;
 const session = owner.state;
 const confirming = ref(false);
-const locked = computed(() => busy.value || session.busy || !!session.pending);
+const locked = computed(() => !startupReady.value || scanPending.value || busy.value || session.busy || !!session.pending);
 const canManage = computed(() => props.store.can('extensions.write'));
 const canScan = computed(() => local.available.value && canManage.value);
+const hasFooterActions = computed(() => view.value === 'store' || canScan.value);
 const canEnable = computed(() => canScan.value && props.store.can('settings.write'));
 const listColumn = ref<HTMLElement | null>(null);
 const detailColumn = ref<HTMLElement | null>(null);
@@ -43,8 +49,9 @@ const descriptionTarget = ref<HTMLElement | null>(null);
 const mobileDetail = ref(false);
 const { history, historyNext, historyBusy, loadHistory } = usePluginHistory(
   props.store,
-  () => props.visible,
-  () => session.pending
+  readsVisible,
+  () => session.pending,
+  localRevision
 );
 onMounted(() => {
   descriptionTarget.value = document.getElementById('page-description-override');
@@ -130,7 +137,7 @@ async function enableLocal(row: PluginRow): Promise<void> {
     confirming.value = false;
   }
   if (session.error === 'extension_local_candidate_changed' || (!session.pending && !session.error)) {
-    await local.scan();
+    await scanLocal();
     if (!local.error.value) return;
   }
   await local.refresh();
@@ -141,7 +148,7 @@ async function inspect(retry = false): Promise<void> {
   const directory = await (retry ? owner.retry() : owner.inspect());
   if (localOperation) {
     if (!session.pending) {
-      await local.scan();
+      await scanLocal();
       if (!local.error.value) return;
     }
     await local.refresh();
@@ -158,12 +165,25 @@ async function updateAll(): Promise<void> {
   }
 }
 const selectedHistory = computed(() => history.value.filter((item) => item.extensionId === selected.value?.extensionId));
-watch(() => props.visible, async (visible) => {
-  if (!visible) return;
-  if (!local.available.value) await local.refresh();
-  if (props.visible && canScan.value) await local.scan();
-}, { immediate: true });
-watch(local.revision, () => { if (props.visible) void browser.load(); }, { flush: 'post' });
+let localWork: Promise<void> | undefined;
+function scanLocal(onEntry = false): Promise<void> {
+  if (localWork) return localWork;
+  if (!startupReady.value) return Promise.resolve();
+  scanPending.value = true;
+  localWork = (async () => {
+    // Let the page readers release their prepared reads before scan invalidates them.
+    await nextTick();
+    if (onEntry && !local.available.value) await local.refresh();
+    if (startupReady.value && (!onEntry || props.visible) && canScan.value) await local.scan();
+  })().finally(() => {
+    localWork = undefined;
+    scanPending.value = false;
+  });
+  return localWork;
+}
+watch([() => props.visible, startupReady], ([visible, ready]) => {
+  if (visible && ready) void scanLocal(true);
+}, { immediate: true, flush: 'sync' });
 watch(view, () => {
   mobileDetail.value = false;
 });
@@ -199,8 +219,6 @@ async function backToList(): Promise<void> {
     >
       {{ t('插件仓库') }}
     </button>
-    <nexus-button v-if="view === 'installed' && canScan" :label="t('扫描本地目录')" :busy.prop="local.busy.value"
-      :disabled.prop="locked || local.busy.value" @click="local.scan" />
     <button v-if="session.pending" type="button" :disabled="session.busy || !store.can('operations.read')" @click="inspect()">{{ t('读取操作结果') }}</button>
     <button v-if="session.pending && session.retryable" :disabled="session.busy || !canManage" @click="inspect(true)">{{ t('重试应用') }}</button>
   </PageActions>
@@ -214,7 +232,7 @@ async function backToList(): Promise<void> {
     <nexus-toast v-else-if="!session.pending && error" tone="danger" :message.prop="t(error)" />
     <nexus-toast v-if="local.error.value" tone="danger" :message.prop="t(local.error.value)" @nexus-close="local.error.value = ''" />
   </template>
-  <div class="plugin-workspace" :class="{ store: view === 'store', detail: mobileDetail }">
+  <div class="plugin-workspace" :class="{ store: view === 'store', detail: mobileDetail, 'footer-actions': hasFooterActions }">
     <div ref="listColumn" class="plugin-list-column">
       <div class="plugin-search">
         <nexus-text-input
@@ -237,13 +255,13 @@ async function backToList(): Promise<void> {
         class="plugin-list"
         :label="t(view === 'installed' ? '本地插件' : '插件仓库')"
         :aria-label="t(view === 'installed' ? '本地插件' : '插件仓库')"
-        :aria-busy="busy || (view === 'installed' && local.busy.value)"
+        :aria-busy="!startupReady || scanPending || busy || (view === 'installed' && local.busy.value)"
       >
         <div class="plugin-list-items">
           <nexus-loading-state
-            v-if="busy && !browser.rows.value.length"
+            v-if="(!startupReady || scanPending || busy) && !browser.rows.value.length"
             :progress.prop="null"
-            :label="t('正在加载插件…')"
+            :label="t(installing ? '正在安装随附插件…' : '正在加载插件…')"
           />
           <nexus-empty-state
             v-else-if="!filtered.length"
@@ -347,13 +365,21 @@ async function backToList(): Promise<void> {
       <div v-else class="plugin-placeholder">
         <nexus-empty-state :title="t('选择一个插件')" :description="t('从左侧列表选择插件查看完整信息。')" />
       </div>
-      <footer v-if="view === 'store'" class="plugin-store-footer">
-        <small>{{ t('目录更新时间') }}：{{ catalog?.publishedAt || t('未提供') }}</small>
+      <footer v-if="hasFooterActions" class="plugin-footer">
+        <small v-if="view === 'store'">{{ t('目录更新时间') }}：{{ catalog?.publishedAt || t('未提供') }}</small>
         <div>
-          <button class="primary" :disabled="locked || !canManage || !updates.length" @click="updateAll">
-            {{ t('更新所有插件') }}
+          <template v-if="view === 'store'">
+            <button class="primary" :disabled="locked || !canManage || !updates.length" @click="updateAll">
+              {{ t('更新所有插件') }}
+            </button>
+            <button type="button" :disabled="locked || !canManage" :aria-busy="busy" @click="browser.load(true)">
+              {{ t('刷新仓库') }}
+            </button>
+          </template>
+          <button v-else type="button" :disabled="locked || local.busy.value"
+            :aria-busy="scanPending || local.busy.value" @click="scanLocal()">
+            {{ t('扫描本地目录') }}
           </button>
-          <button :disabled="locked || !canManage" @click="browser.load(true)">{{ t('刷新仓库') }}</button>
         </div>
       </footer>
     </div>
@@ -398,13 +424,13 @@ async function backToList(): Promise<void> {
   padding: 8px;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--nx-radius-lg);
   background: var(--content-card);
+  box-shadow: var(--nx-surface-shadow);
 }
 .plugin-list-items {
   display: flex;
   flex-direction: column;
-  gap: 8px;
 }
 .plugin-row {
   flex: none;
@@ -414,17 +440,19 @@ async function backToList(): Promise<void> {
   width: 100%;
   min-height: 86px;
   padding: 8px 14px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--content-card-soft);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   text-align: left;
   line-height: 1.5;
 }
+.plugin-row + .plugin-row { border-block-start: 1px solid var(--border); }
 .plugin-row:hover {
   background: var(--content-control-hover);
 }
 .plugin-row.selected {
-  border-color: var(--accent);
+  border-radius: var(--nx-radius-compact);
   background: var(--accent-soft);
   box-shadow: inset 3px 0 var(--accent);
 }
@@ -457,6 +485,7 @@ async function backToList(): Promise<void> {
 .plugin-placeholder > nexus-empty-state {
   border: 0;
   background: transparent;
+  box-shadow: none;
 }
 .plugin-placeholder {
   flex: 1;
@@ -464,27 +493,29 @@ async function backToList(): Promise<void> {
   overflow: auto;
   padding: 28px;
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--nx-radius-lg);
   background: var(--content-card);
+  box-shadow: var(--nx-surface-shadow);
 }
-.plugin-store-footer {
+.plugin-footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
   flex: none;
 }
-.plugin-store-footer > small {
+.plugin-footer > small {
   color: var(--muted);
   font-size: 12px;
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.plugin-store-footer > div {
+.plugin-footer > div {
   display: flex;
   justify-content: flex-end;
   flex: none;
   gap: 8px;
+  margin-inline-start: auto;
 }
 .plugin-tab {
   min-width: 84px !important;
@@ -548,14 +579,20 @@ async function backToList(): Promise<void> {
   .plugin-workspace.detail .plugin-detail-column {
     display: flex;
   }
+  .plugin-workspace.footer-actions:not(.detail) {
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+  .plugin-workspace.footer-actions:not(.detail) .plugin-detail-column {
+    display: contents;
+  }
+  .plugin-workspace.footer-actions:not(.detail) .plugin-detail-column > :not(.plugin-footer) {
+    display: none;
+  }
   .plugin-back {
     display: block;
   }
-  .plugin-store-footer {
+  .plugin-footer {
     flex-wrap: wrap;
-  }
-  .plugin-store-footer > div {
-    margin-left: auto;
   }
 }
 @media (max-width: 600px) {

@@ -106,8 +106,9 @@ const facts = computed(() => props.row.local ? [
   overflow: hidden;
   padding: clamp(18px, 2.5vw, 28px);
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--nx-radius-lg);
   background: var(--content-card);
+  box-shadow: var(--nx-surface-shadow);
 }
 header {
   display: grid;

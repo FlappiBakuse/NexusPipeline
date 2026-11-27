@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch, nextTick } from 'vue';
 import { t } from '../app/locale';
+import '../ui/dropdown-motion.css';
 const props = defineProps<{ kind: string; order: string; descending: boolean; visible: boolean }>();
 const emit = defineEmits<{ kind: [value: string]; order: [value: string]; descending: [value: boolean] }>();
 const open = ref(false),
@@ -57,7 +58,7 @@ onBeforeUnmount(() => controller.abort());
       <nexus-icon name="filter" aria-hidden="true" />
       {{ t('筛选') }}
     </button>
-    <div v-if="open" ref="panel" class="plugin-filter-panel" role="dialog" :aria-label="t('插件筛选与排序')">
+    <div v-if="open" ref="panel" class="plugin-filter-panel" data-dropdown-panel role="dialog" :aria-label="t('插件筛选与排序')">
       <p>{{ t('插件类型') }}</p>
       <button
         v-for="item in [
@@ -126,12 +127,13 @@ nexus-icon {
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
+  transform-origin: top right;
   z-index: 40;
   width: 248px;
   padding: 8px 12px 12px;
   background: var(--panel-opaque);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--nx-radius-md);
   box-shadow: var(--shadow);
 }
 .plugin-filter-panel p {
@@ -164,6 +166,7 @@ nexus-icon {
   background: transparent;
   font-size: 12px;
   text-align: left;
+  box-shadow: none;
 }
 .plugin-filter-panel button + button {
   margin-top: 2px;

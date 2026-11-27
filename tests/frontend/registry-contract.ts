@@ -135,7 +135,8 @@ export async function registryContracts(checks: string[]): Promise<void> {
   const modal = document.createElement('nexus-modal'); modal.setAttribute('surface', 'secondary');
   const modalCard = document.createElement('nexus-card'); modalCard.setAttribute('surface', 'nested');
   const modalField = document.createElement('nexus-text-input'); modalCard.append(modalField); modal.append(modalCard);
-  const modalColors = () => [modalCard, modalField.shadowRoot!.querySelector('input')!].map(backgroundPixel);
+  const modalPanel = modal.shadowRoot!.querySelector('.panel')!;
+  const modalColors = () => [modalPanel, modalCard, modalField.shadowRoot!.querySelector('input')!].map(backgroundPixel);
   appearanceHost.append(style, primary, secondary, nested, field, modal);
   document.body.dataset.theme = 'dark';
   const appearanceSession = await registry.mount(appearance.extensionId, 'theme', appearanceHost,
@@ -144,7 +145,8 @@ export async function registryContracts(checks: string[]): Promise<void> {
     cardLight: '#eeeeee', cardOpacity: .6, secondaryTransparent: true });
   assert(document.body.style.getPropertyValue('--accent') === '#334455' &&
     document.body.style.getPropertyValue('--panel').includes('#112233') &&
-    document.body.style.getPropertyValue('--panel-soft').includes('#112233'),
+    getComputedStyle(document.body).getPropertyValue('--panel-soft') ===
+      getComputedStyle(document.body).getPropertyValue('--panel'),
   'appearance applies validated accent, card opacity and secondary transparency');
   let invalidAppearance = false;
   try { appearanceSession.setAppearance({ accent: '#bad', extra: 'unsafe' } as never); }
@@ -154,21 +156,23 @@ export async function registryContracts(checks: string[]): Promise<void> {
   appearanceSession.setAppearance({ accent: '#334455', cardDark: '#112233', cardLight: '#eeeeee',
     cardOpacity: .6, secondaryTransparent: false });
   const darkOverlay = modalColors();
-  assert(darkOverlay.every(color => color.endsWith(',255')) && darkOverlay[0] !== darkOverlay[1] && backgroundPixel(primary).endsWith(',153'),
-    'secondary overlay cards and inputs are opaque and retain distinct wallpaper shades');
+  assert(darkOverlay[0]!.endsWith(',255') && darkOverlay.slice(1).every(color => color.endsWith(',0')) &&
+    backgroundPixel(primary).endsWith(',153'),
+    'the independently painted overlay is opaque and its nested controls do not repaint it');
   assert([secondary, nested, field.shadowRoot!.querySelector('input')!].every(element => backgroundPixel(element).endsWith(',153')),
-    'all main-page nested surfaces retain transparency when secondary transparency is disabled');
+    'standalone main-page surfaces retain transparency when secondary transparency is disabled');
   document.body.dataset.theme = 'light';
   await new Promise(resolve => setTimeout(resolve, 0));
   assert(document.body.style.getPropertyValue('--panel').includes('#eeeeee'),
     'appearance chooses the light card color when Host theme changes');
   const lightOverlay = modalColors();
-  assert(lightOverlay.every((color, index) => color.endsWith(',255') && color !== darkOverlay[index]) && lightOverlay[0] !== lightOverlay[1],
+  assert(lightOverlay[0]!.endsWith(',255') && lightOverlay[0] !== darkOverlay[0] &&
+    lightOverlay.slice(1).every(color => color.endsWith(',0')),
     'opaque overlay surfaces follow a live light-theme change');
   appearanceSession.setAppearance({ accent: '#334455', cardDark: '#112233', cardLight: '#eeeeee',
     cardOpacity: .6, secondaryTransparent: true });
-  assert([secondary, nested, field.shadowRoot!.querySelector('input')!, modalCard, modalField.shadowRoot!.querySelector('input')!]
-    .every(element => backgroundPixel(element).endsWith(',153')),
+  assert([secondary, nested, field.shadowRoot!.querySelector('input')!, modalPanel]
+    .every(element => backgroundPixel(element).endsWith(',153')) && modalColors().slice(1).every(color => color.endsWith(',0')),
     'enabling secondary transparency changes opacity without discarding the current palette');
   const otherSession = await registry.mount(appearance.extensionId, 'other', appearanceHost,
     { surfaceId: 'overview.cards', instanceId: 'fixture-instance' });

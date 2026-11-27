@@ -2,7 +2,7 @@ import { onBeforeUnmount, ref, watch } from 'vue';
 import type { RecordsStore } from '../app/store-ports';
 import { arrayValue, objectValue } from '../control/client';
 
-export function usePluginHistory(store: RecordsStore, visible: () => boolean, pending: () => unknown) {
+export function usePluginHistory(store: RecordsStore, visible: () => boolean, pending: () => unknown, revision: () => number) {
   const history = ref<Record<string, unknown>[]>([]),
     historyNext = ref<number | null>(null),
     historyBusy = ref(false);
@@ -33,19 +33,13 @@ export function usePluginHistory(store: RecordsStore, visible: () => boolean, pe
     }
   }
   watch(
-    visible,
-    (active) => {
-      if (active) void loadHistory();
-      else historyOwner?.abort();
+    [visible, pending, revision, () => store.state.preparationRevision],
+    ([active, operation]) => {
+      if (!active) historyOwner?.abort();
+      else if (!operation) void loadHistory();
     },
     { immediate: true }
   );
-  watch(pending, (next, before) => {
-    if (!next && before && visible()) void loadHistory();
-  });
   onBeforeUnmount(() => historyOwner?.abort());
-  watch(() => store.state.preparationRevision, () => {
-    if (visible() && !pending()) void loadHistory();
-  });
   return { history, historyNext, historyBusy, loadHistory };
 }

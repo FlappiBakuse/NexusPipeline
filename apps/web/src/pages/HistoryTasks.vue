@@ -52,7 +52,8 @@ const tasks = computed(() => groups.value.flatMap(group => group.tasks));
   margin: 20px 0;
   padding: 16px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--nx-radius-md);
+  box-shadow: var(--nx-surface-shadow);
 }
 .tasks-heading, .tasks-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
 .tasks-heading { justify-content: space-between; }

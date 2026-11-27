@@ -7,7 +7,7 @@ import type { ControlHostSettingsValues, ControlHostSettings } from '../control/
 
 const owners = new WeakMap<AppStore, Map<string, SettingsWrites<ControlHostSettingsValues>>>();
 
-export function useSettingsSession(store: AppStore, valid: () => boolean) {
+export function useSettingsSession(store: AppStore, valid: (category: string) => boolean) {
   const instance = store.state.capabilities!.instanceId;
   let instances = owners.get(store);
   if (!instances) {
@@ -53,8 +53,8 @@ export function useSettingsSession(store: AppStore, valid: () => boolean) {
   writer.observe(store.state.settings!.saved);
   watch(() => store.state.settings?.saved, value => { if (value) writer.observe(value); });
   return { session: writer.state, locked: computed(() => writer.state.unknown),
-    patch: (values: Partial<ControlHostSettingsValues>) => {
-      if (valid() && store.can('settings.write')) void writer.patch(values).catch(reason => {
+    patch: (category: string, values: Partial<ControlHostSettingsValues>) => {
+      if (store.can('settings.write') && valid(category)) void writer.patch(values).catch(reason => {
         if (!store.editors.signal.aborted && store.state.capabilities?.instanceId === instance && !writer.state.error)
           writer.state.error = reason instanceof Error ? reason.message : '设置保存失败。';
       });

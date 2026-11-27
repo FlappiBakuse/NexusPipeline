@@ -1,12 +1,13 @@
 import { settingContract } from './setting-controls-contract.js';
 import { calendarLocaleContract } from './calendar-locale-contract.js';
-import { timeContract, colorContract } from './picker-controls-contract.js';
+import { compositeRadiusContract, timeContract, colorContract } from './picker-controls-contract.js';
 import type { UiElement, UiElementName } from '@nexuspipeline/extension-sdk';
 
 const create = <N extends UiElementName>(name: N): UiElement<N> =>
   document.createElement(name) as UiElement<N>;
 type Check = (condition: unknown, name: string) => void;
 export function paintedControls(fixture: HTMLElement, check: Check): void {
+  compositeRadiusContract(fixture, check);
   numberContract(fixture, check);
   textContract(fixture, check);
   fileContract(fixture, check);
@@ -248,6 +249,16 @@ function selectContract(fixture: HTMLElement, check: Check): void {
     !list.matches(':popover-open'),
     'scrolling that moves the anchor closes an option list instead of leaving it detached'
   );
+  select.style.cssText = 'position: fixed; top: 0; left: 32px; width: 240px';
+  field.click();
+  check(list.style.transformOrigin.endsWith('top'), 'an option list opening below scales from its top edge');
+  const animation = getComputedStyle(list).animationName;
+  check(animation === (matchMedia('(prefers-reduced-motion: reduce)').matches ? 'none' : 'dropdown-enter'),
+    'option list opening animation respects reduced motion');
+  field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  select.style.cssText = 'position: fixed; bottom: 0; left: 32px; width: 240px';
+  field.click();
+  check(list.style.transformOrigin.endsWith('bottom'), 'an option list flipping above scales from its bottom edge');
   select.remove();
   check(!list.matches(':popover-open'), 'disconnect releases the select top-layer surface');
 

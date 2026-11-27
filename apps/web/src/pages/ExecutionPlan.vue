@@ -52,7 +52,7 @@ const completion = computed(() => completionLabels[props.preview.completionActio
             <strong>{{ group.dependencies.map(item => planDependency(item.order, item.name)).join(' · ') }}</strong>
             <nexus-badge v-if="group.dependencySkipped" tone="warning" :label="t('未满足')" />
           </div>
-          <article class="plan-group" data-surface="raised">
+          <article class="plan-group">
             <header class="plan-heading">
               <h4>{{ group.name }}</h4>
               <nexus-badge v-if="group.round" tone="info" :label="planRound(group.round)" />
@@ -95,14 +95,12 @@ const completion = computed(() => completionLabels[props.preview.completionActio
   container: execution-plan / inline-size;
 }
 .plan-summary, .plan-group {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-block-start: 1px solid var(--border);
 }
 .plan-summary {
   display: grid;
   gap: 10px;
   padding: 14px 16px;
-  background: var(--content-card);
 }
 .plan-heading {
   display: flex;
@@ -129,7 +127,7 @@ const completion = computed(() => completionLabels[props.preview.completionActio
   content: '';
   inset-block: 24px 0;
   inset-inline-start: 13px;
-  border-inline-start: 1px solid var(--border-strong);
+  border-inline-start: 1px solid var(--nx-color-border);
 }
 .plan-number {
   z-index: 0;
@@ -139,9 +137,10 @@ const completion = computed(() => completionLabels[props.preview.completionActio
   margin-block-start: 9px;
   border-radius: 50%;
   background: var(--content-card-soft);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--nx-color-border);
   color: var(--accent);
   font-weight: 700;
+  box-shadow: var(--nx-surface-shadow);
 }
 .plan-stage { display: grid; gap: 6px; min-inline-size: 0; }
 .plan-dependency {
@@ -150,11 +149,12 @@ const completion = computed(() => completionLabels[props.preview.completionActio
   flex-wrap: wrap;
   gap: 4px 8px;
   padding: 7px 10px;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-sm);
+  border: 1px dashed var(--nx-color-border);
+  border-radius: var(--nx-radius-md);
   color: var(--muted);
   font-size: 12px;
   overflow-wrap: anywhere;
+  box-shadow: var(--nx-surface-shadow);
 }
 .plan-dependency[data-skipped='true'] { color: var(--warn); background: var(--warn-soft); }
 .plan-dependency nexus-badge { margin-inline-start: auto; }
@@ -183,11 +183,12 @@ const completion = computed(() => completionLabels[props.preview.completionActio
   flex: none;
   padding: 2px 5px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--nx-radius-compact);
   background: var(--muted-soft);
   color: var(--muted);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
+  box-shadow: var(--nx-surface-shadow);
 }
 .plan-item > nexus-badge { justify-self: start; }
 .plan-item[data-disposition='blocked'] .plan-reason { color: var(--bad); }

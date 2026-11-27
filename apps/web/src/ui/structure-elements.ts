@@ -2,7 +2,8 @@ import { NexusElement, elementAttributes } from './element-base.js';
 import { controlStyles } from './control-styles.js';
 
 const cardStyle = `:host{display:block;min-width:0;padding:0;border:1px solid var(--nx-color-border,#394152);
-border-radius:var(--nx-radius-lg,16px);background:var(--_nexus-card-fill,var(--nx-color-surface,#1e2330));color:var(--nx-color-text,#e9edf5)}
+border-radius:var(--nx-radius-lg);background:var(--content-embedded-fill,var(--content-card,var(--nx-color-surface,#1e2330)));color:var(--nx-color-text,#e9edf5);
+  box-shadow: var(--nx-surface-shadow);}
 h2,h3,p{margin:0}h2{font-size:15px;line-height:1.45}h3{font-size:15px}p{margin-top:4px;font-size:12px;line-height:1.5;color:var(--nx-color-muted,#9eacc1)}
 header{display:flex;align-items:start;justify-content:space-between;gap:16px;padding:16px 24px}header[hidden]{display:none}.body{padding:16px 24px 24px}.body[data-no-heading=true]{padding:24px}`;
 
@@ -84,7 +85,7 @@ export class CollapsibleCard extends NexusElement {
       'nexus-collapsible-card',
       controlStyles +
         cardStyle +
-        `:host{padding:0;overflow:hidden}button{width:100%;min-height:72px;display:flex;align-items:center;justify-content:space-between;text-align:left;border:0;border-radius:0;background:transparent;padding:16px 24px}
+        `:host{padding:0;overflow:hidden}button{width:100%;min-height:72px;display:flex;align-items:center;justify-content:space-between;text-align:left;border:0;border-radius:0;background:transparent;padding:16px 24px;box-shadow: none;}
       button:hover{background:transparent}.heading{display:grid;gap:4px}.title{font-size:15px;line-height:1.45}.description{font-size:12px;color:var(--nx-color-muted);line-height:1.5}.description:empty{display:none}
       nexus-icon{color:var(--nx-color-accent)}.reveal{display:grid;grid-template-rows:0fr;opacity:0;visibility:hidden;transition:grid-template-rows var(--nx-motion-duration-page,220ms) ease,opacity var(--nx-motion-duration-page,220ms) ease,visibility 0s var(--nx-motion-duration-page,220ms)}
       .reveal[data-expanded=true]{grid-template-rows:1fr;opacity:1;visibility:visible;transition-delay:0s}.clip{min-height:0;overflow:hidden}.body{margin:0;border-top:1px solid var(--nx-color-border);padding:24px}
@@ -164,7 +165,7 @@ export class ScheduleCard extends NexusElement {
     super(
       'nexus-schedule-card',
       controlStyles +
-        `:host{display:block;min-width:0;background:var(--_nexus-card-fill)}.head{display:flex;align-items:center;gap:8px;padding:13px 8px}.head>button{flex:1;display:flex;align-items:center;justify-content:space-between;min-width:0;padding:0;border:0;border-radius:0;background:transparent;text-align:left}.head>button:hover{background:transparent}nexus-icon{flex:none;color:var(--nx-color-accent)}
+        `:host{display:block;min-width:0;border-radius:var(--nx-radius-md);background:var(--content-embedded-fill,var(--content-card))}.head{display:flex;align-items:center;gap:8px;padding:13px 8px}.head>button{flex:1;display:flex;align-items:center;justify-content:space-between;min-width:0;padding:0;border:0;border-radius:0;background:transparent;text-align:left;box-shadow: none;}.head>button:hover{background:transparent}nexus-icon{flex:none;color:var(--nx-color-accent)}
         .body{display:grid;grid-template-columns:minmax(0,3fr) minmax(150px,1fr);gap:16px;padding:0 0 14px 34px}.body[hidden]{display:none}slot[name=actions]{grid-column:1/-1}@media(max-width:820px){.body{grid-template-columns:1fr}}@media(max-width:480px){.body{padding-left:0}}`,
       '<div class="head"><nexus-drag-handle></nexus-drag-handle><button type="button"><span class="summary"></span><nexus-icon aria-hidden="true"></nexus-icon></button></div><div class="body"><slot name="days"></slot><slot name="time"></slot><slot name="actions"></slot></div>'
     );
@@ -220,7 +221,7 @@ export class SwitchSetting extends NexusElement {
     super(
       'nexus-switch-setting',
       controlStyles +
-        `:host{display:flex;align-items:center;gap:16px;min-height:64px;padding:12px 16px;border:1px solid var(--content-card-border,var(--nx-color-border));border-radius:var(--nx-radius-md);background:var(--content-control,var(--nx-color-surface))}
+        `:host{display:flex;align-items:center;gap:16px;min-height:64px;padding:12px 16px;border:1px solid var(--content-card-border,var(--nx-color-border));border-radius:var(--nx-radius-md);background:var(--content-embedded-fill,var(--content-control,var(--nx-color-surface)));box-shadow: var(--nx-surface-shadow);}
     .copy{flex:1;min-width:0;line-height:1.5}.title{font-size:13px;font-weight:600}
     .description{margin-top:4px;color:var(--nx-color-muted,#9eacc1);font-size:12px;font-weight:400;white-space:pre-line;overflow-wrap:break-word}
     .description:empty{display:none}
@@ -273,9 +274,9 @@ export class SwitchList extends NexusElement {
   constructor() {
     super(
       'nexus-switch-list',
-      `:host{display:grid;min-width:0;border:1px solid var(--content-card-border,var(--nx-color-border));border-radius:var(--nx-radius-md);overflow:hidden;background:var(--_nexus-card-fill)}
+      `:host{display:grid;min-width:0;border:1px solid var(--content-card-border,var(--nx-color-border));border-radius:var(--nx-radius-md);overflow:hidden;background:var(--content-embedded-fill,var(--content-card));box-shadow: var(--nx-surface-shadow);}
       h3{margin:0;padding:12px 16px;font-size:14px;color:var(--nx-color-muted,#9eacc1)}h3:empty{display:none}
-      ::slotted(nexus-switch-setting){border:0;border-radius:0;background:transparent}
+      ::slotted(nexus-switch-setting){border:0;border-radius:0;background:transparent;box-shadow: none;}
       ::slotted(nexus-switch-setting[hidden]){display:none}
       ::slotted(nexus-switch-setting:nth-child(n + 2 of nexus-switch-setting:not([hidden]))){border-top:1px solid var(--content-card-border,var(--nx-color-border))}`,
       '<h3></h3><slot></slot>'
@@ -295,8 +296,9 @@ export class NexusCardElement extends NexusElement {
       'nexus-card',
       `
       :host{display:block;min-width:0;border:1px solid var(--nx-color-border,#394152);
-      border-radius:var(--nx-radius-lg,14px);padding:var(--nx-space-5,24px);
-      color:var(--nx-color-text,#e9edf5);background:var(--_nexus-card-fill,var(--content-card,#1e2330))}
+      border-radius:var(--nx-radius-lg);padding:var(--nx-space-5,24px);
+      color:var(--nx-color-text,#e9edf5);background:var(--content-embedded-fill,var(--content-card,#1e2330));
+  box-shadow: var(--nx-surface-shadow);}
     `,
       '<slot></slot>'
     );

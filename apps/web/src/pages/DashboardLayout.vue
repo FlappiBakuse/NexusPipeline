@@ -77,8 +77,9 @@ h3 {
 .layout-list {
   display: block;
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--nx-radius-md);
   overflow: hidden;
+  box-shadow: var(--nx-surface-shadow);
 }
 article {
   display: flex;
@@ -94,14 +95,14 @@ article > span {
   gap: 4px;
   flex: 1;
 }
-small,
-.all-added {
+small {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.6;
 }
-.all-added {
-  padding: 16px;
-  margin: 0;
+.layout-list > nexus-empty-state {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 </style>

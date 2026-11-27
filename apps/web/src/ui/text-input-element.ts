@@ -4,9 +4,10 @@ import { controlStyles } from './control-styles.js';
 const styles =
   controlStyles +
   `
-:host{display:block;width:100%}
+:host{display:block;width:100%;border-radius:var(--nx-radius-sm)}
 input{width:100%;min-height:var(--nx-control-height,40px);border:1px solid var(--nx-color-border,#394152);
-border-radius:var(--nx-radius-sm,8px);padding:0 var(--nx-input-padding-end,var(--nx-space-3,12px)) 0 var(--nx-space-3,12px);background:var(--input-bg,var(--content-control,#ffffff08))}
+border-radius:var(--nx-radius-sm);padding:0 var(--nx-input-padding-end,var(--nx-space-3,12px)) 0 var(--nx-space-3,12px);background:var(--input-bg,var(--content-embedded-fill,var(--content-control,#ffffff08)));
+  box-shadow: var(--nx-surface-shadow);}
 input[aria-invalid=true]{border-color:var(--nx-color-danger,#ef7070)}
 `;
 

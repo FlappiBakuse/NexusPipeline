@@ -34,8 +34,8 @@ export class NexusToastElement extends NexusElement {
   constructor() {
     super('nexus-toast', `
       :host{position:fixed;inset:auto 24px var(--nx-toast-bottom,24px) auto;margin:0;max-width:calc(100vw - 48px);
-      box-sizing:border-box;padding:12px 16px;border:1px solid var(--nx-color-border);border-radius:8px;
-      background:var(--nx-color-surface,#1e2330);color:var(--nx-color-text,#e9edf5);box-shadow:0 12px 28px #0005;
+      box-sizing:border-box;padding:12px 16px;border:1px solid var(--nx-color-border);border-radius:var(--nx-radius-md);
+      background:var(--nx-color-surface,#1e2330);color:var(--nx-color-text,#e9edf5);box-shadow:var(--nx-surface-shadow);
       white-space:pre-wrap;overflow-wrap:anywhere;pointer-events:none}
       :host(:not(:popover-open)){display:none}
       :host([data-tone=danger]){border-color:var(--nx-color-danger)}

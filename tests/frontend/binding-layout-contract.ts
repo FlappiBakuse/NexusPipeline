@@ -15,7 +15,9 @@ export async function bindingLayoutContract(fixture: HTMLElement, check: (value:
   const other = { ...binding, id: 'other' };
   const bindings = [other, binding];
   const bundle = { scripts: [{ id: 'script', name: 'Bound script', kind: 'specialized' }], bindings } as AutomationBundle;
-  const mount = document.createElement('section'); mount.style.width = '900px'; fixture.append(mount);
+  const scroll = document.createElement('nexus-scroll-area');
+  scroll.style.cssText = 'width: 900px; height: 240px';
+  const mount = document.createElement('section'); scroll.append(mount); fixture.append(scroll);
   let configured = '';
   const app = createApp({ render: () => h(AccountFields, { store, modelValue: user, bindings, bundle,
     visible: true, onConfigure: id => { configured = id; } }) });
@@ -31,9 +33,16 @@ export async function bindingLayoutContract(fixture: HTMLElement, check: (value:
     const box = heading().getBoundingClientRect(), text = title.getBoundingClientRect();
     check(text.width > 0 && text.left >= box.left && text.right <= box.right && box.height < 100,
       'collapsed binding title stays inside its compact heading');
+    scroll.scrollTop = scroll.scrollHeight;
+    check(scroll.scrollTop > 0, 'the user editor can start at the bottom of its own scroll area');
     heading().querySelector<HTMLButtonElement>('.binding-toggle')!.click(); await nextTick();
     check(arrow() === 'chevronDown', 'the binding uses the same expanded chevron as settings');
-    await new Promise(resolve => setTimeout(resolve, 220));
+    const reveal = heading().nextElementSibling!;
+    await Promise.allSettled(reveal.getAnimations().map(animation => animation.finished));
+    await new Promise(requestAnimationFrame);
+    const viewport = scroll.shadowRoot!.querySelector('.viewport')!;
+    check(Math.abs(heading().closest('.binding')!.getBoundingClientRect().top - viewport.getBoundingClientRect().top) <= 1,
+      'opening a binding scrolls the editor viewport to the expanded heading');
     const selected = () => heading().closest<HTMLElement>('.binding')!;
     check(selected().getBoundingClientRect().top < mount.querySelector<HTMLElement>('[data-item-id="other"]')!.getBoundingClientRect().top,
       'expanding a later binding places it above the other cards');
@@ -56,7 +65,7 @@ export async function bindingLayoutContract(fixture: HTMLElement, check: (value:
     heading().querySelector<HTMLButtonElement>('.binding-toggle')!.click(); await nextTick();
     check(selected().querySelector<HTMLElement>('.binding-reveal')!.inert, 'collapsing excludes retained configuration controls from interaction');
     await new Promise(resolve => setTimeout(resolve, 220));
-    check(selected().getBoundingClientRect().left > mount.querySelector<HTMLElement>('[data-item-id="other"]')!.getBoundingClientRect().left,
+    check(selected().getBoundingClientRect().top > mount.querySelector<HTMLElement>('[data-item-id="other"]')!.getBoundingClientRect().top,
       'collapsing restores the saved binding order');
-  } finally { app.unmount(); mount.remove(); store.dispose(); }
+  } finally { app.unmount(); scroll.remove(); store.dispose(); }
 }

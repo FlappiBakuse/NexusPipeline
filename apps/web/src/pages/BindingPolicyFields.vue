@@ -55,7 +55,7 @@ async function browse(kind: 'pre' | 'post'): Promise<void> {
 
 <template>
   <div class="binding-policy">
-    <section data-surface="raised">
+    <section>
       <h3 :tabindex="locked('general') ? 0 : undefined"
         v-help="locked('general') ? t('使用全局设置，当前绑定的独立设置已保留。') : ''">{{ t('通用') }}</h3>
       <nexus-switch-list>
@@ -109,7 +109,7 @@ async function browse(kind: 'pre' | 'post'): Promise<void> {
         />
       </label>
     </section>
-    <section data-surface="raised">
+    <section>
       <h3 :tabindex="locked('notification') ? 0 : undefined"
         v-help="locked('notification') ? t('使用全局设置，当前绑定的独立设置已保留。') : ''">{{ t('通知') }}</h3>
       <nexus-switch-list>
@@ -145,7 +145,7 @@ async function browse(kind: 'pre' | 'post'): Promise<void> {
       </label>
       <nexus-toast v-if="failure" tone="danger" :message.prop="t(failure)" />
     </section>
-    <section data-surface="raised">
+    <section>
       <h3 :tabindex="locked('advanced') ? 0 : undefined"
         v-help="locked('advanced') ? t('使用全局设置，当前绑定的独立设置已保留。') : ''">{{ t('高级') }}</h3>
       <nexus-switch-list v-if="global">
@@ -191,13 +191,16 @@ async function browse(kind: 'pre' | 'post'): Promise<void> {
 .binding-policy {
   display: grid;
   gap: 16px;
+  padding-block-start: 16px;
+  border-block-start: 1px solid var(--border);
 }
 section {
   display: grid;
   gap: 12px;
-  padding: 16px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
+}
+section + section {
+  padding-block-start: 16px;
+  border-block-start: 1px solid var(--border);
 }
 h3 {
   margin: 0;

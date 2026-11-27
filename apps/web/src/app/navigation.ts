@@ -87,7 +87,6 @@ registerMessages({
   '服务启动、历史记录与日志选项': 'Startup, history retention and logging',
   '远程管理入口与本机 Agent 服务': 'Remote access and the local agent service',
   '宿主外部 HTTP/HTTPS 请求': 'Outbound HTTP and HTTPS connections',
-  控制需要手动确认的配置修复行为: 'Configuration repair and advanced behavior',
   '更新渠道、检查与应用操作': 'Update channels, checks and installation',
   '检查运行环境、恢复现场与插件状态': 'Inspect the runtime, recovery state and extensions'
 });

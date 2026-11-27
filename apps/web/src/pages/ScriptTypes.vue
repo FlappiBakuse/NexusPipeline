@@ -109,7 +109,7 @@ onBeforeUnmount(() => owner?.abort());
 }
 .script-types > p,
 .type-choice-wide { grid-column: 1 / -1; }
-.type-divider { grid-column: 1 / -1; width: 100%; margin: 0; border: 0; border-top: 1px solid var(--border); }
+.type-divider { grid-column: 1 / -1; width: 100%; margin: 0; border: 0; border-top: 1px solid var(--border); box-shadow: none; }
 .type-choice {
   display: flex;
   align-items: center;
@@ -117,6 +117,7 @@ onBeforeUnmount(() => owner?.abort());
   width: 100%;
   padding: 14px 16px;
   text-align: left;
+  border-radius: var(--nx-radius-md);
   background: var(--content-control);
 }
 .type-choice:hover {
@@ -143,7 +144,7 @@ onBeforeUnmount(() => owner?.abort());
   width: 36px;
   height: 36px;
   flex: none;
-  border-radius: 11px;
+  border-radius: var(--nx-radius-sm);
   font-size: 20px;
   color: white;
 

@@ -46,7 +46,7 @@ export async function settingsRefreshCases(): Promise<string[]> {
       await fixture.streamOpened;
       fixture.reads.length = 0;
       const owner = useSettingsSession(store, () => true);
-      owner.patch(mode === 'ordinary' ? { historyRetentionDays: 60 } : { autoStart: true });
+      owner.patch('service', mode === 'ordinary' ? { historyRetentionDays: 60 } : { autoStart: true });
       await fixture.settingsRequested;
       fixture.replyToSave();
       await new Promise<void>(resolve => setImmediate(resolve));
@@ -93,7 +93,7 @@ function controlledHost(plugins = false) {
     dashboardCards: [], pinnedSettings: [], collapsedSettings: [] } };
   const values = { autoStart: false, desktop: { mode: 'browser', minimizeToTray: true, openOnStartup: false },
     service: { webPort: 0, allowRemoteAccess: false, mcpEnabled: false, mcpWriteEnabled: false, mcpPort: 18291 },
-    allowConfigRepair: false, historyRetentionDays: 30, logLevel: 'info', locale: 'zhCn', proxy: { mode: 'none', url: null, userName: '' },
+    historyRetentionDays: 30, logLevel: 'info', locale: 'zhCn', proxy: { mode: 'none', url: null, userName: '' },
     updates: { checkEnabled: false, autoApplyEnabled: false, pluginAutoUpdateEnabled: false, channel: 'stable', sourceUrl: null, pluginSource: 'develop' },
     extensions: plugins ? [{ extensionId: 'sample', enabled: true }] : [], automaticRetry: { enabled: false, backoffSeconds: 5 } };
   const status = { instanceId, processId: 1, hostVersion: '0.18.0', admission: null, currentWebPort: 1234,

@@ -146,8 +146,9 @@ td {
 .running-record {
   padding: 16px;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--content-card-soft);
+  border-radius: var(--nx-radius-md);
+  background: var(--content-embedded-fill, var(--content-card-soft));
+  box-shadow: var(--nx-surface-shadow);
 }
 .running-record header {
   display: flex;
@@ -176,8 +177,9 @@ td {
   padding: 48px 20px;
   text-align: center;
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--nx-radius-md);
   font-size: 13px;
+  box-shadow: var(--nx-surface-shadow);
 }
 .running-empty > strong {
   display: block;
@@ -197,6 +199,7 @@ td {
   color: var(--accent);
   font-weight: 400;
   line-height: inherit;
+  box-shadow: none;
 }
 @media (max-width: 600px) {
   .running-table {

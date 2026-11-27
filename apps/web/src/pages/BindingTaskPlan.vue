@@ -197,7 +197,7 @@ onBeforeUnmount(() => owner?.abort());
 </script>
 
 <template>
-  <section class="binding-task-plan" data-surface="raised">
+  <section class="binding-task-plan">
     <header>
       <div class="plan-heading">
         <h3>{{ t('任务计划') }}</h3>
@@ -244,9 +244,8 @@ onBeforeUnmount(() => owner?.abort());
   display: grid;
   gap: 12px;
   min-width: 0;
-  padding: 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  padding-block-start: 16px;
+  border-block-start: 1px solid var(--border);
 }
 header, .plan-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
 header { justify-content: space-between; }
@@ -254,9 +253,11 @@ h3 { margin: 0; font-size: 14px; }
 .source-paths, .plan-result > p { margin: 0; color: var(--muted); overflow-wrap: anywhere; font-size: 12px; }
 .plan-result { display: grid; gap: 9px; min-width: 0; }
 .plan-result details {
+  background: var(--content-card);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--nx-radius-md);
   font-size: 12px;
+  box-shadow: var(--nx-surface-shadow);
 }
 summary {
   display: flex;

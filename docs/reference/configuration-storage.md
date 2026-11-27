@@ -78,7 +78,7 @@ YAML 使用锁定的 YamlDotNet 18.1.0 事件解析器，限制单文档、32 �
 `PatchBatchService` 接受 Host 已确定的逐文档地址、相对路径、语法、访问范围与当前补丁提案。
 这些参数不构成插件修复授权；普通 Generic 原始保存不调用补丁批次。
 正式 TaskAdapter 使用原脚本 `adapterResources` 对已登记配置路径和已保存快照内文件的显式声明。
-实际发布的包必须声明 `configuration.edit`；Host 同时核对当前安装修订、绑定/配置修订及 `AllowConfigRepair`。
+配置修复始终可用。实际发布的包必须声明 `configuration.edit`，Host 同时核对当前安装修订及绑定和配置修订。
 候选摘要绑定源及完整提案，确认后重新调用实际适配器；候选变化即拒绝。
 原 `ConfigurationDocument` 先对声明的 Write/Protected 验证全部编辑，再把写入范围收窄到精确候选选择器，禁止 descendants 扩权。
 提交借用同一实际 Mutation root，复用原 `ConfigurationPatchService` 与配置 CAS；操作重放核对原主体、完整选择和候选摘要。

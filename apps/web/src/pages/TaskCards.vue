@@ -39,15 +39,16 @@ li { display: grid; min-width: 0; }
   gap: 6px 9px;
   padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 11px;
-  background: var(--content-control);
+  border-radius: var(--nx-radius-md);
+  background: var(--content-card);
+  box-shadow: var(--nx-surface-shadow);
 }
 strong { font-size: 13px; overflow-wrap: anywhere; }
 .task-number {
   display: grid;
   place-items: center;
   block-size: 28px;
-  border-radius: 100px;
+  border-radius: var(--nx-radius-pill);
   background: var(--muted-soft);
   color: var(--muted);
   font-size: 12px;

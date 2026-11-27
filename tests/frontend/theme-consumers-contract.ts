@@ -32,9 +32,9 @@ export async function themeConsumersContract(parent: HTMLElement, check: (value:
         values: { ...values, theme: mode } }; await nextTick();
       const light = document.body.dataset.theme === 'light';
       const log = getComputedStyle(holder.querySelector('.history-log-preview')!);
-      check(log.backgroundColor === (light ? 'rgb(241, 241, 239)' : 'rgb(10, 18, 32)'),
+      check(log.backgroundColor === (light ? 'rgb(244, 246, 249)' : 'rgb(10, 18, 32)'),
         mode + ' script log uses its paired theme background');
-      check(log.color === (light ? 'rgb(63, 61, 57)' : 'rgb(185, 213, 244)'),
+      check(log.color === (light ? 'rgb(54, 66, 82)' : 'rgb(185, 213, 244)'),
         mode + ' script log retains readable foreground');
       check(getComputedStyle(holder.querySelector('.warning')!).borderLeftColor === (light ? 'rgb(166, 106, 11)' : 'rgb(246, 191, 97)'),
         mode + ' settings warning uses the active warning palette');

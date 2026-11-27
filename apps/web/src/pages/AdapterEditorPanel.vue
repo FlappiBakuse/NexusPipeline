@@ -196,7 +196,7 @@ onBeforeUnmount(() => {
 .configuration-repair { display: grid; gap: 8px; min-width: 0; padding-block-start: 10px; border-block-start: 1px solid var(--border); }
 header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
 h4 { margin: 0; font-size: 13px; }
-.repair-result { display: grid; gap: 9px; padding: 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--content-card-soft); }
+.repair-result { display: grid; gap: 9px; padding-block-start: 10px; border-block-start: 1px solid var(--border); }
 label { display: grid; gap: 5px; min-width: 0; color: var(--muted); font-size: 12px; }
 .repair-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 7px; }
 p { margin: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }

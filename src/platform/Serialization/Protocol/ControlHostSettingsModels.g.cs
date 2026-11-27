@@ -40,9 +40,6 @@ public sealed record ControlHostSettingsValues
     /// <summary>Schema field <c>service</c>; constraints are owned by control-host-settings.schema.json.</summary>
     [JsonPropertyName("service")]
     public required ControlHostSettingsValuesService Service { get; init; }
-    /// <summary>Schema field <c>allowConfigRepair</c>; constraints are owned by control-host-settings.schema.json.</summary>
-    [JsonPropertyName("allowConfigRepair")]
-    public required bool AllowConfigRepair { get; init; }
     /// <summary>Schema field <c>historyRetentionDays</c>; constraints are owned by control-host-settings.schema.json.</summary>
     [JsonPropertyName("historyRetentionDays")]
     public required long HistoryRetentionDays { get; init; }

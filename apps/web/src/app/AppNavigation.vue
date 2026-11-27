@@ -219,8 +219,8 @@ onBeforeUnmount(() => {
   height: 34px;
   color: white;
   font-weight: 800;
-  border-radius: 10px;
-  background: linear-gradient(135deg, var(--accent), #7e6cff);
+  border-radius: var(--nx-radius-sm);
+  background: linear-gradient(135deg, #62a0ff, #7e6cff);
 }
 .brand small {
   display: block;
@@ -256,7 +256,7 @@ onBeforeUnmount(() => {
   width: 100%;
   min-height: 42px;
   border: 1px solid transparent;
-  border-radius: 9px;
+  border-radius: var(--nx-radius-sm);
   background: transparent;
   padding: 0 12px;
   color: var(--muted);
@@ -325,6 +325,7 @@ onBeforeUnmount(() => {
   padding: 8px;
   border-color: transparent;
   background: transparent;
+  box-shadow: none;
 }
 .theme-toggle nexus-icon,
 .menu-toggle nexus-icon {
@@ -362,6 +363,7 @@ onBeforeUnmount(() => {
     opacity: 0;
     pointer-events: none;
     transition: opacity 250ms ease;
+  box-shadow: none;
   }
   .drawer-scrim.active {
     opacity: 1;
@@ -396,7 +398,7 @@ onBeforeUnmount(() => {
     place-items: center;
   }
   .mobile-topbar > .theme-toggle {
-    border-color: var(--border-strong);
+    border-color: var(--nx-color-border);
     background: var(--content-control);
   }
 }

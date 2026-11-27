@@ -29,18 +29,20 @@
 .pane {
   min-width: 0;
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--nx-radius-lg);
   padding: 20px;
-  background: var(--panel);
+  background: var(--content-embedded-fill, var(--panel));
+  box-shadow: var(--nx-surface-shadow);
 }
 .entity-line {
   display: grid;
   gap: 10px;
   border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--content-card);
+  border-radius: var(--nx-radius-md);
+  background: var(--content-embedded-fill, var(--content-card));
   padding: 14px 16px;
   min-width: 0;
+  box-shadow: var(--nx-surface-shadow);
 }
 .entity-title {
   width: 100%;
@@ -53,12 +55,13 @@
   border: 0;
   background: transparent;
   padding: 0;
+  box-shadow: none;
 }
 .entity-title > nexus-icon {
   padding: 10px;
   width: 42px;
   height: 42px;
-  border-radius: 10px;
+  border-radius: var(--nx-radius-sm);
   background: var(--accent-soft);
   color: var(--accent);
   flex: none;
@@ -84,6 +87,7 @@
   padding: 16px 0;
   border: 0;
   border-top: 1px solid var(--border);
+  box-shadow: none;
 }
 .form-group legend {
   font-weight: 600;
@@ -119,9 +123,10 @@
   margin: 0;
   padding: 14px 20px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--nx-radius-md);
   background: var(--panel);
   flex-wrap: wrap;
+  box-shadow: var(--nx-surface-shadow);
 }
 .statistics strong {
   display: block;
@@ -136,13 +141,14 @@
 .notice-banner {
   border: 1px solid var(--border);
   padding: 12px 16px;
-  border-radius: 10px;
+  border-radius: var(--nx-radius-md);
   margin-bottom: 16px;
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
   align-items: center;
   overflow-wrap: anywhere;
+  box-shadow: var(--nx-surface-shadow);
 }
 .error-banner {
   color: var(--bad);
@@ -153,7 +159,7 @@
   max-width: 420px;
   padding: 24px;
   background: var(--panel);
-  border-radius: 12px;
+  border-radius: var(--nx-radius-lg);
 }
 .authentication label {
   display: grid;
@@ -267,13 +273,11 @@
 
 .entity-card-actions > nexus-icon-button {
   --size: 40px;
-  --nx-icon-border: var(--border-strong);
   inline-size: var(--size);
   block-size: var(--size);
 }
 
 .entity-card-actions > .danger-action {
-  --nx-icon-border: var(--bad-border);
   --nx-color-text: var(--bad);
 }
 

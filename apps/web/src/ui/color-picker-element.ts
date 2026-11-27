@@ -1,17 +1,30 @@
 import { createIdentity } from '../control/identity';
 import { NexusElement, elementAttributes } from './element-base.js';
 import { controlStyles } from './control-styles.js';
+import dropdownMotion from './dropdown-motion.css?inline';
+import { orientDropdown } from './dropdown-origin.js';
 
 const styles =
-  controlStyles +
+  controlStyles + dropdownMotion +
   `
-:host{display:block;min-width:0}.row{display:flex;min-width:0}.value-input{min-width:0;flex:1;height:40px;padding:0 12px;border:1px solid var(--nx-color-border);border-radius:8px 0 0 8px;background:var(--content-control);color:inherit;outline:0}
-.trigger{display:flex;gap:7px;align-items:center;min-width:112px;padding:0 10px;border-radius:0 8px 8px 0;text-align:left;color:var(--nx-color-muted);font-size:12px;font-weight:400}
-.swatch{width:18px;height:18px;flex:none;border-radius:50%;border:1px solid var(--border-strong,var(--nx-color-border,#394152));box-shadow:inset 0 0 0 2px var(--content-card)}
-.panel{position:fixed;inset:auto;margin:0;width:260px;padding:16px;max-width:calc(100vw - 16px);border:1px solid var(--border-strong,var(--nx-color-border,#394152));border-radius:12px;background:var(--nx-color-surface,#131f33);color:inherit;box-shadow:0 16px 40px #0005}
-.panel[hidden]{display:none}.palette{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:16px}.palette button{height:24px;min-height:24px;border-radius:5px;border:1px solid var(--border-strong,var(--nx-color-border,#394152));padding:0}
-.hex{appearance:none;width:100%;height:36px;padding:8px 10px;margin-bottom:12px;background:var(--content-control,var(--nx-color-surface,#1a2940));color:inherit;border:1px solid var(--border-strong,var(--nx-color-border,#394152));border-radius:7px}
-label{display:flex;align-items:center;gap:10px;font-size:12px;margin:10px 0}input[type=range]{appearance:none;width:100%;height:4px;border:0;border-radius:4px;background:var(--border-strong,var(--nx-color-border,#394152))}
+:host{display:block;min-width:0;border-radius:var(--nx-radius-sm)}
+.row{display:flex;min-width:0;border-radius:inherit}
+.value-input{min-width:0;flex:1;height:40px;padding:0 12px;border:1px solid var(--nx-color-border);border-radius:0;
+border-start-start-radius:var(--nx-radius-sm);border-end-start-radius:var(--nx-radius-sm);background:var(--content-embedded-fill,var(--content-control));color:inherit;
+  box-shadow: var(--nx-surface-shadow);}
+.value-input:focus{outline:none}
+.row{box-shadow:var(--nx-surface-shadow)}
+.row > .value-input{box-shadow:none}
+.row:focus-within{outline:2px solid var(--nx-color-accent);outline-offset:-2px}
+.row:has(.value-input[aria-invalid=true]){outline:1px solid var(--nx-color-danger);outline-offset:-1px}
+.row:has(.value-input[aria-invalid=true]):focus-within{outline-width:2px;outline-offset:-2px}
+.trigger{display:flex;gap:7px;align-items:center;min-width:112px;padding:0 10px;border-inline-start:0;background:var(--content-embedded-fill,var(--content-control));border-radius:0;box-shadow:none;
+border-start-end-radius:var(--nx-radius-sm);border-end-end-radius:var(--nx-radius-sm);text-align:start;color:var(--nx-color-muted);font-size:12px;font-weight:400}
+.swatch{width:18px;height:18px;flex:none;border-radius:50%;border:1px solid var(--nx-color-border,#394152);box-shadow:inset 0 0 0 2px var(--content-card)}
+.panel{position:fixed;inset:auto;margin:0;width:260px;padding:16px;max-width:calc(100vw - 16px);border:1px solid var(--nx-color-border,#394152);border-radius:var(--nx-radius-md);background:var(--nx-color-surface,#131f33);color:inherit;box-shadow:var(--nx-surface-shadow)}
+.panel[hidden]{display:none}.palette{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:16px}.palette button{height:24px;min-height:24px;border-radius:var(--nx-radius-compact);border:1px solid var(--nx-color-border,#394152);padding:0;box-shadow: var(--nx-surface-shadow);}
+.hex{appearance:none;width:100%;height:36px;padding:8px 10px;margin-bottom:12px;background:var(--content-control,var(--nx-color-surface,#1a2940));color:inherit;border:1px solid var(--nx-color-border,#394152);border-radius:var(--nx-radius-sm);box-shadow: var(--nx-surface-shadow);}
+label{display:flex;align-items:center;gap:10px;font-size:12px;margin:10px 0}input[type=range]{appearance:none;width:100%;height:4px;border:0;border-radius:var(--nx-radius-pill);background:var(--border-strong,var(--nx-color-border,#394152));box-shadow: none;}
 input[type=range]::-webkit-slider-thumb{appearance:none;width:14px;height:14px;border-radius:50%;background:var(--nx-color-accent,#62a0ff);border:2px solid var(--nx-color-surface,#131f33)}
 `;
 const palette = [
@@ -46,7 +59,7 @@ export class ColorPicker extends NexusElement {
     super(
       'nexus-color-picker',
       styles,
-      '<div class="row"><input class="value-input" type="text" spellcheck="false"><button class="trigger" type="button" aria-haspopup="dialog"><span class="swatch" aria-hidden="true"></span><span class="value"></span></button></div><div class="panel" popover="manual" role="dialog" hidden><div class="palette"></div><input class="hex" type="text" maxlength="7" aria-label="HEX" spellcheck="false"><div class="channels"></div></div>'
+      '<div class="row"><input class="value-input" type="text" spellcheck="false"><button class="trigger" type="button" aria-haspopup="dialog"><span class="swatch" aria-hidden="true"></span><span class="value"></span></button></div><div data-dropdown-panel class="panel" popover="manual" role="dialog" hidden><div class="palette"></div><input class="hex" type="text" maxlength="7" aria-label="HEX" spellcheck="false"><div class="channels"></div></div>'
     );
     this.trigger = this.root.querySelector('.trigger')!;
     this.panel = this.root.querySelector('.panel')!;
@@ -207,6 +220,7 @@ export class ColorPicker extends NexusElement {
           ? rect.bottom + 5
           : rect.top - this.panel.offsetHeight - 5
       ) + 'px';
+    orientDropdown(this.panel, this.trigger.getBoundingClientRect());
     this.hex.focus();
   }
   private close(): void {

@@ -336,7 +336,6 @@ export interface ControlHostSettingsValues {
   readonly autoStart: boolean;
   readonly desktop: ControlHostSettingsValuesDesktop;
   readonly service: ControlHostSettingsValuesService;
-  readonly allowConfigRepair: boolean;
   readonly historyRetentionDays: number;
   readonly logLevel: "debug" | "info" | "warning" | "error" | "fatal";
   readonly locale: "zhCn" | "enUs";

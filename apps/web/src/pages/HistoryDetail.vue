@@ -223,10 +223,8 @@ onBeforeUnmount(() => owner?.abort());
 }
 .history-attempt-card {
   margin-top: 20px;
-  padding: 16px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--content-card-soft);
+  padding-block-start: 16px;
+  border-block-start: 1px solid var(--border);
 }
 .history-attempt-card > header {
   display: flex;

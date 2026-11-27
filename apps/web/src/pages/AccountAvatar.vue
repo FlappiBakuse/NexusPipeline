@@ -94,15 +94,16 @@ button {
   height: 36px;
   min-height: 36px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--nx-radius-sm);
   background: var(--content-control);
   color: var(--accent);
+  box-shadow: var(--nx-surface-shadow);
 }
 img {
   width: 34px;
   height: 34px;
   object-fit: cover;
-  border-radius: 5px;
+  border-radius: var(--nx-radius-compact);
 }
 small {
   display: grid;
@@ -115,6 +116,7 @@ small {
   border: 1px solid var(--border);
   border-radius: 50%;
   background: var(--panel);
+  box-shadow: var(--nx-surface-shadow);
 }
 input {
   display: none;

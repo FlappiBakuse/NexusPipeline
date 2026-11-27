@@ -1,6 +1,6 @@
 {
   "algorithm": "nexus-sdk-source-manifest-sha256-v1",
-  "sourceFingerprint": "3fefc6e99d74412c1a324a8c1e94b1f07a4438de15f3da4e5c01fa9cb76b7efc",
+  "sourceFingerprint": "c540a50418289900c78cc8fb8c590836d9127b762c2428d903d0eead77c221cf",
   "inputs": [
     {
       "path": "Directory.Build.props",
@@ -364,8 +364,8 @@
     },
     {
       "path": "contracts/schemas/control-host-settings.schema.json",
-      "sizeBytes": 5710,
-      "sha256": "201934acb480070173b76cf9ecffe68b23f10336d2931579ff02c22c6000eaa6"
+      "sizeBytes": 5611,
+      "sha256": "42e46120502be115f2736e9b27ada7279eb54b6cef800e4672ee4bf046988a7f"
     },
     {
       "path": "contracts/schemas/control-interface-change.schema.json",

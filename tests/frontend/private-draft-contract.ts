@@ -103,6 +103,16 @@ async function settings(parent: HTMLElement, check: Check) {
     check(editor.secret.value === '' && editor.secretMode.value === 'keep' && editor.secretRevision.value === 9 && writes.length === 0,
       'settings explicit cancellation clears only the selected sensitive draft');
     store.state.capabilities!.capabilities.push('secrets.read', 'secrets.write');
+    session.status = { revision: 9, isConfigured: true, isReadable: true };
+    const proxyRead = Promise.withResolvers<Response>();
+    let proxySignal: AbortSignal | null | undefined;
+    globalThis.fetch = async (_input, options) => { proxySignal = options?.signal; return proxyRead.promise; };
+    const revealingProxy = editor.revealSecret();
+    editor.cancelSecret();
+    proxyRead.resolve(new Response('Fixture-proxy-password'));
+    await revealingProxy;
+    check(proxySignal?.aborted && editor.secret.value === '' && !editor.secretVisible.value && session.status.isConfigured,
+      'disabling the proxy cancels a delayed password reveal and preserves the saved credential status');
     tokenSession.status = { revision: 3, isConfigured: true, isReadable: true };
     const reading = Promise.withResolvers<Response>();
     let changed = false, postedToken = '';

@@ -306,8 +306,9 @@ onBeforeUnmount(() => {
   min-width: 0;
   padding: 20px;
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--nx-radius-lg);
   background: var(--panel);
+  box-shadow: var(--nx-surface-shadow);
 }
 .target-controls > label {
   color: var(--muted);

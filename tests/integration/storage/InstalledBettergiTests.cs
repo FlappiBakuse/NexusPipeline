@@ -1,8 +1,6 @@
 using System.Runtime.Versioning;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Configuration;
-using NexusPipeline.Core.Settings;
-using NexusPipeline.Platform.Storage.Sqlite;
 using NexusPipeline.Core.Extensions;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Platform.Storage;
@@ -121,19 +119,14 @@ public sealed class InstalledBettergiTests
         Assert.Equal(RecoveryOutcome.Restored, receipt.Facts.Recovery); Assert.False(accepted.Root.IsActive);
         fixture.Inputs.VerifyUnchanged();
     }
-    [Theory(DisplayName = "Adapter Repair Requires Host Policy And The Original Declared Protected Access And Keeps Exact Replay")]
+    [Theory(DisplayName = "Adapter Repair Preserves Declared Protected Access And Exact Replay")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task EnforcesRepairPolicy(bool protectRepair)
+    public async Task PreservesRepairBoundaries(bool protectRepair)
     {
         await using var fixture = new InstalledBettergiFixture(protectRepair); await fixture.InstallAsync();
         var selection = fixture.Selection();
         var proposal = await fixture.Adapters.ProposeConfigurationAsync(InstalledBettergiFixture.Subject, selection, default);
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => fixture.Adapters.PreviewRepairAsync(
-            InstalledBettergiFixture.Subject, selection, 0, proposal.ProposalDigest, default).AsTask());
-        var settings = fixture.Source.Settings.Read();
-        var enable = new HostSettingsChange(settings.Revision, settings.Values with { AllowConfigRepair = true });
-        fixture.Source.Settings.Commit(HostSettingsStore.Identity(Guid.NewGuid(), InstalledBettergiFixture.Subject, enable), enable, DateTimeOffset.UtcNow);
         await Assert.ThrowsAsync<IOException>(() => fixture.Adapters.PreviewRepairAsync(InstalledBettergiFixture.Subject,
             selection, 0, new string('a', 64), default).AsTask());
         if (protectRepair)

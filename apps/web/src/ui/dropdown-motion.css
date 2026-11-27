@@ -1,0 +1,12 @@
+@media (prefers-reduced-motion: no-preference) {
+  [data-dropdown-panel]:not([hidden]) {
+    animation: dropdown-enter var(--nx-motion-duration-fast, 160ms) var(--nx-motion-ease, ease-out) both;
+  }
+}
+
+@keyframes dropdown-enter {
+  from {
+    opacity: 0;
+    scale: 0.94;
+  }
+}

@@ -2,21 +2,23 @@ import { createIdentity } from '../control/identity';
 import type { DateRange } from '@nexuspipeline/extension-sdk';
 import { NexusElement, elementAttributes } from './element-base.js';
 import { controlStyles } from './control-styles.js';
+import dropdownMotion from './dropdown-motion.css?inline';
+import { orientDropdown } from './dropdown-origin.js';
 
 const styles =
-  controlStyles +
+  controlStyles + dropdownMotion +
   `
-:host{display:block;min-width:0}.trigger{display:flex;width:100%;align-items:center;justify-content:space-between;gap:12px;padding:0 12px;border-radius:8px;background:var(--content-control);font-weight:400;text-align:left}
+:host{display:block;min-width:0;border-radius:var(--nx-radius-sm)}.trigger{display:flex;width:100%;align-items:center;justify-content:space-between;gap:12px;padding:0 12px;border-radius:var(--nx-radius-sm);background:var(--content-embedded-fill,var(--content-control));font-weight:400;text-align:left}
 .trigger svg{width:16px;height:16px;flex:none;color:var(--nx-color-accent)}
 .panel{position:fixed;inset:auto;margin:0;width:min(640px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:hidden;padding:12px;
-border:1px solid var(--border-strong,var(--nx-color-border));border-radius:var(--nx-radius-md,10px);background:var(--content-card,var(--nx-color-surface));color:inherit;box-shadow:var(--shadow,0 16px 40px #0005)}
+border:1px solid var(--nx-color-border);border-radius:var(--nx-radius-md);background:var(--content-card,var(--nx-color-surface));color:inherit;box-shadow:var(--shadow,0 16px 40px #0005)}
 .panel[hidden]{display:none}.panel::backdrop{background:transparent}.toolbar{display:grid;grid-template-columns:40px 1fr 40px;gap:8px;align-items:center;text-align:center}
 .toolbar button{padding:0;font-size:20px}.months{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,298px),1fr));gap:12px}
 h4{margin:12px 0 8px;font-size:12px;text-align:center}.grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px}
 .weekday{min-height:24px;display:grid;place-items:center;color:var(--nx-color-muted);font-size:10px;font-weight:700}
-.day{min-width:0;min-height:40px;padding:0;font-size:12px;border-color:transparent;background:transparent;font-weight:400;border-radius:6px}
+.day{min-width:0;min-height:40px;padding:0;font-size:12px;border-color:transparent;background:transparent;font-weight:400;border-radius:var(--nx-radius-compact);box-shadow: none;}
 .day.in-range{border-radius:0;background:var(--accent-soft);color:var(--nx-color-accent)}.day.start,.day.end{background:var(--nx-color-accent);color:#fff}
-.day.start{border-radius:6px 0 0 6px}.day.end{border-radius:0 6px 6px 0}.day.start.end{border-radius:6px}.day:disabled{opacity:.42}
+.day.start{border-radius:var(--nx-radius-compact) 0 0 var(--nx-radius-compact)}.day.end{border-radius:0 var(--nx-radius-compact) var(--nx-radius-compact) 0}.day.start.end{border-radius:var(--nx-radius-compact)}.day:disabled{opacity:.42}
 .selection{display:flex;justify-content:center;align-items:center;gap:12px;margin-top:12px;padding-top:8px;border-top:1px solid var(--nx-color-border)}
 .selection span{display:grid;gap:2px;text-align:center}.selection small,.hint{color:var(--nx-color-muted);font-size:10px}.selection strong{font-size:12px}
 .footer{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:12px}.apply{background:var(--accent-strong,var(--nx-color-accent));color:#fff}
@@ -42,7 +44,7 @@ export class DateRangePicker extends NexusElement {
     super(
       'nexus-date-range-picker',
       styles,
-      '<button class="trigger" type="button" aria-haspopup="dialog"><span></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 2v6m10-6v6M3 11h18"/></svg></button><nexus-scroll-area class="panel" label="Date range" role="dialog" popover="manual" hidden><div class="toolbar"><button type="button" data-month="-1">‹</button><strong></strong><button type="button" data-month="1">›</button></div><div class="months"></div><div class="selection"></div><div class="footer"><span class="hint"></span><button class="apply" type="button"></button></div></nexus-scroll-area>'
+      '<button class="trigger" type="button" aria-haspopup="dialog"><span></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 2v6m10-6v6M3 11h18"/></svg></button><nexus-scroll-area data-dropdown-panel class="panel" label="Date range" role="dialog" popover="manual" hidden><div class="toolbar"><button type="button" data-month="-1">‹</button><strong></strong><button type="button" data-month="1">›</button></div><div class="months"></div><div class="selection"></div><div class="footer"><span class="hint"></span><button class="apply" type="button"></button></div></nexus-scroll-area>'
     );
     this.trigger = this.root.querySelector('.trigger')!;
     this.panel = this.root.querySelector('.panel')!;
@@ -270,6 +272,7 @@ export class DateRangePicker extends NexusElement {
       Math.max(16, Math.min(rect.left, innerWidth - this.panel.offsetWidth - 16)) + 'px';
     this.panel.style.top =
       Math.max(16, Math.min(rect.bottom + 8, innerHeight - this.panel.offsetHeight - 16)) + 'px';
+    orientDropdown(this.panel, rect);
   }
   private keyboard(event: KeyboardEvent): void {
     if (!this.expanded && ['ArrowDown', 'Enter', ' '].includes(event.key)) {

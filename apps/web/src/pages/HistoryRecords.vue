@@ -88,8 +88,9 @@ const recordRows = computed(() =>
   overflow: hidden;
   padding: 8px;
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--nx-radius-lg);
   background: var(--panel);
+  box-shadow: var(--nx-surface-shadow);
 }
 .history-records > header {
   display: flex;
@@ -102,15 +103,17 @@ const recordRows = computed(() =>
 .history-records > nexus-empty-state {
   border: 0;
   background: transparent;
+  box-shadow: none;
 }
 .back-history {
   display: none;
 }
 .record-card {
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--nx-radius-md);
   margin-bottom: 8px;
-  background: var(--content-card-soft);
+  background: var(--content-embedded-fill, var(--content-card-soft));
+  box-shadow: var(--nx-surface-shadow);
 }
 .record-open {
   width: 100%;
@@ -121,6 +124,7 @@ const recordRows = computed(() =>
   border: 0;
   background: transparent;
   text-align: left;
+  box-shadow: none;
 }
 .record-main {
   display: grid;

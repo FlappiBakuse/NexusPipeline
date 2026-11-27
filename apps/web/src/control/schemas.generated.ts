@@ -1872,7 +1872,6 @@ export default {
           "autoStart",
           "desktop",
           "service",
-          "allowConfigRepair",
           "historyRetentionDays",
           "logLevel",
           "locale",
@@ -1946,9 +1945,6 @@ export default {
                 "maximum": 65535
               }
             }
-          },
-          "allowConfigRepair": {
-            "type": "boolean"
           },
           "historyRetentionDays": {
             "type": "integer",

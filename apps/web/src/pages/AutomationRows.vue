@@ -198,13 +198,14 @@ async function openSummary(row: Row): Promise<void> {
 }
 .automation-row {
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--nx-radius-lg);
   background: var(--panel);
   display: flex;
   min-height: 80px;
   gap: 8px;
   align-items: center;
   padding: 12px;
+  box-shadow: var(--nx-surface-shadow);
 }
 nexus-drag-handle {
   flex: none;
@@ -221,7 +222,7 @@ nexus-drag-handle {
 .queues .row-main {
   gap: 6px;
 }
-.summary-link { border: 0; background: transparent; padding: 0; min-height: 0; min-width: 0; max-width: 100%; }
+.summary-link { border: 0; background: transparent; padding: 0; min-height: 0; min-width: 0; max-width: 100%; box-shadow: none; }
 .row-meta {
   display: flex;
   align-items: center;
@@ -236,9 +237,10 @@ nexus-drag-handle {
   min-height: 36px;
   flex: none;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--nx-radius-compact);
   background: var(--content-control);
   color: var(--accent);
+  box-shadow: var(--nx-surface-shadow);
 }
 .script-avatar img { width: 36px; height: 36px; object-fit: contain; }
 .script-avatar nexus-icon {

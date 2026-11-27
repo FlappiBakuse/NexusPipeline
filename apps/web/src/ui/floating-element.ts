@@ -1,4 +1,5 @@
 import { NexusElement } from './element-base.js';
+import { orientDropdown } from './dropdown-origin.js';
 
 export abstract class FloatingElement extends NexusElement {
   protected readonly panel: HTMLElement;
@@ -74,6 +75,7 @@ export abstract class FloatingElement extends NexusElement {
       (rect.bottom + this.panel.offsetHeight + 8 > innerHeight && rect.top > this.panel.offsetHeight
         ? rect.top - this.panel.offsetHeight - 4
         : rect.bottom + 4) + 'px';
+    orientDropdown(this.panel, rect);
   }
 
   protected close(reason: 'button' | 'escape' | 'backdrop' | 'owner'): void {

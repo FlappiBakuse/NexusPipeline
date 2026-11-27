@@ -38,6 +38,7 @@ export function useSettingsSecrets(owner: Owner, notice: Ref<string>) {
   const edits = { 'proxy-password': 0, 'control-bearer': 0 };
   let epoch = 0,
     controller = new AbortController(),
+    proxyReveal = new AbortController(),
     disposed = false;
   const state = (field: LocalField) => hostSecretSession(owner.store, instanceId(), field);
   const proxy = computed(() => state('proxy-password')),
@@ -68,11 +69,18 @@ export function useSettingsSecrets(owner: Owner, notice: Ref<string>) {
   const secretError = computed(() => proxy.value.error),
     tokenError = computed(() => bearer.value.error);
   const tokenOperationStatus = computed(() => bearer.value.operationStatus);
-  function conceal(): void {
-    secret.value = ''; token.value = '';
-    secretMode.value = 'keep'; tokenMode.value = 'keep';
-    inputs.value.secret.revision = null; inputs.value.token.revision = null;
+  function cancelSecret(): void {
+    proxyReveal.abort();
+    proxyReveal = new AbortController();
+    secretReading.value = false;
+    secret.value = '';
+    secretMode.value = 'keep';
     secretVisible.value = false;
+  }
+  function conceal(): void {
+    cancelSecret();
+    token.value = '';
+    tokenMode.value = 'keep';
     tokenVisible.value = false;
   }
   function reset(): void {
@@ -80,7 +88,6 @@ export function useSettingsSecrets(owner: Owner, notice: Ref<string>) {
     controller.abort();
     controller = new AbortController();
     conceal();
-    secretReading.value = false;
     tokenReading.value = false;
   }
   watch(secretMode, (mode) => {
@@ -139,9 +146,10 @@ export function useSettingsSecrets(owner: Owner, notice: Ref<string>) {
     )
       return;
     reading.value = true;
+    const signal = isToken ? read.signal : AbortSignal.any([read.signal, proxyReveal.signal]);
     try {
-      const value = await readValue(owner.store.client, field, read.signal);
-      if (!current(read) || edits[field] !== edit || session.pending) return;
+      const value = await readValue(owner.store.client, field, signal);
+      if (signal.aborted || !current(read) || edits[field] !== edit || session.pending) return;
       if (isToken) {
         token.value = value;
         tokenMode.value = 'keep';
@@ -152,9 +160,9 @@ export function useSettingsSecrets(owner: Owner, notice: Ref<string>) {
         secretVisible.value = true;
       }
     } catch (reason) {
-      if (current(read)) session.error = reason instanceof Error ? reason.message : '秘密状态读取失败';
+      if (!signal.aborted && current(read)) session.error = reason instanceof Error ? reason.message : '秘密状态读取失败';
     } finally {
-      if (current(read)) reading.value = false;
+      if (!signal.aborted && current(read)) reading.value = false;
     }
   }
   const revealSecret = () => reveal('proxy-password'),
@@ -298,7 +306,7 @@ export function useSettingsSecrets(owner: Owner, notice: Ref<string>) {
     inspectSecretOperation,
     editSecret,
     editToken,
-    cancelSecret: () => { if (!proxy.value.pending) { secret.value = ''; secretMode.value = 'keep'; secretVisible.value = false; } },
+    cancelSecret,
     cancelToken: () => { if (!bearer.value.pending) { token.value = ''; tokenMode.value = 'keep'; tokenVisible.value = false; } }
   };
 }

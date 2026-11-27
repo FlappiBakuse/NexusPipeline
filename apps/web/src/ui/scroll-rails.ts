@@ -16,7 +16,7 @@ export const scrollRailStyles = `.rail {
 :host([data-scroll-active]) .rail { opacity: 1; }
 .thumb {
   position: absolute;
-  border-radius: 999px;
+  border-radius: var(--nx-radius-pill);
   background: color-mix(in srgb,var(--nx-color-text,#7d8798) 48%,transparent);
   pointer-events: none;
   cursor: grab;

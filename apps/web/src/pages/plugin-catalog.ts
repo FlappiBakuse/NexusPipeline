@@ -23,7 +23,7 @@ export interface PluginRow {
 
 export const pluginRowId = (row: PluginRow): string => row.local ? 'local/' + row.local.candidateId : row.extensionId;
 
-export function usePluginBrowser(store: AppStore, visible: () => boolean, local: Ref<LocalExtensionCandidate[]>) {
+export function usePluginBrowser(store: AppStore, visible: () => boolean, local: Ref<LocalExtensionCandidate[]>, revision: () => number) {
   const installed = ref<ExtensionState[]>([]),
     catalog = ref<ExtensionCatalog | null>(null);
   const localDetails = reactive(new Map<string, ExtensionDetails>());
@@ -45,7 +45,6 @@ export function usePluginBrowser(store: AppStore, visible: () => boolean, local:
   const current = () => store.state.capabilities?.instanceId === instance;
   const channel = computed(() => store.state.settings?.saved.values.updates.pluginSource || 'stable');
   let owner: AbortController | undefined, detailOwner: AbortController | undefined;
-  let loaded = false;
   let directoryRevision = 0, hasReleaseTrust = false;
   const rows = computed<PluginRow[]>(() => {
     const ids =
@@ -190,7 +189,6 @@ export function usePluginBrowser(store: AppStore, visible: () => boolean, local:
       if (!hasReleaseTrust) next = null;
       if (catalog.value?.identity.sha256 !== next?.identity.sha256) catalogDetails.clear();
       catalog.value = next;
-      loaded = true;
       if (!selected.value) selectedId.value = filtered.value[0] ? pluginRowId(filtered.value[0]) : '';
       if (selectedId.value) await select(selectedId.value);
     } catch (reason) {
@@ -244,12 +242,10 @@ export function usePluginBrowser(store: AppStore, visible: () => boolean, local:
     if (visible()) void load();
   });
   watch(
-    visible,
-    (active) => {
-      if (active) {
-        if (!loaded) void load();
-        else if (selectedId.value) void select(selectedId.value);
-      } else {
+    [visible, revision, () => store.state.preparationRevision],
+    ([active]) => {
+      if (active) void load();
+      else {
         owner?.abort();
         detailOwner?.abort();
       }
@@ -259,9 +255,6 @@ export function usePluginBrowser(store: AppStore, visible: () => boolean, local:
   onBeforeUnmount(() => {
     owner?.abort();
     detailOwner?.abort();
-  });
-  watch(() => store.state.preparationRevision, () => {
-    if (visible()) void load();
   });
   return {
     installed,

@@ -62,6 +62,15 @@ async function inspectNavigation(check: Check): Promise<void> {
       await nextTick();
     }
     const sidebar = holder.querySelector<HTMLElement>('.sidebar')!;
+    const brand = sidebar.querySelector('.brand-mark')!;
+    const themeBefore = document.body.dataset.theme;
+    document.body.dataset.theme = 'dark';
+    const darkLogo = getComputedStyle(brand).backgroundImage;
+    document.body.dataset.theme = 'light';
+    const lightLogo = getComputedStyle(brand).backgroundImage;
+    if (themeBefore === undefined) delete document.body.dataset.theme; else document.body.dataset.theme = themeBefore;
+    check(darkLogo.includes('rgb(98, 160, 255)') && lightLogo === darkLogo,
+      'the sidebar logo keeps its dark-theme gradient in both themes');
     const viewport = sidebar.querySelector<Area>('.sidebar-navigation')!.shadowRoot!.querySelector<HTMLElement>('.viewport')!;
     const lastLink = sidebar.querySelector<HTMLElement>('a[href="#/settings"]')!;
     const footer = sidebar.querySelector<HTMLElement>('.sidebar-footer')!;
@@ -89,6 +98,7 @@ async function inspectWorkspace(component: typeof HistoryPage | typeof PluginsPa
   const holder = document.createElement('div');
   const store = createStore(fixtureClient());
   store.state.capabilities = { instanceId: 'contained-workspace', hostVersion: '0.18.0', capabilities: ['extensions.read'] };
+  store.state.events = {};
   holder.innerHTML = `<div class="page-shell" style="height: 580px">
     <nexus-scroll-area class="workspace-scroll" data-card-scroll="true"><main class="workspace">
       <header class="workspace-header"><div><h1>Page</h1><p><span id="page-description-override"></span></p></div>
@@ -123,5 +133,11 @@ async function inspectWorkspace(component: typeof HistoryPage | typeof PluginsPa
     verify(detail, 'the plugin detail card');
     const headings = [...detail.querySelectorAll('.markdown-document :is(h1,h2)')].map(item => item.textContent);
     check(headings.join(',') === 'Usage,0.5.0', 'embedded plugin documents omit cover headings and retain section and version headings (' + headings.join(', ') + ')');
+    holder.querySelectorAll<HTMLButtonElement>('.plugin-tab')[1]!.click();
+    await nextTick();
+    const refresh = holder.querySelector<HTMLButtonElement>('.plugin-footer button:not(.primary)')!;
+    const bounds = refresh.getBoundingClientRect();
+    check(!holder.querySelector('.plugin-row') && bounds.width > 0 && bounds.height > 0 && bounds.right <= innerWidth,
+      'the empty repository keeps its refresh action visible in the list view');
   } finally { app.unmount(); holder.remove(); store.dispose(); }
 }

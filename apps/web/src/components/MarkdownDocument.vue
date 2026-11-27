@@ -65,7 +65,7 @@ function openLink(event: MouseEvent): void {
 }
 .markdown-document :deep(code) {
   padding: 2px 4px;
-  border-radius: 4px;
+  border-radius: var(--nx-radius-compact);
   background: var(--accent-soft);
   color: var(--accent);
   font-size: 11px;
@@ -76,7 +76,7 @@ function openLink(event: MouseEvent): void {
 .markdown-document :deep(pre) {
   margin: 0;
   padding: 12px;
-  border-radius: 8px;
+  border-radius: var(--nx-radius-md);
   background: var(--content-card-soft);
 }
 .markdown-document :deep(pre code) {
@@ -91,7 +91,7 @@ function openLink(event: MouseEvent): void {
 .markdown-document :deep(blockquote) {
   margin: 12px 0;
   padding-left: 14px;
-  border-left: 3px solid var(--border-strong);
+  border-left: 3px solid var(--nx-color-border);
   color: var(--muted);
 }
 .markdown-document :deep(table) {
@@ -103,5 +103,6 @@ function openLink(event: MouseEvent): void {
   padding: 7px 10px;
   border: 1px solid var(--border);
   text-align: left;
+  box-shadow: var(--nx-surface-shadow);
 }
 </style>

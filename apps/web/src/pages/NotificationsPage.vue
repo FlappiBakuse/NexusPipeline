@@ -309,13 +309,14 @@ async function reorder(ids: string[]): Promise<void> {
 }
 .task {
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--nx-radius-lg);
   background: var(--panel);
   display: flex;
   align-items: center;
   gap: 8px;
   min-height: 80px;
   padding: 12px;
+  box-shadow: var(--nx-surface-shadow);
 }
 .avatar {
   display: grid;
@@ -324,9 +325,10 @@ async function reorder(ids: string[]): Promise<void> {
   width: 36px;
   height: 36px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--nx-radius-compact);
   background: var(--accent-soft);
   color: var(--accent);
+  box-shadow: var(--nx-surface-shadow);
 }
 .copy {
   display: grid;

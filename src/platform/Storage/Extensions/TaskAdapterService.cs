@@ -199,7 +199,7 @@ internal sealed class TaskAdapterService : ITaskAdapterPort
         using var root = RepairRoot(selection);
         using var source = new ResolvedAdapterSelection(_instance, _database, _lease, _resources, _contracts, _roots, selection, root, requireCaller);
         using var prepared = await PrepareRepairAsync(serverSubject, source, candidateIndex, expectedProposalDigest, cancellationToken).ConfigureAwait(false);
-        source.RequireCurrent(); RequireRepairEnabled();
+        source.RequireCurrent();
         return prepared.Use((_, _, candidate) => new AdapterRepairPreview(source.Stamp, candidateIndex, expectedProposalDigest,
             Convert.ToHexStringLower(SHA256.HashData(candidate.Span)), prepared.SizeBytes, prepared.HasChanges));
     }
@@ -217,15 +217,13 @@ internal sealed class TaskAdapterService : ITaskAdapterPort
         if (replay is not null) return replay;
         using var source = new ResolvedAdapterSelection(_instance, _database, _lease, _resources, _contracts, _roots, selection, root, requireCaller);
         using var prepared = await PrepareRepairAsync(serverSubject, source, candidateIndex, expectedProposalDigest, cancellationToken).ConfigureAwait(false);
-        void Check() { source.RequireCurrent(); RequireRepairEnabled(); }
         return new ConfigurationPatchService(_instance, _database, _contracts, _lease, _resources)
-            .CommitOwned(prepared, root, Check, acceptedAt, cancellationToken);
+            .CommitOwned(prepared, root, source.RequireCurrent, acceptedAt, cancellationToken);
     }
 
     private async ValueTask<PreparedConfigurationPatch> PrepareRepairAsync(string subject, ResolvedAdapterSelection source,
         int index, string expected, CancellationToken cancellationToken)
     {
-        RequireRepairEnabled();
         var response = await PrepareConfigurationAsync(source, cancellationToken).ConfigureAwait(false);
         var patches = (response.ConfigPatches ?? []).Select(patch => new ConfigurationPatchReader(_contracts)
             .Read(JsonSerializer.SerializeToUtf8Bytes(patch))).ToImmutableArray();
@@ -266,7 +264,7 @@ internal sealed class TaskAdapterService : ITaskAdapterPort
         }
         var exact = patch.Edits.Select(edit => new ConfigurationAccessGrant(edit.Selector, false)).ToImmutableArray();
         var narrowed = ConfigurationPatchPolicy.Freeze(new ConfigurationDocumentAccess(exact, exact, declaration.Access.Protected));
-        source.RequireCurrent(); RequireRepairEnabled();
+        source.RequireCurrent();
         return new ConfigurationPatchService(_instance, _database, _contracts, _lease, _resources).PreviewAdapter(subject,
             saved.Address, source.Selection.ExpectedBindingRevision, AdapterConfigurationPolicy.Contract(script, declaration), declaration.RelativePath,
             declaration.Syntax, narrowed, JsonSerializer.SerializeToUtf8Bytes(response.ConfigPatches![index]),
@@ -277,7 +275,7 @@ internal sealed class TaskAdapterService : ITaskAdapterPort
     {
         RequireSubject(subject); selection = AdapterSelectionPolicy.Freeze(selection);
         if (index is < 0 or > 255 || !FileTreePolicy.Digest(digest)) throw new ArgumentException("adapter_repair_selection_invalid");
-        _lease.VerifyHeld(_instance); RequireRepairEnabled(); return selection;
+        _lease.VerifyHeld(_instance); return selection;
     }
 
     private ResourceOperationLease RepairRoot(AdapterSelection selection)
@@ -290,10 +288,6 @@ internal sealed class TaskAdapterService : ITaskAdapterPort
         claims.AddRange(selection.Resources.Select(resource => new ResourceClaim(
             ConfigurationRevisionService.ResourceKey(new(selection.BindingId, resource.ResourceId)), ResourceClaimMode.Mutation)));
         return _resources.TryAcquire(selection.OperationId, claims).Lease ?? throw new ConfigurationException("configuration_resource_conflict");
-    }
-    private void RequireRepairEnabled()
-    {
-        if (!new HostSettingsStore(_database).Read().Values.AllowConfigRepair) throw new UnauthorizedAccessException("configuration_repair_disabled");
     }
     private static string RepairDigest(AdapterSelection selection, int index, string digest) => Digest(BoundedJson.Serialize(new
         { format = "nexus.adapter.repair", version = 1, selection, index, digest }));

@@ -140,9 +140,10 @@ onBeforeUnmount(() => resize?.disconnect());
   min-height: 0;
   padding: 0;
   overflow: hidden;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  border: 1px solid var(--nx-color-border);
+  border-radius: var(--nx-radius-sm);
   background: transparent;
+  box-shadow: var(--nx-surface-shadow);
 }
 .image-button :deep(.media-image) {
   width: 100%;
@@ -160,7 +161,7 @@ onBeforeUnmount(() => resize?.disconnect());
   right: 5px;
   bottom: 5px;
   padding: 1px 6px;
-  border-radius: 20px;
+  border-radius: var(--nx-radius-pill);
   background: #071321dd;
   color: #fff;
   font-size: 10px;

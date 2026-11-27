@@ -1,6 +1,7 @@
 import { createApp, h, nextTick } from 'vue';
 import DispatchPage from '../../apps/web/src/pages/DispatchPage.vue';
 import FormSelect from '../../apps/web/src/components/FormSelect';
+import uiTheme from '../../apps/web/src/ui/theme.css?inline';
 import { createStore } from '../../apps/web/src/app/store';
 import { ControlClient } from '../../apps/web/src/control/client';
 import type { ActiveRun } from '../../apps/web/src/control/execution';
@@ -101,9 +102,11 @@ async function executionSubmissionContract(fixture: HTMLElement, check: (value: 
       createdAt: new Date().toISOString(), roots: [], scripts: [], users: [], bindings: [], schedules: [], attachments: [],
       queues: [{ id: queueId, name: 'Queue', scriptIds: [], order: 0, completionAction: 'none',
         notifyEnabled: false, notificationTaskIds: [] }] } };
+  const style = document.createElement('style');
+  style.textContent = uiTheme;
   const mount = document.createElement('section');
   mount.style.cssText = 'display:grid;gap:16px;width:800px;max-width:100%';
-  fixture.append(mount);
+  fixture.append(style, mount);
   const app = createApp({ render: () => h(DispatchPage, { store, visible: true }) });
   app.component('FormSelect', FormSelect).mount(mount);
   const settle = async () => { await nextTick(); await new Promise(resolve => setTimeout(resolve, 40)); await nextTick(); };
@@ -170,8 +173,8 @@ async function executionSubmissionContract(fixture: HTMLElement, check: (value: 
     check(shown() === [second.runId, first.runId].join(',') && panes[0]!.right < panes[1]!.left,
       'split view opens exactly two different runs side by side');
     check(getComputedStyle(tabs[0]!).borderTopStyle === 'dashed' &&
-      getComputedStyle(tabs[1]!).borderTopLeftRadius === '10px' &&
-      getComputedStyle(tabs[1]!).borderBottomLeftRadius === '4px' &&
+      getComputedStyle(tabs[1]!).borderTopLeftRadius === '8px' &&
+      getComputedStyle(tabs[1]!).borderBottomLeftRadius === '6px' &&
       tabs[0]!.querySelector('.tab-secondary-badge')?.textContent?.trim() === '右屏',
       'the prototype tab shape and right-pane marker distinguish both visible runs');
     tabs[0]!.click();
@@ -189,5 +192,5 @@ async function executionSubmissionContract(fixture: HTMLElement, check: (value: 
     await settle();
     check(shown() === first.runId && !mount.querySelector('[role="tablist"]'),
       'finishing the focused run returns to a tab-free single detail');
-  } finally { app.unmount(); mount.remove(); store.dispose(); }
+  } finally { app.unmount(); mount.remove(); style.remove(); store.dispose(); }
 }

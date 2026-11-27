@@ -254,8 +254,9 @@ onBeforeUnmount(() => {
   overflow: hidden;
   padding: 8px;
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--nx-radius-lg);
   background: var(--panel);
+  box-shadow: var(--nx-surface-shadow);
 }
 .history-index-pane > p {
   text-align: center;
@@ -264,6 +265,7 @@ onBeforeUnmount(() => {
 .history-index-pane > nexus-empty-state {
   border: 0;
   background: transparent;
+  box-shadow: none;
 }
 .date-heading {
   display: flex;
@@ -275,6 +277,7 @@ onBeforeUnmount(() => {
   border: 0;
   background: transparent;
   text-align: left;
+  box-shadow: none;
 }
 .date-heading strong {
   font-size: 15px;
@@ -294,6 +297,7 @@ nexus-icon {
   border: 0;
   background: transparent;
   text-align: left;
+  box-shadow: none;
 }
 .history-user strong {
   flex: 1;

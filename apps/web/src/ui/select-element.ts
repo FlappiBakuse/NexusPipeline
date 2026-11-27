@@ -2,21 +2,24 @@ import { createIdentity } from '../control/identity';
 import type { Option } from '@nexuspipeline/extension-sdk';
 import { NexusElement, elementAttributes } from './element-base.js';
 import { controlStyles } from './control-styles.js';
+import dropdownMotion from './dropdown-motion.css?inline';
+import { orientDropdown } from './dropdown-origin.js';
 
 const styles =
-  controlStyles +
+  controlStyles + dropdownMotion +
   `
-:host{display:inline-block;min-width:0;width:100%}.field{position:relative}
-input{appearance:none;width:100%;height:40px;padding:0 38px 0 12px;border:1px solid var(--border-strong,var(--nx-color-border,#394152));
-border-radius:8px;background:var(--content-control,var(--nx-color-surface,#1a2940));font:inherit;font-weight:400;color:inherit;cursor:pointer;outline:0}
+:host{display:inline-block;min-width:0;width:100%;border-radius:var(--nx-radius-sm)}.field{position:relative}
+input{appearance:none;width:100%;height:40px;padding:0 38px 0 12px;border:1px solid var(--nx-color-border,#394152);
+border-radius:var(--nx-radius-sm);background:var(--content-embedded-fill,var(--content-control,var(--nx-color-surface,#1a2940)));font:inherit;font-weight:400;color:inherit;cursor:pointer;outline:0;
+  box-shadow: var(--nx-surface-shadow);}
 .arrow{position:absolute;right:15px;top:16px;width:7px;height:7px;border:solid var(--nx-color-muted);border-width:0 1.5px 1.5px 0;transform:rotate(45deg);pointer-events:none}
 input[aria-expanded=true]{border-color:var(--nx-color-accent)}input[aria-expanded=true]+.arrow{transform:translateY(3px) rotate(225deg)}
 input[aria-invalid=true]{border-color:var(--nx-color-danger)}
 input::placeholder{color:inherit;opacity:1}
 .panel{position:fixed;inset:auto;margin:0;padding:5px;max-width:calc(100vw - 16px);max-height:300px;overflow:hidden;
-border:1px solid var(--border-strong,var(--nx-color-border,#394152));border-radius:10px;background:var(--nx-color-surface,#131f33);color:inherit;box-shadow:0 14px 40px #0004}
+border:1px solid var(--nx-color-border,#394152);border-radius:var(--nx-radius-md);background:var(--nx-color-surface,#131f33);color:inherit;box-shadow:var(--nx-surface-shadow)}
 .panel[hidden]{display:none}.panel::backdrop{background:transparent}
-.option{display:flex;align-items:center;gap:12px;width:100%;min-height:36px;text-align:left;padding:7px 10px;border:0;background:transparent;line-height:1.5;border-radius:6px}
+.option{display:flex;align-items:center;gap:12px;width:100%;min-height:36px;text-align:left;padding:7px 10px;border:0;background:transparent;line-height:1.5;border-radius:var(--nx-radius-compact);box-shadow: none;}
 .option[aria-selected=true]{color:var(--nx-color-accent);background:var(--accent-soft,color-mix(in srgb,var(--nx-color-accent,#62a0ff) 15%,transparent))}
 .option[aria-selected=true]::after{content:'';margin-left:auto;flex-shrink:0;width:6px;height:10px;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:rotate(45deg)}
 .option:focus-visible{outline-offset:-2px}.empty{padding:12px;color:var(--nx-color-muted);font-size:12px}
@@ -39,7 +42,7 @@ export class NexusSelectElement extends NexusElement {
     super(
       'nexus-select',
       styles,
-      '<div class="field"><input role="combobox" aria-expanded="false" autocomplete="off"><span class="arrow" aria-hidden="true"></span></div><nexus-scroll-area class="panel" label="Options" role="listbox" popover="manual" hidden></nexus-scroll-area>'
+      '<div class="field"><input role="combobox" aria-expanded="false" autocomplete="off"><span class="arrow" aria-hidden="true"></span></div><nexus-scroll-area data-dropdown-panel class="panel" label="Options" role="listbox" popover="manual" hidden></nexus-scroll-area>'
     );
     this.field = this.root.querySelector('input')!;
     this.list = this.root.querySelector('.panel')!;
@@ -267,6 +270,7 @@ export class NexusSelectElement extends NexusElement {
       (below >= Math.min(300, this.list.scrollHeight) || below >= above
         ? rect.bottom + 4
         : Math.max(8, rect.top - this.list.offsetHeight - 4)) + 'px';
+    orientDropdown(this.list, rect);
     if (focused)
       [...this.list.querySelectorAll<HTMLButtonElement>('button')]
         .find((button) => button.dataset.id === focused)

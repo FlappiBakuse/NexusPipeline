@@ -27,18 +27,20 @@ export class NexusTooltipElement extends FloatingElement {
       `:host{display:inline-flex;vertical-align:middle}:host([hidden]){display:none}
       :host(:empty:not([data-field-help])){position:absolute;width:0;height:0}
       button{position:relative;display:grid;place-content:center;width:20px;height:20px;padding:0;margin-inline:6px 2px;
-      border:0;border-radius:50%;background:transparent;color:var(--nx-color-muted);cursor:pointer}
+      border:0;border-radius:50%;background:transparent;color:var(--nx-color-muted);cursor:pointer;
+  box-shadow: none;}
       button::after{content:"";position:absolute;inset:-2px}
       .glyph{display:grid;place-content:center;box-sizing:border-box;width:15px;height:15px;border-radius:50%;
-      border:1px solid var(--border-strong,var(--nx-color-border));pointer-events:none}
+      border:1px solid var(--nx-color-border);pointer-events:none;
+  box-shadow: var(--nx-surface-shadow);}
       .glyph svg{display:block;width:10px;height:10px}
       button:hover,button[aria-expanded=true]{color:var(--accent)}
       button:hover .glyph,button[aria-expanded=true] .glyph{border-color:currentColor}
       button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
       .panel{position:fixed;inset:auto;margin:0;box-sizing:border-box;overflow:visible;
-      max-width:min(320px,calc(100vw - 16px));border:1px solid var(--border-strong,var(--nx-color-border));border-radius:10px;
+      max-width:min(320px,calc(100vw - 16px));border:1px solid var(--nx-color-border);border-radius:var(--nx-radius-md);
       background:var(--content-card-secondary,var(--nx-color-surface));color:var(--nx-color-text);
-      font:400 13px/1.55 system-ui;box-shadow:0 12px 28px #0005}
+      font:400 13px/1.55 system-ui;box-shadow:var(--nx-surface-shadow)}
       .panel::before{content:"";position:absolute;left:calc(var(--pointer) - 5px);top:-6px;width:10px;height:10px;
       background:inherit;border:inherit;border-right:0;border-bottom:0;transform:rotate(45deg)}
       .panel[data-side=above]::before{top:auto;bottom:-6px;transform:rotate(225deg)}

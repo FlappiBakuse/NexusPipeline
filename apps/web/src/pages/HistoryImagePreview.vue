@@ -211,6 +211,7 @@ onBeforeUnmount(() => {
   background: transparent;
   color: white;
   overflow: hidden;
+  box-shadow: none;
 }
 .history-image-preview[open] {
   display: block;
@@ -240,8 +241,8 @@ onBeforeUnmount(() => {
   min-width: 40px;
   padding: 0 12px;
   color: white;
-  border: 1px solid #ffffff66;
-  border-radius: 8px;
+  border: 1px solid var(--nx-color-border);
+  border-radius: var(--nx-radius-sm);
   background: #0006;
   font-size: 14px;
 }
@@ -270,6 +271,7 @@ onBeforeUnmount(() => {
   background: transparent;
   touch-action: none;
   cursor: grab;
+  box-shadow: none;
 }
 .history-image-position {
   position: relative;

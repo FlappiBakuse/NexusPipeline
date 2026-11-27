@@ -35,8 +35,6 @@ export const fieldMessages: Readonly<Record<string, string>> = {
   任务开始前主动启动游戏: 'Launch the game before the task',
   使用判断脚本: 'Use a judgement script',
   '允许 MCP 写入与执行': 'Allow MCP writes and execution',
-  '允许在每次运行前检查并修复配置；关闭时保留原配置。':
-    'Check and repair configuration before each run; leave the original configuration when disabled.',
   全局管理: 'Global settings',
   公网访问地址: 'Public access address',
   关键字判断: 'Keyword judgement',
@@ -198,7 +196,6 @@ export const fieldMessages: Readonly<Record<string, string>> = {
   '选择脚本或队列后，可以在这里查看实时状态。': 'Select a script or queue to view its live status here.',
   选择要绑定的脚本实例: 'Select a script instance to bind',
   选择运行用户: 'Select run account',
-  逐次配置修复: 'Repair configuration before each run',
   '配置文件路径/文件夹': 'Configuration file path or folder',
   '重启后监听本机 MCP 端点': 'Listen on the local MCP endpoint after restarting',
   '已恢复未保存的草稿，请及时保存或取消。': 'An unsaved draft was restored. Please save or cancel it.',

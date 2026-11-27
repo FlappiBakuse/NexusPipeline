@@ -194,5 +194,6 @@ const specializedTitle = computed(() => props.scriptType && activeKind.value ===
   margin: 0;
   padding: 0;
   min-width: 0;
+  box-shadow: none;
 }
 </style>

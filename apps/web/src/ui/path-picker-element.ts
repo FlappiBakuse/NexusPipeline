@@ -4,8 +4,14 @@ import { controlStyles, compositeFieldStyles } from './control-styles.js';
 const styles =
   controlStyles +
   `
-:host{display:flex;min-width:0;gap:8px}input{min-width:0;min-height:40px;padding:8px 12px;border:1px solid var(--nx-color-border,#394152);
-border-radius:var(--nx-radius-sm,8px);background:var(--content-control,#ffffff08)}
+:host{display:flex;width:100%;min-width:0;box-shadow:var(--nx-surface-shadow)}input{flex:1;min-width:0;min-height:40px;padding:8px 12px;border:1px solid var(--nx-color-border,#394152);
+border-radius:var(--nx-radius-sm);background:var(--content-embedded-fill,var(--content-control,#ffffff08));
+  }
+.actions{display:flex}
+input:has(+ .actions > button){border-start-end-radius:0;border-end-end-radius:0}
+button{display:grid;place-items:center;min-width:42px;width:42px;padding:0;border-inline-start:0;background:var(--content-embedded-fill,var(--content-control,#ffffff08));border-radius:0;box-shadow:none}
+button:last-child{border-start-end-radius:var(--nx-radius-sm);border-end-end-radius:var(--nx-radius-sm)}
+svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.6}
 `;
 
 export class PathPicker extends NexusElement {
@@ -15,10 +21,7 @@ export class PathPicker extends NexusElement {
   constructor() {
     super(
       'nexus-path-picker',
-      styles + compositeFieldStyles +
-        `:host{width:100%;gap:0}input{flex:1;border-radius:8px 0 0 8px}
-      .actions{display:flex}button{display:grid;place-items:center;min-width:42px;width:42px;padding:0;border-radius:0}
-      button:last-child{border-radius:0 8px 8px 0}svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.6}`,
+      styles + compositeFieldStyles,
       '<input type="text"><span class="actions"></span>'
     );
     this.field = this.root.querySelector('input')!;

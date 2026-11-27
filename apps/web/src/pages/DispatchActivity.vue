@@ -197,13 +197,14 @@ registerMessages({
   max-width: min(270px, 88vw);
   padding: 0 11px;
   border: 1px solid var(--border);
-  border-radius: 10px 10px 4px 4px;
+  border-radius: var(--nx-radius-sm) var(--nx-radius-sm) var(--nx-radius-compact) var(--nx-radius-compact);
   background: var(--panel);
   color: var(--muted);
   font: inherit;
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
+  box-shadow: var(--nx-surface-shadow);
 }
 .dispatch-tab:hover {
   color: var(--text);
@@ -256,7 +257,7 @@ registerMessages({
   height: 18px;
   padding-inline: 5px;
   border: 1px solid color-mix(in srgb, var(--ok) 28%, transparent);
-  border-radius: 6px;
+  border-radius: var(--nx-radius-compact);
   background: color-mix(in srgb, var(--ok) 14%, transparent);
   color: var(--ok);
   font-size: 10px;
@@ -289,6 +290,9 @@ registerMessages({
   gap: 12px;
   padding: 20px;
 }
+.dispatch-idle .running-empty {
+  border-radius: var(--nx-radius-md);
+}
 .dispatch-idle > strong {
   font-size: 15px;
   line-height: 1.35;
@@ -304,7 +308,7 @@ registerMessages({
   gap: 8px;
   padding: 8px 12px;
   border: 1px solid color-mix(in srgb, var(--warn) 38%, var(--border));
-  border-radius: 10px;
+  border-radius: var(--nx-radius-md);
   background: color-mix(in srgb, var(--warn) 10%, var(--panel));
   font-size: 12px;
 }

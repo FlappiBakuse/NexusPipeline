@@ -21,7 +21,7 @@ public sealed class SettingsServiceTests
         var identity = Identity(first);
         fixture.Service.Save(identity, first, DateTimeOffset.UtcNow);
         Assert.Equal(60000, fixture.Service.Read().Saved.Values.Service.WebPort);
-        Assert.Equal(58731, fixture.Service.Read().Effective.Service.WebPort);
+        Assert.Equal(0, fixture.Service.Read().Effective.Service.WebPort);
         var second = new HostSettingsChange(1, first.Values with { HistoryRetentionDays = 40 });
         fixture.Service.Save(Identity(second), second, DateTimeOffset.UtcNow);
         Assert.False(fixture.Service.Save(identity, first, DateTimeOffset.UtcNow).IsNew);

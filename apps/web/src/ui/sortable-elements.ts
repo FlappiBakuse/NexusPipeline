@@ -70,7 +70,7 @@ export class DragHandle extends NexusElement {
     super(
       'nexus-drag-handle',
       controlStyles +
-        'button{min-width:var(--nx-drag-size,24px);width:var(--nx-drag-size,24px);min-height:var(--nx-drag-size,24px);height:var(--nx-drag-size,24px);padding:0;border:0;background:transparent;color:var(--nx-color-muted);cursor:grab;touch-action:none}button:active{cursor:grabbing}',
+        'button{min-width:var(--nx-drag-size,24px);width:var(--nx-drag-size,24px);min-height:var(--nx-drag-size,24px);height:var(--nx-drag-size,24px);padding:0;border:0;box-shadow:none;background:transparent;color:var(--nx-color-muted);cursor:grab;touch-action:none}button:active{cursor:grabbing}',
       '<button type="button" aria-keyshortcuts="ArrowUp ArrowDown" draggable="false"><svg width="10" height="14" viewBox="0 0 10 14" aria-hidden="true"><g fill="currentColor"><circle cx="3" cy="3" r="1.2"/><circle cx="7" cy="3" r="1.2"/><circle cx="3" cy="7" r="1.2"/><circle cx="7" cy="7" r="1.2"/><circle cx="3" cy="11" r="1.2"/><circle cx="7" cy="11" r="1.2"/></g></svg></button>'
     );
     this.button = this.root.querySelector('button')!;

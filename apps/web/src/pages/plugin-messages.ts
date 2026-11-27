@@ -4,6 +4,7 @@ registerMessages({
   插件目录不可用: 'Plugin directory unavailable',
   等待移除: 'Waiting for removal',
   '正在加载插件…': 'Loading plugins…',
+  '正在安装随附插件…': 'Installing bundled plugins…',
   返回插件列表: 'Back to plugin list',
   通用: 'General',
   插件详情: 'Plugin details',

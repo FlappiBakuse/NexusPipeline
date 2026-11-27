@@ -20,7 +20,7 @@ button {
 input,
 textarea {
   font-size: 13px;
-  background: var(--content-control);
+  background: var(--content-embedded-fill, var(--content-control));
 }
 input::placeholder,
 textarea::placeholder {
@@ -44,10 +44,11 @@ input[type='radio'] {
   min-height: 18px;
   padding: 0;
   margin: 0 5px 0 0;
-  border: 1px solid var(--border-strong);
-  border-radius: 5px;
+  border: 1px solid var(--nx-color-border);
+  border-radius: var(--nx-radius-compact);
   vertical-align: middle;
   cursor: pointer;
+  box-shadow: var(--nx-surface-shadow);
 }
 input[type='checkbox']::before {
   content: '';
@@ -80,9 +81,10 @@ input[type='range'] {
   margin: 12px 0;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--nx-radius-pill);
   background: var(--border-strong);
   cursor: pointer;
+  box-shadow: none;
 }
 input[type='range']::-webkit-slider-thumb {
   appearance: none;
@@ -97,18 +99,20 @@ input[type='file'] {
   padding: 0;
   border: 0;
   background: transparent;
+  box-shadow: none;
 }
 input[type='file']::file-selector-button {
   appearance: none;
   min-height: 40px;
   padding: 0 16px;
   margin-right: 12px;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  border: 1px solid var(--nx-color-border);
+  border-radius: var(--nx-radius-sm);
   background: var(--content-control);
   color: var(--text);
   font: inherit;
   cursor: pointer;
+  box-shadow: var(--nx-surface-shadow);
 }
 textarea {
   resize: none;
@@ -120,8 +124,9 @@ progress {
   height: 6px;
   overflow: hidden;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--nx-radius-pill);
   background: var(--panel-soft);
+  box-shadow: none;
 }
 progress::-webkit-progress-bar {
   background: var(--panel-soft);
@@ -186,8 +191,9 @@ nexus-tooltip[data-field-help] {
   gap: 16px;
   padding: 14px 16px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--nx-radius-md);
   background: var(--content-card-soft);
+  box-shadow: var(--nx-surface-shadow);
 }
 .switch-field > nexus-switch {
   justify-self: end;
@@ -204,11 +210,11 @@ button.primary:hover {
 button.quiet {
   background: transparent;
   border-color: transparent;
+  box-shadow: none;
 }
 button.danger {
   color: var(--bad);
   background: var(--bad-soft);
-  border-color: var(--bad-border);
 }
 button:disabled,
 input:disabled,
@@ -229,7 +235,7 @@ textarea:disabled,
   background: var(--border-strong);
   border: 2px solid transparent;
   background-clip: padding-box;
-  border-radius: 8px;
+  border-radius: var(--nx-radius-pill);
 }
 ::-webkit-scrollbar-track {
   background: transparent;

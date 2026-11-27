@@ -157,7 +157,7 @@ internal sealed record SettingsExtensionIntent(long SettingsRevision, bool Desir
 internal static class HostSettingsRows
 {
     private const string Columns = "revision,auto_start,desktop_mode,minimize_to_tray,open_desktop,web_port,remote_access," +
-        "mcp_enabled,mcp_write,mcp_port,config_repair,retention_days,log_level,locale,proxy_mode,proxy_url,proxy_user," +
+        "mcp_enabled,mcp_write,mcp_port,retention_days,log_level,locale,proxy_mode,proxy_url,proxy_user," +
         "update_check,update_auto,plugin_auto,update_channel,update_source,plugin_source,retry_enabled,retry_backoff_seconds";
 
     internal static HostSettingsSnapshot ReadCurrent(SqliteConnection connection, SqliteTransaction transaction)
@@ -181,11 +181,11 @@ internal static class HostSettingsRows
             if (!row.Read()) throw new IOException("settings_snapshot_missing");
             value = new(row.GetBoolean(1), new((DesktopMode)row.GetInt32(2), row.GetBoolean(3), row.GetBoolean(4)),
                 new(row.GetInt32(5), row.GetBoolean(6), row.GetBoolean(7), row.GetBoolean(8), row.GetInt32(9)),
-                row.GetBoolean(10), row.GetInt32(11), (HostLogLevel)row.GetInt32(12), (HostLocale)row.GetInt32(13),
-                new((ProxyMode)row.GetInt32(14), Optional(row, 15), row.GetString(16)),
-                new(row.GetBoolean(17), row.GetBoolean(18), row.GetBoolean(19), (UpdateChannel)row.GetInt32(20),
-                    Optional(row, 21), (PluginSourceChannel)row.GetInt32(22)), [])
-                { AutomaticRetry = new(row.GetBoolean(23), row.GetInt32(24)) };
+                row.GetInt32(10), (HostLogLevel)row.GetInt32(11), (HostLocale)row.GetInt32(12),
+                new((ProxyMode)row.GetInt32(13), Optional(row, 14), row.GetString(15)),
+                new(row.GetBoolean(16), row.GetBoolean(17), row.GetBoolean(18), (UpdateChannel)row.GetInt32(19),
+                    Optional(row, 20), (PluginSourceChannel)row.GetInt32(21)), [])
+                { AutomaticRetry = new(row.GetBoolean(22), row.GetInt32(23)) };
         }
         var extensions = ImmutableArray.CreateBuilder<ExtensionPreference>();
         using (var command = connection.CreateCommand())
@@ -207,11 +207,12 @@ internal static class HostSettingsRows
         var v = snapshot.Values;
         object?[] values = [snapshot.Revision, v.AutoStart, v.Desktop.Mode, v.Desktop.MinimizeToTray, v.Desktop.OpenOnStartup,
             v.Service.WebPort, v.Service.AllowRemoteAccess, v.Service.McpEnabled, v.Service.McpWriteEnabled, v.Service.McpPort,
-            v.AllowConfigRepair, v.HistoryRetentionDays, v.LogLevel, v.Locale, v.Proxy.Mode, v.Proxy.Url, v.Proxy.UserName,
+            v.HistoryRetentionDays, v.LogLevel, v.Locale, v.Proxy.Mode, v.Proxy.Url, v.Proxy.UserName,
             v.Updates.CheckEnabled, v.Updates.AutoApplyEnabled, v.Updates.PluginAutoUpdateEnabled, v.Updates.Channel,
             v.Updates.SourceUrl, v.Updates.PluginSource, v.AutomaticRetry.Enabled, v.AutomaticRetry.BackoffSeconds];
-        Execute(connection, transaction, $"INSERT INTO system.settings_snapshots({Columns}) VALUES(" +
-            string.Join(',', Enumerable.Range(0, values.Length).Select(index => "$" + index)) + ");", values);
+        // The existing catalog requires this column. Configuration repair is always available subject to capability checks.
+        Execute(connection, transaction, $"INSERT INTO system.settings_snapshots({Columns},config_repair) VALUES(" +
+            string.Join(',', Enumerable.Range(0, values.Length).Select(index => "$" + index)) + ",1);", values);
         foreach (var item in v.Extensions)
             Execute(connection, transaction, "INSERT INTO system.settings_extensions VALUES($0,$1,$2);", snapshot.Revision, item.ExtensionId, item.Enabled);
     }

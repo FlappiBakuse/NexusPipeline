@@ -8,7 +8,7 @@ export function settingsValues(value: unknown): ControlHostSettingsValues {
   const webPort = boundedInteger(service.webPort, 0, 65535);
   if (webPort > 0 && webPort < 1024) throw new TypeError('settings_web_port_invalid');
   return {
-    autoStart: booleanValue(row.autoStart), allowConfigRepair: booleanValue(row.allowConfigRepair),
+    autoStart: booleanValue(row.autoStart),
     historyRetentionDays: boundedInteger(row.historyRetentionDays, 1, 180),
     logLevel: enumValue(row.logLevel, ['debug', 'info', 'warning', 'error', 'fatal']),
     locale: enumValue(row.locale, ['zhCn', 'enUs']),

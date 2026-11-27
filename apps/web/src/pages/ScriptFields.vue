@@ -382,8 +382,9 @@ h3 {
   width: calc((100% - 24px) / 3);
   padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--nx-radius-md);
   background: var(--content-control);
+  box-shadow: var(--nx-surface-shadow);
 }
 .judge-switch.enabled {
   border-color: var(--accent);

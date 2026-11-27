@@ -11,7 +11,7 @@ export const cases: string[] = [];
 function check(value: unknown, name: string): void { assert(value, name); cases.push(name); }
 const values: ControlHostSettingsValues = { autoStart: false, desktop: { mode: 'browser', minimizeToTray: true, openOnStartup: false },
   service: { webPort: 0, allowRemoteAccess: false, mcpEnabled: false, mcpWriteEnabled: false, mcpPort: 18291 },
-  allowConfigRepair: false, historyRetentionDays: 30, logLevel: 'info', locale: 'zhCn', proxy: { mode: 'none', url: null, userName: '' },
+  historyRetentionDays: 30, logLevel: 'info', locale: 'zhCn', proxy: { mode: 'none', url: null, userName: '' },
   updates: { checkEnabled: false, autoApplyEnabled: false, pluginAutoUpdateEnabled: false, channel: 'stable', sourceUrl: null, pluginSource: 'develop' },
   extensions: [{ extensionId: 'sample', enabled: true }], automaticRetry: { enabled: false, backoffSeconds: 5 } };
 const candidate: CatalogEntry = { extensionId: 'sample', artifactName: 'Sample', packageVersion: '0.5.0', kind: 'managed-code',

@@ -41,23 +41,37 @@ function taskDraft(binding: Binding) {
 const available = computed(() =>
   props.bundle.scripts.filter((item) => !props.bindings.some((binding) => binding.scriptId === item.id))
 );
-async function animateBindingLayout(root: HTMLElement | undefined, change: () => void): Promise<void> {
-  const cards = () => [...(root?.querySelectorAll<HTMLElement>('.binding') || [])];
+async function toggleBinding(id: string): Promise<void> {
+  const section = root.value;
+  if (!section) return;
+  const cards = () => [...section.querySelectorAll<HTMLElement>('.binding')];
   const previous = new Map(cards().map(card => [card, card.getBoundingClientRect()]));
   for (const card of cards()) for (const animation of card.getAnimations()) animation.cancel();
-  change();
+  const next = expanded.value === id ? '' : id;
+  expanded.value = next;
+  choosing.value = false;
+  visited.value.add(id);
   await nextTick();
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches || !root?.isConnected) return;
-  const configured = getComputedStyle(root).getPropertyValue('--nx-motion-duration-normal');
-  if (configured && parseFloat(configured) < 1) return;
-  for (const card of cards()) {
-    const before = previous.get(card), after = card.getBoundingClientRect();
-    if (!before || !after.width || !after.height) continue;
-    card.animate([
-      { transform: `translate(${before.left - after.left}px,${before.top - after.top}px) scale(${before.width / after.width},${before.height / after.height})`, transformOrigin: 'top left' },
-      { transform: 'none', transformOrigin: 'top left' }
-    ], { duration: 180, easing: 'cubic-bezier(.2,.8,.2,1)' });
+  if (!props.visible || !section.isConnected || expanded.value !== next) return;
+  const opened = section.querySelector<HTMLElement>('.binding.expanded');
+  const configured = getComputedStyle(section).getPropertyValue('--nx-motion-duration-normal');
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches && !(configured && parseFloat(configured) < 1)) {
+    for (const card of cards()) {
+      if (card === opened) continue;
+      const before = previous.get(card), after = card.getBoundingClientRect();
+      if (!before || !after.width || !after.height) continue;
+      card.animate([
+        { transform: `translate(${before.left - after.left}px,${before.top - after.top}px) scale(${before.width / after.width},${before.height / after.height})`, transformOrigin: 'top left' },
+        { transform: 'none', transformOrigin: 'top left' }
+      ], { duration: 180, easing: 'cubic-bezier(.2,.8,.2,1)' });
+    }
   }
+  if (!opened) return;
+  const reveal = opened.querySelector<HTMLElement>('.binding-reveal')!;
+  // Its final height supplies the scroll range needed to align the card with the viewport.
+  await Promise.allSettled(reveal.getAnimations().map(animation => animation.finished));
+  const alignment = { block: 'start', inline: 'nearest', behavior: 'instant', container: 'nearest' } as const;
+  if (props.visible && opened.isConnected && expanded.value === next) opened.scrollIntoView(alignment);
 }
 function toggleChoice(id: string): void {
   choices.value = choices.value.includes(id)
@@ -180,7 +194,7 @@ function discardConfiguration(binding: Binding): void {
           v-for="binding in bindings"
           :key="binding.id"
           :data-item-id="binding.id" :data-draft-item="binding.id"
-          :class="['binding', { expanded: expanded === binding.id }]" data-surface="collapsible"
+          :class="['binding', { expanded: expanded === binding.id }]"
         >
           <div class="binding-heading">
             <nexus-drag-handle
@@ -193,7 +207,7 @@ function discardConfiguration(binding: Binding): void {
               class="binding-toggle"
               :disabled="removing"
               :aria-expanded="expanded === binding.id"
-              @click="animateBindingLayout(root, () => { expanded = expanded === binding.id ? '' : binding.id; choosing = false; visited.add(binding.id); })"
+              @click="toggleBinding(binding.id)"
             >
               <img class="binding-icon" :src="scriptIcon(scripts.get(binding.scriptId)?.extensionId)" alt="" />
               <span>
@@ -302,17 +316,17 @@ small {
 .binding-grid,
 .choice-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
   align-items: start;
   margin-top: 16px;
 }
+.binding-grid { grid-template-columns: minmax(0, 1fr); }
+.choice-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .binding {
   min-width: 0;
-  border: 1px solid var(--content-card-border, var(--border));
-  border-radius: 10px;
+  border: 1px solid transparent;
   overflow: hidden;
 }
+.binding + .binding { border-block-start-color: var(--border); }
 .binding.expanded {
   grid-column: 1 / -1;
   order: -1;
@@ -334,6 +348,7 @@ small {
   background: transparent;
   min-width: 0;
   text-align: left;
+  box-shadow: none;
 }
 .binding-toggle > span:first-of-type {
   display: grid;
@@ -352,7 +367,8 @@ small {
   width: 36px;
   height: 36px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--nx-radius-compact);
+  box-shadow: var(--nx-surface-shadow);
 }
 .badges {
   display: flex;
@@ -364,9 +380,8 @@ small {
 }
 .binding-content {
   display: grid;
-  gap: 16px;
+  gap: 20px;
   padding: 16px;
-  border-top: 1px solid var(--border);
   min-width: 0;
   grid-template-columns: minmax(0, 1fr);
 }
@@ -382,8 +397,14 @@ small {
 }
 .script-picker {
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--nx-radius-md);
   padding: 16px;
+  box-shadow: var(--nx-surface-shadow);
+}
+.script-picker > nexus-empty-state {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 .choice-grid button {
   display: flex;
@@ -412,6 +433,4 @@ small {
 }
 
 .binding-icon { width: 28px; height: 28px; flex: none; object-fit: contain; }
-
-.binding.expanded { border-color: var(--content-control-border); }
 </style>

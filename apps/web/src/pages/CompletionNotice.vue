@@ -179,7 +179,7 @@ onBeforeUnmount(() => {
   gap: 10px;
   padding: 18px;
   border: 1px solid var(--warn);
-  border-radius: 12px;
+  border-radius: var(--nx-radius-md);
   background: var(--panel);
 }
 .completion h2,

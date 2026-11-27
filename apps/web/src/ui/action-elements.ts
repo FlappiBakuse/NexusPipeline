@@ -3,12 +3,14 @@ import { NexusElement, elementAttributes } from './element-base.js';
 import { FloatingElement } from './floating-element.js';
 import { controlStyles } from './control-styles.js';
 import { iconPaths } from './icon-paths.js';
+import dropdownMotion from './dropdown-motion.css?inline';
 
 const panelStyle =
-  controlStyles +
+  controlStyles + dropdownMotion +
   `
 .panel{z-index:100;min-width:160px;max-width:min(360px,calc(100vw - 16px));max-height:min(420px,calc(100vh - 16px));overflow:hidden;
-padding:0;border:0;background:transparent;outline:0}
+padding:0;border:0;background:transparent;outline:0;
+  box-shadow: none;}
 .panel[hidden]{display:none}button{text-align:left}button[data-tone=danger]{color:var(--nx-color-danger,#ef7070)}
 `;
 
@@ -58,7 +60,7 @@ export class NexusMenuElement extends FloatingElement {
     super(
       'nexus-menu',
       panelStyle,
-      '<slot name="trigger"></slot><nexus-scroll-area class="panel" label="Menu" role="menu" tabindex="-1" hidden></nexus-scroll-area>',
+      '<slot name="trigger"></slot><nexus-scroll-area class="panel" data-dropdown-panel label="Menu" role="menu" tabindex="-1" hidden></nexus-scroll-area>',
       '.panel'
     );
   }
@@ -130,7 +132,7 @@ export class NexusButtonElement extends NexusElement {
       'nexus-button',
       controlStyles +
         `button{width:100%;min-width:0;padding:var(--nx-button-padding,0 15px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:var(--nx-button-fill,transparent)}
-      button[data-tone=danger]{background:var(--bad-soft,transparent);border-color:color-mix(in srgb,var(--nx-color-danger) 45%,transparent)}
+      button[data-tone=danger]{background:var(--bad-soft,transparent)}
     `,
       '<button><slot name="icon"></slot><slot></slot></button>'
     );

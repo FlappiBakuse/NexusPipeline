@@ -14,8 +14,9 @@ export class NexusBadgeElement extends NexusElement {
       'nexus-badge',
       tones +
         `:host{display:inline-flex;align-items:center;min-width:0;max-width:100%;height:24px;
-    padding:2px 9px;border:1px solid var(--content-control-border,var(--nx-color-border));border-radius:6px;
-    background:var(--muted-soft,var(--content-card-soft));color:var(--nx-color-muted);font-size:12px;font-weight:650;line-height:18px;white-space:nowrap}
+    padding:2px 9px;border:1px solid var(--content-control-border,var(--nx-color-border));border-radius:var(--nx-radius-compact);
+    background:var(--muted-soft,var(--content-card-soft));color:var(--nx-color-muted);font-size:12px;font-weight:650;line-height:18px;white-space:nowrap;
+  box-shadow: var(--nx-surface-shadow);}
     :host([data-tone=info]){background:var(--accent-soft);color:var(--nx-color-accent)}
     :host([data-tone=success]){background:var(--ok-soft);color:var(--success)}
     :host([data-tone=warning]){background:var(--warn-soft);color:var(--warning)}
@@ -107,7 +108,7 @@ export class EmptyState extends NexusElement {
     super(
       'nexus-empty-state',
       tones +
-        `:host{box-sizing:border-box;display:grid;justify-items:center;align-content:center;gap:5px;min-height:147px;padding:24px 20px;text-align:center;line-height:1.55;border:1px solid var(--content-card-border,var(--nx-color-border));border-radius:var(--nx-radius-lg);background:var(--_nexus-card-fill,var(--content-card,var(--nx-color-surface)))}
+        `:host{box-sizing:border-box;display:grid;justify-items:center;align-content:center;gap:5px;min-height:147px;padding:24px 20px;text-align:center;line-height:1.55;border:1px solid var(--content-card-border,var(--nx-color-border));border-radius:var(--nx-radius-lg);background:var(--content-embedded-fill,var(--content-card,var(--nx-color-surface)));box-shadow: var(--nx-surface-shadow);}
     h3{margin:0;font-size:15px;font-weight:700;color:var(--tone,var(--nx-color-text,#e9edf5))}p{margin:0;font-size:13px;font-weight:400;color:var(--nx-color-muted,#9eacc1);overflow-wrap:anywhere}`,
       '<slot name="icon"></slot><h3></h3><p></p><slot name="actions"></slot>'
     );
@@ -152,7 +153,7 @@ export class LoadingState extends NexusElement {
     super(
       'nexus-loading-state',
       `:host{display:grid;justify-items:center;align-content:center;gap:8px;min-height:176px;padding:32px 24px;color:var(--nx-color-text)}
-    .bar{width:min(280px,100%);height:6px;border-radius:99px;background:var(--content-card-soft);overflow:hidden}
+    .bar{width:min(280px,100%);height:6px;border-radius:var(--nx-radius-pill);background:var(--content-card-soft);overflow:hidden}
     .fill{height:100%;border-radius:inherit;background:var(--nx-color-accent);transition:width .2s ease}
     :host([data-indeterminate]) .fill{animation:loading 1.4s ease-in-out infinite}:host([data-paused]) .fill{animation-play-state:paused}
     @keyframes loading{0%{transform:translateX(-120%)}50%{transform:translateX(100%)}100%{transform:translateX(240%)}}

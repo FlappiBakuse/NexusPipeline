@@ -35,10 +35,11 @@ registerMessages({ 实时日志: 'Live log', 前置: 'Pre-hook', 主任务: 'Mai
   flex-direction: column;
   min-width: 0;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--nx-radius-md);
   overflow: clip;
   background: var(--log-bg);
   color: var(--log-text);
+  box-shadow: var(--nx-surface-shadow);
 }
 .script-log-live { height: 100%; }
 .script-log-toolbar {
@@ -61,10 +62,11 @@ registerMessages({ 实时日志: 'Live log', 前置: 'Pre-hook', 主任务: 'Mai
   min-height: 24px;
   padding: 1px 6px;
   border-color: transparent;
-  border-radius: 5px;
+  border-radius: var(--nx-radius-sm);
   background: transparent;
   color: var(--muted);
   font-size: 12px;
+  box-shadow: none;
 }
 .script-log-roles button[aria-pressed='true'] {
   border-color: var(--border);
