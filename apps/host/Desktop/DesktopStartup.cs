@@ -1,6 +1,7 @@
 using NexusPipeline.Core.Extensions;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Host.Composition;
+using NexusPipeline.Host.Lifecycle;
 using NexusPipeline.Platform.Storage;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
@@ -56,8 +57,22 @@ internal static class DesktopStartup
                     lease, resumeWindow, showStartupProgress);
                 if (activatePending) progress.Activate();
             }
-            return await ApplicationHost.RunCoreAsync(runtimeRoot, requestedPort, nativeClientProcessId, lease, maintenanceOrigin,
-                launchDesktop, resumeWindow, installationBundle, showStartupProgress, progress);
+            HostRestartTarget? previous = null;
+            while (true)
+            {
+                var restart = new HostServiceRestart(previous);
+                try
+                {
+                    var result = await ApplicationHost.RunCoreAsync(previous?.Reply.Port ?? requestedPort,
+                        nativeClientProcessId, lease, maintenanceOrigin, resumeWindow, installationBundle,
+                        showStartupProgress && previous is null, progress, restart);
+                    if (restart.Next is not { } next) return result;
+                    lease.BeginServiceGeneration();
+                    previous = next;
+                }
+                catch { restart.Next?.Listener.Dispose(); throw; }
+                finally { restart.Previous?.Listener.Dispose(); }
+            }
         }
         catch (Exception error) when (desktopRequested)
         {

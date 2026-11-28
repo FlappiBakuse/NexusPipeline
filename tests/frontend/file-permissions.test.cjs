@@ -16,7 +16,7 @@ function fixture() {
   const window = { isDestroyed: () => false, webContents: contents };
   const selected = { requestingUrl: contents.mainFrame.url, isDirectory: false,
     fileAccessType: 'writable', filePath: 'D:\\Projects\\Temp\\log.txt' };
-  installFilePermissions(window, page, { showMessageBoxSync: (owner, options) => {
+  installFilePermissions(window, () => page, { showMessageBoxSync: (owner, options) => {
     state.options = options;
     assert.equal(owner, window); assert.equal(options.detail, selected.filePath);
     state.prompts++; state.duringPrompt?.(); return state.reply;

@@ -25,6 +25,9 @@ export function useAppAppearance(store: AppStore) {
     { immediate: true }
   );
   watch(() => store.state.interface, apply, { immediate: true });
+  watch(() => store.state.interface?.values.theme, value => {
+    if (value) void desktop?.setTheme(value).catch(store.report);
+  }, { immediate: true });
   watch(
     () => store.state.interface?.values.locale,
     (value) => {

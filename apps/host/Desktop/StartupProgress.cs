@@ -92,6 +92,11 @@ internal sealed class StartupProgress : IDisposable
 
     internal Task PresentInterfaceAsync() => _channel.SendAsync(new { kind = "present" });
 
+    internal Task RefreshAsync(int port, DesktopPreferences preferences) =>
+        _channel.SendAsync(new { kind = "restart", address = "http://127.0.0.1:" + port,
+            minimizeToTray = preferences.MinimizeToTray,
+            mode = preferences.Mode == DesktopMode.Browser ? "browser" : "desktop" });
+
     internal async Task FailAsync(Exception error)
     {
         var reason = Reason(error);

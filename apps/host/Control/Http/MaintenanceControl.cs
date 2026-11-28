@@ -61,7 +61,7 @@ internal sealed class HostUpdateControl(ControlAuthentication authority, HostUpd
 }
 
 [SupportedOSPlatform("windows")]
-internal sealed class MaintenanceControl(ControlAuthentication authority, HostMaintenanceController maintenance)
+internal sealed class MaintenanceControl(ControlAuthentication authority, HostMaintenanceController maintenance, HostServiceRestart restart)
 {
     internal void Map(WebApplication app)
     {
@@ -73,11 +73,34 @@ internal sealed class MaintenanceControl(ControlAuthentication authority, HostMa
             var operation = ControlQueryValues.Id(operationId);
             try
             {
-                return Results.Json(await maintenance.RestartAsync(operation, context.RequestAborted),
+                var origin = context.Request.Scheme + "://" + context.Request.Host.Value;
+                return Results.Json(await maintenance.RestartAsync(operation, origin, context.Response, context.RequestAborted),
                     NotificationUseCases.Json, statusCode: 202);
             }
             catch (IOException error) when (error.Message == "maintenance_handoff_unavailable")
             { return ControlErrors.Reported(409, "host_restart_unavailable", "restart", error, operation); }
+            catch (System.ComponentModel.Win32Exception error)
+            { return ControlErrors.Reported(409, "host_restart_unavailable", "restart-listener", error, operation); }
+        });
+        app.MapGet("/control/v1/maintenance/restart/{operationId}", (HttpContext context, string operationId) =>
+        {
+            _ = authority.Require(context, ControlCapability.MaintenanceWrite); Query(context);
+            var ready = restart.Read(ControlQueryValues.Id(operationId));
+            if (ready is null) return Results.NotFound();
+            if (restart.Previous!.AllowsObserver(context))
+            {
+                context.Response.Headers.AccessControlAllowOrigin = restart.Previous.Origin;
+                context.Response.Headers.Vary = "Origin";
+            }
+            return Results.Json(ready, NotificationUseCases.Json);
+        });
+        app.MapGet("/control/v1/maintenance/restart-observer.js", (HttpContext context) =>
+        {
+            _ = authority.Require(context, ControlCapability.MaintenanceWrite); Query(context);
+            var origin = new Uri(context.Request.Scheme + "://" + context.Request.Host.Value);
+            context.Response.Headers.ContentSecurityPolicy =
+                $"default-src 'none'; connect-src 'self' {origin.Scheme}://{origin.IdnHost}:*";
+            return Results.Text(RestartObserver, "text/javascript");
         });
         app.MapGet("/control/v1/maintenance/operations/{operationId}", (HttpContext context, string operationId) =>
         {
@@ -100,4 +123,29 @@ internal sealed class MaintenanceControl(ControlAuthentication authority, HostMa
     }
     private static void Query(HttpContext context)
     { if (context.Request.QueryString.HasValue) throw new ControlRequestException(400, "request_query_invalid"); }
+
+    private const string RestartObserver = """
+        self.onmessage = async ({ data: expected }) => {
+          const url = new URL('/control/v1/maintenance/restart/' + expected.operationId, self.location.origin);
+          url.port = expected.port;
+          const deadline = performance.now() + 45000;
+          while (performance.now() < deadline) {
+            try {
+              const response = await fetch(url, { cache: 'no-store', credentials: 'omit', redirect: 'error',
+                signal: AbortSignal.timeout(2500) });
+              if (response.ok) {
+                const actual = await response.json();
+                if (actual.state === 'ready' && ['instanceId', 'operationId', 'processId', 'port']
+                  .every(key => expected[key] === actual[key])) {
+                  self.postMessage('ready');
+                  return;
+                }
+              }
+            } catch {}
+            await new Promise(resolve => setTimeout(resolve, 250));
+          }
+          self.postMessage('unavailable');
+        };
+        self.postMessage('listening');
+        """;
 }

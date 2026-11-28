@@ -34,7 +34,7 @@ test('drawn window actions require the bound current main-frame session and reta
     async fetch(url) { requests.push(url.pathname); return {}; },
   };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../apps/desktop/native-bridge.cjs'), 'utf8'), sandbox);
-  const bridge = sandbox.module.exports.installNativeBridge(window, { address: page }, page, () => { quit = true; });
+  const bridge = sandbox.module.exports.installNativeBridge(window, { address: page }, () => { quit = true; });
   const event = { sender: window.webContents, senderFrame: window.webContents.mainFrame };
   const action = (type, extra = {}) => handlers.get('desktop.action')(event, { type, sessionId: identity.sessionId, ...extra });
   await assert.rejects(action('window.minimize', { sessionId: undefined }), /desktop_request_rejected/);

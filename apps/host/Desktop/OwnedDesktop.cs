@@ -66,7 +66,6 @@ internal sealed class OwnedDesktop : IDisposable
     private readonly ProcessStartObserver _observer;
     private readonly OwnedWorkerIdentity _root;
     private readonly DesktopLaunch _launch;
-    private DesktopControl? _control;
     internal NativeClientBinding Binding { get; }
 
     internal OwnedDesktop(RuntimeInstance instance, string payloadRoot, DesktopResponseSigner signer,
@@ -107,15 +106,8 @@ internal sealed class OwnedDesktop : IDisposable
 
     internal void Start() => _launch.Start();
 
-    internal void BindControl(DesktopControl control)
+    internal async Task ExitForMaintenanceAsync(DesktopControl control, PreparedDesktopExit prepared, CancellationToken cancellation)
     {
-        if (_control is not null) throw new InvalidOperationException("desktop_control_already_bound");
-        _control = control;
-    }
-
-    internal async Task ExitForMaintenanceAsync(PreparedDesktopExit prepared, CancellationToken cancellation)
-    {
-        var control = _control ?? throw new IOException("desktop_control_unavailable");
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         deadline.CancelAfter(TimeSpan.FromSeconds(30));
         control.PrepareMaintenanceExit(prepared);

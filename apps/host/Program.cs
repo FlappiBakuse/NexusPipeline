@@ -59,9 +59,6 @@ if (args is ["update-session", var windowPid] && OperatingSystem.IsWindows() &&
     int.TryParse(windowPid, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var window) && window > 0)
     return await NexusPipeline.Host.Lifecycle.UpdateWindowHost.RunAsync(window);
 
-if (args is ["restart-start", ..] && OperatingSystem.IsWindows())
-    return await NexusPipeline.Host.Lifecycle.HostRestartStart.RunAsync(args);
-
 if (args is ["--version"])
 {
     Console.WriteLine(Assembly.GetExecutingAssembly().GetName().Version);

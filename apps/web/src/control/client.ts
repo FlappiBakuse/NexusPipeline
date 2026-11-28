@@ -44,10 +44,7 @@ export class ControlClient {
   setExitBlocked(value: boolean): void { this.exitBlocked = value; }
   private requireWrite(): void {
     if (this.exitBlocked) throw new ControlFailure(409, 'desktop_exit_in_progress');
-  }
-  // The restart response waits for native exit, so its own RPC cannot block that signed handoff.
-  canExitMaintenance(): boolean {
-    return this.writes === (this.restarting ? 1 : 0);
+    if (this.restarting) throw new ControlFailure(409, 'host_restart_unavailable');
   }
   authenticate(token: string): void {
     this.authority.abort();
@@ -93,15 +90,16 @@ export class ControlClient {
       this.writes--;
     }
   }
-  async restartHost<T>(operationId: string, decode: Decoder<T>): Promise<T> {
+  async restartHost<T>(operationId: string, decode: Decoder<T>, observe: (reply: T) => Promise<void>): Promise<void> {
     if (
-      this.restarting ||
+      this.writes || this.restarting ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(operationId)
     )
-      throw new Error('host_restart_unavailable');
+      throw new ControlFailure(409, 'host_restart_unavailable');
+    const submission = this.write('/control/v1/maintenance/restart/' + operationId, null, decode, operationId);
     this.restarting = true;
     try {
-      return await this.write('/control/v1/maintenance/restart/' + operationId, null, decode, operationId);
+      await observe(await submission);
     } finally {
       this.restarting = false;
     }

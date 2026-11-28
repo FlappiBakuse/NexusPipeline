@@ -54,7 +54,7 @@ export function bindingEditorFixture(parent: HTMLElement) {
   return { holder, writes, reopen: () => { visible.value = true; }, dispose: () => { app.unmount(); holder.remove(); store.dispose(); } };
 }
 export async function exitDecision(store: ReturnType<typeof draftFixture>['store']) {
-  const result = prepareAppExit(store.client)('close');
+  const result = prepareAppExit(store.client)();
   await settle();
   const dialog = document.querySelector('nexus-confirm-dialog');
   return { prompted: !!dialog, accepted: await result === 'ready' };

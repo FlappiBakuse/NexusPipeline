@@ -25,7 +25,7 @@ async function main() {
   window = new BrowserWindow({ show: false, webPreferences: { preload: path.resolve(__dirname, '../../apps/desktop/preload.cjs'),
     sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true } });
   const page = config.address;
-  const bridge = installNativeBridge(window, config, page, () => stop(new Error('fixture_unexpected_quit')));
+  const bridge = installNativeBridge(window, config, () => stop(new Error('fixture_unexpected_quit')));
   await window.loadURL(page); await bridge.start();
   const bound = await window.webContents.executeJavaScript(`(async () => {
     await window.nexusDesktopChannel.connect();

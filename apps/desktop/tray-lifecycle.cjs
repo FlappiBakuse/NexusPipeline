@@ -115,7 +115,14 @@ function createTrayLifecycle(config, bridge, windows, electron, startup) {
     await refreshLocale();
     if (config.visible && mode === 'browser') await show();
   }
-  return Object.freeze({ start, complete, show: activate, refreshMenu: menu,
+  async function applyRestartMode(next, visible) {
+    if (next === mode) return false;
+    mode = next;
+    if (mode === 'browser') windows.release();
+    if (visible) await show();
+    return true;
+  }
+  return Object.freeze({ start, complete, show: activate, refreshMenu: menu, applyRestartMode,
     exitState(value) { exitState = value; menu(); }, dispose() { ended = true; tray?.destroy(); } });
 }
 module.exports = { createTrayLifecycle };

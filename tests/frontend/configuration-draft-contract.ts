@@ -318,11 +318,10 @@ async function historyTasks(parent: HTMLElement, check: Check): Promise<void> {
   }
 }
 async function exitReadiness(check: Check): Promise<void> {
-  const client = { pendingWrites: 0, canExitMaintenance: () => true };
+  const client = { pendingWrites: 0 };
   const decide = prepareAppExit(client);
-  check(await decide('close') === 'ready' && !document.querySelector('nexus-confirm-dialog'),
+  check(await decide() === 'ready' && !document.querySelector('nexus-confirm-dialog'),
     'normal exit readiness has no user decision stage');
   client.pendingWrites = 1;
-  check(await decide('close') === 'pending-writes', 'actual in-flight writes remain an explicit exit blocker');
-  check(await decide('maintenance') === 'ready', 'the signed restart handoff keeps its own waiting RPC exemption');
+  check(await decide() === 'pending-writes', 'actual in-flight writes remain an explicit exit blocker');
 }

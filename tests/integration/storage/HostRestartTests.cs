@@ -3,59 +3,21 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Net.Sockets;
 using System.Runtime.Versioning;
-using System.Security.Cryptography;
 using System.Text.Json;
 using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Storage;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace NexusPipeline.StorageTests;
 
 [SupportedOSPlatform("windows")]
-public sealed class HostRestartTests(ITestOutputHelper output)
+public sealed class HostRestartTests
 {
-    [Fact(DisplayName = "A Suspended Restart Process Reuses Its Held Executable Digest Across Two Fresh Identity Reads")]
-    public void ReusesSuspendedRestartImage()
-    {
-        var sample = Environment.GetEnvironmentVariable("NEXUS_PROCESS_FIXTURE_EXE") ?? throw new InvalidOperationException();
-        var root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "restart-image-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        var executable = Path.Combine(root, "owned.exe");
-        File.Copy(sample, executable);
-        var expected = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(executable)));
-        var instance = Guid.NewGuid(); var operation = Guid.NewGuid();
-        using var creator = ProcessIdentityLease.HoldCurrent();
-        using var creatorScope = new ProcessIdentityScope(creator);
-        using var text = new StringWriter();
-        var previous = Console.Error;
-        try
-        {
-            Console.SetError(text);
-            using var profile = StartupProfile.Begin("suspended-restart-image");
-            using var child = MaintenanceStartupProcess.CreateRestart(executable, [], root);
-            try
-            {
-                var first = child.ReadFrozenIdentity(instance, operation);
-                Assert.Equal(first, child.ReadFrozenIdentity(instance, operation));
-                Assert.Equal(child.ProcessId, first.ProcessId);
-                Assert.Equal(expected, first.ImageSha256);
-                Assert.Equal(executable, first.ImagePath, ignoreCase: true);
-                Assert.Throws<IOException>(() => File.Open(executable, FileMode.Open, FileAccess.Write, FileShare.Read).Dispose());
-            }
-            finally { Assert.Null(child.Stop()); }
-            child.ReleaseStoppedImage();
-        }
-        finally { Console.SetError(previous); }
-        using var report = JsonDocument.Parse(text.ToString());
-        var hashes = report.RootElement.GetProperty("steps").EnumerateArray()
-            .Single(step => step.GetProperty("name").GetString() == "process.image-hash").GetProperty("count").GetInt64();
-        output.WriteLine($"suspended restart: two fresh process identity reads, {hashes} image hashes");
-        Assert.Equal(1, hashes);
-    }
-
-    [Fact]
-    public async Task RestartsSavedPort()
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    public async Task RestartsSavedPort(bool changePort, bool externalDesktop)
     {
         var executable = Environment.GetEnvironmentVariable("NEXUS_TEST_HOST_EXE") ?? throw new InvalidOperationException();
         var runtime = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "restart-" + Guid.NewGuid().ToString("N"));
@@ -64,10 +26,14 @@ public sealed class HostRestartTests(ITestOutputHelper output)
             UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
         };
         foreach (var item in new[] { "serve", "--runtime-root", runtime, "--port", "0" }) start.ArgumentList.Add(item);
+        if (externalDesktop)
+        {
+            start.ArgumentList.Add("--native-client-pid");
+            start.ArgumentList.Add(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
         start.Environment.Remove("DOTNET_STARTUP_HOOKS");
         using var parent = Process.Start(start) ?? throw new IOException("host_not_started");
         var errors = parent.StandardError.ReadToEndAsync();
-        Process? successor = null;
         try
         {
             var line = await parent.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(20));
@@ -77,53 +43,70 @@ public sealed class HostRestartTests(ITestOutputHelper output)
             var address = ready.RootElement.GetProperty("address").GetString()!;
             using var client = new HttpClient { BaseAddress = new Uri(address), Timeout = TimeSpan.FromSeconds(40) };
             using var settings = JsonDocument.Parse(await client.GetStringAsync("/control/v1/settings/service"));
-            var port = FreePort();
+            var port = changePort ? FreePort() : new Uri(address).Port;
             var service = settings.RootElement.GetProperty("service").Deserialize<Dictionary<string, JsonElement>>()!;
-            service["webPort"] = JsonSerializer.SerializeToElement(port);
+            service["webPort"] = JsonSerializer.SerializeToElement(changePort ? port : 0);
             using var saved = await client.PostAsJsonAsync("/control/v1/settings/service", new
             {
                 format = "nexus.control.service-settings", version = 1, operationId = Guid.NewGuid(),
                 expectedRevision = settings.RootElement.GetProperty("revision").GetInt64(), service
             });
             Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+            using var oldFeed = JsonDocument.Parse(await client.GetStringAsync("/control/v1/events/snapshot"));
+            var stream = oldFeed.RootElement.GetProperty("streamId").GetGuid();
+            var after = oldFeed.RootElement.GetProperty("sequence").GetInt64();
+            using var events = await client.GetAsync($"/control/v1/events?streamId={stream:D}&afterSequence={after}",
+                HttpCompletionOption.ResponseHeadersRead);
+            Assert.Equal(HttpStatusCode.OK, events.StatusCode);
             var operation = Guid.NewGuid();
             using var restart = await client.PostAsync("/control/v1/maintenance/restart/" + operation.ToString("D"), null);
             var response = await restart.Content.ReadAsStringAsync();
+            if (externalDesktop)
+            {
+                Assert.Equal(HttpStatusCode.Conflict, restart.StatusCode);
+                Assert.False(parent.HasExited);
+                using var stillCurrent = JsonDocument.Parse(await client.GetStringAsync("/control/v1/events/snapshot"));
+                Assert.Equal(stream, stillCurrent.RootElement.GetProperty("streamId").GetGuid());
+                return;
+            }
             Assert.True(restart.StatusCode == HttpStatusCode.Accepted, response);
             using var receipt = JsonDocument.Parse(response);
             Assert.Equal(operation, receipt.RootElement.GetProperty("operationId").GetGuid());
             Assert.Equal(identity, receipt.RootElement.GetProperty("instanceId").GetGuid());
             Assert.Equal(port, receipt.RootElement.GetProperty("port").GetInt32());
-            Assert.Equal("handoff", receipt.RootElement.GetProperty("state").GetString());
+            Assert.Equal("restarting", receipt.RootElement.GetProperty("state").GetString());
             var pid = receipt.RootElement.GetProperty("processId").GetInt32();
-            Assert.NotEqual(parent.Id, pid);
-            successor = Process.GetProcessById(pid);
-            _ = successor.SafeHandle;
+            Assert.Equal(parent.Id, pid);
             var actual = ProcessIdentityReader.Read(pid);
             Assert.Equal(Path.GetFullPath(executable), actual.ImagePath, ignoreCase: true);
-            await parent.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30));
-            Assert.Equal(0, parent.ExitCode);
             var nextAddress = "http://127.0.0.1:" + port;
             using var next = new HttpClient { BaseAddress = new Uri(nextAddress), Timeout = TimeSpan.FromSeconds(2) };
-            var status = await WaitReadyAsync(next, successor);
+            var status = await WaitReadyAsync(next, parent, operation);
             using (status)
             {
                 Assert.Equal(identity, status.RootElement.GetProperty("instanceId").GetGuid());
                 Assert.Equal(pid, status.RootElement.GetProperty("processId").GetInt32());
             }
             Assert.Equal(actual, ProcessIdentityReader.Read(pid));
+            var observation = "/control/v1/maintenance/restart/" + operation.ToString("D");
+            using var observed = new HttpRequestMessage(HttpMethod.Get, observation);
+            observed.Headers.Add("Origin", address);
+            using var readyReply = await next.SendAsync(observed);
+            Assert.Equal(HttpStatusCode.OK, readyReply.StatusCode);
+            Assert.Equal(address, Assert.Single(readyReply.Headers.GetValues("Access-Control-Allow-Origin")));
+            using var unbound = new HttpRequestMessage(HttpMethod.Get, observation);
+            unbound.Headers.Add("Origin", "http://localhost:" + new Uri(address).Port);
+            using var denied = await next.SendAsync(unbound);
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
             using var current = JsonDocument.Parse(await next.GetStringAsync("/control/v1/settings/service"));
-            Assert.Equal(port, current.RootElement.GetProperty("service").GetProperty("webPort").GetInt32());
-            Console.WriteLine($"restart: old={parent.Id}; successor={pid}; port={port}; instance={identity:D}");
+            Assert.Equal(changePort ? port : 0, current.RootElement.GetProperty("service").GetProperty("webPort").GetInt32());
+            using var newFeed = JsonDocument.Parse(await next.GetStringAsync("/control/v1/events/snapshot"));
+            Assert.NotEqual(stream, newFeed.RootElement.GetProperty("streamId").GetGuid());
+            Console.WriteLine($"restart: retained host={pid}; port={port}; instance={identity:D}");
         }
         finally
         {
             if (!parent.HasExited) { parent.Kill(); await parent.WaitForExitAsync(); }
-            if (successor is not null)
-            {
-                if (!successor.HasExited) { successor.Kill(); await successor.WaitForExitAsync(); }
-                successor.Dispose();
-            }
             Console.WriteLine(await errors);
         }
     }
@@ -136,14 +119,25 @@ public sealed class HostRestartTests(ITestOutputHelper output)
         finally { listener.Stop(); }
     }
 
-    private static async Task<JsonDocument> WaitReadyAsync(HttpClient client, Process process)
+    private static async Task<JsonDocument> WaitReadyAsync(HttpClient client, Process process, Guid operation)
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         while (!deadline.IsCancellationRequested)
         {
-            Assert.False(process.HasExited, "Prepared successor exited before listener readiness");
-            try { return JsonDocument.Parse(await client.GetStringAsync("/control/v1/status", deadline.Token)); }
-            catch (HttpRequestException) { await Task.Delay(50, deadline.Token); }
+            Assert.False(process.HasExited, "The service restart must retain the original process");
+            try
+            {
+                using var response = await client.GetAsync("/control/v1/maintenance/restart/" + operation.ToString("D"), deadline.Token);
+                if (response.IsSuccessStatusCode)
+                {
+                    using var ready = JsonDocument.Parse(await response.Content.ReadAsStringAsync(deadline.Token));
+                    Assert.Equal("ready", ready.RootElement.GetProperty("state").GetString());
+                    return JsonDocument.Parse(await client.GetStringAsync("/control/v1/status", deadline.Token));
+                }
+            }
+            catch (HttpRequestException) { }
+            catch (OperationCanceledException) when (!deadline.IsCancellationRequested) { }
+            await Task.Delay(50, deadline.Token);
         }
         throw new TimeoutException("restart_listener_not_ready");
     }

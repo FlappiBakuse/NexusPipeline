@@ -53,6 +53,7 @@ if (process.isMainFrame) {
       return () => ipcRenderer.removeListener('desktop.exit-state', listener);
     },
     setLocale: locale => ipcRenderer.invoke('desktop.locale', locale),
+    setTheme: theme => ipcRenderer.invoke('desktop.theme', theme),
     chooseFile: pickerId => action('file.select', { pickerId }), chooseFolder: pickerId => action('folder.select', { pickerId }),
     releasePathPicker: pickerId => action('picker.release', { pickerId }),
     openExternal: url => action('external.open', { url }), hide: () => action('hide'), show: () => action('show'),

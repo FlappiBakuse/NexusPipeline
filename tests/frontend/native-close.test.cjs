@@ -91,7 +91,7 @@ for (const scenario of [
   const page = 'http://127.0.0.1:1234/';
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../apps/desktop/native-bridge.cjs'), 'utf8'), sandbox);
   const bridge = sandbox.module.exports.installNativeBridge(window,
-    { address: 'http://127.0.0.1:1234/', instanceId: 'instance' }, 'http://127.0.0.1:1234/', () => { quit = true; });
+    { address: 'http://127.0.0.1:1234/', instanceId: 'instance' }, () => { quit = true; });
   await bridge.start();
   const poll = [...timers.values()][0].callback();
   assert.equal(typeof finishPoll, 'function');
@@ -169,7 +169,7 @@ function exitFixture() {
   };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../apps/desktop/native-bridge.cjs'), 'utf8'), context);
   const bridge = context.module.exports.installNativeBridge(window,
-    { address: 'http://127.0.0.1:1234/', instanceId: 'fixture' }, 'http://127.0.0.1:1234/', () => { quit++; });
+    { address: 'http://127.0.0.1:1234/', instanceId: 'fixture' }, () => { quit++; });
   const event = { sender: window.webContents, senderFrame: window.webContents.mainFrame };
   return { bridge, messages, handlers, events,
     get quit() { return quit; }, get authorizations() { return authorizations; },

@@ -2,13 +2,12 @@
 const path = require('node:path');
 const { text } = require('./native-text.cjs');
 
-function installFilePermissions(window, page, dialog) {
+function installFilePermissions(window, getPage, dialog) {
   let prompting = false;
   let generation = 0;
   const decisions = new Map();
-  const origin = new URL(page).origin;
   const current = contents => !window.isDestroyed() && contents === window.webContents &&
-    !contents.isDestroyed() && contents.mainFrame.url.split('#')[0] === page;
+    !contents.isDestroyed() && contents.mainFrame.url.split('#')[0] === getPage();
   window.webContents.on('did-start-navigation', (_event, _url, inPlace, mainFrame) => {
     if (mainFrame && !inPlace) { generation++; decisions.clear(); }
   });
@@ -16,8 +15,11 @@ function installFilePermissions(window, page, dialog) {
     path.isAbsolute(details.filePath) && ['writable', 'readable'].includes(details.fileAccessType);
   function decide(contents, permission, requestingOrigin, details) {
     if (prompting || permission !== 'fileSystem' || !current(window.webContents) ||
-        contents !== null && contents !== window.webContents || requestingOrigin !== origin && requestingOrigin !== origin + '/' ||
-        details?.requestingUrl !== undefined && details.requestingUrl.split('#')[0] !== page || !validFile(details)) return false;
+        contents !== null && contents !== window.webContents || !validFile(details)) return false;
+    const page = getPage();
+    const origin = new URL(page).origin;
+    if (requestingOrigin !== origin && requestingOrigin !== origin + '/' ||
+        details?.requestingUrl !== undefined && details.requestingUrl.split('#')[0] !== page) return false;
     const key = path.normalize(details.filePath);
     const prior = decisions.get(key);
     if (prior && prior.expires > performance.now()) return prior.allowed;
@@ -43,8 +45,8 @@ function installFilePermissions(window, page, dialog) {
   }
   window.webContents.session.setPermissionCheckHandler(decide);
   window.webContents.session.setPermissionRequestHandler((contents, permission, answer, details) => {
-    if (!current(contents) || details?.requestingUrl?.split('#')[0] !== page) { answer(false); return; }
-    answer(decide(contents, permission, origin, details));
+    if (!current(contents) || details?.requestingUrl?.split('#')[0] !== getPage()) { answer(false); return; }
+    answer(decide(contents, permission, new URL(getPage()).origin, details));
   });
 }
 

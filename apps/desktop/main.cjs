@@ -15,6 +15,13 @@ const { recordFailure } = require('./diagnostics.cjs');
 
 const retryableHostErrors = new Set(['ERR_CONNECTION_REFUSED', 'ERR_CONNECTION_RESET', 'ERR_CONNECTION_CLOSED', 'ERR_EMPTY_RESPONSE']);
 
+function hostPage(value) {
+  const address = new URL(value);
+  if (address.protocol !== 'http:' || address.hostname !== '127.0.0.1' || !address.port || address.username ||
+      address.password || address.pathname !== '/' || address.search || address.hash) throw new Error('desktop_host_denied');
+  return address.href;
+}
+
 async function loadHostPage(window, page) {
   const deadline = performance.now() + 30000;
   while (!window.isDestroyed()) {
@@ -83,7 +90,7 @@ app.whenReady().then(async () => {
     created.webContents.on('will-attach-webview', event => event.preventDefault());
     created.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     created.webContents.on('will-navigate', (event, url) => { if (url.split('#')[0] !== page) event.preventDefault(); });
-    if (page) installFilePermissions(created, page, dialog);
+    installFilePermissions(created, () => page, dialog);
     bridge?.attachWindow(created);
     created.on('close', event => {
       windowState.flush();
@@ -144,9 +151,32 @@ app.whenReady().then(async () => {
   };
   tray = createTrayLifecycle(config, lifecycle, windows, electron, startup);
   await tray.start();
+  async function refreshHost(value) {
+    const target = hostPage(value.address);
+    if (typeof value.minimizeToTray !== 'boolean' || !['desktop', 'browser'].includes(value.mode))
+      throw new Error('desktop_restart_message_invalid');
+    const current = window?.webContents.getURL();
+    const fragment = current && current.split('#')[0] === page ? new URL(current).hash : '';
+    const reload = current?.split('#')[0] === target;
+    config.address = value.address;
+    config.minimizeToTray = value.minimizeToTray;
+    page = target;
+    bridge.invalidate();
+    if (await tray.applyRestartMode(value.mode, window?.isVisible() ?? true)) {
+      startup.presented('restart');
+      return;
+    }
+    if (window && value.mode === 'desktop') {
+      if (reload) window.webContents.reload();
+      else await loadHostPage(window, page + fragment);
+    }
+    startup.presented('restart');
+  }
   startup.subscribe(value => {
     if (value.kind === 'activate') void tray.show().catch(() => {});
-    if (value.kind === 'failed' && starting && !overlay && window && !window.isDestroyed()) {
+    if (value.kind === 'restart')
+      void refreshHost(value).catch(error => recordFailure('desktop-main', 'restart', error));
+    if (value.kind === 'failed' && !overlay && window && !window.isDestroyed()) {
       overlay = createStartupView(window, startup, config);
       void overlay.loaded.catch(() => {});
     }
@@ -167,20 +197,16 @@ app.whenReady().then(async () => {
   });
   try {
     const ready = await startup.ready;
-    const address = new URL(ready.address);
-    if (address.protocol !== 'http:' || address.hostname !== '127.0.0.1' || !address.port || address.username ||
-        address.password || address.pathname !== '/' || address.search || address.hash) throw new Error('desktop_host_denied');
+    page = hostPage(ready.address);
     Object.assign(config, ready);
     const preparedAt = performance.now();
     const measure = stage => startup.measure(stage, performance.now() - preparedAt);
-    page = new URL('/', address).href;
-    bridge = installNativeBridge(window, config, page, async () => {
+    bridge = installNativeBridge(window, config, async () => {
       quitting = true; windowState.dispose();
       screen.removeListener('display-removed', displayChanged); screen.removeListener('display-metrics-changed', displayChanged);
       tray?.dispose(); overlay?.dispose(); startup.dispose(); await bridge.dispose(); window?.destroy(); app.quit();
     }, locale => { config.locale = locale; setLocale(locale); tray?.refreshMenu(); }, value => tray?.exitState(value));
     if (window) {
-      installFilePermissions(window, page, dialog);
       await loadHostPage(window, page); loadedPage = true;
       measure('document');
     }

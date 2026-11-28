@@ -1,11 +1,11 @@
 {
   "post": {
     "operationId": "restartHost",
-    "description": "Requires local control.maintenance.write. No body or query. Restarts the same Host from saved settings without an update package or release trust. Requires an idle completion drain and existing desktop family proof. An authenticated successor waits for actual parent exit before acquiring the same instance. CLI: host-restart --id <uuid>. Not exposed through MCP. A 202 response proves prepared handoff, not successful service startup; reconnect to the returned saved port to observe readiness.",
+    "description": "Requires local control.maintenance.write. No body or query. Drains the idle service and rebuilds it from saved settings in the same process and instance. CLI: host-restart --id <uuid>. Not exposed through MCP. A 202 response accepts the restart; query this operation on the returned port to observe readiness.",
     "parameters": [{"name": "operationId", "in": "path", "required": true, "schema": {"$ref": "../schemas/common.schema.json#/$defs/uuid"}}],
     "responses": {
       "202": {
-        "description": "Prepared successor and committed handoff",
+        "description": "Service restart accepted",
         "content": {"application/json": {"schema": {
           "type": "object", "additionalProperties": false,
           "required": ["operationId", "instanceId", "processId", "port", "state"],
@@ -14,13 +14,36 @@
             "instanceId": {"$ref": "../schemas/common.schema.json#/$defs/uuid"},
             "processId": {"type": "integer", "minimum": 1},
             "port": {"type": "integer", "minimum": 1, "maximum": 65535},
-            "state": {"const": "handoff"}
+            "state": {"const": "restarting"}
           }
         }}}
       },
       "400": {"description": "Invalid request"},
       "403": {"description": "Local authority required"},
-      "409": {"description": "Busy, unknown process origin or failed handoff; no successful restart claimed"}
+      "409": {"description": "Service is busy or the requested listener is unavailable"}
+    }
+  },
+  "get": {
+    "operationId": "readHostRestart",
+    "description": "Requires local control.maintenance.write. Reports readiness of the specified restart on the new service listener. The initiating origin may read this exact operation after a port change.",
+    "parameters": [{"name": "operationId", "in": "path", "required": true, "schema": {"$ref": "../schemas/common.schema.json#/$defs/uuid"}}],
+    "responses": {
+      "200": {
+        "description": "Replacement service is ready",
+        "content": {"application/json": {"schema": {
+          "type": "object", "additionalProperties": false,
+          "required": ["operationId", "instanceId", "processId", "port", "state"],
+          "properties": {
+            "operationId": {"$ref": "../schemas/common.schema.json#/$defs/uuid"},
+            "instanceId": {"$ref": "../schemas/common.schema.json#/$defs/uuid"},
+            "processId": {"type": "integer", "minimum": 1},
+            "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+            "state": {"const": "ready"}
+          }
+        }}}
+      },
+      "403": {"description": "Local authority required"},
+      "404": {"description": "This restart has not published readiness"}
     }
   }
 }

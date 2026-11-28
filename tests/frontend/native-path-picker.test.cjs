@@ -42,7 +42,7 @@ test('file and folder dialogs remember only successful choices in their live edi
     } };
   const source = name => fs.readFileSync(path.join(__dirname, '../../apps/desktop', name), 'utf8');
   vm.runInNewContext(source('native-bridge.cjs'), sandbox);
-  const bridge = sandbox.module.exports.installNativeBridge(window, { address: page }, page, () => {});
+  const bridge = sandbox.module.exports.installNativeBridge(window, { address: page }, () => {});
   vm.runInNewContext(source('preload.cjs'), sandbox);
   await api.connect();
   const first = '00000000-0000-4000-8000-000000000001', other = '00000000-0000-4000-8000-000000000002';

@@ -1,5 +1,6 @@
 using NexusPipeline.Core.Control;
 using NexusPipeline.Core.Settings;
+using NexusPipeline.Host.Lifecycle;
 using NexusPipeline.Platform.Storage.Secrets;
 using System.Net;
 using System.Net.Http.Headers;
@@ -21,11 +22,12 @@ internal sealed class ControlAuthentication
     private readonly string _localSubject;
     private readonly ControlAuthenticationThrottle _throttle;
     private readonly TimeProvider _clock;
+    private readonly HostRestartTarget? _restart;
     private long _nextDependencyDiagnostic;
     internal Guid InstanceId => _instanceId;
 
     internal ControlAuthentication(Guid instanceId, bool effectiveRemoteListener, int? effectiveMcpPort,
-        Func<HostSettingsSnapshot> settings, ControlBearerVerifier bearer, TimeProvider clock)
+        Func<HostSettingsSnapshot> settings, ControlBearerVerifier bearer, TimeProvider clock, HostRestartTarget? restart = null)
     {
         if (instanceId == Guid.Empty || effectiveMcpPort is < 1 or > 65535)
             throw new ArgumentException("control_listener_identity_invalid");
@@ -33,6 +35,7 @@ internal sealed class ControlAuthentication
         var sid = user.User?.Value ?? throw new IOException("control_windows_user_unavailable");
         _localSubject = "local:" + sid;
         _instanceId = instanceId; _effectiveRemoteListener = effectiveRemoteListener; _effectiveMcpPort = effectiveMcpPort;
+        _restart = restart;
         _settings = settings; _bearer = bearer; _throttle = new(clock); _clock = clock;
     }
 
@@ -109,7 +112,7 @@ internal sealed class ControlAuthentication
         return now >= next && Interlocked.CompareExchange(ref _nextDependencyDiagnostic, now + 60, next) == next;
     }
 
-    private static bool Authority(HttpContext context)
+    private bool Authority(HttpContext context)
     {
         var request = context.Request;
         if (request.Headers.Host.Count != 1 || request.Headers.Origin.Count > 1 || request.Scheme is not ("http" or "https") ||
@@ -126,6 +129,7 @@ internal sealed class ControlAuthentication
             !authority.IdnHost.Equals("localhost", StringComparison.OrdinalIgnoreCase);
         if (!localName && !literal && !remoteDns) return false;
         if (request.Headers.Origin.Count == 0) return true;
+        if (_restart?.AllowsObserver(context) == true) return true;
         var value = request.Headers.Origin[0];
         return value is { Length: > 0 } && Uri.TryCreate(value, UriKind.Absolute, out var origin) &&
             origin.UserInfo.Length == 0 && origin.AbsolutePath == "/" && origin.Query.Length == 0 && origin.Fragment.Length == 0 &&

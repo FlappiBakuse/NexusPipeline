@@ -6,8 +6,7 @@ const path = require('node:path/win32');
 const { readProof, readSession, readClosePermit, readCloseRejection, readFrontend, readMode, responseText } = require('./proof-reader.cjs');
 const { installLoginBridge } = require('./native-login.cjs');
 
-function installNativeBridge(window, config, page, authorizedQuit, setLocale = () => {}, exitChanged = () => {}) {
-  const host = new URL(config.address);
+function installNativeBridge(window, config, authorizedQuit, setLocale = () => {}, exitChanged = () => {}) {
   let session;
   let generation = 0;
   let preparing;
@@ -30,7 +29,7 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
   }
   function validateSender(event) {
     if (!window || window.isDestroyed() || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame ||
-        event.senderFrame.url.split('#')[0] !== page) throw new Error('desktop_source_denied');
+        event.senderFrame.url.split('#')[0] !== new URL('/', config.address).href) throw new Error('desktop_source_denied');
   }
   function invalidate() {
     frontend?.invalidate();
@@ -56,7 +55,7 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
   async function connect() {
     const current = generation;
     const challenge = crypto.randomUUID();
-    const response = await fetch(new URL('control/v1/desktop/session?correlationId=' + challenge, host), { signal: AbortSignal.timeout(5000) });
+    const response = await fetch(new URL('control/v1/desktop/session?correlationId=' + challenge, config.address), { signal: AbortSignal.timeout(5000) });
     const value = readSession(await responseText(response), config.verificationKey, config.instanceId, challenge);
     if (current !== generation) throw new Error('desktop_document_changed');
     session = value;
@@ -64,15 +63,18 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
   }
   async function connectWhenReady() {
     if (session) return session;
-    if (!connecting) connecting = (async () => {
+    if (connecting?.generation === generation) return await connecting.work;
+    const current = { generation };
+    connecting = current;
+    current.work = (async () => {
       const until = performance.now() + 30000;
-      while (!ended) {
+      while (!ended && current.generation === generation) {
         try { return await connect(); }
         catch { if (performance.now() >= until) throw new Error('desktop_host_startup_unavailable'); await new Promise(resolve => setTimeout(resolve, 100)); }
       }
-      throw new Error('desktop_window_ended');
-    })().finally(() => { connecting = undefined; });
-    return await connecting;
+      throw new Error(ended ? 'desktop_window_ended' : 'desktop_document_changed');
+    })().finally(() => { if (connecting === current) connecting = undefined; });
+    return await current.work;
   }
   async function prepareRenderer(reason = 'close') {
     if (!window) return;
@@ -133,7 +135,7 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
       if (current !== generation) throw new Error('desktop_document_changed');
       closeAuthorization = new AbortController();
       const request = { ...requestIdentity(crypto.randomUUID()), type: 'close.request' };
-      const response = await fetch(new URL('control/v1/desktop/authorize', host), {
+      const response = await fetch(new URL('control/v1/desktop/authorize', config.address), {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request),
         signal: AbortSignal.any([stopping.signal, closeAuthorization.signal, AbortSignal.timeout(30000)]) });
       if (response.status === 409)
@@ -158,8 +160,9 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
         const request = requestIdentity(crypto.randomUUID());
         correlationId = request.correlationId; stage = 'poll';
         const query = new URLSearchParams({ sessionId: request.sessionId, correlationId: request.correlationId });
-        const response = await fetch(new URL('control/v1/desktop/maintenance?' + query, host), {
+        const response = await fetch(new URL('control/v1/desktop/maintenance?' + query, config.address), {
           signal: AbortSignal.any([stopping.signal, AbortSignal.timeout(30000)]) });
+        if (current !== generation) { await response.body?.cancel(); return; }
         if (response.status === 204) await response.body?.cancel();
         else {
           stage = 'verify';
@@ -202,6 +205,11 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
     if (locale !== 'zh-CN' && locale !== 'en-US') throw new Error('desktop_locale_invalid');
     setLocale(locale);
   });
+  ipcMain.handle('desktop.theme', (event, theme) => {
+    validateSender(event);
+    if (!['dark', 'light', 'system'].includes(theme)) throw new Error('desktop_theme_invalid');
+    config.theme = theme;
+  });
   ipcMain.handle('desktop.action', async (event, input) => {
     validateSender(event);
     const pickerAction = ['file.select', 'folder.select', 'picker.release'].includes(input?.type);
@@ -227,7 +235,7 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
       const picker = pickerAction ? pickers.get(input.pickerId) || {} : undefined;
       if (picker) pickers.set(input.pickerId, picker);
       const request = { ...requestIdentity(crypto.randomUUID()), type: input.type, ...(input.url === undefined ? {} : { url: input.url }) };
-      const response = await fetch(new URL('control/v1/desktop/authorize', host), { method: 'POST',
+      const response = await fetch(new URL('control/v1/desktop/authorize', config.address), { method: 'POST',
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request), signal: AbortSignal.timeout(5000) });
       const reply = readProof(await responseText(response), config.verificationKey, 'nexus.desktop.channel');
       validateSender(event);
@@ -253,7 +261,7 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
   async function dispose() {
     frontend.dispose();
     ended = true; stopping.abort(); clearTimeout(timer); invalidate();
-    for (const name of ['desktop.connect', 'desktop.prepared', 'desktop.action', 'desktop.locale']) ipcMain.removeHandler(name);
+    for (const name of ['desktop.connect', 'desktop.prepared', 'desktop.action', 'desktop.locale', 'desktop.theme']) ipcMain.removeHandler(name);
     await login.dispose();
   }
   async function changeWindow(change) {
@@ -268,11 +276,11 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
     if (!['desktop', 'browser'].includes(mode)) throw new Error('desktop_mode_invalid');
     await connectWhenReady();
     const request = { ...requestIdentity(crypto.randomUUID()), format: 'nexus.desktop.mode', mode };
-    const response = await fetch(new URL('control/v1/desktop/mode', host), { method: 'POST',
+    const response = await fetch(new URL('control/v1/desktop/mode', config.address), { method: 'POST',
       headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request), signal: AbortSignal.timeout(5000) });
     readMode(await responseText(response), config.verificationKey, request);
   }
-  return Object.freeze({ requestClose, changeWindow, publishMode, attachWindow, dispose, start: async () => {
+  return Object.freeze({ requestClose, changeWindow, publishMode, attachWindow, dispose, invalidate, start: async () => {
     await connectWhenReady();
     await login.start();
     if (!ended) timer = setTimeout(pollMaintenance, 2000);
@@ -282,13 +290,12 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 function installFrontendBridge(config, validateSender, connect, generation) {
   const clients = new Map();
-  const address = new URL(config.address);
   const identity = session => ({ format: 'nexus.desktop.frontend', version: 1, instanceId: session.instanceId,
     nativeClientId: session.clientId, sessionId: session.sessionId, correlationId: crypto.randomUUID() });
   async function post(path, request, clientId, token) {
     const headers = { 'Content-Type': 'application/json' };
     if (token) headers['X-Nexus-Frontend-Client'] = token;
-    const response = await fetch(new URL(path, address), { method: 'POST', headers, body: JSON.stringify(request),
+    const response = await fetch(new URL(path, config.address), { method: 'POST', headers, body: JSON.stringify(request),
       redirect: 'error', signal: AbortSignal.timeout(5000) });
     return readFrontend(await responseText(response), config.verificationKey, request, clientId);
   }

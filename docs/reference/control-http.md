@@ -70,13 +70,13 @@ CLI 必须显式提供 `--binary-stdout true`，错误写 stderr；MCP 继续只
 维护查询、启动和取消复用原待办 owner；`start` 的 202 只表示交接已启动，不表示候选已成功。
 独立重启使用 `POST /control/v1/maintenance/restart/{operationId}`，要求本机维护权限，
 不接受 body 或 query；CLI 为 `host-restart --id <uuid>`。它不要求更新包或 Release 信任，
-复用闲置排空和 owned 桌面关闭检查。202 返回接管进程、相同实例及已保存端口，
-只证明交接；固定端口重连后检查 status 的 `processId` 与实例身份才证明服务就绪。
-保存端口为 0 时，接管前的回复仍为 0，实际端口以新 Host 的 `host.ready` 和桌面启动授权为准。
-受控接管进程等待旧宿主实际退出，再按保存设置启动；不能用 PID 存在代替拥有权证明。
+保留宿主进程及实例租约，排空闲置服务后按已保存设置重建服务和客户端会话。
+202 返回 `restarting`、相同进程和实例及目标端口。以目标端口上的
+`GET /control/v1/maintenance/restart/{operationId}` 返回 `ready` 确认同一操作已就绪。
+自动端口可用时沿用本次 Web 端口。端口变化时，原本机来源可读取该次重启状态。
 `completed` 查询须同时检查 `outcome`：`updated` 表示采用候选，`originalRestored` 表示已恢复旧载荷，`notExecuted` 表示未执行替换。
 `maintenance-prepare` 根据精确签名源和版本准备不可变载荷，记录执行时机和窗口意图；其 202 只表示待办受理。
-窗口模式 `headless` 保留纯后台服务，要求 `visible=false`、`route="/"`，更新及再次重启均不启动 Electron。`desktop` 和 `browser` 仍恢复其独立桌面进程；后台服务的自动更新采用 `headless`。
+窗口模式 `headless` 保留纯后台服务，要求 `visible=false`、`route="/"`。载荷更新按 `desktop` 或 `browser` 恢复桌面进程，后台服务的自动更新采用 `headless`。普通服务重启沿用当前窗口和模式。
 下载使用保存的代理快照、有限响应及可信跳转范围，完成后仍核验实际程序集的 production/test 身份。
 取消只能发生在持久交接之前；进入交接后的停止与恢复必须核实真实 writer 和 Job 家族。
 桌面更新交接要求生产信任核验及完整 owned 家族停止；Test 信任和缺少家族证据均拒绝交接。

@@ -19,7 +19,7 @@ public sealed class InstanceLease : IDisposable
     private DirectoryAttributeProtection? _directories;
     public RuntimeInstance Instance { get; }
     internal Sqlite.StateDatabase? Database { get; private set; }
-    internal Guid StartupGeneration { get; } = Guid.NewGuid();
+    internal Guid StartupGeneration { get; private set; } = Guid.NewGuid();
     internal Execution.RunBudgetOwner RunBudgets { get; }
     internal Execution.LiveLogHub LiveLogs { get; }
     internal Notifications.NotificationPublicationProof NotificationPublications { get; } = new();
@@ -148,6 +148,29 @@ public sealed class InstanceLease : IDisposable
         lock (_extensionGate)
             if (!ReferenceEquals(owner, _extensionActivator) || !ReferenceEquals(resources, _extensionResources))
                 throw new IOException("extension_scope_inventory_unbound");
+    }
+
+    internal void ReleaseExtensionActivator(NexusPipeline.Platform.Extensions.ExtensionActivator owner,
+        NexusPipeline.Core.Maintenance.ResourceLeaseManager resources)
+    {
+        VerifyHeld(Instance);
+        lock (_extensionGate)
+        {
+            if (!ReferenceEquals(owner, _extensionActivator) || !ReferenceEquals(resources, _extensionResources))
+                throw new IOException("extension_scope_inventory_unbound");
+            _extensionActivator = null; _extensionResources = null;
+        }
+    }
+
+    internal void BeginServiceGeneration()
+    {
+        VerifyHeld(Instance);
+        lock (_extensionGate)
+        {
+            if (_extensionActivator is not null || ExecutionPublicationCount != 0)
+                throw new IOException("service_generation_still_active");
+            StartupGeneration = Guid.NewGuid();
+        }
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]

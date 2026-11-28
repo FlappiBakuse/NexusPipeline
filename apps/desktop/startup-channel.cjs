@@ -46,6 +46,7 @@ function connectStartup(config) {
           if (!Number.isInteger(value.action) || value.action < 0 || value.action > 3) throw new Error('desktop_menu_invalid');
           requests.get(value.id)?.resolve(value.action); requests.delete(value.id);
         } else if (value.kind === 'ready') resolveReady(value.config);
+        else if (value.kind === 'restart') { for (const listener of listeners) listener(value); }
         else if (value.kind === 'present') resolvePresentable();
         else if (value.kind === 'complete') { resolvePresentable(); resolveComplete(); }
         else if (value.kind === 'stage' || value.kind === 'failed' || value.kind === 'activate') {

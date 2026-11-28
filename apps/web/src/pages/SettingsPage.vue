@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { fieldHelp as vHelp } from '../components/field-help';
-import { createIdentity } from '../control/identity';
 import { computed, reactive, ref, watch } from 'vue';
 import type { AppStore } from '../app/store';
 import type { InterfaceCategory } from '../control/interface';
-import { ControlFailure, integerValue, objectValue } from '../control/client';
+import { ControlFailure } from '../control/client';
+import { restartService } from './service-restart';
 import { validateForm } from '../components/form-validation';
 import { useSettingsSecrets } from './settings-secret-state';
 import { useSettingsSession } from './settings-session';
@@ -18,7 +18,6 @@ import './settings-messages';
 const props = defineProps<{ store: AppStore; visible: boolean }>();
 const form = ref<HTMLElement>();
 const notice = ref('');
-const restartPort = ref<number | null>(null);
 const restarting = ref(false);
 const restartError = ref('');
 const categories: { id: InterfaceCategory; label: string; description: string }[] = [
@@ -71,9 +70,9 @@ async function restart(): Promise<void> {
   restarting.value = true;
   restartError.value = '';
   try {
-    const result = await props.store.client.restartHost(createIdentity(), objectValue);
-    restartPort.value = integerValue(result.port);
-    notice.value = '重启交接已受理。';
+    const instance = props.store.state.capabilities?.instanceId;
+    if (!instance) throw new Error('control_instance_changed');
+    await restartService(props.store.client, instance, () => { notice.value = '服务正在重启，界面将自动刷新。'; });
   } catch (reason) {
     restartError.value = reason instanceof ControlFailure && !reason.uncertain
       ? reason.code : '重启未确认，请检查当前服务状态。';
@@ -89,7 +88,7 @@ async function restart(): Promise<void> {
       <nexus-toast v-if="host.session.error" tone="danger" :message.prop="t(host.session.error)" />
       <nexus-toast v-if="view.state.error" tone="danger" :message.prop="t(view.state.error)" />
       <nexus-toast v-if="restartError" tone="danger" :message.prop="t(restartError)" @nexus-close="restartError = ''" />
-      <nexus-toast v-else-if="notice" :message.prop="t(notice) + (restartPort ? ' ' + restartPort : '')" @nexus-close="notice = ''" />
+      <nexus-toast v-else-if="notice" :message.prop="t(notice)" @nexus-close="notice = ''" />
     </template>
     <section v-if="store.state.settings?.restartReasons.length" class="warning restart-notice">
       <p role="status">{{ t('有改动需要重启服务后生效。') }}</p>

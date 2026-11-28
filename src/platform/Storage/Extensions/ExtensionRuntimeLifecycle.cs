@@ -240,5 +240,9 @@ public sealed class ExtensionRuntimeLifecycle : IExtensionRuntimeLifecycle, IAsy
         _fileProtection.Dispose();
     }
 
-    public ValueTask DisposeAsync() => new(StopAsync(TimeSpan.FromSeconds(10)));
+    public async ValueTask DisposeAsync()
+    {
+        await StopAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+        _lease.ReleaseExtensionActivator(Activator, _resources);
+    }
 }

@@ -25,7 +25,7 @@ internal sealed class ControlEvents(ControlAuthentication authority, ControlEven
             if (after is < 0 or > 9007199254740991) throw new ControlRequestException(400, "query_invalid");
             context.Response.ContentType = "text/event-stream";
             context.Response.Headers.CacheControl = "no-store";
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, app.Lifetime.ApplicationStopping);
             var lastSent = System.Diagnostics.Stopwatch.GetTimestamp();
             try
             {

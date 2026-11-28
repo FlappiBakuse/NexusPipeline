@@ -102,7 +102,7 @@ registerMessages({
   '视图结果待确认，请只读查询。': 'View settings outcome is unknown; read status to confirm.',
   '秘密变更结果未知。请刷新状态后再决定是否重试；草稿已保留。':
     'Secret change outcome is unknown. Refresh status before trying again; draft preserved.',
-  '重启交接已受理。': 'Restart handoff accepted.',
+  '服务正在重启，界面将自动刷新。': 'The service is restarting. This page will refresh automatically.',
   '新服务端口：': 'New service port: ',
   "settings_invalid": "Settings validation failed. Check required fields and allowed ranges.",
   "设置校验未通过，请检查必填字段和取值范围。": "Settings validation failed. Check required fields and allowed ranges.",

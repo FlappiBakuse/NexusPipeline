@@ -7,6 +7,7 @@ export interface DesktopChannel {
   preparation?(value: { stage: string; done: number; total: number }): Promise<void>;
   connect(): Promise<{ instanceId: string; route: string }>;
   setLocale(locale: 'zh-CN' | 'en-US'): Promise<void>;
+  setTheme(theme: 'dark' | 'light' | 'system'): Promise<void>;
   bindFrontend(clientId: string, token: string): Promise<unknown>;
   retireFrontend(clientId: string): Promise<void>;
   prepareExit(callback: (reason: 'close' | 'maintenance') => Promise<ExitReadiness>): void;

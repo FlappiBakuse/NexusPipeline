@@ -27,39 +27,41 @@ namespace NexusPipeline.Host.Composition;
 internal static class ApplicationHost
 {
     [SupportedOSPlatform("windows")]
-    internal static async Task<int> RunCoreAsync(string runtimeRoot, int? requestedPort, int? nativeClientProcessId = null,
-        InstanceLease? startupLease = null, NexusPipeline.Platform.Processes.MaintenanceStartupOrigin? maintenanceOrigin = null,
-        bool launchDesktop = false, UpdateWindowIntent? resumeWindow = null, (string Directory, ExtensionStoreChannel Channel)? installationBundle = null,
-        bool showStartupProgress = false, StartupProgress? startup = null)
+    internal static async Task<int> RunCoreAsync(int? requestedPort, int? nativeClientProcessId,
+        InstanceLease startupLease, NexusPipeline.Platform.Processes.MaintenanceStartupOrigin? maintenanceOrigin,
+        UpdateWindowIntent? resumeWindow, (string Directory, ExtensionStoreChannel Channel)? installationBundle,
+        bool showStartupProgress, StartupProgress? startup, HostServiceRestart serviceRestart)
     {
         using var externalNativeBinding = nativeClientProcessId is { } nativePid ? new NativeClientBinding(nativePid) : null;
         var contracts = new ContractReader();
-        var instanceLease = startupLease ?? throw new InvalidOperationException("startup_lease_required");
+        var instanceLease = startupLease;
         var instance = instanceLease.Instance;
         instanceLease.VerifyHeld(instance);
         var payloadRoots = new PayloadApplyRoots(PhysicalPathPolicy.RuntimeApplicationDirectory(),
             Path.Combine(instance.RuntimeRoot, "extensions"));
+        var progress = serviceRestart.Previous is null ? startup : null;
         var runtime = RuntimeReadiness.Verify(instance, contracts, instanceLease, payloadRoots,
-            stage => startup?.Advance(stage));
+            stage => progress?.Advance(stage));
         if (!NexusPipeline.Platform.Storage.Sqlite.ExtensionInstalledRows.ReadIds(runtime.Database).Any())
             Directory.CreateDirectory(PhysicalPathPolicy.NormalizeWithoutLinks(payloadRoots.ExtensionPayloadRoot));
         var lifecycle = new HostLifecycle(runtime.Recovery, TimeProvider.System);
         var resources = new ResourceLeaseManager(lifecycle);
         var controlSettings = new NexusPipeline.Platform.Storage.Sqlite.HostSettingsStore(runtime.Database);
-        startup?.Advance(StartupStage.LoadingSettings);
+        progress?.Advance(StartupStage.LoadingSettings);
         var savedStartup = controlSettings.Read().Values;
         var controlStartup = savedStartup.Service;
         var port = requestedPort ?? controlStartup.WebPort;
         int? mcpPort = controlStartup.McpEnabled ? controlStartup.McpPort : null;
         if (port != 0 && port == mcpPort) throw new ArgumentException("control_listener_ports_conflict");
-        using var listener = new ControlListener(controlStartup.AllowRemoteAccess ? IPAddress.Any : IPAddress.Loopback, port, mcpPort);
+        using var listener = new ControlListener(controlStartup.AllowRemoteAccess ? IPAddress.Any : IPAddress.Loopback,
+            port, mcpPort, serviceRestart.Previous?.Listener);
         port = listener.Port;
         var windowIntent = startup?.Intent ?? resumeWindow;
         using var headlessSigner = startup is null ? new NexusPipeline.Platform.Security.DesktopResponseSigner() : null;
         var desktopSigner = startup?.Signer ?? headlessSigner!;
         var ownedDesktop = startup?.Desktop;
         var nativeBinding = ownedDesktop?.Binding ?? externalNativeBinding;
-        startup?.Advance(StartupStage.RestoringExecution);
+        progress?.Advance(StartupStage.RestoringExecution);
         using (StartupProfile.Begin("execution.reconcile"))
             new RecoveryCompletionService(instance, runtime.Database, contracts, instanceLease, resources, runtime.Recovery).ReconcilePending();
         var providers = new ExecutionProviderRegistry();
@@ -81,7 +83,7 @@ internal static class ApplicationHost
             payloadRoots,
             resources, runtime.Recovery, extensions, () => settingsService.Read().Effective.Proxy, secretService);
         var operations = new OperationQueryService(instance, instanceLease, runtime.Database);
-        startup?.Advance(StartupStage.PreparingServices);
+        progress?.Advance(StartupStage.PreparingServices);
         var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { ContentRootPath = payloadRoots.HostPayloadRoot });
         await using var services = new ExecutionRuntimeServices(instance, runtime.Database, contracts, instanceLease, resources, lifecycle, runtime.Recovery, providers, secretService, payloadRoots, nativeBinding, runtime.Notifications);
         var extensionSecrets = new SecretAccessPolicy(instance, runtime.Database, instanceLease, resources);
@@ -160,9 +162,14 @@ internal static class ApplicationHost
             options.Listen(controlStartup.AllowRemoteAccess ? IPAddress.Any : IPAddress.Loopback, port);
         });
         await using var app = builder.Build();
+        await using var desktop = nativeBinding is null ? null : new DesktopControl(nativeBinding, instance.InstanceId, contracts,
+            lifecycle, new DesktopExitWatch(nativeBinding, lifecycle, app.Lifetime,
+                ownedDesktop is null ? null : ownedDesktop.AwaitFamilyAsync), desktopSigner, desktopPresence, nativeClients,
+            ownedDesktop is null ? null : settingsService.PublishDesktopMode, app.Lifetime.ApplicationStopping);
         await using var maintenance = new HostMaintenanceController(instance, runtime.Database, instanceLease, contracts,
             payloadRoots,
-            lifecycle, resources, app.Lifetime, nativeBinding, maintenanceOrigin, ownedDesktop, services.Scheduling, windowIntent);
+            lifecycle, resources, app.Lifetime, nativeBinding, maintenanceOrigin, ownedDesktop, services.Scheduling,
+            desktop, serviceRestart, port, mcpPort, controlStartup.AllowRemoteAccess);
         await using var automaticUpdates = new HostAutomaticUpdates(instance, runtime.Database, settingsService,
             updates, maintenance, packages, extensions, app.Lifetime.ApplicationStopping);
         var initialSource = Path.Combine(payloadRoots.HostPayloadRoot, "package-info", "initial-extensions");
@@ -173,14 +180,9 @@ internal static class ApplicationHost
             !automaticUpdates.HasStartupPending && initializer.IsPending(initialSource);
         var initialStartup = new InitialExtensionStartup(showBeforeInitialExtensions);
         using var editShutdown = app.Lifetime.ApplicationStopping.Register(configurationEdits.PreventNewBegins);
-        await using var desktop = nativeBinding is null ? null : new DesktopControl(nativeBinding, instance.InstanceId, contracts,
-            lifecycle, new DesktopExitWatch(nativeBinding, lifecycle, app.Lifetime,
-                ownedDesktop is null ? null : ownedDesktop.AwaitFamilyAsync), desktopSigner, desktopPresence, nativeClients,
-            ownedDesktop is null ? null : settingsService.PublishDesktopMode);
-        if (desktop is not null) ownedDesktop?.BindControl(desktop);
         using var bearerVerifier = new ControlBearerVerifier(instance, runtime.Database, instanceLease, runtime.Recovery, secretService);
         var controlAuthority = new ControlAuthentication(instance.InstanceId, controlStartup.AllowRemoteAccess,
-            mcpPort, controlSettings.Read, bearerVerifier, TimeProvider.System);
+            mcpPort, controlSettings.Read, bearerVerifier, TimeProvider.System, serviceRestart.Previous);
         await using var controlTokens = new ControlTokenService(instance, runtime.Database, instanceLease, resources,
             secretService, nativeBinding, app.Lifetime.ApplicationStopping);
         app.Use((HttpContext context, RequestDelegate next) => ControlExceptionBoundary.InvokeAsync(context, next, instance.InstanceId));
@@ -285,7 +287,7 @@ internal static class ApplicationHost
         new ExecutionReadControl(controlAuthority, execution, new LiveLogReader(instance, instanceLease)).Map(app);
         WebAssets.Map(app);
         new RuntimeQueries(controlAuthority, runtimeUseCases).Map(app);
-        new MaintenanceControl(controlAuthority, maintenance).Map(app);
+        new MaintenanceControl(controlAuthority, maintenance, serviceRestart).Map(app);
         new HostUpdateControl(controlAuthority, updates, contracts).Map(app);
         new ExecutionControl(controlAuthority, executionControlUseCases, contracts).Map(app);
         new AutomationControl(controlAuthority, automationControl, new AutomationControlCodec(contracts),
@@ -325,9 +327,9 @@ internal static class ApplicationHost
             if (showBeforeInitialExtensions)
             {
                 await StartControlAsync();
-                await startup!.PresentInterfaceAsync();
+                await progress!.PresentInterfaceAsync();
             }
-            if (!showBeforeInitialExtensions) startup?.Advance(StartupStage.InstallingExtensions);
+            if (!showBeforeInitialExtensions) progress?.Advance(StartupStage.InstallingExtensions);
             if (installationBundle is { } bundle)
             {
                 await packages.InstallLocalAsync(bundle.Directory, bundle.Channel);
@@ -335,13 +337,13 @@ internal static class ApplicationHost
             }
             using (StartupProfile.Begin("extensions.initial"))
                 await initializer.InitializeAsync(initialSource, app.Lifetime.ApplicationStopping);
-            if (!showBeforeInitialExtensions) startup?.Advance(StartupStage.StartingExtensions);
+            if (!showBeforeInitialExtensions) progress?.Advance(StartupStage.StartingExtensions);
             using (StartupProfile.Begin("extensions.start"))
                 await extensions.StartAsync(CancellationToken.None);
             if (!showBeforeInitialExtensions) await StartControlAsync();
 
-            startup?.Advance(StartupStage.StartupUpdates);
-            var startupUpdating = await automaticUpdates.ApplyStartupAsync();
+            progress?.Advance(StartupStage.StartupUpdates);
+            var startupUpdating = serviceRestart.Previous is null && await automaticUpdates.ApplyStartupAsync();
             if (!startupUpdating)
             {
                 services.Start(app.Lifetime); automaticUpdates.Start(); packages.StartCleanup();
@@ -349,7 +351,10 @@ internal static class ApplicationHost
                 _ = packages.ScanLocalIntakeAsync().ContinueWith(fault =>
                     app.Logger.LogWarning(fault.Exception, "Local extension scan failed"),
                     CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
-                if (startup is not null) await startup.CompleteAsync();
+                if (progress is not null) await progress.CompleteAsync();
+                serviceRestart.Ready();
+                if (serviceRestart.Previous is not null && startup is not null)
+                    await startup.RefreshAsync(port, savedStartup.Desktop);
             }
             var webAddress = app.Urls.Single(value => new Uri(value).Port != mcpPort);
             var advertised = new UriBuilder(webAddress) { Host = IPAddress.Loopback.ToString() }.Uri.GetLeftPart(UriPartial.Authority);
@@ -394,10 +399,10 @@ internal static class ApplicationHost
 
         async Task StartControlAsync()
         {
-            startup?.Advance(StartupStage.StartingServer);
+            progress?.Advance(StartupStage.StartingServer);
             await app.StartAsync();
-            startup?.Advance(StartupStage.StartingDesktop);
-            if (startup is not null) await startup.ConfigureAsync(port, savedStartup.Desktop);
+            progress?.Advance(StartupStage.StartingDesktop);
+            if (progress is not null) await progress.ConfigureAsync(port, savedStartup.Desktop);
         }
     }
 }

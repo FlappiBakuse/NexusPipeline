@@ -3,6 +3,8 @@ using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Platform.Networking;
+using NexusPipeline.Host.Control.Http;
+using NexusPipeline.Host.Composition;
 using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage;
@@ -37,10 +39,14 @@ internal sealed class HostMaintenanceController : IAsyncDisposable
     private readonly ResourceLeaseManager _resources;
     private readonly IHostApplicationLifetime _application;
     private readonly NativeClientBinding? _desktop;
+    private readonly DesktopControl? _desktopControl;
     private readonly NexusPipeline.Host.Desktop.OwnedDesktop? _ownedDesktop;
     private readonly MaintenanceStartupOrigin? _inheritedOrigin;
     private readonly NexusPipeline.Platform.Storage.Scheduling.PersistentScheduleService? _scheduling;
-    private readonly UpdateWindowIntent? _window;
+    private readonly HostServiceRestart? _serviceRestart;
+    private readonly int _webPort;
+    private readonly int? _mcpPort;
+    private readonly bool _remote;
     private readonly UpdateReleaseTrust? _trust = UpdateReleaseTrust.Configured();
     private PreparedUpdateHandoff? _handoff;
     private MaintenanceBootstrapPayload? _bootstrap;
@@ -52,7 +58,6 @@ internal sealed class HostMaintenanceController : IAsyncDisposable
     private Guid _operationId;
     private string? _subject;
     private bool _handedOff, _stopping;
-    private HostRestartHandoff? _restart;
     private ResourceOperationLease? _restartRoot;
     private NativeClientBinding? _updateWindow;
     internal string? FailureCode { get; private set; }
@@ -63,23 +68,27 @@ internal sealed class HostMaintenanceController : IAsyncDisposable
         IHostApplicationLifetime application, NativeClientBinding? desktop, MaintenanceStartupOrigin? inheritedOrigin,
         NexusPipeline.Host.Desktop.OwnedDesktop? ownedDesktop = null,
         NexusPipeline.Platform.Storage.Scheduling.PersistentScheduleService? scheduling = null,
-        UpdateWindowIntent? window = null)
+        DesktopControl? desktopControl = null, HostServiceRestart? serviceRestart = null, int webPort = 0, int? mcpPort = null,
+        bool remote = false)
     {
         _instance = instance; _database = database; _lease = lease; _contracts = contracts; _roots = roots;
         _lifecycle = lifecycle; _resources = resources; _application = application; _desktop = desktop;
         _inheritedOrigin = inheritedOrigin; _ownedDesktop = ownedDesktop; _scheduling = scheduling;
-        _window = window;
+        _desktopControl = desktopControl;
+        _serviceRestart = serviceRestart; _webPort = webPort; _mcpPort = mcpPort;
+        _remote = remote;
     }
 
-    internal async Task<HostRestartReply> RestartAsync(Guid operationId, CancellationToken cancellation)
+    internal async Task<HostRestartReply> RestartAsync(Guid operationId, string origin,
+        HttpResponse response, CancellationToken cancellation)
     {
         await _serial.WaitAsync(cancellation);
         var stage = "admission";
         try
         {
-            if (_stopping || operationId == Guid.Empty || _flight is { IsCompleted: false } || _handoff is not null || _restart is not null)
+            if (_stopping || _serviceRestart is null || operationId == Guid.Empty ||
+                _flight is { IsCompleted: false } || _handoff is not null || _desktop is not null && _ownedDesktop is null)
                 throw Invalid();
-            if (_desktop is not null && _ownedDesktop is null) throw new IOException("maintenance_desktop_family_proof_required");
             stage = "drain";
             _drain = _lease.PublishExecution(() => _lifecycle.BeginCompletionDrain(operationId, onlyWhenIdle: true, drainReferences: true)) ?? throw Invalid();
             try
@@ -97,44 +106,35 @@ internal sealed class HostMaintenanceController : IAsyncDisposable
                 if (!_drain.TryEnterEffect()) throw Invalid();
                 stage = "payload";
                 _restartRoot = _resources.TryCompletePayload(_drain).Lease ?? throw Invalid();
-                var saved = new HostSettingsStore(_database).Read().Values;
-                var window = _window is null || _window.Mode == UpdateWindowMode.Headless ? _window : _window with
+                stage = "listener";
+                var saved = new HostSettingsStore(_database).Read().Values.Service;
+                var target = ControlListener.PrepareRestart(saved, _webPort, _mcpPort, _remote);
+                try
                 {
-                    Mode = saved.Desktop.Mode == NexusPipeline.Core.Settings.DesktopMode.Desktop
-                        ? UpdateWindowMode.Desktop : UpdateWindowMode.Browser
-                };
-                _restart = new(_inheritedOrigin);
-                // The accepted handoff closes its requesting renderer before committing the successor.
-                stage = "successor";
-                await _restart.PrepareAsync(_instance, operationId, saved.Service.WebPort, window, deadline.Token);
-                if (_ownedDesktop is not null)
-                {
-                    stage = "desktop";
-                    using var prepared = _resources.PrepareDesktopExit(_drain, _restartRoot);
-                    await _ownedDesktop.ExitForMaintenanceAsync(prepared, deadline.Token);
+                    cancellation.ThrowIfCancellationRequested();
+                    var reply = new HostRestartReply(operationId, _instance.InstanceId, Environment.ProcessId, target.Port, "restarting");
+                    response.OnCompleted(() =>
+                    {
+                        _application.StopApplication();
+                        return Task.CompletedTask;
+                    });
+                    _serviceRestart.Next = new(reply, origin, target);
+                    _stopping = true;
+                    return reply;
                 }
-                stage = "handoff";
-                await _restart.CommitAsync(deadline.Token);
-                _handedOff = true; _stopping = true;
-                _application.StopApplication();
-                return _restart.Reply;
+                catch { target.Dispose(); throw; }
             }
             catch (Exception primary)
             {
                 try
                 {
-                    if (_restart is not null && !_restart.Stop())
-                        throw new IOException("host_restart_stop_unconfirmed");
-                    _restart?.Dispose(); _restart = null;
                     _restartRoot?.Dispose(); _restartRoot = null;
                     if (!_drain.ReleaseFinishedEffect() && !_drain.TryCancel()) throw Invalid();
                     _drain = null;
                 }
                 catch (Exception secondary)
                 {
-                    var code = secondary is IOException { Message: "host_restart_stop_unconfirmed" }
-                        ? "host_restart_stop_unconfirmed" : "host_restart_cleanup_failed";
-                    throw new IOException(code, new AggregateException(primary, secondary));
+                    throw new IOException("host_restart_cleanup_failed", new AggregateException(primary, secondary));
                 }
                 throw;
             }
@@ -253,7 +253,7 @@ internal sealed class HostMaintenanceController : IAsyncDisposable
             {
                 stage = "desktop-family-exit";
                 using var prepared = _resources.PrepareDesktopExit(_drain!, _handoff!.Root);
-                await _ownedDesktop.ExitForMaintenanceAsync(prepared, _application.ApplicationStopping);
+                await _ownedDesktop.ExitForMaintenanceAsync(_desktopControl!, prepared, _application.ApplicationStopping);
             }
             var handoff = _handoff ?? throw Invalid();
             stage = "helper-start";
@@ -365,9 +365,7 @@ internal sealed class HostMaintenanceController : IAsyncDisposable
         _stopping = true;
         if (_flight is { } flight) await flight.WaitAsync(TimeSpan.FromSeconds(40));
         if (!_handedOff && _handoff is not null) await AbortUnhandedAsync();
-        if (!_handedOff && _restart is not null && !_restart.Stop())
-            throw new IOException("host_restart_stop_unconfirmed");
-        _restart?.Dispose(); _restartRoot?.Dispose();
+        _restartRoot?.Dispose();
         ReleaseInputs(); _drain?.Dispose(); _serial.Dispose();
     }
     private static bool IsHandoffFailure(Exception error) => error is IOException or OperationCanceledException or

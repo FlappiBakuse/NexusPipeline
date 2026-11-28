@@ -44,52 +44,44 @@ async function maintenanceExitContract(checks: string[]): Promise<void> {
     held.push({ path: new URL(String(input)).pathname, resolve });
   }));
   const id = '70000000-0000-4000-8000-000000000001';
-  const restarting = client.restartHost(id, objectValue);
-  assert(client.pendingWrites === 1 && client.canExitMaintenance(),
-    'a held restart response allows its own signed maintenance exit while remaining a pending write', checks);
-  let duplicate: unknown;
-  try { await client.restartHost(id, objectValue); } catch (error) { duplicate = error; }
-  assert(duplicate instanceof Error && held.length === 1,
-    'a second restart cannot replace the pending restart or issue another request', checks);
   const ordinary = client.write('/control/v1/automation/change', { operationId: 'ordinary' }, objectValue);
-  assert(Number(client.pendingWrites) === 2 && !client.canExitMaintenance(),
-    'an ordinary pending write still prevents maintenance exit during restart', checks);
-  held[1]!.resolve(jsonResponse({ saved: true }));
+  const noObservation = async () => {};
+  const refused = await client.restartHost(id, objectValue, noObservation).catch(error => error);
+  assert(refused instanceof ControlFailure && held.length === 1,
+    'a pending write blocks restart before any mutation is sent', checks);
+  held[0]!.resolve(jsonResponse({ saved: true }));
   await ordinary;
-  assert(Number(client.pendingWrites) === 1 && client.canExitMaintenance(),
-    'finishing the ordinary write permits the waiting restart handoff', checks);
-  let releaseSecret!: () => void;
-  const secret = client.trackExternalWrite(() => new Promise<void>(resolve => { releaseSecret = resolve; }));
-  assert(Number(client.pendingWrites) === 2 && !client.canExitMaintenance(),
-    'a held raw secret write prevents maintenance exit during restart', checks);
-  releaseSecret();
-  await secret;
-  assert(Number(client.pendingWrites) === 1 && client.canExitMaintenance(),
-    'settling the raw secret write restores only the restart exception', checks);
-  held[0]!.resolve(jsonResponse({ state: 'handoff' }, 202));
+  const accepted = Promise.withResolvers<void>();
+  const readiness = Promise.withResolvers<void>();
+  const restarting = client.restartHost(id, objectValue, async () => {
+    accepted.resolve();
+    await readiness.promise;
+  });
+  assert(client.pendingWrites === 1, 'the restart RPC remains an ordinary pending write', checks);
+  const duplicate = await client.restartHost(id, objectValue, noObservation).catch(error => error);
+  assert(duplicate instanceof ControlFailure && Number(held.length) === 2,
+    'a second restart issues no duplicate request', checks);
+  held[1]!.resolve(jsonResponse({ state: 'restarting' }, 202));
+  await accepted.promise;
+  const blocked = await client.trackExternalWrite(async () => {}).catch(error => error);
+  assert(blocked instanceof ControlFailure && Number(client.pendingWrites) === 0,
+    'other writes stay blocked while the accepted restart waits for readiness', checks);
+  readiness.resolve();
   await restarting;
-  assert(Number(client.pendingWrites) === 0 && client.canExitMaintenance(),
-    'a completed restart releases all exit guards', checks);
-  const generic = client.write('/control/v1/maintenance/restart/' + id, null, objectValue, id);
-  assert(Number(client.pendingWrites) === 1 && !client.canExitMaintenance(),
-    'a generic write cannot exclude itself merely by using a maintenance URL', checks);
-  held[2]!.resolve(jsonResponse({ failed: true }, 409));
-  await generic.catch(() => {});
+  await client.trackExternalWrite(async () => {});
   const offline = new ControlClient('http://control.test', async () => { throw new TypeError('offline'); });
-  let unknown: unknown;
-  try { await offline.restartHost(id, objectValue); } catch (error) { unknown = error; }
-  assert(unknown instanceof ControlFailure && unknown.uncertain && unknown.operationId === id
-    && offline.pendingWrites === 0 && offline.canExitMaintenance(),
-  'a lost restart response preserves its uncertain operation without replay or a stuck guard', checks);
+  const unknown = await offline.restartHost(id, objectValue, noObservation).catch(error => error);
+  assert(unknown instanceof ControlFailure && unknown.uncertain && unknown.operationId === id && offline.pendingWrites === 0,
+    'a lost restart response preserves its uncertain operation without replay or a stuck guard', checks);
   let rejectSecret!: (error: unknown) => void;
   const uncertainSecret = client.trackExternalWrite(() => new Promise<void>((_, reject) => { rejectSecret = reject; }));
-  assert(Number(client.pendingWrites) === 1 && !client.canExitMaintenance(),
+  assert(Number(client.pendingWrites) === 1,
     'a held raw secret write blocks ordinary maintenance preparation', checks);
   rejectSecret(new ControlFailure(0, 'write_outcome_unknown', undefined, id, true));
   let secretOutcome: unknown;
   try { await uncertainSecret; } catch (error) { secretOutcome = error; }
   assert(secretOutcome instanceof ControlFailure && secretOutcome.uncertain && secretOutcome.operationId === id
-    && Number(client.pendingWrites) === 0 && client.canExitMaintenance(),
+    && Number(client.pendingWrites) === 0,
     'uncertain raw secret settlement preserves operation identity and releases its exit guard', checks);
 }
 

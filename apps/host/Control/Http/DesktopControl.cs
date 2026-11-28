@@ -69,7 +69,7 @@ internal sealed class DesktopControl : IAsyncDisposable
     private readonly DesktopExitWatch _exit;
     private readonly DesktopPresence? _presence;
     private readonly NativeClientSessions? _nativeClients;
-    private readonly CancellationTokenSource _nativeEnding = new();
+    private readonly CancellationTokenSource _nativeEnding;
     private readonly Task _nativeWatch;
     private readonly TaskCompletionSource _nativeExited = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Action<NexusPipeline.Core.Settings.DesktopMode>? _publishMode;
@@ -77,7 +77,7 @@ internal sealed class DesktopControl : IAsyncDisposable
 
     public DesktopControl(NativeClientBinding binding, Guid instanceId, ContractReader contracts, HostLifecycle lifecycle,
         DesktopExitWatch exit, DesktopResponseSigner? signer = null, DesktopPresence? presence = null, NativeClientSessions? nativeClients = null,
-        Action<NexusPipeline.Core.Settings.DesktopMode>? publishMode = null)
+        Action<NexusPipeline.Core.Settings.DesktopMode>? publishMode = null, CancellationToken applicationStopping = default)
     {
         _binding = binding;
         _session = new(instanceId, Guid.NewGuid());
@@ -87,6 +87,7 @@ internal sealed class DesktopControl : IAsyncDisposable
         _presence = presence;
         _nativeClients = nativeClients;
         _publishMode = publishMode;
+        _nativeEnding = CancellationTokenSource.CreateLinkedTokenSource(applicationStopping);
         _signer = signer ?? new(); _ownsSigner = signer is null;
         _nativeWatch = nativeClients is null ? Task.CompletedTask : WatchNativeAsync();
     }
@@ -167,6 +168,7 @@ internal sealed class DesktopControl : IAsyncDisposable
                 using var waiting = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, _nativeEnding.Token);
                 try { await changed.WaitAsync(TimeSpan.FromSeconds(25), waiting.Token); }
                 catch (TimeoutException) { return Results.NoContent(); }
+                catch (OperationCanceledException) when (waiting.IsCancellationRequested) { return Results.NoContent(); }
             }
             if (!IsNative(context) || sessionId != _session.Identity.SessionId) return Results.StatusCode(403);
             lock (_maintenanceGate)

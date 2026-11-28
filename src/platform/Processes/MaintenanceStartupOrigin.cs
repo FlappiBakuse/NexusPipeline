@@ -114,20 +114,6 @@ internal sealed class MaintenanceStartupOrigin : IDisposable
         if (_currentJob is null || _currentJob.Flags != 0x800) throw Invalid();
     }
 
-    internal MaintenanceJobQuery RetainRestartJob()
-    {
-        RequireReleasedSuccessor();
-        return _currentJob!.Clone();
-    }
-
-    internal static MaintenanceStartupOrigin ReceiveRestartJob(NativeClientBinding parent, ProcessIdentity identity, long handle)
-    {
-        using var received = MaintenanceJobQuery.Receive(parent, identity, handle);
-        if (received.Flags != 0x800) throw Invalid();
-        received.RequireMember(identity);
-        return CaptureAcknowledgedSuccessor(received, parent, identity, 0x800);
-    }
-
     internal static void RequirePipeParent(NamedPipeClientStream pipe, NativeClientBinding parent, ProcessIdentity identity)
     {
         if (!parent.IsRegistered(identity) ||
