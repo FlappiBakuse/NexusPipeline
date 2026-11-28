@@ -265,16 +265,22 @@
 }
 
 .entity-card-actions {
+  --entity-card-action-size: 40px;
   display: flex;
   flex: none;
   align-items: center;
   gap: 6px;
 }
 
-.entity-card-actions > nexus-icon-button {
-  --size: 40px;
-  inline-size: var(--size);
-  block-size: var(--size);
+.entity-card-actions > :is(nexus-icon-button, .entity-card-indicator) {
+  --size: var(--entity-card-action-size);
+  inline-size: var(--entity-card-action-size);
+  block-size: var(--entity-card-action-size);
+}
+
+.entity-card-indicator {
+  display: grid;
+  place-items: center;
 }
 
 .entity-card-actions > .danger-action {
@@ -282,5 +288,46 @@
 }
 
 @media (max-width: 600px) or (pointer: coarse) {
-  .entity-card-actions > nexus-icon-button { --size: 44px; }
+  .entity-card-actions { --entity-card-action-size: 44px; }
+}
+.editor-breadcrumb > ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.editor-breadcrumb > ol > li {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+.editor-breadcrumb > ol > li + li::before {
+  content: '›' / '';
+  color: var(--nx-color-muted);
+}
+.editor-breadcrumb a {
+  color: var(--nx-color-muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.editor-breadcrumb a:hover,
+.editor-breadcrumb a:focus-visible {
+  color: var(--nx-color-accent);
+}
+.editor-breadcrumb a:focus-visible {
+  outline: 2px solid var(--nx-color-accent);
+  outline-offset: 3px;
+}
+.editor-breadcrumb [aria-current='page'] {
+  margin: 0;
+  color: var(--nx-color-text);
+  font-size: var(--nx-modal-title-size, 19px);
+  line-height: var(--nx-modal-title-line-height, 1.35);
+  font-weight: 700;
+  text-decoration: none;
+  overflow-wrap: anywhere;
 }

@@ -90,7 +90,9 @@ function reorder(ids: string[]): void {
           :options.prop="scriptOptions"
           @nexus-change="choose(row.id, $event.detail.value)"
         />
-        <button type="button" class="danger" @click="remove(row.id)">{{ t('删除') }}</button>
+        <div class="entity-card-actions">
+          <nexus-icon-button icon="trash" class="danger-action" :label="t('删除任务')" @click="remove(row.id)" />
+        </div>
       </div>
     </nexus-sortable-list>
     <button type="button" class="add-task" :disabled="rows.length >= 4096" @click="add">
@@ -123,23 +125,18 @@ small {
 .task-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 14px 8px 14px 0;
+  gap: var(--queue-row-gap);
+  padding-block: 14px;
 }
 .task-row + .task-row {
   border-top: 1px solid var(--border);
 }
 nexus-drag-handle {
   flex: none;
-  --nx-drag-size: 32px;
 }
 nexus-select {
   min-width: 0;
   flex: 1;
-}
-.task-row > button {
-  min-width: 84px;
-  font-size: 12px;
 }
 .add-task {
   margin-top: 12px;
@@ -150,13 +147,6 @@ nexus-select {
     align-items: start;
     flex-direction: column;
     gap: 4px;
-  }
-  .task-row {
-    padding-right: 0;
-  }
-  .task-row > button {
-    min-width: 64px;
-    flex: none;
   }
 }
 </style>

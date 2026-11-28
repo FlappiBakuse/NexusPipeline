@@ -88,7 +88,7 @@ function readLogin(text, trustedKey, request) {
       if (!exactFields(offer, ['captureId', 'nonce', 'clientId', 'extensionId', 'activationId', 'operationId', 'policy', 'isCanceled']) ||
           ['captureId', 'nonce', 'clientId', 'activationId', 'operationId'].some(key => !uuid.test(offer[key])) ||
           typeof offer.extensionId !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(offer.extensionId) || typeof offer.isCanceled !== 'boolean' ||
-          !exactFields(offer.policy, ['id', 'startUrl', 'origins', 'popupOrigins', 'cookies', 'storage', 'jsonRequests', 'readySets', 'checks', 'equalSets']) ||
+          !exactFields(offer.policy, ['id', 'startUrl', 'origins', 'popupOrigins', 'cookies', 'storage', 'jsonRequests', 'readySets', 'checks', 'equalSets', 'pageActions']) ||
           JSON.stringify(offer.policy).length > 8192) throw new Error('desktop_login_offer_invalid');
     }
   } else throw new Error('desktop_login_reply_invalid');

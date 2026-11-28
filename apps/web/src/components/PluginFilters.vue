@@ -134,7 +134,7 @@ nexus-icon {
   background: var(--panel-opaque);
   border: 1px solid var(--border);
   border-radius: var(--nx-radius-md);
-  box-shadow: var(--shadow);
+  box-shadow: var(--nx-surface-shadow);
 }
 .plugin-filter-panel p {
   margin: 2px 8px 4px;

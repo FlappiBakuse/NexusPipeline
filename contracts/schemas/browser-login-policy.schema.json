@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.nexuspipeline.invalid/1/browser-login-policy.schema.json",
   "type": "object", "additionalProperties": false,
-  "required": ["id", "startUrl", "origins", "popupOrigins", "cookies", "storage", "jsonRequests", "readySets", "checks", "equalSets"],
+  "required": ["id", "startUrl", "origins", "popupOrigins", "cookies", "storage", "jsonRequests", "readySets", "checks", "equalSets", "pageActions"],
   "properties": {
     "id": {"$ref": "#/$defs/id"},
     "startUrl": {"type": "string", "minLength": 1, "maxLength": 2048},
@@ -13,7 +13,8 @@
     "jsonRequests": {"type": "array", "maxItems": 4, "items": {"$ref": "#/$defs/jsonRequest"}},
     "readySets": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"$ref": "#/$defs/set"}},
     "checks": {"type": "array", "maxItems": 28, "items": {"$ref": "#/$defs/check"}},
-    "equalSets": {"type": "array", "maxItems": 8, "items": {"type": "array", "minItems": 2, "maxItems": 16, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}}}
+    "equalSets": {"type": "array", "maxItems": 8, "items": {"type": "array", "minItems": 2, "maxItems": 16, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}}},
+    "pageActions": {"$ref": "#/$defs/pageActions"}
   },
   "$defs": {
     "id": {"type": "string", "minLength": 1, "maxLength": 80, "pattern": "^[a-z0-9._-]+$"},
@@ -39,6 +40,30 @@
       "properties": {
         "id": {"$ref": "#/$defs/id"}, "origin": {"$ref": "#/$defs/origin"}, "endpoint": {"type": "string", "minLength": 1, "maxLength": 2048},
         "method": {"enum": ["GET", "POST"]}, "selector": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"type": "string", "minLength": 1, "maxLength": 128}}
+      }
+    },
+    "pageActions": {
+      "type": "object", "additionalProperties": false, "required": ["stopWhen", "clicks"],
+      "properties": {
+        "stopWhen": {"type": "array", "maxItems": 6, "items": {"$ref": "#/$defs/pageMatch"}},
+        "clicks": {"type": "array", "maxItems": 2, "items": {"$ref": "#/$defs/pageClick"}}
+      }
+    },
+    "pageClick": {
+      "type": "object", "additionalProperties": false, "required": ["target", "unique", "requiresSelector", "unlessSelector"],
+      "properties": {
+        "target": {"$ref": "#/$defs/pageMatch"},
+        "unique": {"type": "boolean"},
+        "requiresSelector": {"type": "string", "maxLength": 384},
+        "unlessSelector": {"type": "string", "maxLength": 384}
+      }
+    },
+    "pageMatch": {
+      "type": "object", "additionalProperties": false, "required": ["selector", "kind", "labels"],
+      "properties": {
+        "selector": {"type": "string", "minLength": 1, "maxLength": 384},
+        "kind": {"enum": ["visible", "login-text", "other-text", "account-link", "absolute", "label"]},
+        "labels": {"type": "array", "maxItems": 16, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 48}}
       }
     },
     "check": {

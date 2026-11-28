@@ -16,6 +16,7 @@
   },
   "slots": [
     "default",
+    "title",
     "footer"
   ],
   "events": {

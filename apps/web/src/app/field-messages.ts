@@ -39,6 +39,7 @@ export const fieldMessages: Readonly<Record<string, string>> = {
   公网访问地址: 'Public access address',
   关键字判断: 'Keyword judgement',
   内网访问地址: 'Local network address',
+  删除任务: 'Delete task',
   删除定时: 'Delete schedule',
   判定脚本: 'Judgement script',
   判断脚本: 'Judgement script',

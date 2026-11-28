@@ -1,6 +1,6 @@
 {
   "algorithm": "nexus-sdk-source-manifest-sha256-v1",
-  "sourceFingerprint": "c540a50418289900c78cc8fb8c590836d9127b762c2428d903d0eead77c221cf",
+  "sourceFingerprint": "04ae01dd20ecce15a721beec68a6c83793fcdb60feca9586e9de150f91355985",
   "inputs": [
     {
       "path": "Directory.Build.props",
@@ -254,8 +254,8 @@
     },
     {
       "path": "contracts/schemas/browser-login-policy.schema.json",
-      "sizeBytes": 3331,
-      "sha256": "d3a6e4bbf2827c7622ca44169b662eefd6f63544213acec6891bd852c792a7d2"
+      "sizeBytes": 4600,
+      "sha256": "01d5d098ed4a5c2ccb95169e1b1321750fb83264645bd24f4944ca9d6c628303"
     },
     {
       "path": "contracts/schemas/common.schema.json",
@@ -749,13 +749,13 @@
     },
     {
       "path": "contracts/sdk-frontend-api.json",
-      "sizeBytes": 58962,
-      "sha256": "cefeaedd5e148f6c1c1c30eb0d8d1d068286d0c213aaa24d603a31c5053ee9c7"
+      "sizeBytes": 58986,
+      "sha256": "4b03b2ee9e593d6c6ba862fa723a1b2ef7135b6ee9107ac9c22cfbef4001b3c5"
     },
     {
       "path": "contracts/sdk-public-api.json",
-      "sizeBytes": 1941923,
-      "sha256": "58ce6019020f2b3a4c4ef896801df1822a15177db1bf2a97e4db9444e4043c08"
+      "sizeBytes": 1973652,
+      "sha256": "0b2f8d0ac2d2bcb3ae824916a73fc18d1a4bae3a2d1d0e2754172d0ec6ac53c6"
     },
     {
       "path": "contracts/ui-elements.json",
@@ -854,8 +854,8 @@
     },
     {
       "path": "contracts/ui-elements/nexus-modal.json",
-      "sizeBytes": 561,
-      "sha256": "715dbe7669996a9249f42fd6fcc88a52a8c5734f162999f159046b3238828fc0"
+      "sizeBytes": 574,
+      "sha256": "4a4b53f813fe0081e7ff3925695e45c4c634c6c31516c41fca39e006a3524b60"
     },
     {
       "path": "contracts/ui-elements/nexus-number-input.json",
@@ -1064,8 +1064,8 @@
     },
     {
       "path": "sdk/dotnet/Lifecycle/BrowserLoginPolicy.cs",
-      "sizeBytes": 1396,
-      "sha256": "bb81b76edd1ecc002edfae2736e37882de705286bbeed61f853f1fa1a731f891"
+      "sizeBytes": 2332,
+      "sha256": "10b2a8934ae162fd864f4836bdc0206e88b1adc6db5425b2e7f8b350e78a13b8"
     },
     {
       "path": "sdk/dotnet/Lifecycle/ExtensionActivationContext.cs",
@@ -1084,8 +1084,8 @@
     },
     {
       "path": "sdk/dotnet/Lifecycle/IExtensionDesktop.cs",
-      "sizeBytes": 2579,
-      "sha256": "a46ceaaae9cbcb7c6bb88aa49842559d48e578c2f9c28b5a273fef393c690ba4"
+      "sizeBytes": 2855,
+      "sha256": "55e93ed87d3239c7ce3c8216fc511c46d69a29f6cb3f8a53903946ac4a8a7181"
     },
     {
       "path": "sdk/dotnet/Media/IMediaPreviewRegistrationPort.cs",

@@ -179,11 +179,12 @@ try {
   await page.getByRole('button', { name: '添加签到任务', exact: true }).click();
   await editor.getByRole('textbox', { name: '任务名称', exact: true }).fill('Browser qualification');
   await editor.getByRole('switch', { name: '启用此任务', exact: true }).click();
+  await editor.getByRole('button', { name: '游戏自动签到', exact: true }).click();
   const platform = initial.platforms.find(item => item.id === 'cn');
   const selection = editor.locator(`nexus-select[aria-label=${JSON.stringify(platform.name + ' 签到游戏')}]`);
   await selection.locator('input[role=combobox]').click();
   await selection.locator(`[role=option][data-id=${JSON.stringify(platform.games[0].id)}]`).click();
-  await editor.getByRole('textbox', { name: '任务名称', exact: true }).click();
+  await editor.getByRole('button', { name: '返回上级', exact: true }).click();
   await editor.getByRole('button', { name: '保存', exact: true }).click();
   await editor.waitFor({ state: 'detached' });
   const saved = (await state()).tasks;

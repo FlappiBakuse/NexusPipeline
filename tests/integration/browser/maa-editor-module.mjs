@@ -40,12 +40,17 @@ async function confirm() {
 }
 async function openBinding() {
   await page.locator('a[href="#/users"]').first().click();
-  await page.locator('.automation-row').getByRole('button', { name: input.context.userName, exact: true }).click();
+  const account = page.locator('.automation-row').filter({
+    has: page.getByRole('heading', { name: input.context.userName, exact: true })
+  });
+  await account.getByRole('button', { name: '用户管理', exact: true }).click();
   const binding = page.locator('.binding[data-item-id=' + JSON.stringify(input.context.bindingId) + ']');
-  await binding.locator('.binding-toggle').click();
-  await binding.locator('.maa-editor').waitFor();
-  await binding.getByRole('button', { name: '读取项目', exact: true }).click();
-  await binding.getByRole('textbox', { name: 'Credentials / user', exact: true }).waitFor();
+  await binding.locator('.binding-entry').click();
+  const detail = page.locator('.binding-detail[data-draft-item=' + JSON.stringify(input.context.bindingId) + ']');
+  await detail.locator('.edit-configuration').click();
+  const editor = page.locator('.maa-editor');
+  await editor.getByRole('button', { name: '读取项目', exact: true }).click();
+  await editor.getByRole('textbox', { name: 'Credentials / user', exact: true }).waitFor();
 }
 async function preview() {
   await page.locator('.maa-editor').getByRole('button', { name: '只读执行预览', exact: true }).click();

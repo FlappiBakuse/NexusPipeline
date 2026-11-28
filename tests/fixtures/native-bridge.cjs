@@ -37,11 +37,19 @@ async function main() {
   assert(bound, 'fixture_native_bind'); checks.push('actual main-frame preload and native TCP binding');
   facts.bound = bound;
   const route = '/control/v1/extensions/fixture-plugin/frontend/' + config.activationId + '/invoke/';
-  const result = await window.webContents.executeJavaScript(`(async () => {
+  await window.webContents.executeJavaScript(`(() => {
+    window.__fixtureCapture = (async () => {
     const response = await fetch(${JSON.stringify(route + 'native-capture')},{method:'POST',headers:{'Content-Type':'application/json',
       'X-Nexus-Frontend-Client':window.__fixtureGrant.token},body:JSON.stringify({operationId:${JSON.stringify(crypto.randomUUID())},input:{}})});
     if (!response.ok) throw new Error('fixture_capture_failed');return response.json();
+    })();
   })()`);
+  let login;
+  while (!login) { login = BrowserWindow.getAllWindows().find(item => item !== window); if (!login) await pause(); }
+  while (login.webContents.getURL() === '' || !await login.webContents.executeJavaScript(
+    "document.querySelector('[data-action=complete]')?.getAttribute('aria-disabled') === 'false'")) await pause();
+  await login.webContents.executeJavaScript("document.querySelector('[data-action=complete]').click();true");
+  const result = await window.webContents.executeJavaScript('window.__fixtureCapture');
   assert(result.valid && result.jsonDenied && result.disposed, 'fixture_owned_draft_failed');
   facts.capture = { valid: result.valid, jsonDenied: result.jsonDenied, disposed: result.disposed };
   facts.windowsAfterCapture = BrowserWindow.getAllWindows().length;

@@ -40,7 +40,7 @@ function isReady(policy, values) {
 function origin(url) { try { const value = new URL(url); return !value.username && !value.password ? value.origin : undefined; } catch { return undefined; } }
 function endpoint(url) { try { const value = new URL(url); return value.origin + value.pathname; } catch { return undefined; } }
 
-async function collectValues(policy, privateSession, windows, passive) {
+async function collectValues(policy, privateSession, pages, passive) {
   const values = Object.assign(Object.create(null), passive);
   for (const rule of policy.cookies) {
     const matches = (await privateSession.cookies.get({ domain: rule.domain, name: rule.name }))
@@ -48,9 +48,9 @@ async function collectValues(policy, privateSession, windows, passive) {
     if (new Set(matches.map(cookie => cookie.value)).size > 1) throw new Error('browser_login_cookie_conflict');
     if (matches[0]?.value) values[rule.id] = matches[0].value;
   }
-  for (const window of windows) {
-    if (window.isDestroyed()) continue;
-    const frames = window.webContents.mainFrame.framesInSubtree;
+  for (const contents of pages) {
+    if (contents.isDestroyed()) continue;
+    const frames = contents.mainFrame.framesInSubtree;
     if (frames.length > 64) throw new Error('browser_login_frame_limit');
     for (const frame of frames) {
       const address = origin(frame.url);

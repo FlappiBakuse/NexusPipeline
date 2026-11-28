@@ -142,9 +142,23 @@ internal sealed class InstalledDesktopPort(InstalledExtensionConsumption consump
                 policy.JsonRequests.Select(rule => new Core.Desktop.LoginJsonRule(rule.Id, rule.Origin, rule.Endpoint, rule.Method, rule.Selector.ToImmutableArray())).ToImmutableArray(),
                 policy.ReadySets.Select(set => set.ToImmutableArray()).ToImmutableArray(),
                 policy.Checks.Select(check => new Core.Desktop.LoginValueCheck(check.Id, check.Kind, check.Path.ToImmutableArray(), check.MaximumLength)).ToImmutableArray(),
-                policy.EqualSets.Select(set => set.ToImmutableArray()).ToImmutableArray());
+                policy.EqualSets.Select(set => set.ToImmutableArray()).ToImmutableArray()) { PageActions = CopyPageActions(policy.PageActions) };
         }
         catch (Exception error) when (error is NullReferenceException or ArgumentNullException)
         { throw new ArgumentException("browser_login_policy_invalid", nameof(policy)); }
+    }
+
+    private static Core.Desktop.LoginPageActions CopyPageActions(NexusPipeline.Extensibility.Lifecycle.LoginPageActions actions)
+    {
+        if (actions.StopWhen.Count > 6 || actions.Clicks.Count > 2) throw new ArgumentException("browser_login_policy_invalid");
+        return new(actions.StopWhen.Select(CopyMatch).ToImmutableArray(),
+            actions.Clicks.Select(click => new Core.Desktop.LoginPageClick(CopyMatch(click.Target), click.Unique,
+                click.RequiresSelector, click.UnlessSelector)).ToImmutableArray());
+
+        static Core.Desktop.LoginPageMatch CopyMatch(NexusPipeline.Extensibility.Lifecycle.LoginPageMatch match)
+        {
+            if (match.Labels.Count > 16) throw new ArgumentException("browser_login_policy_invalid");
+            return new(match.Selector, match.Kind, match.Labels.ToImmutableArray());
+        }
     }
 }

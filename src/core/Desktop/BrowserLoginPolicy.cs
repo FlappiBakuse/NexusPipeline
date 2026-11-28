@@ -12,7 +12,14 @@ public sealed record LoginJsonRule(string Id, string Origin, string Endpoint, st
 public sealed record LoginValueCheck(string Id, string Kind, ImmutableArray<string> Path, int MaximumLength);
 public sealed record BrowserLoginPolicy(string Id, string StartUrl, ImmutableArray<string> Origins, ImmutableArray<string> PopupOrigins,
     ImmutableArray<LoginCookieRule> Cookies, ImmutableArray<LoginStorageRule> Storage, ImmutableArray<LoginJsonRule> JsonRequests,
-    ImmutableArray<ImmutableArray<string>> ReadySets, ImmutableArray<LoginValueCheck> Checks, ImmutableArray<ImmutableArray<string>> EqualSets);
+    ImmutableArray<ImmutableArray<string>> ReadySets, ImmutableArray<LoginValueCheck> Checks, ImmutableArray<ImmutableArray<string>> EqualSets)
+{
+    public LoginPageActions PageActions { get; init; } = new([], []);
+}
+
+public sealed record LoginPageActions(ImmutableArray<LoginPageMatch> StopWhen, ImmutableArray<LoginPageClick> Clicks);
+public sealed record LoginPageClick(LoginPageMatch Target, bool Unique, string RequiresSelector, string UnlessSelector);
+public sealed record LoginPageMatch(string Selector, string Kind, ImmutableArray<string> Labels);
 
 public static class BrowserPolicyRules
 {
@@ -41,6 +48,7 @@ public static class BrowserPolicyRules
         foreach (var set in policy.ReadySets)
             if (set.IsDefaultOrEmpty || set.Length > 8 || set.Distinct(StringComparer.Ordinal).Count() != set.Length || set.Any(id => !ids.Contains(id))) throw Invalid();
         RequireChecks(policy, ids);
+        RequirePageActions(policy.PageActions, start);
         if (JsonSerializer.SerializeToUtf8Bytes(policy).Length > 8192) throw Invalid();
         return policy with { Origins = origins, PopupOrigins = popups, Cookies = policy.Cookies.ToArray().ToImmutableArray(),
             Storage = policy.Storage.ToArray().ToImmutableArray(), JsonRequests = policy.JsonRequests.Select(rule => rule with {
@@ -48,6 +56,32 @@ public static class BrowserPolicyRules
             ReadySets = policy.ReadySets.Select(set => set.ToArray().ToImmutableArray()).ToImmutableArray(),
             Checks = policy.Checks.Select(check => check with { Path = check.Path.ToArray().ToImmutableArray() }).ToImmutableArray(),
             EqualSets = policy.EqualSets.Select(set => set.ToArray().ToImmutableArray()).ToImmutableArray() };
+    }
+
+    private static void RequirePageActions(LoginPageActions actions, Uri start)
+    {
+        if (actions is null || actions.StopWhen.IsDefault || actions.StopWhen.Length > 6 ||
+            actions.Clicks.IsDefault || actions.Clicks.Length > 2 ||
+            actions.Clicks.IsEmpty && !actions.StopWhen.IsEmpty ||
+            !actions.Clicks.IsEmpty && start.Scheme != "https") throw Invalid();
+        foreach (var guard in actions.StopWhen) RequirePageMatch(guard);
+        foreach (var click in actions.Clicks)
+        {
+            if (click is null || click.RequiresSelector is null || click.UnlessSelector is null) throw Invalid();
+            if (click.RequiresSelector.Length > 0) Text(click.RequiresSelector, 384);
+            if (click.UnlessSelector.Length > 0) Text(click.UnlessSelector, 384);
+            RequirePageMatch(click.Target);
+            if (click.Target.Kind is not ("visible" or "login-text" or "label")) throw Invalid();
+        }
+    }
+
+    private static void RequirePageMatch(LoginPageMatch match)
+    {
+        if (match is null || match.Kind is not ("visible" or "login-text" or "other-text" or "account-link" or "absolute" or "label") ||
+            match.Labels.IsDefault || match.Labels.Length > 16 || (match.Kind == "label" ? match.Labels.IsEmpty : !match.Labels.IsEmpty) ||
+            match.Labels.Distinct(StringComparer.Ordinal).Count() != match.Labels.Length) throw Invalid();
+        Text(match.Selector, 384);
+        foreach (var label in match.Labels) Text(label, 48);
     }
 
     private static void RequireCookie(LoginCookieRule cookie, HashSet<string> ids, ImmutableArray<string> origins)

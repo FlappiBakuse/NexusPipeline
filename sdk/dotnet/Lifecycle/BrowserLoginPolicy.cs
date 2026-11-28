@@ -3,7 +3,18 @@ namespace NexusPipeline.Extensibility.Lifecycle;
 /// <summary>Explicit navigation, passive selectors and completion constraints for one native login.</summary>
 public sealed record BrowserLoginPolicy(string Id, string StartUrl, IReadOnlyList<string> Origins, IReadOnlyList<string> PopupOrigins,
     IReadOnlyList<LoginCookieRule> Cookies, IReadOnlyList<LoginStorageRule> Storage, IReadOnlyList<LoginJsonRule> JsonRequests,
-    IReadOnlyList<IReadOnlyList<string>> ReadySets, IReadOnlyList<LoginValueCheck> Checks, IReadOnlyList<IReadOnlyList<string>> EqualSets);
+    IReadOnlyList<IReadOnlyList<string>> ReadySets, IReadOnlyList<LoginValueCheck> Checks, IReadOnlyList<IReadOnlyList<string>> EqualSets)
+{
+    /// <summary>Optional entry clicks and stop conditions for the exact HTTPS start page.</summary>
+    public LoginPageActions PageActions { get; init; } = new([], []);
+}
+
+/// <summary>Stops on any matching guard. Clicks are tried in priority order, at most once each per document.</summary>
+public sealed record LoginPageActions(IReadOnlyList<LoginPageMatch> StopWhen, IReadOnlyList<LoginPageClick> Clicks);
+/// <summary>Clicks a visible target when the required selector is visible and the suppressing selector is absent or hidden. Empty selectors impose no condition.</summary>
+public sealed record LoginPageClick(LoginPageMatch Target, bool Unique, string RequiresSelector, string UnlessSelector);
+/// <summary>Matches visible elements using a CSS selector and a fixed predicate. Labels are used with the label predicate.</summary>
+public sealed record LoginPageMatch(string Selector, string Kind, IReadOnlyList<string> Labels);
 
 /// <summary>Selects one exact cookie domain, path and name.</summary>
 public sealed record LoginCookieRule(string Id, string Domain, string Path, string Name);

@@ -30,22 +30,31 @@ try {
   await page.locator('.authentication button').click();
   await page.waitForFunction(() => document.querySelector('style[data-extension-id="maa-framework"]'));
   await page.locator('a[href="#/users"]').first().click();
-  await page.locator('.automation-row').getByRole('button', { name: input.context.userName, exact: true }).click();
+  const account = page.locator('.automation-row').filter({
+    has: page.getByRole('heading', { name: input.context.userName, exact: true })
+  });
+  await account.getByRole('button', { name: '用户管理', exact: true }).click();
   const binding = page.locator('.binding[data-item-id=' + JSON.stringify(input.context.bindingId) + ']');
-  await binding.locator('.binding-toggle').click();
-  await binding.locator('.maa-editor').waitFor();
+  await binding.locator('.binding-entry').click();
+  const detail = page.locator('.binding-detail[data-draft-item=' + JSON.stringify(input.context.bindingId) + ']');
+  await detail.locator('.edit-configuration').click();
+  const editor = page.locator('.maa-editor');
+  await editor.waitFor();
   await page.getByRole('textbox', { name: '原生 DLL 相对目录', exact: true }).fill('native');
-  await binding.getByRole('button', { name: '读取项目', exact: true }).click();
-  await binding.getByRole('textbox', { name: 'Credentials / user', exact: true }).waitFor();
-  await binding.getByRole('button', { name: '只读执行预览', exact: true }).click();
+  await editor.getByRole('button', { name: '读取项目', exact: true }).click();
+  await editor.getByRole('textbox', { name: 'Credentials / user', exact: true }).waitFor();
+  await editor.getByRole('button', { name: '只读执行预览', exact: true }).click();
   await page.locator('.maa-output').filter({ hasText: '"canExecute": true' }).waitFor();
-  await binding.getByRole('button', { name: '保存用户配置', exact: true }).click();
+  await editor.getByRole('button', { name: '保存用户配置', exact: true }).click();
   await page.locator('nexus-confirm-dialog [data-action=confirm]').click();
-  await binding.getByText('已保存', { exact: true }).waitFor();
+  await editor.getByText('已保存', { exact: true }).waitFor();
   assert.equal(fs.existsSync(input.context.marker), false);
   checks.push('actual editor preview and save preserve the selected pretask without starting it');
 
-  await page.locator('nexus-modal[open]').getByRole('button', { name: '关闭', exact: true }).click();
+  const close = 'dialog > .panel > header > .close';
+  await page.locator('nexus-modal').filter({ has: editor }).locator(close).click();
+  await editor.waitFor({ state: 'detached' });
+  await page.locator('nexus-modal').filter({ has: detail }).locator(close).click();
   await page.locator('a[href="#/dispatch"]').first().click();
   const targets = await page.locator('nexus-select[aria-label="目标类型"]').evaluate(control => control.options.map(option => option.label));
   assert.deepEqual(targets, ['脚本实例', '调度队列']);

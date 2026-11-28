@@ -11,7 +11,7 @@ const styles =
 :host{display:block;min-width:0;border-radius:var(--nx-radius-sm)}.trigger{display:flex;width:100%;align-items:center;justify-content:space-between;gap:12px;padding:0 12px;border-radius:var(--nx-radius-sm);background:var(--content-embedded-fill,var(--content-control));font-weight:400;text-align:left}
 .trigger svg{width:16px;height:16px;flex:none;color:var(--nx-color-accent)}
 .panel{position:fixed;inset:auto;margin:0;width:min(640px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:hidden;padding:12px;
-border:1px solid var(--nx-color-border);border-radius:var(--nx-radius-md);background:var(--content-card,var(--nx-color-surface));color:inherit;box-shadow:var(--shadow,0 16px 40px #0005)}
+border:1px solid var(--nx-color-border);border-radius:var(--nx-radius-md);background:var(--content-card,var(--nx-color-surface));color:inherit;box-shadow:var(--nx-surface-shadow,0 16px 40px #0005)}
 .panel[hidden]{display:none}.panel::backdrop{background:transparent}.toolbar{display:grid;grid-template-columns:40px 1fr 40px;gap:8px;align-items:center;text-align:center}
 .toolbar button{padding:0;font-size:20px}.months{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,298px),1fr));gap:12px}
 h4{margin:12px 0 8px;font-size:12px;text-align:center}.grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px}

@@ -15,13 +15,18 @@ export class NexusModalElement extends NexusElement {
     super(
       'nexus-modal',
       styles,
-      '<dialog aria-labelledby="title"><div class="mask"></div><div class="panel"><header><h2 id="title"></h2><slot name="header-actions"></slot><button class="close" type="button" aria-label="Close">' +
+      '<dialog><div class="mask"></div><div class="panel"><header><div class="modal-title"><slot name="title"><h2></h2></slot></div><slot name="header-actions"></slot><button class="close" type="button" aria-label="Close">' +
         closeIcon +
         '</button></header><nexus-scroll-area class="content"><slot></slot></nexus-scroll-area><footer><slot name="footer"></slot></footer></div></dialog>'
     );
     this.dialog = this.root.querySelector('dialog')!;
     this.heading = this.root.querySelector('h2')!;
     this.closeButton = this.root.querySelector('button')!;
+    const content = this.root.querySelector('nexus-scroll-area') as HTMLElement;
+    Object.defineProperty(this, 'scrollTop', {
+      get: () => content.scrollTop,
+      set: (value: number) => { content.scrollTop = value; }
+    });
     this.modal = new ModalSurface(this.dialog, (reason) => this.requestClose(reason));
   }
 
@@ -42,8 +47,10 @@ export class NexusModalElement extends NexusElement {
   }
 
   protected render(): void {
-    this.heading.textContent = String(this.values.title);
-    this.root.querySelector('nexus-scroll-area')!.setAttribute('label', String(this.values.title));
+    const title = String(this.values.title);
+    this.heading.textContent = title;
+    this.dialog.setAttribute('aria-label', title);
+    this.root.querySelector('nexus-scroll-area')!.setAttribute('label', title);
     this.root.querySelector('footer')!.hidden = !(
       this.root.querySelector('slot[name=footer]') as HTMLSlotElement
     ).assignedNodes().length;

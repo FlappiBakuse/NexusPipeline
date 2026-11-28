@@ -209,19 +209,15 @@ function setTime(id: string, value: string): void {
                 />
               </label>
             </div>
-            <div class="end-actions">
+            <div class="end-actions entity-card-actions">
               <nexus-switch
         data-draft-field="QueueFields/item.enabled"
                 :aria-label="t('启用定时')"
                 :value.prop="item.enabled"
                 @nexus-change="setSchedule(item.id, { enabled: $event.detail.value })"
               />
-              <button
-                type="button"
-                @click="removeSchedule(item.id)"
-              >
-                {{ t('删除定时') }}
-              </button>
+              <nexus-icon-button icon="trash" class="danger-action" :label="t('删除定时')"
+                @click="removeSchedule(item.id)" />
             </div>
           </div>
         </article>
@@ -238,6 +234,8 @@ function setTime(id: string, value: string): void {
 
 <style scoped>
 .queue-fields {
+  --nx-drag-size: 32px;
+  --queue-row-gap: 8px;
   display: grid;
   gap: 20px;
 }
@@ -288,28 +286,12 @@ small {
   font-size: 12px;
 }
 .schedule-item {
-  padding: 8px 0 14px;
-  border-radius: var(--nx-radius-md);
-  transition: background-color var(--nx-motion-duration-fast, 160ms) ease;
-}
-@media (hover: hover) {
-  .schedule-item:hover {
-    background-color: var(--content-control-hover);
-  }
-}
-.schedule-item:has(.schedule-heading > button:focus-visible) {
-  background-color: var(--content-control-hover);
-}
-@media (prefers-reduced-motion: reduce) {
-  .schedule-item { transition: none; }
+  padding-block: 8px 14px;
 }
 .schedule-heading {
   display: flex;
   align-items: center;
-  gap: 8px;
-}
-.schedule-heading nexus-drag-handle {
-  --nx-drag-size: 32px;
+  gap: var(--queue-row-gap);
 }
 .schedule-heading > button {
   display: flex;
@@ -319,7 +301,7 @@ small {
   text-align: left;
   border: 0;
   background: transparent;
-  padding: 8px 8px 8px 0;
+  padding: 8px 0;
   box-shadow: none;
 }
 .schedule-heading span {
@@ -332,7 +314,8 @@ small {
   font-size: 12px;
 }
 .schedule-content {
-  padding: 14px 0 0 34px;
+  padding-block-start: 14px;
+  padding-inline-start: calc(var(--nx-drag-size) + var(--queue-row-gap));
 }
 .schedule-controls {
   display: grid;
@@ -359,8 +342,7 @@ small {
   gap: 12px;
   margin-top: 24px;
 }
-.queue-section > button,
-.end-actions > button {
+.queue-section > button {
   color: var(--muted);
 }
 @media (max-width: 600px) {
@@ -372,7 +354,7 @@ small {
     flex-wrap: wrap;
   }
   .schedule-content {
-    padding-left: 0;
+    padding-inline-start: 0;
   }
   .weekdays { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }

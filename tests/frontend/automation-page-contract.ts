@@ -298,26 +298,30 @@ async function activeBindingRemoval(parent: HTMLElement, check: Check) {
     await settle();
     press(account, '确定');
     await settle();
-    const toggle = account.querySelector<HTMLButtonElement>('.binding-toggle')!;
-    toggle.click();
+    const row = account.querySelector<HTMLElement>('.binding')!;
+    const bindingId = row.dataset.itemId!;
+    const openBinding = () => row.querySelector<HTMLButtonElement>('.binding-entry')!.click();
+    const removeBinding = () => row.querySelector('nexus-icon-button')!.shadowRoot!
+      .querySelector<HTMLButtonElement>('button[aria-label="移除绑定"]')!.click();
+    openBinding();
     await settle();
     account.querySelector<HTMLButtonElement>('.edit-configuration')!.click();
     await settle();
     const editor = [...holder.querySelectorAll('nexus-modal')].find(modal => modal !== account)!;
     press(editor, '关闭');
     await settle();
-    toggle.click();
+    press(account, '返回上级');
     await settle();
     press(account, '编辑绑定');
     await settle();
-    press(account, '移除绑定');
+    removeBinding();
     await settle();
-    const retained = account.contains(toggle);
+    const retained = account.contains(row);
     check(retained, 'removing an unsaved binding keeps its active native configuration session reachable');
     if (!retained) return;
     press(account, '完成编辑');
     await settle();
-    toggle.click();
+    openBinding();
     await settle();
     account.querySelector<HTMLButtonElement>('.edit-configuration')!.click();
     await settle();
@@ -331,7 +335,6 @@ async function activeBindingRemoval(parent: HTMLElement, check: Check) {
     const staged = [...holder.querySelectorAll('nexus-modal')].find(modal => modal !== account)!;
     press(staged, '保留到草稿');
     await settle();
-    const bindingId = toggle.closest<HTMLElement>('[data-item-id]')!.dataset.itemId!;
     const managed = store.editors.target(store.state.capabilities!.instanceId, 'bindings', bindingId)
       .child('extension/maa-framework').child('automation.binding.editor');
     const release = managed.guardCancel(() => false);
@@ -342,16 +345,16 @@ async function activeBindingRemoval(parent: HTMLElement, check: Check) {
     release();
     press(account, '放弃配置草稿');
     await settle();
-    check(account.contains(toggle) && managed.signal.aborted &&
+    check(account.contains(row) && managed.signal.aborted &&
       writes.some(route => route.endsWith('/prepared-configuration/discard')),
       'discarding a staged configuration keeps the binding and releases its candidate and managed editor state');
-    toggle.click();
+    press(account, '返回上级');
     await settle();
     press(account, '编辑绑定');
     await settle();
-    press(account, '移除绑定');
+    removeBinding();
     await settle();
-    check(!account.contains(toggle), 'removing the binding succeeds after the configuration session is cancelled');
+    check(!account.contains(row), 'removing the binding succeeds after the configuration session is cancelled');
   } finally { dispose(); }
 }
 

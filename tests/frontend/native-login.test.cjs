@@ -6,6 +6,27 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
 
+test('automatic login entry requires the exact start-page query in both processes', async () => {
+  const { createLoginPageActions } = require('../../apps/desktop/login-page-actions.cjs');
+  const contents = new EventEmitter();
+  const start = 'https://example.test/login?source=desktop';
+  const other = 'https://example.test/login?source=other';
+  let url = other, code;
+  contents.mainFrame = { get url() { return url; } };
+  contents.getURL = () => url;
+  contents.isLoadingMainFrame = contents.isDestroyed = () => false;
+  contents.executeJavaScriptInIsolatedWorld = async (_world, scripts) => { code = scripts[0].code; return false; };
+  const stop = createLoginPageActions(contents, { startUrl: start,
+    pageActions: { clicks: [{ target: { selector: 'button', kind: 'visible' } }], stopWhen: [] } }, () => true);
+  contents.emit('did-stop-loading');
+  assert.equal(code, undefined);
+  url = start + '#section';
+  contents.emit('did-stop-loading');
+  assert.equal(typeof code, 'string');
+  assert.equal(vm.runInNewContext(code, { location: new URL(other), performance }), false);
+  await stop();
+});
+
 test('an empty native login wait does not block startup or issue another request before it ends', async () => {
   const module = { exports: {} }, timers = new Map();
   let requests = 0, id = 0;
@@ -70,19 +91,29 @@ test('native login continues independent cleanup and waits for a proved clean se
   });
   class BrowserWindow extends EventEmitter {
     webContents = new EventEmitter();
-    constructor() { super(); this.webContents.setWindowOpenHandler = () => {}; }
-    setMenu() {} setTitle() {} setAutoHideMenuBar() {}
-    async loadURL() {}
+    contentView = { addChildView() {} };
+    setMenu() {} show() {}
+    getContentSize() { return [1080, 800]; }
     isDestroyed() { return false; }
     destroy() { calls.push('window'); this.emit('closed'); }
+  }
+  class WebContentsView {
+    webContents = Object.assign(new EventEmitter(), {
+      setWindowOpenHandler() {}, isDestroyed() { return false; },
+      close() { calls.push('view'); this.emit('destroyed'); },
+      async loadURL() {}
+    });
+    setBounds() {}
   }
   const module = { exports: {} };
   const modulePath = path.join(__dirname, '../../apps/desktop/login-window.cjs');
   vm.runInNewContext(fs.readFileSync(modulePath, 'utf8'), {
-    module, setTimeout, clearTimeout,
+    module, setTimeout, clearTimeout, setImmediate, clearImmediate,
     require(name) {
-      if (name === 'electron') return { BrowserWindow, session: { fromPartition: () => session }, Menu: { buildFromTemplate() {} } };
+      if (name === 'electron') return { BrowserWindow, WebContentsView, session: { fromPartition: () => session } };
       if (name === './native-text.cjs') return { text: value => value };
+      if (name === './login-shell.cjs') return { configureLoginShell: () => ({ load: async () => {} }) };
+      if (name === './login-page-actions.cjs') return { createLoginPageActions: () => () => {} };
       if (name === './login-values.cjs') return {
         watchResponses: () => ({ ready: Promise.resolve(), dispose: () => calls.push('observer') })
       };
@@ -95,7 +126,7 @@ test('native login continues independent cleanup and waits for a proved clean se
     policy: { startUrl: 'https://example.invalid/' } }, null, async status => { calls.push(status); });
   await value.started;
   await value.cancel();
-  assert.deepEqual(calls, ['observer', 'window', 'connections', 'storage', 'cache', 'auth-cache', 'resolver-cache', 'cookies']);
+  assert.deepEqual(calls, ['observer', 'view', 'window', 'connections', 'storage', 'cache', 'auth-cache', 'resolver-cache', 'cookies']);
   const failure = records.find(item => item.stage === 'cleanup-failed');
   assert.equal(failure.details.primary.stage, 'storage');
   assert.equal(failure.details.cleanup[0].reason, 'browser_login_storage_not_cleared');
@@ -105,5 +136,5 @@ test('native login continues independent cleanup and waits for a proved clean se
   assert.equal(records.filter(item => ['cleanup', 'canceled'].includes(item.stage)).length, 1);
   failing = false;
   await value.retry();
-  assert.deepEqual(calls.slice(-2), ['release-policy', 'failed']);
+  assert.deepEqual(calls.slice(-2), ['release-policy', 'canceled']);
 });

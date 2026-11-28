@@ -40,6 +40,9 @@ public sealed record BrowserLoginPolicy
     /// <summary>Schema field <c>equalSets</c>; constraints are owned by browser-login-policy.schema.json.</summary>
     [JsonPropertyName("equalSets")]
     public required IReadOnlyList<IReadOnlyList<string>> EqualSets { get; init; }
+    /// <summary>Schema field <c>pageActions</c>; constraints are owned by browser-login-policy.schema.json.</summary>
+    [JsonPropertyName("pageActions")]
+    public required BrowserLoginPolicyPageActions PageActions { get; init; }
 }
 
 /// <summary>Wire shape from browser-login-policy.schema.json; validate the schema before use.</summary>
@@ -97,6 +100,51 @@ public sealed record BrowserLoginPolicyJsonRequest
     /// <summary>Schema field <c>selector</c>; constraints are owned by browser-login-policy.schema.json.</summary>
     [JsonPropertyName("selector")]
     public required IReadOnlyList<string> Selector { get; init; }
+}
+
+/// <summary>Wire shape from browser-login-policy.schema.json; validate the schema before use.</summary>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record BrowserLoginPolicyPageActions
+{
+    /// <summary>Schema field <c>stopWhen</c>; constraints are owned by browser-login-policy.schema.json.</summary>
+    [JsonPropertyName("stopWhen")]
+    public required IReadOnlyList<BrowserLoginPolicyPageMatch> StopWhen { get; init; }
+    /// <summary>Schema field <c>clicks</c>; constraints are owned by browser-login-policy.schema.json.</summary>
+    [JsonPropertyName("clicks")]
+    public required IReadOnlyList<BrowserLoginPolicyPageClick> Clicks { get; init; }
+}
+
+/// <summary>Wire shape from browser-login-policy.schema.json; validate the schema before use.</summary>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record BrowserLoginPolicyPageClick
+{
+    /// <summary>Schema field <c>target</c>; constraints are owned by browser-login-policy.schema.json.</summary>
+    [JsonPropertyName("target")]
+    public required BrowserLoginPolicyPageMatch Target { get; init; }
+    /// <summary>Schema field <c>unique</c>; constraints are owned by browser-login-policy.schema.json.</summary>
+    [JsonPropertyName("unique")]
+    public required bool Unique { get; init; }
+    /// <summary>Schema field <c>requiresSelector</c>; constraints are owned by browser-login-policy.schema.json.</summary>
+    [JsonPropertyName("requiresSelector")]
+    public required string RequiresSelector { get; init; }
+    /// <summary>Schema field <c>unlessSelector</c>; constraints are owned by browser-login-policy.schema.json.</summary>
+    [JsonPropertyName("unlessSelector")]
+    public required string UnlessSelector { get; init; }
+}
+
+/// <summary>Wire shape from browser-login-policy.schema.json; validate the schema before use.</summary>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record BrowserLoginPolicyPageMatch
+{
+    /// <summary>Schema field <c>selector</c>; constraints are owned by browser-login-policy.schema.json.</summary>
+    [JsonPropertyName("selector")]
+    public required string Selector { get; init; }
+    /// <summary>Schema field <c>kind</c>; constraints are owned by browser-login-policy.schema.json.</summary>
+    [JsonPropertyName("kind")]
+    public required string Kind { get; init; }
+    /// <summary>Schema field <c>labels</c>; constraints are owned by browser-login-policy.schema.json.</summary>
+    [JsonPropertyName("labels")]
+    public required IReadOnlyList<string> Labels { get; init; }
 }
 
 /// <summary>Wire shape from browser-login-policy.schema.json; validate the schema before use.</summary>

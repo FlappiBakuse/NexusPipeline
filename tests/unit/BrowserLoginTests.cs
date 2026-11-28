@@ -6,6 +6,25 @@ namespace NexusPipeline.CoreTests;
 
 public sealed class BrowserLoginTests
 {
+    [Fact(DisplayName = "Login Entry Click Policy Accepts Bounded HTTPS DOM Rules And Rejects Other Targets")]
+    public void FreezesBoundedPageActions()
+    {
+        const string origin = "https://login.example.test";
+        var policy = Policy() with { StartUrl = origin + "/entry", Origins = [origin],
+            Cookies = [new("token", "login.example.test", "/", "token")],
+            PageActions = new([new("[role=dialog]", "visible", [])], [new(new("#sign-in", "visible", []), false, "", "")]) };
+        Assert.Equal(policy.PageActions, BrowserPolicyRules.Freeze(policy, [origin]).PageActions);
+        var loopback = policy with { StartUrl = "http://127.0.0.1/entry", Origins = ["http://127.0.0.1"],
+            Cookies = [new("token", "127.0.0.1", "/", "token")] };
+        Assert.Throws<ArgumentException>(() => BrowserPolicyRules.Freeze(loopback, loopback.Origins));
+        foreach (var target in new LoginPageMatch[] { new("#sign-in", "script", []), new("#sign-in", "account-link", []),
+                     new("#sign-in", "label", []), new(new string('s', 385), "visible", []) })
+        {
+            var invalid = policy with { PageActions = new([], [new(target, true, "", "")]) };
+            Assert.Throws<ArgumentException>(() => BrowserPolicyRules.Freeze(invalid, [origin]));
+        }
+    }
+
     [Fact(DisplayName = "An Outstanding Empty Login Read Keeps Its Peer Available And Wakes For A Real Offer Or Cancellation")]
     public async Task WaitsForRealOffers()
     {

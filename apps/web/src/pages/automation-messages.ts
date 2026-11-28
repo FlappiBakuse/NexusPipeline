@@ -37,6 +37,8 @@ registerMessages({
   '请修正无效字段后再保存。': 'Correct the invalid fields before saving.',
   '请先在绑定中保存或取消配置编辑，再移除绑定。': 'Save or cancel configuration editing for this binding before removing it.',
   放弃配置草稿: 'Discard configuration draft',
+  页面路径: 'Breadcrumbs',
+  返回上级: 'Back',
   '请先结束当前配置编辑，再放弃草稿。': 'Finish the active configuration edit before discarding the draft.',
   导入与导出: 'Import and export',
   管理范围: 'Management scope',

@@ -23,7 +23,7 @@ function installLoginBridge(config, parent, connect, generation) {
       await post(request);
       active.delete(state.offer.captureId);
     } catch (error) {
-      state.cleaned = true; state.window = undefined;
+      state.cleanedStatus = status === 'canceled' ? status : 'failed'; state.window = undefined;
       const { type, reason } = describeFailure(error);
       const failure = `${type}/${reason}`;
       if (failure !== state.lastFailure) recordFailure('desktop-login', 'complete', error, request.correlationId);
@@ -34,32 +34,32 @@ function installLoginBridge(config, parent, connect, generation) {
     const prior = active.get(offer.captureId);
     if (prior && (prior.offer.nonce !== offer.nonce || prior.session.sessionId !== session.sessionId)) throw new Error('desktop_login_identity_changed');
     if (prior) {
-      if (!prior.cleaned) {
+      if (!prior.cleanedStatus) {
         if (offer.isCanceled || stale) await prior.window.cancel();
         else await prior.window.retry();
       }
       return;
     }
     if (active.size >= 128) throw new Error('desktop_login_limit');
-    const state = { offer, session, cleaned: false, window: undefined }; active.set(offer.captureId, state);
+    const state = { offer, session, cleanedStatus: undefined, window: undefined }; active.set(offer.captureId, state);
     if (offer.isCanceled || stale) { await complete(state, 'canceled', Object.create(null)); return; }
     state.window = createLoginWindow(offer, typeof parent === 'function' ? parent() : parent, (status, values) => complete(state, status, values), async values => {
       const result = await post({ ...identity(session), type: 'candidate', captureId: offer.captureId, nonce: offer.nonce, values });
       return result.accepted;
-    });
+    }, config.theme);
   }
   async function poll() {
     if (ended) return;
     let stage = 'connect'; let correlationId;
     try {
       const current = generation(); const session = await connect();
-      const alreadyCleaned = [...active.values()].filter(state => state.cleaned);
+      const alreadyCleaned = [...active.values()].filter(state => state.cleanedStatus);
       const request = { ...identity(session), type: 'poll' };
       correlationId = request.correlationId; stage = 'poll';
       const response = await post(request);
       stage = 'offer';
       for (const offer of response.offers) await processOffer(offer, session, ended || current !== generation());
-      for (const state of alreadyCleaned) await complete(state, 'failed', Object.create(null));
+      for (const state of alreadyCleaned) await complete(state, state.cleanedStatus, Object.create(null));
       lastPollFailure = undefined;
     } catch (error) {
       if (!ended) {

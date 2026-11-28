@@ -7,5 +7,5 @@ public static class SdkIdentity
     /// <summary>SDK package version, independent of Host and format versions.</summary>
     public const string Version = "0.1.0";
     /// <summary>SHA256 of the public semantic schema and compiled API description.</summary>
-    public const string ContractFingerprint = "526c00ef3b6e8028b548f8dd1c2fd437d4989256fd9969a7b440c98c567a3add";
+    public const string ContractFingerprint = "78c01b22ee1a8f5b45dbf78723a12786562695835fb5ee47270072ec08ac0908";
 }

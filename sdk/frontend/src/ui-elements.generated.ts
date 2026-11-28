@@ -1070,6 +1070,7 @@ export const uiElementDefinitions = {
     },
     "slots": [
       "default",
+      "title",
       "footer"
     ]
   },

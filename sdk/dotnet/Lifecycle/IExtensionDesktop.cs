@@ -13,9 +13,11 @@ public interface IExtensionDesktop
     /// <summary>Requires the actual current desktop frontend call bound to its verified native client and original grant lifetime.</summary>
     ValueTask RequireClientAsync(CancellationToken cancellationToken) => ValueTask.FromException(new NotSupportedException("native_frontend_unavailable"));
     /// <summary>Captures only declared login values in an isolated native session and returns after its window and session are cleaned.</summary>
+    /// <exception cref="IOException">Uses the code <c>browser_login_canceled</c> after a user dismissal has been cleaned up.</exception>
     ValueTask<BrowserLoginCapture> CaptureAsync(BrowserLoginPolicy policy, CancellationToken cancellationToken) =>
         ValueTask.FromException<BrowserLoginCapture>(new NotSupportedException("browser_login_unavailable"));
     /// <summary>Keeps the isolated window available after a rejected candidate and cleans it after validation succeeds.</summary>
+    /// <exception cref="IOException">Uses the code <c>browser_login_canceled</c> after a user dismissal has been cleaned up.</exception>
     ValueTask<BrowserLoginCapture> CaptureValidatedAsync(BrowserLoginPolicy policy,
         Func<BrowserLoginCapture, CancellationToken, ValueTask<bool>> validate, CancellationToken cancellationToken) =>
         ValueTask.FromException<BrowserLoginCapture>(new NotSupportedException("browser_login_validation_unavailable"));

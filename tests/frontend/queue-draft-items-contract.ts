@@ -2,6 +2,7 @@ import { createApp, h, ref } from 'vue';
 import { AutomationEditor, automationSession } from '../../apps/web/src/pages/automation-editor';
 import AutomationEditorDialog from '../../apps/web/src/pages/AutomationEditorDialog.vue';
 import theme from '../../apps/web/src/styles/theme.css?inline';
+import workspace from '../../apps/web/src/styles/workspace.css?inline';
 import { draftFixture, settle } from './configuration-draft-fixture';
 import QueueTasks from '../../apps/web/src/pages/QueueTasks.vue';
 import type { AutomationBundle } from '../../apps/web/src/control/wire.generated';
@@ -14,12 +15,20 @@ export async function queueDraftItemsContract(parent: HTMLElement, check: (value
   model.discard();
   store.state.automation = { ...store.state.automation!, bundle: { ...store.state.automation!.bundle, queues: [saved as never] } };
   const holder = document.createElement('section'); parent.append(holder);
-  const style = document.createElement('style'); style.textContent = theme; document.head.append(style);
+  const style = document.createElement('style'); style.textContent = [theme, workspace].join('\n'); document.head.append(style);
   const originalTheme = document.body.dataset.theme;
   const app = createApp({ render: () => model.editing.value ? h(AutomationEditorDialog,
     { store, kind: 'queues', visible: true, model, session, onClose: () => { model.editing.value = false; } }) : null });
   app.mount(holder);
   const click = (caption: string) => [...holder.querySelectorAll('button')].find(button => button.textContent?.includes(caption))!.click();
+  const removeSchedule = () => {
+    const control = holder.querySelector<HTMLElement & { icon: string }>('.end-actions nexus-icon-button');
+    const button = control?.shadowRoot?.querySelector('button');
+    check(control?.icon === 'trash' && button?.getAttribute('aria-label') === '删除定时' &&
+      !!button.querySelector('svg path') && !button.textContent?.trim() && button.type === 'button',
+      'the schedule uses the labelled shared SVG removal action');
+    button!.click();
+  };
   const fill = () => getComputedStyle(holder.querySelector('.schedule-item')!).backgroundColor;
   const scheduleTrigger = () => holder.querySelector<HTMLButtonElement>('.schedule-heading button')!;
   try {
@@ -33,7 +42,7 @@ export async function queueDraftItemsContract(parent: HTMLElement, check: (value
     holder.querySelector('nexus-time-picker')!.dispatchEvent(new CustomEvent('nexus-change',
       { detail: { value: '10:00' }, bubbles: true, composed: true })); await settle();
     check(model.queueSchedules.value[0].localMinute === 600, 'the real queue editor receives the new schedule time');
-    click('删除定时'); await settle();
+    removeSchedule(); await settle();
     check(!model.edited && model.queueSchedules.value.length === 0, 'removing the new queue schedule restores the saved model');
     holder.querySelector('nexus-modal')!.shadowRoot!.querySelector<HTMLButtonElement>('button[aria-label="关闭"],button[aria-label="Close"]')!.click();
     await settle();
@@ -58,11 +67,31 @@ export async function queueDraftItemsContract(parent: HTMLElement, check: (value
     check(!!holder.querySelector('nexus-toast.draft-restored-toast'), 'a collapsed existing queue schedule keeps its edited draft on reopen');
     holder.querySelector<HTMLButtonElement>('.schedule-heading button')!.click(); await settle();
     check(holder.querySelector('nexus-time-picker')!.hasAttribute('data-unsaved'), 'recreated queue time fields retain the saved baseline');
-    click('删除定时'); await settle();
+    removeSchedule(); await settle();
     model.queueSchedules.value = [original as never]; await settle();
     holder.querySelector<HTMLButtonElement>('.schedule-heading button')!.click(); await settle();
     check(!model.edited && !holder.querySelector('nexus-time-picker')?.hasAttribute('data-unsaved'),
       'undoing an existing schedule deletion restores its business and field baselines');
+    model.editing.value = false; await settle();
+    model.edit(); await settle();
+    check(!model.existing.value && model.queueSchedules.value.length === 1, 'a new queue opens with its default schedule');
+    click('添加任务'); await settle();
+    const task = holder.querySelector('.task-row')!;
+    const control = task.querySelector<HTMLElement & { icon: string }>('nexus-icon-button');
+    const action = control?.shadowRoot?.querySelector('button');
+    const right = (element: Element) => element.getBoundingClientRect().right;
+    const modal = holder.querySelector('nexus-modal')!;
+    const shadow = modal.shadowRoot!;
+    check(Math.abs(right(task.querySelector('nexus-icon-button, button')!) - right(holder.querySelector('.end-actions nexus-icon-button')!)) < 0.5 &&
+      Math.abs(right(shadow.querySelector('.close')!) - right(holder.querySelector('.editor-actions')!)) < 0.5,
+      'queue task, schedule, and modal actions share the same trailing edge');
+    check(control?.icon === 'trash' && action?.getAttribute('aria-label') === '删除任务' &&
+      !!action.querySelector('svg path') && action.type === 'button', 'queue tasks use the labelled shared SVG removal action');
+    action!.click(); await settle();
+    check(!holder.querySelector('.task-row') && !(model.draft.value.scriptIds as string[]).length,
+      'the task removal action updates the queue draft');
+    removeSchedule(); await settle();
+    check(!model.queueSchedules.value.length, 'the shared remove action also removes a schedule in a new queue');
   } finally {
     app.unmount(); holder.remove(); store.dispose(); style.remove();
     if (originalTheme === undefined) delete document.body.dataset.theme;

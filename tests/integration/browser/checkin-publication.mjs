@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 
+const openCredentials = editor => editor.getByRole('button', { name: '游戏自动签到', exact: true }).click();
+const backToTask = editor => editor.getByRole('button', { name: '返回上级', exact: true }).click();
+
 function faults(page) {
   const ledger = { writes: [], queries: [], committedResponseLost: false };
   let phase = 'lost-write';
@@ -40,8 +43,10 @@ async function reconcile(page, platform, state, fault, checks) {
   await page.locator('.checkin-task').getByRole('button', { name: '编辑签到', exact: true }).click();
   const editor = page.locator('.checkin-editor');
   await editor.getByRole('textbox', { name: '任务名称', exact: true }).fill('Publication retained draft');
+  await openCredentials(editor);
   const secret = editor.locator(`nexus-text-input[aria-label=${JSON.stringify(platform.name + ' 凭据')}] input`);
   await secret.fill('account_id=10001; cookie_token=nexus-controlled-fixture');
+  await backToTask(editor);
   const save = editor.getByRole('button', { name: '保存', exact: true });
   const check = editor.getByRole('button', { name: '检查保存结果', exact: true });
   await save.click(); await check.waitFor();
@@ -81,20 +86,23 @@ async function credentialIntents(page, platform, originalName, fault, checks) {
   const open = () => page.locator('.checkin-task').getByRole('button', { name: '编辑签到', exact: true }).click();
   const clear = editor.getByRole('button', { name: platform.name + ' · 清除已保存凭据', exact: true });
   const secret = editor.locator(`nexus-text-input[aria-label=${JSON.stringify(platform.name + ' 凭据')}] input`);
-  await open(); await clear.waitFor();
+  await open(); await openCredentials(editor); await clear.waitFor();
   assert.equal(await secret.inputValue(), '');
+  await backToTask(editor);
   await editor.getByRole('textbox', { name: '任务名称', exact: true }).fill('Publication keep');
   await editor.getByRole('button', { name: '保存', exact: true }).click();
   await editor.waitFor({ state: 'detached' });
-  await open(); await clear.waitFor();
+  await open(); await openCredentials(editor); await clear.waitFor();
   assert.equal(await secret.inputValue(), '');
   await clear.click();
+  await backToTask(editor);
   await editor.getByRole('textbox', { name: '任务名称', exact: true }).fill(originalName);
   await editor.getByRole('button', { name: '保存', exact: true }).click();
   await editor.waitFor({ state: 'detached' });
   await open();
-  await editor.getByRole('textbox', { name: '任务名称', exact: true }).waitFor();
+  await openCredentials(editor);
   assert.equal(await clear.count(), 0); assert.equal(await secret.inputValue(), '');
+  await backToTask(editor);
   await editor.getByRole('button', { name: '取消', exact: true }).click();
   await editor.waitFor({ state: 'detached' });
   assert.deepEqual(fault.ledger.writes.map(item => item.credentialAction), ['set', 'keep', 'clear']);
@@ -110,8 +118,10 @@ async function translatedRows(page, checks) {
   await page.locator('.checkin-task').getByText('Disabled', { exact: true }).waitFor();
   await page.locator('.checkin-task').getByRole('button', { name: 'Edit check-in', exact: true }).click();
   const editor = page.locator('.checkin-editor');
+  await editor.getByRole('button', { name: 'Automatic game check-in', exact: true }).click();
   for (const platform of ['Miyoushe', 'HoYoLAB', 'Skland', 'SKPORT', 'Kuro community', 'Tajiduo'])
     await editor.getByRole('combobox', { name: platform + ' Check-in games', exact: true }).waitFor();
+  await editor.getByRole('button', { name: 'Back to task', exact: true }).click();
   await editor.getByRole('button', { name: 'Cancel', exact: true }).click();
   await editor.waitFor({ state: 'detached' });
   await page.locator('a[href="#/settings"]').first().click();

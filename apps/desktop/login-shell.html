@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>NexusPipeline</title>
+  <link rel="stylesheet" href="login-shell.css">
+  <script src="login-shell-renderer.js" defer></script>
+</head>
+<body>
+  <header>
+    <div class="intro">
+      <strong id="title"></strong>
+      <p id="status" role="status"></p>
+    </div>
+    <div id="toolbar" role="toolbar" focusgroup="toolbar wrap" inert>
+      <div id="navigation" role="group">
+        <button type="button" data-action="back" aria-disabled="true">←</button>
+        <button type="button" data-action="forward" aria-disabled="true">→</button>
+        <button type="button" data-action="reload"></button>
+      </div>
+      <span role="separator" aria-orientation="vertical"></span>
+      <div id="finish" role="group">
+        <button type="button" data-action="cancel"></button>
+        <button type="button" data-action="complete" aria-disabled="true"></button>
+      </div>
+    </div>
+  </header>
+</body>
+</html>

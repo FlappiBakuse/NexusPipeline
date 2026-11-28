@@ -13,7 +13,12 @@ export async function surfaceDepthContract(check: (value: unknown, name: string)
   document.head.append(style);
   const main = document.createElement('nexus-card');
   const modal = document.createElement('nexus-modal') as UiElement<'nexus-modal'>;
+  modal.title = 'Editor';
   modal.surface = 'secondary';
+  const title = document.createElement('nav');
+  title.slot = 'title';
+  title.textContent = 'Editor / Details';
+  modal.append(title);
   const scope = new ExtensionScope(), drafts = new EditorDraftStore(() => {});
   const wallpaper = new SurfaceSession(document.createElement('div'), { surfaceId: 'application.appearance', instanceId: 'theme' },
     scope, drafts.target('theme', 'theme', 'wallpaper'));
@@ -51,8 +56,13 @@ export async function surfaceDepthContract(check: (value: unknown, name: string)
   const controls = fieldFrames(primary.raised);
   const iconButton = icon.shadowRoot!.querySelector('button')!;
   const modalPanel = modal.shadowRoot!.querySelector('.panel')!;
+  const modalDialog = modal.shadowRoot!.querySelector('dialog')!;
+  const titleSlot = modal.shadowRoot!.querySelector<HTMLSlotElement>('slot[name=title]');
   const before = document.body.dataset.theme;
   try {
+    check(titleSlot?.assignedElements()[0] === title && titleSlot?.textContent === 'Editor' &&
+      modalDialog.getAttribute('aria-label') === 'Editor',
+      'the modal keeps its accessible name and fallback heading alongside a slotted heading');
     for (const mode of ['dark', 'light'] as const) {
       document.body.dataset.theme = mode;
       for (const tinted of [false, true]) {
@@ -67,6 +77,11 @@ export async function surfaceDepthContract(check: (value: unknown, name: string)
         check(color(expandable.shadowRoot!.querySelector('.body')!, switches)[3] === 0,
           mode + ' expandable sections share their surface with the switch group');
         const frame = getComputedStyle(main);
+        const expected = mode === 'dark'
+          ? 'rgba(0, 0, 0, 0.15) 0px 1px 2px 0px, rgba(0, 0, 0, 0.19) 0px 2px 5px 0px'
+          : 'rgba(22, 37, 58, 0.04) 0px 1px 2px 0px, rgba(22, 37, 58, 0.03) 0px 2px 5px 0px';
+        check(frame.boxShadow === expected && getComputedStyle(modalPanel).boxShadow === expected,
+          mode + ' card and modal use the theme-specific shadow');
         check(frame.boxShadow !== 'none' && [primary.switches, iconButton, primary.field, primary.native].every(element => {
           const style = getComputedStyle(element);
           return style.borderTopWidth === '1px' && style.borderTopColor === frame.borderTopColor && style.boxShadow === frame.boxShadow;

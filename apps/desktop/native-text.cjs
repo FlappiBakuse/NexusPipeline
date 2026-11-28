@@ -2,8 +2,10 @@
 let locale = 'zh-CN';
 const words = {
   loginLoading: ['正在加载官方登录页', 'Loading official login page'], loginActions: ['登录操作', 'Sign-in actions'], loginRefresh: ['刷新登录页', 'Refresh sign-in page'],
-  loginLoadFailed: ['官方页面加载失败，请在登录操作中刷新', 'Page failed to load; refresh from Sign-in actions'],
-  loginComplete: ['完成并验证', 'Finish and verify'],
+  loginLoadFailed: ['官方页面加载失败，请刷新重试', 'The official page failed to load. Refresh to try again.'],
+  loginWeb: ['网页登录', 'Web sign-in'], loginNavigation: ['网页导航', 'Page navigation'],
+  loginFinishActions: ['完成登录操作', 'Finish sign-in actions'], loginBack: ['后退', 'Back'], loginForward: ['前进', 'Forward'],
+  loginComplete: ['完成登录', 'Finish sign-in'], loginVerifying: ['正在验证登录', 'Verifying sign-in'],
   loginRejected: ['验证未通过，可继续登录后再次完成', 'Verification rejected; continue signing in and finish again'],
   loginIncomplete: ['登录信息尚未齐全，请继续登录', 'Sign-in values are incomplete; continue signing in'],
   loginRetry: ['验证暂不可用，请重试完成', 'Verification unavailable; try finishing again'],
@@ -30,4 +32,4 @@ function text(key) {
   if (!Object.hasOwn(words, key)) throw new Error('desktop_text_unknown');
   return words[key][locale === 'en-US' ? 1 : 0];
 }
-module.exports = { setLocale, text };
+module.exports = { setLocale, getLocale: () => locale, text };

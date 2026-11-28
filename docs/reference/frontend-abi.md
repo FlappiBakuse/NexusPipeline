@@ -43,6 +43,7 @@ Host 字段使用 `v-help`，插件通过 frontend-ui 的 `fieldHelp` 使用同�
 
 图标按钮将标准 `aria-pressed` 同步至内部按钮，图标 slot 不拦截指针操作。
 模态使用显式视口宽度及自绘样式，移动端操作按钮为44px，输入框与步进按钮按各自尺寸呈现。
+`nexus-modal` 的 `title` 插槽可展示编辑器面包屑。`title` 属性为弹窗和正文滚动区提供可访问名称，并作为默认显示标题。弹窗的 `scrollTop` 读写正文滚动位置。
 `--nx-modal-title-size` 与 `--nx-modal-title-line-height` 用于具体表面的标题层级，`--nx-action-height` 只控制操作按钮。
 `--nx-button-fill` 调整中性操作按钮的表面，`--nx-drag-size` 调整拖拽把手的触控区域。
 `--nx-button-padding`、`--nx-button-radius` 与输入字体、内边距变量调整消费者外观，不改变元素属性或事件合同。

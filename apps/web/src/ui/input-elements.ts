@@ -312,7 +312,7 @@ button,button:hover{background:transparent}
 .track{display:block;position:relative;width:100%;height:30px;overflow:hidden;border-radius:inherit;
 background:var(--border-strong,#465066);transition:background .18s ease,filter .18s ease}
 .thumb{position:absolute;top:5px;left:5px;width:20px;height:20px;border-radius:50%;
-background:var(--content-card,#f0f3fa);box-shadow:0 1px 3px #0003;transition:transform .18s ease}
+background:var(--content-card,#f0f3fa);box-shadow:var(--nx-switch-thumb-shadow);transition:transform .18s ease}
 [aria-checked=true] .track{background:var(--nx-color-accent,#80a7ff)}
 [aria-checked=true] .thumb{transform:translateX(22px)}
 button:not(:disabled):hover .track{filter:brightness(1.12)}
