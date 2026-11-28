@@ -30,6 +30,10 @@ async function initialLayout(check: Check) {
     store.state.interface = snapshot; return snapshot;
   };
   try {
+    store.state.interface = { ...store.state.interface!, revision: 1,
+      values: { ...store.state.interface!.values, theme: 'light' } };
+    await settle();
+    check(model.cards.value[0] === 'game-activities', 'saving a theme before editing the layout keeps default overview contributions visible');
     await model.beginLayout();
     model.changeLayout(['status', 'running', 'history-duration']);
     check(!model.cards.value.includes('game-activities'), 'first layout removal previews immediately before Save');
@@ -41,6 +45,8 @@ async function initialLayout(check: Check) {
     release(); await saving;
     check(JSON.stringify(store.state.interface.values.dashboardCards) === '["running","history-duration"]',
       'first-run Save persists the complete preview');
+    check(!model.cards.value.includes('game-activities'),
+      'a card explicitly moved to available stays hidden after the layout is saved');
   } finally { release(); store.dispose(); }
 }
 async function notification(parent: HTMLElement, check: Check) {

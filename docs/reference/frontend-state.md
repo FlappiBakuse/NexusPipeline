@@ -97,7 +97,7 @@ Electron 文件系统写权限只针对绑定文档请求的已选文件，并�
 界面语言、主题、概览布局与设置分类置顶/折叠归 `InterfacePreferences`，与宿主语言独立。
 概览按运行状态、当前运行、历史统计三个单元排序和显隐；历史时长与次数两图共用一个布局单元。
 读取保留原始偏好值用于核验完整操作身份，显示与编辑按卡片目录归并。
-`dashboard-layout.ts` 持有弹窗内的布局预览；`DashboardLayout` 对显示集合和可添加集合都使用公共把手及键盘排序。保存经界面偏好命令 owner 一次提交 `dashboardCards` 与 `dashboardAvailableCards`，未提供后者的既有偏好使用目录顺序。完整保存和取消语义归[设置边界](settings.md#即时设置与界面偏好)。
+`dashboard-layout.ts` 持有弹窗内的布局预览；`DashboardLayout` 对显示集合和可添加集合都使用公共把手及键盘排序。保存经界面偏好命令 owner 一次提交 `dashboardCards` 与 `dashboardAvailableCards`。未提供可添加集合且显示集合仍为内置默认值时，默认启用的插件卡片继续随目录显示。完整保存和取消语义归[设置边界](settings.md#即时设置与界面偏好)。
 该具体 UI 偏好文件仅允许固定字段，按实例、CAS修订和最后 operation 校验，原子替换；
 未知格式保留原字节并拒绝覆盖。它不保存业务配置、运行计划、凭据或普通编辑草稿。
 

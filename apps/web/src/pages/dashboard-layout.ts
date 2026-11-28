@@ -25,8 +25,10 @@ export function useDashboardLayout(store: AppStore, contributions: () => Dashboa
     const snapshot = store.state.interface;
     if (!snapshot) return defaults();
     const values = commands().state.values;
-    return snapshot.revision === 0 && values.dashboardAvailableCards === undefined
-      ? defaults() : dashboardCards(values.dashboardCards);
+    const cards = dashboardCards(values.dashboardCards);
+    const hasDefaultLayout = values.dashboardAvailableCards === undefined &&
+      cards.length === dashboardDefaults.length && cards.every((id, index) => id === dashboardDefaults[index]);
+    return hasDefaultLayout ? defaults() : cards;
   };
   const available = () => preview.value?.dashboardAvailableCards ?? dashboardCards([
     ...(commands().state.values.dashboardAvailableCards ?? []), ...catalog()
